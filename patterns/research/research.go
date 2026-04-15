@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"hydaelyn/program"
-	"hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/program"
+	"github.com/Viking602/go-hydaelyn/workflow"
 )
 
 type Decision string

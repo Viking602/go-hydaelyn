@@ -9,16 +9,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hydaelyn/agent"
-	"hydaelyn/auth"
-	"hydaelyn/hook"
-	"hydaelyn/message"
-	"hydaelyn/provider"
-	"hydaelyn/session"
-	"hydaelyn/storage"
-	"hydaelyn/team"
-	"hydaelyn/tool"
-	"hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/go-hydaelyn/auth"
+	"github.com/Viking602/go-hydaelyn/hook"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/storage"
+	"github.com/Viking602/go-hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/workflow"
 )
 
 var ErrProviderNotFound = errors.New("provider not found")

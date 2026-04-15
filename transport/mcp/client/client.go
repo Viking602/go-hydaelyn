@@ -12,8 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"hydaelyn/message"
-	"hydaelyn/transport/mcp/jsonrpc"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/transport/mcp/jsonrpc"
 )
 
 type Transport interface {

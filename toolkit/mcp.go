@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"hydaelyn/tool"
-	mcpclient "hydaelyn/transport/mcp/client"
+	"github.com/Viking602/go-hydaelyn/tool"
+	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
 )
 
 func ImportMCPTools(ctx context.Context, client *mcpclient.Client) ([]tool.Driver, error) {

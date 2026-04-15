@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"hydaelyn/message"
-	"hydaelyn/patterns/deepsearch"
-	"hydaelyn/provider"
-	"hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 type teamFakeProvider struct{}

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"hydaelyn/message"
-	"hydaelyn/provider"
-	"hydaelyn/session"
-	"hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/toolkit"
 )
 
 type fakeProvider struct{}

@@ -3,7 +3,7 @@ package toolkit
 import (
 	"testing"
 
-	"hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 func TestProfileAndTeamBuilders(t *testing.T) {

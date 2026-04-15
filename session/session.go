@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/message"
 )
 
 var ErrSessionNotFound = errors.New("session not found")

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/provider"
 )
 
 type Config struct {

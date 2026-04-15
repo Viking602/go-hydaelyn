@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 func TestPatternCreatesResearchTasksThenVerificationPhase(t *testing.T) {

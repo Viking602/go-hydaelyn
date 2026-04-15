@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 
-	"hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 type HTTPToolConfig struct {

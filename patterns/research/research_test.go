@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"hydaelyn/program"
-	"hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/program"
+	"github.com/Viking602/go-hydaelyn/workflow"
 )
 
 func TestResearchDriverRespectsBudget(t *testing.T) {

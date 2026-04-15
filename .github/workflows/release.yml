@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Validate release tag and module major version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          MODULE="$(go list -m)"
+
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tags must be valid semver like v0.1.0 or v1.2.3-rc.1"
+            exit 1
+          fi
+
+          MAJOR="${BASH_REMATCH[1]}"
+          if (( MAJOR >= 2 )); then
+            if [[ "$MODULE" != */v"${MAJOR}" ]]; then
+              echo "Go module major releases v${MAJOR}.x.y require the module path to end with /v${MAJOR}"
+              echo "Current module path: ${MODULE}"
+              exit 1
+            fi
+          fi
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release.json <<EOF
+          {
+            "tag_name": "${TAG}",
+            "name": "${TAG}",
+            "generate_release_notes": true
+          }
+          EOF
+
+          curl --fail-with-body \
+            -L \
+            -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" \
+            -d @release.json

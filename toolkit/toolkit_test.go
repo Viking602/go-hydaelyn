@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"hydaelyn/tool"
-	"hydaelyn/tooltest"
+	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/tooltest"
 )
 
 func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {

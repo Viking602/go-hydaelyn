@@ -1,6 +1,6 @@
 package toolkit
 
-import "hydaelyn/team"
+import "github.com/Viking602/go-hydaelyn/team"
 
 type ProfileOption func(*team.Profile)
 

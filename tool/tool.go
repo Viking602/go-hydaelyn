@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/message"
 )
 
 type Definition = message.ToolDefinition

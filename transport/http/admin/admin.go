@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"hydaelyn/host"
-	"hydaelyn/message"
-	"hydaelyn/session"
-	"hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 type Server struct {

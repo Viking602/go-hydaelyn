@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"hydaelyn/session"
-	"hydaelyn/team"
-	"hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/workflow"
 )
 
 type RunStatus string

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 func TestHTTPTool(t *testing.T) {

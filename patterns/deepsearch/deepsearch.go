@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 type Pattern struct{}

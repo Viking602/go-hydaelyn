@@ -23,6 +23,12 @@ It is designed around supervisor-controlled teams, full subagents, isolated work
 - Supervisor-visible state stays structured and shared; worker scratchpads stay isolated.
 - MCP is treated as a compatibility layer for external tools only.
 
+## Install
+
+```bash
+go get github.com/Viking602/go-hydaelyn@latest
+```
+
 ## Quick example
 
 ```go
@@ -76,3 +82,7 @@ Those imported tools can then be attached to any worker profile via `ToolNames`.
 - `providers/openai` and `providers/anthropic` are still scaffolds; their real remote streaming integrations are the next step.
 - V1 runs multi-agent teams in a single process with goroutine-based parallelism.
 - MCP resources/prompts are intentionally not part of the current core model; only external MCP tools are imported.
+
+## Releases
+
+This repository uses tag-driven releases. Push a semver tag like `v0.1.0` and the `release` GitHub Action will run tests, validate module-version rules, and create the GitHub Release automatically. See [RELEASING.md](RELEASING.md).

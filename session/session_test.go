@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/message"
 )
 
 func TestMemoryStoreBranchCopiesTranscript(t *testing.T) {
