@@ -12,6 +12,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/auth"
 	"github.com/Viking602/go-hydaelyn/capability"
+	"github.com/Viking602/go-hydaelyn/compact"
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/mcp"
 	"github.com/Viking602/go-hydaelyn/message"
@@ -33,34 +34,38 @@ var ErrPatternNotFound = errors.New("pattern not found")
 var ErrInvalidTeamState = errors.New("invalid team state")
 
 type Config struct {
-	Storage     storage.Driver
-	Auth        auth.Driver
-	WorkerID    string
-	Defaults    map[string]string
-	Plugins     []plugin.Spec
-	Middlewares []middleware.Handler
+	Storage          storage.Driver
+	Auth             auth.Driver
+	WorkerID         string
+	Defaults         map[string]string
+	Plugins          []plugin.Spec
+	Middlewares      []middleware.Handler
+	Compactor        compact.Compactor
+	CompactThreshold int
 }
 
 type Runtime struct {
-	storage     storage.Driver
-	auth        auth.Driver
-	tools       *tool.Bus
-	workflows   *workflow.Registry
-	hooks       hook.Chain
-	middlewares middleware.Chain
-	capability  *capability.Invoker
-	plugins     *plugin.Registry
-	queue       scheduler.TaskQueue
-	providers   map[string]provider.Driver
-	profiles    map[string]team.Profile
-	patterns    map[string]team.Pattern
-	defaults    map[string]string
-	workerID    string
-	mu          sync.RWMutex
-	runSeq      uint64
-	teamSeq     uint64
-	activeRuns  map[string]context.CancelFunc
-	activeTeams map[string]context.CancelFunc
+	storage          storage.Driver
+	auth             auth.Driver
+	tools            *tool.Bus
+	workflows        *workflow.Registry
+	hooks            hook.Chain
+	middlewares      middleware.Chain
+	capability       *capability.Invoker
+	plugins          *plugin.Registry
+	queue            scheduler.TaskQueue
+	providers        map[string]provider.Driver
+	profiles         map[string]team.Profile
+	patterns         map[string]team.Pattern
+	defaults         map[string]string
+	workerID         string
+	compactor        compact.Compactor
+	compactThreshold int
+	mu               sync.RWMutex
+	runSeq           uint64
+	teamSeq          uint64
+	activeRuns       map[string]context.CancelFunc
+	activeTeams      map[string]context.CancelFunc
 }
 
 func New(config Config) *Runtime {
@@ -69,20 +74,22 @@ func New(config Config) *Runtime {
 		driver = storage.NewMemoryDriver()
 	}
 	runtime := &Runtime{
-		storage:     driver,
-		auth:        config.Auth,
-		tools:       tool.NewBus(),
-		workflows:   workflow.NewRegistry(),
-		middlewares: middleware.NewChain(config.Middlewares...),
-		capability:  capability.NewInvoker(),
-		plugins:     plugin.NewRegistry(),
-		providers:   map[string]provider.Driver{},
-		profiles:    map[string]team.Profile{},
-		patterns:    map[string]team.Pattern{},
-		defaults:    cloneStringMap(config.Defaults),
-		workerID:    config.WorkerID,
-		activeRuns:  map[string]context.CancelFunc{},
-		activeTeams: map[string]context.CancelFunc{},
+		storage:          driver,
+		auth:             config.Auth,
+		tools:            tool.NewBus(),
+		workflows:        workflow.NewRegistry(),
+		middlewares:      middleware.NewChain(config.Middlewares...),
+		capability:       capability.NewInvoker(),
+		plugins:          plugin.NewRegistry(),
+		providers:        map[string]provider.Driver{},
+		profiles:         map[string]team.Profile{},
+		patterns:         map[string]team.Pattern{},
+		defaults:         cloneStringMap(config.Defaults),
+		workerID:         config.WorkerID,
+		compactor:        config.Compactor,
+		compactThreshold: config.CompactThreshold,
+		activeRuns:       map[string]context.CancelFunc{},
+		activeTeams:      map[string]context.CancelFunc{},
 	}
 	if runtime.workerID == "" {
 		runtime.workerID = runtime.nextWorkerID()
@@ -125,6 +132,10 @@ func (r *Runtime) RegisterWorkflow(driver workflow.Driver) {
 
 func (r *Runtime) RegisterHook(handler hook.Handler) {
 	r.hooks = r.hooks.Append(handler)
+}
+
+func (r *Runtime) RegisterCompactor(compactor compact.Compactor) {
+	r.compactor = compactor
 }
 
 func (r *Runtime) RegisterPlugin(spec plugin.Spec) error {
@@ -250,6 +261,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 		Hooks:    r.engineHooks(),
 	}
 	var result agent.Result
+	compactedMessages := r.compactMessages(runCtx, snapshot.Messages)
 	err = r.runStage(runCtx, &middleware.Envelope{
 		Stage:     middleware.StageAgent,
 		Operation: "prompt",
@@ -258,7 +270,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 	}, func(ctx context.Context, envelope *middleware.Envelope) error {
 		runResult, runErr := engine.Run(ctx, agent.Input{
 			Model:         request.Model,
-			Messages:      snapshot.Messages,
+			Messages:      compactedMessages,
 			Metadata:      request.Metadata,
 			ToolMode:      request.ToolMode,
 			MaxIterations: 6,
@@ -277,7 +289,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 		_ = r.storage.Runs().Save(ctx, run)
 		return PromptResponse{}, err
 	}
-	generated := result.Messages[len(snapshot.Messages):]
+	generated := result.Messages[len(compactedMessages):]
 	entries, err := r.appendSessionMessages(ctx, request.SessionID, generated...)
 	if err != nil {
 		return PromptResponse{}, err
@@ -1025,7 +1037,7 @@ func (r *Runtime) loadInitialTaskMessages(ctx context.Context, state team.RunSta
 		return nil, err
 	}
 	if len(snapshot.Messages) > 0 {
-		return snapshot.Messages, nil
+		return r.compactMessages(ctx, snapshot.Messages), nil
 	}
 	initialMessages := r.initialTaskMessages(state, task, agentInstance, profile)
 	if _, err := r.appendSessionMessages(ctx, task.SessionID, initialMessages...); err != nil {
@@ -1035,6 +1047,7 @@ func (r *Runtime) loadInitialTaskMessages(ctx context.Context, state team.RunSta
 }
 
 func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile, initialMessages []message.Message) ([]message.Message, error) {
+	initialMessages = r.compactMessages(ctx, initialMessages)
 	currentProvider, err := r.lookupProvider(profile.Provider)
 	if err != nil {
 		return nil, err
@@ -1079,6 +1092,18 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 		return nil, err
 	}
 	return result.Messages[len(initialMessages):], nil
+}
+
+func (r *Runtime) compactMessages(ctx context.Context, messages []message.Message) []message.Message {
+	if r.compactor == nil || r.compactThreshold <= 0 || len(messages) <= r.compactThreshold {
+		return messages
+	}
+	compacted, err := r.compactor.Compact(ctx, messages)
+	if err != nil {
+		// Fail open: return original messages rather than breaking the session.
+		return messages
+	}
+	return compacted
 }
 
 func (r *Runtime) persistTaskMessages(ctx context.Context, task team.Task, generated []message.Message) error {
