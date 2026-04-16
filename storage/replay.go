@@ -13,12 +13,36 @@ func ReplayTeam(events []Event) team.RunState {
 		case EventTeamStarted:
 			state.Pattern, _ = event.Payload["pattern"].(string)
 			state.Status = team.StatusRunning
+			if phase, ok := event.Payload["phase"].(string); ok && phase != "" {
+				state.Phase = team.Phase(phase)
+			}
+			if sup, ok := event.Payload["supervisor"].(map[string]string); ok {
+				state.Supervisor = team.Member{
+					ID:          sup["id"],
+					Role:        team.Role(sup["role"]),
+					ProfileName: sup["profileName"],
+				}
+			}
+			if workers, ok := event.Payload["workers"].([]map[string]string); ok {
+				for _, w := range workers {
+					state.Workers = append(state.Workers, team.Member{
+						ID:          w["id"],
+						Role:        team.Role(w["role"]),
+						ProfileName: w["profileName"],
+					})
+				}
+			}
 		case EventTaskScheduled:
 			task := team.Task{
-				ID:     event.TaskID,
-				Title:  stringValue(event.Payload["title"]),
-				Input:  stringValue(event.Payload["input"]),
-				Status: team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+				ID:              event.TaskID,
+				Title:           stringValue(event.Payload["title"]),
+				Input:           stringValue(event.Payload["input"]),
+				Status:          team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+				Kind:            team.TaskKind(stringValue(event.Payload["kind"])),
+				RequiredRole:    team.Role(stringValue(event.Payload["requiredRole"])),
+				AssigneeAgentID: stringValue(event.Payload["assigneeAgent"]),
+				FailurePolicy:   team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
+				DependsOn:       stringSlice(event.Payload["dependsOn"]),
 			}
 			tasks[event.TaskID] = len(state.Tasks)
 			state.Tasks = append(state.Tasks, task)
@@ -63,4 +87,24 @@ func statusValue(value any, fallback string) string {
 		return text
 	}
 	return fallback
+}
+
+func stringSlice(value any) []string {
+	if value == nil {
+		return nil
+	}
+	switch items := value.(type) {
+	case []string:
+		return append([]string{}, items...)
+	case []any:
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			if text, ok := item.(string); ok {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }

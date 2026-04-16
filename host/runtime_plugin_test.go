@@ -4,9 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/middleware"
+	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/plugin"
 	"github.com/Viking602/go-hydaelyn/provider"
@@ -217,5 +219,114 @@ func TestRuntimeTeamExecutionFlowsThroughRuntimeMiddlewareStages(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected middleware stage %q in trace, got %#v", item, trace)
 		}
+	}
+}
+
+func TestRuntimeProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing.T) {
+	runtime := New(Config{})
+	trace := make([]string, 0, 4)
+	runtime.UseCapabilityMiddleware(capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
+		trace = append(trace, string(call.Type)+":"+call.Name)
+		return next(ctx, call)
+	}))
+	if err := runtime.RegisterPlugin(plugin.Spec{
+		Type:      plugin.TypeProvider,
+		Name:      "fake",
+		Component: fakeProvider{},
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(provider) error = %v", err)
+	}
+	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+		Topic string `json:"topic"`
+	}) (string, error) {
+		return "topic:" + input.Topic, nil
+	})
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	if err := runtime.RegisterPlugin(plugin.Spec{
+		Type:      plugin.TypeTool,
+		Name:      "answer",
+		Component: driver,
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(tool) error = %v", err)
+	}
+	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := runtime.Prompt(context.Background(), PromptRequest{
+		SessionID: sess.ID,
+		Provider:  "fake",
+		Model:     "test",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "go")},
+	}); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	foundLLM := false
+	foundTool := false
+	for _, item := range trace {
+		if item == "llm:fake" {
+			foundLLM = true
+		}
+		if item == "tool:answer" {
+			foundTool = true
+		}
+	}
+	if !foundLLM || !foundTool {
+		t.Fatalf("expected capability trace for plugin-registered provider and tool, got %#v", trace)
+	}
+}
+
+func TestRuntimeObserverPluginAcceptsObserveObserver(t *testing.T) {
+	runtime := New(Config{})
+	observer := observe.NewMemoryObserver()
+	if err := runtime.RegisterPlugin(plugin.Spec{
+		Type:      plugin.TypeObserver,
+		Name:      "memory-observer",
+		Component: observer,
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(observer) error = %v", err)
+	}
+	if err := runtime.RegisterPlugin(plugin.Spec{
+		Type:      plugin.TypeProvider,
+		Name:      "fake",
+		Component: fakeProvider{},
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(provider) error = %v", err)
+	}
+	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+		Topic string `json:"topic"`
+	}) (string, error) {
+		return "topic:" + input.Topic, nil
+	})
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	if err := runtime.RegisterPlugin(plugin.Spec{
+		Type:      plugin.TypeTool,
+		Name:      "answer",
+		Component: driver,
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(tool) error = %v", err)
+	}
+	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := runtime.Prompt(context.Background(), PromptRequest{
+		SessionID: sess.ID,
+		Provider:  "fake",
+		Model:     "test",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "go")},
+	}); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if len(observer.Spans()) == 0 {
+		t.Fatalf("expected observer plugin spans")
+	}
+	counters := observer.Counters()
+	if counters["llm.calls"] == 0 || counters["tool.calls"] == 0 {
+		t.Fatalf("expected llm/tool counters, got %#v", counters)
 	}
 }

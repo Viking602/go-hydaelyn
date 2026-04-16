@@ -24,8 +24,8 @@ type TaskLease struct {
 type TaskQueue interface {
 	Enqueue(ctx context.Context, lease TaskLease) error
 	Acquire(ctx context.Context, ownerID string, ttl time.Duration) (TaskLease, bool, error)
-	Heartbeat(ctx context.Context, taskID, ownerID string, ttl time.Duration) error
-	Release(ctx context.Context, taskID, ownerID string) error
+	Heartbeat(ctx context.Context, lease TaskLease, ttl time.Duration) error
+	Release(ctx context.Context, lease TaskLease) error
 	RecoverExpired(ctx context.Context, now time.Time) error
 }
 
@@ -52,12 +52,13 @@ func NewMemoryQueueWithConfig(config QueueConfig) *MemoryQueue {
 func (q *MemoryQueue) Enqueue(_ context.Context, lease TaskLease) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	key := leaseKey(lease)
 	for _, current := range q.pending {
-		if current.TaskID == lease.TaskID {
+		if leaseKey(current) == key {
 			return nil
 		}
 	}
-	if _, ok := q.inflight[lease.TaskID]; ok {
+	if _, ok := q.inflight[key]; ok {
 		return nil
 	}
 	if q.config.MaxPending > 0 && len(q.pending) >= q.config.MaxPending {
@@ -75,12 +76,13 @@ func (q *MemoryQueue) Acquire(_ context.Context, ownerID string, ttl time.Durati
 	}
 	now := time.Now()
 	for idx, lease := range q.pending {
-		if current, ok := q.inflight[lease.TaskID]; ok && current.ExpiresAt.After(now) {
+		key := leaseKey(lease)
+		if current, ok := q.inflight[key]; ok && current.ExpiresAt.After(now) {
 			continue
 		}
 		lease.OwnerID = ownerID
 		lease.ExpiresAt = now.Add(ttl)
-		q.inflight[lease.TaskID] = lease
+		q.inflight[key] = lease
 		q.pending = append(q.pending[:idx], q.pending[idx+1:]...)
 		return lease, true, nil
 	}
@@ -99,24 +101,25 @@ func (q *MemoryQueue) InflightCount() int {
 	return len(q.inflight)
 }
 
-func (q *MemoryQueue) Heartbeat(_ context.Context, taskID, ownerID string, ttl time.Duration) error {
+func (q *MemoryQueue) Heartbeat(_ context.Context, lease TaskLease, ttl time.Duration) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	lease := q.inflight[taskID]
-	if lease.OwnerID != ownerID {
+	current, ok := q.inflight[leaseKey(lease)]
+	if !ok || current.OwnerID != lease.OwnerID {
 		return nil
 	}
-	lease.ExpiresAt = time.Now().Add(ttl)
-	q.inflight[taskID] = lease
+	current.ExpiresAt = time.Now().Add(ttl)
+	q.inflight[leaseKey(lease)] = current
 	return nil
 }
 
-func (q *MemoryQueue) Release(_ context.Context, taskID, ownerID string) error {
+func (q *MemoryQueue) Release(_ context.Context, lease TaskLease) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	lease, ok := q.inflight[taskID]
-	if ok && lease.OwnerID == ownerID {
-		delete(q.inflight, taskID)
+	key := leaseKey(lease)
+	current, ok := q.inflight[key]
+	if ok && current.OwnerID == lease.OwnerID {
+		delete(q.inflight, key)
 	}
 	return nil
 }
@@ -124,13 +127,20 @@ func (q *MemoryQueue) Release(_ context.Context, taskID, ownerID string) error {
 func (q *MemoryQueue) RecoverExpired(_ context.Context, now time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for taskID, lease := range q.inflight {
+	for key, lease := range q.inflight {
 		if lease.ExpiresAt.Before(now) {
 			lease.OwnerID = ""
 			lease.ExpiresAt = time.Time{}
 			q.pending = append(q.pending, lease)
-			delete(q.inflight, taskID)
+			delete(q.inflight, key)
 		}
 	}
 	return nil
+}
+
+func leaseKey(lease TaskLease) string {
+	if lease.TeamID == "" {
+		return lease.TaskID
+	}
+	return lease.TeamID + "\x00" + lease.TaskID
 }

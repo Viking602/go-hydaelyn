@@ -1,6 +1,7 @@
 package blackboard
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -123,7 +124,7 @@ func (Pipeline) Publish(state *State, request PublishRequest) PublishResult {
 		}
 		evidenceID := ensureEvidence(state, request.TaskID, sourceID, artifactID, summary, snippet, score(request.Confidence))
 		if evidenceID == "" {
-			evidenceID = "evidence-" + request.TaskID + "-" + string(rune('a'+idx))
+			evidenceID = fmt.Sprintf("evidence-%s-fallback-%d", request.TaskID, idx+1)
 		}
 		evidenceIDs = append(evidenceIDs, evidenceID)
 	}
@@ -204,7 +205,7 @@ func ensureSource(state *State, taskID, title string) string {
 			return source.ID
 		}
 	}
-	id := "source-" + taskID
+	id := fmt.Sprintf("source-%s-%d", taskID, len(state.Sources)+1)
 	state.Sources = append(state.Sources, Source{ID: id, TaskID: taskID, Title: title})
 	return id
 }
@@ -215,7 +216,7 @@ func ensureArtifact(state *State, taskID, title, content string) string {
 			return artifact.ID
 		}
 	}
-	id := "artifact-" + taskID
+	id := fmt.Sprintf("artifact-%s-%d", taskID, len(state.Artifacts)+1)
 	state.Artifacts = append(state.Artifacts, Artifact{
 		ID:      id,
 		TaskID:  taskID,
@@ -231,7 +232,7 @@ func ensureEvidence(state *State, taskID, sourceID, artifactID, summary, snippet
 			return evidence.ID
 		}
 	}
-	id := "evidence-" + taskID + "-" + normalizeID(snippet)
+	id := fmt.Sprintf("evidence-%s-%d", taskID, len(state.Evidence)+1)
 	state.Evidence = append(state.Evidence, Evidence{
 		ID:         id,
 		TaskID:     taskID,
@@ -250,7 +251,7 @@ func ensureClaim(state *State, taskID, summary string, evidenceIDs []string, con
 			return claim.ID
 		}
 	}
-	id := "claim-" + taskID
+	id := fmt.Sprintf("claim-%s-%d", taskID, len(state.Claims)+1)
 	state.Claims = append(state.Claims, Claim{
 		ID:          id,
 		TaskID:      taskID,
@@ -267,7 +268,7 @@ func ensureFinding(state *State, taskID, summary string, claimIDs, evidenceIDs [
 			return finding.ID
 		}
 	}
-	id := "finding-" + taskID
+	id := fmt.Sprintf("finding-%s-%d", taskID, len(state.Findings)+1)
 	state.Findings = append(state.Findings, Finding{
 		ID:          id,
 		TaskID:      taskID,
@@ -283,17 +284,6 @@ func normalize(value string) string {
 	return strings.TrimSpace(value)
 }
 
-func normalizeID(value string) string {
-	value = strings.ToLower(normalize(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	if value == "" {
-		return "summary"
-	}
-	if len(value) > 24 {
-		return value[:24]
-	}
-	return value
-}
 
 func redact(value string) string {
 	if value == "" {

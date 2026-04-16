@@ -30,13 +30,13 @@ It is designed around supervisor-controlled teams, full subagents, isolated work
 - Full subagents get their own private sessions and budgets.
 - Supervisor-visible state stays structured and shared; worker scratchpads stay isolated.
 - MCP is treated as a compatibility layer for external tools only.
-- Extension points are converging on `plugin.Registry` plus middleware-driven governance instead of one-off registration APIs.
+- Extension points converge on `plugin.Registry` plus middleware-driven governance instead of one-off registration APIs.
 - Planner-driven team startup and review/replan loops are available when a planner plugin is registered and selected on `StartTeamRequest`.
 - Research tasks now publish normalized, deduped, redacted evidence into a blackboard, and verification-aware synthesis only uses supported claims.
-- LLM and tool paths now route through a shared capability invoker, so governance middleware can observe both.
+- LLM and tool paths now route through a shared capability invoker, including plugin-registered providers/tools, so governance middleware can observe both.
 - Search and remote-agent capabilities can now be registered and invoked through the same runtime entrypoint.
 - Team/task/llm/tool paths can now emit spans and counters through a shared observer interface.
-- A memory-backed task queue and lease model now exists as the first distributed scheduling primitive.
+- A memory-backed task queue and lease model now exists as the first distributed scheduling primitive, and queue leases are keyed by `TeamID + TaskID` to avoid cross-team collisions.
 - MCP gateway plugins can now import external MCP tools directly into runtime tool registration.
 
 ## Install
@@ -106,10 +106,10 @@ Those imported tools can then be attached to any worker profile via `ToolNames`.
 
 ## Official examples
 
-- [examples/research](/Users/viking/GolandProjects/go-hydaelyn/examples/research/main.go)
-- [examples/tooling](/Users/viking/GolandProjects/go-hydaelyn/examples/tooling/main.go)
-- [examples/approval](/Users/viking/GolandProjects/go-hydaelyn/examples/approval/main.go)
-- [examples/durable](/Users/viking/GolandProjects/go-hydaelyn/examples/durable/main.go)
+- [examples/research](examples/research/main.go)
+- [examples/tooling](examples/tooling/main.go)
+- [examples/approval](examples/approval/main.go)
+- [examples/durable](examples/durable/main.go)
 
 ## Benchmark
 
@@ -119,7 +119,7 @@ go test ./host -bench BenchmarkDeepsearchRuntime -run '^$'
 
 ## Current limits
 
-- `providers/openai` and `providers/anthropic` are still scaffolds; their real remote streaming integrations are the next step.
+- `providers/openai` and `providers/anthropic` now include SSE streaming paths, but structured output contracts, richer cost taxonomy, and provider capability metadata are still incomplete.
 - V1 runs multi-agent teams in a single process with goroutine-based parallelism.
 - MCP resources/prompts are intentionally not part of the current core model; only external MCP tools are imported.
 - Planner-driven startup/review/replan exists, task assignment honors role/capability/budget/concurrency, verification-aware synthesis consumes structured blackboard state, capability middleware governs LLM/tool calls, and the OpenAI/Anthropic providers now support real SSE streaming. MCP/search/remote-agent coverage and durable runtime are still pending.

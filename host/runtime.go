@@ -808,9 +808,11 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 
 func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) *team.Result {
 	summary := task.Input
+	confidence := 0.5 // fallback: no substantive LLM output
 	for idx := len(generated) - 1; idx >= 0; idx-- {
 		if strings.TrimSpace(generated[idx].Text) != "" {
 			summary = generated[idx].Text
+			confidence = 0.85 // substantive LLM output available
 			break
 		}
 	}
@@ -819,13 +821,13 @@ func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) *
 		Findings: []team.Finding{
 			{
 				Summary:    summary,
-				Confidence: 0.75,
+				Confidence: confidence,
 			},
 		},
 		Evidence: []team.Evidence{
 			{Source: task.Title, Snippet: summary},
 		},
-		Confidence: 0.75,
+		Confidence: confidence,
 	}
 }
 
@@ -1079,15 +1081,13 @@ func (r *Runtime) applyPlugin(spec plugin.Spec) error {
 		if !ok {
 			return fmt.Errorf("plugin %s/%s does not implement provider.Driver", spec.Type, spec.Name)
 		}
-		r.mu.Lock()
-		r.providers[spec.Name] = driver
-		r.mu.Unlock()
+		r.RegisterProvider(spec.Name, driver)
 	case plugin.TypeTool:
 		driver, ok := spec.Component.(tool.Driver)
 		if !ok {
 			return fmt.Errorf("plugin %s/%s does not implement tool.Driver", spec.Type, spec.Name)
 		}
-		r.tools.Register(driver)
+		r.RegisterTool(driver)
 	case plugin.TypeStorage:
 		driver, ok := spec.Component.(storage.Driver)
 		if !ok {
@@ -1095,9 +1095,13 @@ func (r *Runtime) applyPlugin(spec plugin.Spec) error {
 		}
 		r.storage = driver
 	case plugin.TypeObserver:
+		if observer, ok := spec.Component.(observe.Observer); ok {
+			r.UseObserver(observer)
+			return nil
+		}
 		handler, ok := spec.Component.(hook.Handler)
 		if !ok {
-			return fmt.Errorf("plugin %s/%s does not implement hook.Handler", spec.Type, spec.Name)
+			return fmt.Errorf("plugin %s/%s does not implement observe.Observer or hook.Handler", spec.Type, spec.Name)
 		}
 		r.RegisterHook(handler)
 	case plugin.TypeScheduler:

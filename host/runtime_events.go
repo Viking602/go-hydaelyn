@@ -19,12 +19,27 @@ func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 }
 
 func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) error {
+	workers := make([]map[string]string, 0, len(state.Workers))
+	for _, worker := range state.Workers {
+		workers = append(workers, map[string]string{
+			"id":          worker.ID,
+			"role":        string(worker.Role),
+			"profileName": worker.ProfileName,
+		})
+	}
 	if err := r.appendEvent(ctx, storage.Event{
 		RunID:  state.ID,
 		TeamID: state.ID,
 		Type:   storage.EventTeamStarted,
 		Payload: map[string]any{
 			"pattern": state.Pattern,
+			"phase":   string(state.Phase),
+			"supervisor": map[string]string{
+				"id":          state.Supervisor.ID,
+				"role":        string(state.Supervisor.Role),
+				"profileName": state.Supervisor.ProfileName,
+			},
+			"workers": workers,
 		},
 	}); err != nil {
 		return err
@@ -49,9 +64,14 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 			TaskID: task.ID,
 			Type:   storage.EventTaskScheduled,
 			Payload: map[string]any{
-				"title":  task.Title,
-				"input":  task.Input,
-				"status": string(task.Status),
+				"title":         task.Title,
+				"input":         task.Input,
+				"status":        string(task.Status),
+				"kind":          string(task.Kind),
+				"requiredRole":  string(task.RequiredRole),
+				"assigneeAgent": task.AssigneeAgentID,
+				"failurePolicy": string(task.FailurePolicy),
+				"dependsOn":     task.DependsOn,
 			},
 		}); err != nil {
 			return err

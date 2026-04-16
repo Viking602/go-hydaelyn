@@ -37,20 +37,20 @@ func (q *queueSpy) Acquire(ctx context.Context, ownerID string, ttl time.Duratio
 	return q.inner.Acquire(ctx, ownerID, ttl)
 }
 
-func (q *queueSpy) Heartbeat(ctx context.Context, taskID, ownerID string, ttl time.Duration) error {
+func (q *queueSpy) Heartbeat(ctx context.Context, lease scheduler.TaskLease, ttl time.Duration) error {
 	q.mu.Lock()
 	q.heartbeats++
-	q.owners = append(q.owners, ownerID)
+	q.owners = append(q.owners, lease.OwnerID)
 	q.mu.Unlock()
-	return q.inner.Heartbeat(ctx, taskID, ownerID, ttl)
+	return q.inner.Heartbeat(ctx, lease, ttl)
 }
 
-func (q *queueSpy) Release(ctx context.Context, taskID, ownerID string) error {
+func (q *queueSpy) Release(ctx context.Context, lease scheduler.TaskLease) error {
 	q.mu.Lock()
 	q.releases++
-	q.owners = append(q.owners, ownerID)
+	q.owners = append(q.owners, lease.OwnerID)
 	q.mu.Unlock()
-	return q.inner.Release(ctx, taskID, ownerID)
+	return q.inner.Release(ctx, lease)
 }
 
 func (q *queueSpy) RecoverExpired(ctx context.Context, now time.Time) error {

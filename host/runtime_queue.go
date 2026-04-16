@@ -101,7 +101,7 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	original := current.Tasks[index]
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
-		_ = r.queue.Release(ctx, lease.TaskID, r.workerID)
+		_ = r.queue.Release(ctx, lease)
 		return taskOutcome{index: index, task: original, err: err}, true
 	}
 	releaseSemaphore := func() {}
@@ -109,11 +109,11 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 		sem <- struct{}{}
 		releaseSemaphore = func() { <-sem }
 	}
-	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease.TaskID, r.workerID, localQueueLeaseTTL)
+	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
 	item, err := r.executeTask(ctx, current, original, agentInstance, profile)
 	stopHeartbeat()
 	releaseSemaphore()
-	_ = r.queue.Release(ctx, lease.TaskID, r.workerID)
+	_ = r.queue.Release(ctx, lease)
 	return taskOutcome{index: index, task: item, err: err}, true
 }
 
@@ -170,7 +170,7 @@ func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.
 	state.Normalize()
 	index, ok := mapTaskIndexes(state.Tasks)[lease.TaskID]
 	if !ok {
-		_ = r.queue.Release(ctx, lease.TaskID, r.workerID)
+		_ = r.queue.Release(ctx, lease)
 		return team.RunState{}, 0, team.Task{}, errQueuedTaskMissing
 	}
 	return state, index, state.Tasks[index], nil
@@ -179,13 +179,13 @@ func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.
 func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, original team.Task, lease scheduler.TaskLease) (team.Task, error) {
 	agentInstance, profile, err := r.resolveTaskExecution(state, original)
 	if err != nil {
-		_ = r.queue.Release(ctx, lease.TaskID, r.workerID)
+		_ = r.queue.Release(ctx, lease)
 		return team.Task{}, err
 	}
-	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease.TaskID, r.workerID, localQueueLeaseTTL)
+	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
 	item, err := r.executeTask(ctx, state, original, agentInstance, profile)
 	stopHeartbeat()
-	_ = r.queue.Release(ctx, lease.TaskID, r.workerID)
+	_ = r.queue.Release(ctx, lease)
 	return item, err
 }
 
@@ -207,7 +207,7 @@ func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState) e
 	return r.storage.Teams().Save(ctx, next)
 }
 
-func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, taskID, ownerID string, ttl time.Duration) func() {
+func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, lease scheduler.TaskLease, ttl time.Duration) func() {
 	done := make(chan struct{})
 	interval := ttl / 2
 	if interval <= 0 {
@@ -219,7 +219,7 @@ func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, taskID,
 		for {
 			select {
 			case <-ticker.C:
-				_ = queue.Heartbeat(ctx, taskID, ownerID, ttl)
+				_ = queue.Heartbeat(ctx, lease, ttl)
 			case <-done:
 				return
 			case <-ctx.Done():

@@ -22,7 +22,7 @@ func TestMemoryQueueEnqueueAcquireAndRelease(t *testing.T) {
 	if !ok || lease.TaskID != "task-1" || lease.OwnerID != "worker-1" {
 		t.Fatalf("unexpected lease %#v", lease)
 	}
-	if err := queue.Release(context.Background(), lease.TaskID, lease.OwnerID); err != nil {
+	if err := queue.Release(context.Background(), lease); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestMemoryQueueHeartbeatExtendsLeaseAndRecoverExpiredLease(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected acquired lease")
 	}
-	if err := queue.Heartbeat(context.Background(), lease.TaskID, lease.OwnerID, time.Minute); err != nil {
+	if err := queue.Heartbeat(context.Background(), lease, time.Minute); err != nil {
 		t.Fatalf("Heartbeat() error = %v", err)
 	}
 	time.Sleep(25 * time.Millisecond)
@@ -94,5 +94,28 @@ func TestMemoryQueueHeartbeatExtendsLeaseAndRecoverExpiredLease(t *testing.T) {
 	}
 	if !ok || recovered.OwnerID != "worker-2" {
 		t.Fatalf("expected recovered lease for worker-2, got %#v", recovered)
+	}
+}
+
+func TestMemoryQueueDistinguishesSameTaskIDAcrossTeams(t *testing.T) {
+	queue := NewMemoryQueue()
+	first := TaskLease{TaskID: "task-1", TeamID: "team-a"}
+	second := TaskLease{TaskID: "task-1", TeamID: "team-b"}
+	if err := queue.Enqueue(context.Background(), first); err != nil {
+		t.Fatalf("Enqueue(first) error = %v", err)
+	}
+	if err := queue.Enqueue(context.Background(), second); err != nil {
+		t.Fatalf("Enqueue(second) error = %v", err)
+	}
+	leaseA, ok, err := queue.Acquire(context.Background(), "worker-1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Acquire(first) error = %v ok=%v", err, ok)
+	}
+	leaseB, ok, err := queue.Acquire(context.Background(), "worker-2", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Acquire(second) error = %v ok=%v", err, ok)
+	}
+	if leaseA.TeamID == leaseB.TeamID {
+		t.Fatalf("expected distinct teams, got %#v and %#v", leaseA, leaseB)
 	}
 }

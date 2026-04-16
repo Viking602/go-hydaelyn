@@ -173,6 +173,7 @@ func aggregate(state team.RunState) *team.Result {
 	}
 	findings := make([]team.Finding, 0, len(state.Tasks))
 	summaries := make([]string, 0, len(state.Tasks))
+	totalConfidence := 0.0
 	for _, task := range state.Tasks {
 		if task.Kind != team.TaskKindResearch || task.Result == nil {
 			continue
@@ -183,11 +184,16 @@ func aggregate(state team.RunState) *team.Result {
 			Confidence: task.Result.Confidence,
 		})
 		summaries = append(summaries, task.Result.Summary)
+		totalConfidence += task.Result.Confidence
+	}
+	avgConfidence := 0.5
+	if len(findings) > 0 {
+		avgConfidence = totalConfidence / float64(len(findings))
 	}
 	return &team.Result{
 		Summary:    strings.Join(summaries, "\n"),
 		Findings:   findings,
-		Confidence: 0.75,
+		Confidence: avgConfidence,
 	}
 }
 
