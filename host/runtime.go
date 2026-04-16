@@ -201,6 +201,14 @@ type PromptResponse struct {
 }
 
 func (r *Runtime) Prompt(ctx context.Context, request PromptRequest) (PromptResponse, error) {
+	return r.promptCore(ctx, request, nil)
+}
+
+func (r *Runtime) PromptStream(ctx context.Context, request PromptRequest, onEvent func(provider.Event) error) (PromptResponse, error) {
+	return r.promptCore(ctx, request, onEvent)
+}
+
+func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent func(provider.Event) error) (PromptResponse, error) {
 	currentProvider, err := r.lookupProvider(request.Provider)
 	if err != nil {
 		return PromptResponse{}, err
@@ -254,6 +262,7 @@ func (r *Runtime) Prompt(ctx context.Context, request PromptRequest) (PromptResp
 			Metadata:      request.Metadata,
 			ToolMode:      request.ToolMode,
 			MaxIterations: 6,
+			OnEvent:       onEvent,
 		})
 		if runErr != nil {
 			return runErr

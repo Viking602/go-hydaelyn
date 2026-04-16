@@ -2,12 +2,14 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/session"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -180,10 +182,62 @@ func handleSessionAction(s *Server, writer http.ResponseWriter, request *http.Re
 			Metadata:  body.Metadata,
 		})
 		writeJSON(writer, response, err)
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "prompt-stream":
+		handleStreamPrompt(s, writer, request, sessionID)
 	default:
 		writer.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(writer).Encode(map[string]string{"error": "not found"})
 	}
+}
+
+func handleStreamPrompt(s *Server, w http.ResponseWriter, r *http.Request, sessionID string) {
+	var body struct {
+		Provider string            `json:"provider"`
+		Model    string            `json:"model"`
+		Messages []message.Message `json:"messages"`
+		ToolMode tool.Mode         `json:"toolMode"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	_, err := s.runtime.PromptStream(r.Context(), host.PromptRequest{
+		SessionID: sessionID,
+		Provider:  body.Provider,
+		Model:     body.Model,
+		Messages:  body.Messages,
+		ToolMode:  body.ToolMode,
+		Metadata:  body.Metadata,
+	}, func(evt provider.Event) error {
+		payload, marshalErr := json.Marshal(evt)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if _, writeErr := fmt.Fprintf(w, "data: %s\n\n", string(payload)); writeErr != nil {
+			return writeErr
+		}
+		flusher.Flush()
+		return nil
+	})
+	if err != nil {
+		payload, _ := json.Marshal(map[string]string{"error": err.Error()})
+		fmt.Fprintf(w, "data: %s\n\n", string(payload))
+		flusher.Flush()
+		return
+	}
+
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
 }
 
 func writeJSON(writer http.ResponseWriter, payload any, err error) {
