@@ -740,6 +740,13 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 	runnableCount := len(runnableSet)
 	results := make(chan taskOutcome, runnableCount)
 	var wg sync.WaitGroup
+
+	// siblingCtx isolates cancellation across the batch: when one task fails
+	// terminally we cancel the context for its siblings so they abort quickly
+	// without tearing down the parent runtime.
+	siblingCtx, siblingCancel := context.WithCancel(ctx)
+	var cancelOnce sync.Once
+
 	for idx, task := range current.Tasks {
 		if _, ok := runnableSet[task.ID]; !ok {
 			continue
@@ -747,16 +754,26 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 		wg.Add(1)
 		go func(index int, original team.Task) {
 			defer wg.Done()
+
+			// Child context aborts when siblingCtx aborts, but not vice-versa.
+			taskCtx, taskCancel := context.WithCancel(siblingCtx)
+			defer taskCancel()
+
 			agentInstance, profile, err := r.resolveTaskExecution(current, original)
 			if err != nil {
 				results <- taskOutcome{index: index, task: original, err: err}
+				cancelOnce.Do(siblingCancel)
 				return
 			}
 			if sem, ok := semByProfile[profile.Name]; ok {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 			}
-			item, err := r.executeTask(ctx, current, original, agentInstance, profile)
+			item, err := r.executeTask(taskCtx, current, original, agentInstance, profile)
+			if err != nil {
+				// Terminal failure: ask siblings to stop early.
+				cancelOnce.Do(siblingCancel)
+			}
 			results <- taskOutcome{index: index, task: item, err: err}
 		}(idx, task)
 	}
