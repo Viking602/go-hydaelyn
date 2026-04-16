@@ -65,12 +65,42 @@ type ArtifactStore interface {
 	List(ctx context.Context) ([]Artifact, error)
 }
 
+type EventType string
+
+const (
+	EventTeamStarted       EventType = "TeamStarted"
+	EventPlanCreated       EventType = "PlanCreated"
+	EventTaskScheduled     EventType = "TaskScheduled"
+	EventTaskStarted       EventType = "TaskStarted"
+	EventToolCalled        EventType = "ToolCalled"
+	EventTaskCompleted     EventType = "TaskCompleted"
+	EventTaskFailed        EventType = "TaskFailed"
+	EventCheckpointSaved   EventType = "CheckpointSaved"
+	EventApprovalRequested EventType = "ApprovalRequested"
+	EventTeamCompleted     EventType = "TeamCompleted"
+)
+
+type Event struct {
+	RunID    string         `json:"runId"`
+	Sequence int            `json:"sequence"`
+	Type     EventType      `json:"type"`
+	TeamID   string         `json:"teamId,omitempty"`
+	TaskID   string         `json:"taskId,omitempty"`
+	Payload  map[string]any `json:"payload,omitempty"`
+}
+
+type EventStore interface {
+	Append(ctx context.Context, event Event) error
+	List(ctx context.Context, runID string) ([]Event, error)
+}
+
 type Driver interface {
 	Sessions() session.Store
 	Runs() RunStore
 	Workflows() WorkflowStore
 	Teams() TeamStore
 	Artifacts() ArtifactStore
+	Events() EventStore
 }
 
 type MemoryDriver struct {
@@ -79,6 +109,7 @@ type MemoryDriver struct {
 	workflows *memoryWorkflowStore
 	teams     *memoryTeamStore
 	artifacts *memoryArtifactStore
+	events    *memoryEventStore
 }
 
 func NewMemoryDriver() *MemoryDriver {
@@ -88,6 +119,7 @@ func NewMemoryDriver() *MemoryDriver {
 		workflows: &memoryWorkflowStore{items: map[string]workflow.State{}},
 		teams:     &memoryTeamStore{items: map[string]team.RunState{}},
 		artifacts: &memoryArtifactStore{items: map[string]Artifact{}},
+		events:    &memoryEventStore{items: map[string][]Event{}},
 	}
 }
 
@@ -109,6 +141,10 @@ func (d *MemoryDriver) Teams() TeamStore {
 
 func (d *MemoryDriver) Artifacts() ArtifactStore {
 	return d.artifacts
+}
+
+func (d *MemoryDriver) Events() EventStore {
+	return d.events
 }
 
 type memoryRunStore struct {
@@ -180,6 +216,11 @@ type memoryArtifactStore struct {
 	items map[string]Artifact
 }
 
+type memoryEventStore struct {
+	mu    sync.RWMutex
+	items map[string][]Event
+}
+
 type memoryTeamStore struct {
 	mu    sync.RWMutex
 	items map[string]team.RunState
@@ -236,4 +277,17 @@ func (s *memoryArtifactStore) List(_ context.Context) ([]Artifact, error) {
 		items = append(items, artifact)
 	}
 	return items, nil
+}
+
+func (s *memoryEventStore) Append(_ context.Context, event Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[event.RunID] = append(s.items[event.RunID], event)
+	return nil
+}
+
+func (s *memoryEventStore) List(_ context.Context, runID string) ([]Event, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]Event{}, s.items[runID]...), nil
 }

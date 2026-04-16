@@ -21,10 +21,14 @@ func TestProfileAndTeamBuilders(t *testing.T) {
 	}
 	request := Team("deepsearch", "supervisor", "research-a", "research-b").
 		Input(map[string]any{"query": "hydaelyn"}).
+		Planner("supervisor-planner").
 		Metadata(map[string]string{"mode": "deep"}).
 		Build()
 	if request.Pattern != "deepsearch" || request.SupervisorProfile != "supervisor" {
 		t.Fatalf("unexpected team request: %#v", request)
+	}
+	if request.Planner != "supervisor-planner" {
+		t.Fatalf("expected planner name, got %#v", request)
 	}
 	if len(request.WorkerProfiles) != 2 {
 		t.Fatalf("expected worker profiles, got %#v", request.WorkerProfiles)

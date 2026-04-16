@@ -68,6 +68,11 @@ func (s *TeamSpec) Input(input map[string]any) *TeamSpec {
 	return s
 }
 
+func (s *TeamSpec) Planner(name string) *TeamSpec {
+	s.request.Planner = name
+	return s
+}
+
 func (s *TeamSpec) Metadata(metadata map[string]string) *TeamSpec {
 	s.request.Metadata = metadata
 	return s

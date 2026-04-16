@@ -89,6 +89,80 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments map[string
 	return result, err
 }
 
+type Resource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+type ResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+}
+
+type Prompt struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
+}
+
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+type PromptMessage struct {
+	Role    string         `json:"role"`
+	Content ContentBlock   `json:"content"`
+}
+
+func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
+	var result struct {
+		Resources []Resource `json:"resources"`
+	}
+	if err := c.transport.Call(ctx, "resources/list", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	return result.Resources, nil
+}
+
+func (c *Client) ReadResource(ctx context.Context, uri string) ([]ResourceContent, error) {
+	var result struct {
+		Contents []ResourceContent `json:"contents"`
+	}
+	if err := c.transport.Call(ctx, "resources/read", map[string]any{"uri": uri}, &result); err != nil {
+		return nil, err
+	}
+	return result.Contents, nil
+}
+
+func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
+	var result struct {
+		Prompts []Prompt `json:"prompts"`
+	}
+	if err := c.transport.Call(ctx, "prompts/list", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	return result.Prompts, nil
+}
+
+func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) ([]PromptMessage, error) {
+	var result struct {
+		Messages []PromptMessage `json:"messages"`
+	}
+	params := map[string]any{"name": name}
+	if len(arguments) > 0 {
+		params["arguments"] = arguments
+	}
+	if err := c.transport.Call(ctx, "prompts/get", params, &result); err != nil {
+		return nil, err
+	}
+	return result.Messages, nil
+}
+
 type HTTPTransport struct {
 	client  *http.Client
 	url     string

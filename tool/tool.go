@@ -72,13 +72,7 @@ func (b *Bus) Definitions() []Definition {
 
 func (b *Bus) Subset(names []string) *Bus {
 	if len(names) == 0 {
-		b.mu.RLock()
-		defer b.mu.RUnlock()
-		drivers := make([]Driver, 0, len(b.drivers))
-		for _, driver := range b.drivers {
-			drivers = append(drivers, driver)
-		}
-		return NewBus(drivers...)
+		return NewBus()
 	}
 	selected := make([]Driver, 0, len(names))
 	for _, name := range names {

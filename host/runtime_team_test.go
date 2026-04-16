@@ -81,6 +81,9 @@ func TestRuntimeStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.
 		t.Fatalf("expected team session id")
 	}
 	for _, task := range state.Tasks {
+		if task.AssigneeAgentID == "" {
+			t.Fatalf("expected assignee agent id on task %#v", task)
+		}
 		if task.SessionID == "" {
 			t.Fatalf("expected worker session id on task %#v", task)
 		}
@@ -94,5 +97,54 @@ func TestRuntimeStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.
 		if snapshot.Session.Scope != message.VisibilityPrivate {
 			t.Fatalf("expected private worker session, got %#v", snapshot.Session)
 		}
+		if snapshot.Session.AgentID != task.AssigneeAgentID {
+			t.Fatalf("expected session agent id %q, got %#v", task.AssigneeAgentID, snapshot.Session)
+		}
+	}
+}
+
+func TestRuntimeStartTeamKeepsDistinctAgentInstancesForSameProfileWorkers(t *testing.T) {
+	runtime := New(Config{})
+	runtime.RegisterProvider("team-fake", teamFakeProvider{})
+	runtime.RegisterPattern(deepsearch.New())
+	runtime.RegisterProfile(team.Profile{
+		Name:     "supervisor",
+		Role:     team.RoleSupervisor,
+		Provider: "team-fake",
+		Model:    "test",
+	})
+	runtime.RegisterProfile(team.Profile{
+		Name:     "researcher",
+		Role:     team.RoleResearcher,
+		Provider: "team-fake",
+		Model:    "test",
+	})
+
+	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher", "researcher"},
+		Input: map[string]any{
+			"query":      "parallel search",
+			"subqueries": []string{"branch one", "branch two"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+	if len(state.Workers) != 2 {
+		t.Fatalf("expected 2 worker instances, got %#v", state.Workers)
+	}
+	if state.Workers[0].ID == state.Workers[1].ID {
+		t.Fatalf("expected distinct worker ids, got %#v", state.Workers)
+	}
+	if state.Workers[0].EffectiveProfileName() != "researcher" || state.Workers[1].EffectiveProfileName() != "researcher" {
+		t.Fatalf("expected shared profile template, got %#v", state.Workers)
+	}
+	if len(state.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %#v", state.Tasks)
+	}
+	if state.Tasks[0].AssigneeAgentID == state.Tasks[1].AssigneeAgentID {
+		t.Fatalf("expected different assignee agent ids, got %#v", state.Tasks)
 	}
 }

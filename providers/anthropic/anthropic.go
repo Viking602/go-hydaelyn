@@ -1,16 +1,18 @@
 package anthropic
 
 import (
-	"context"
-	"fmt"
+	"net/http"
 
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 
 type Config struct {
-	APIKey  string
-	BaseURL string
-	Models  []string
+	APIKey    string
+	BaseURL   string
+	Models    []string
+	Client    *http.Client
+	Version   string
+	MaxTokens int
 }
 
 type Driver struct {
@@ -28,6 +30,12 @@ func New(config Config) Driver {
 	if config.BaseURL == "" {
 		config.BaseURL = "https://api.anthropic.com/v1"
 	}
+	if config.Version == "" {
+		config.Version = "2023-06-01"
+	}
+	if config.MaxTokens <= 0 {
+		config.MaxTokens = 1024
+	}
 	return Driver{config: config}
 }
 
@@ -37,8 +45,4 @@ func (d Driver) Metadata() provider.Metadata {
 		Models:  d.config.Models,
 		Version: "v1",
 	}
-}
-
-func (d Driver) Stream(context.Context, provider.Request) (provider.Stream, error) {
-	return nil, fmt.Errorf("anthropic provider adapter is scaffolded but not wired to the remote API yet: %w", provider.ErrNotImplemented)
 }

@@ -1,8 +1,7 @@
 package openai
 
 import (
-	"context"
-	"fmt"
+	"net/http"
 
 	"github.com/Viking602/go-hydaelyn/provider"
 )
@@ -11,6 +10,7 @@ type Config struct {
 	APIKey  string
 	BaseURL string
 	Models  []string
+	Client  *http.Client
 }
 
 type Driver struct {
@@ -37,8 +37,4 @@ func (d Driver) Metadata() provider.Metadata {
 		Models:  d.config.Models,
 		Version: "v1",
 	}
-}
-
-func (d Driver) Stream(context.Context, provider.Request) (provider.Stream, error) {
-	return nil, fmt.Errorf("openai provider adapter is scaffolded but not wired to the remote API yet: %w", provider.ErrNotImplemented)
 }
