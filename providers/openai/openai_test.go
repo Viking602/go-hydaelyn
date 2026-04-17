@@ -60,6 +60,76 @@ func TestDriverStreamParsesChatCompletionSSE(t *testing.T) {
 	}
 }
 
+func TestDriverStreamExtractsReasoningContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"let me think\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\" harder\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{Model: "qwen", Messages: []message.Message{message.NewText(message.RoleUser, "hi")}})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	events := collectEvents(t, stream)
+	var thinking, text string
+	for _, ev := range events {
+		switch ev.Kind {
+		case provider.EventThinkingDelta:
+			thinking += ev.Thinking
+		case provider.EventTextDelta:
+			text += ev.Text
+		}
+	}
+	if thinking != "let me think harder" {
+		t.Fatalf("thinking = %q, want %q", thinking, "let me think harder")
+	}
+	if text != "answer" {
+		t.Fatalf("text = %q, want %q", text, "answer")
+	}
+}
+
+func TestDriverStreamExtractsInlineThinkTags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		// Split "<think>" across two chunks to exercise the cross-chunk buffer.
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pre <thi\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"nk>hidden\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" thoughts</thi\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"nk> visible\"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{Model: "qwen", Messages: []message.Message{message.NewText(message.RoleUser, "hi")}})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	events := collectEvents(t, stream)
+	var thinking, text string
+	for _, ev := range events {
+		switch ev.Kind {
+		case provider.EventThinkingDelta:
+			thinking += ev.Thinking
+		case provider.EventTextDelta:
+			text += ev.Text
+		}
+	}
+	if thinking != "hidden thoughts" {
+		t.Fatalf("thinking = %q, want %q", thinking, "hidden thoughts")
+	}
+	if text != "pre  visible" {
+		t.Fatalf("text = %q, want %q", text, "pre  visible")
+	}
+}
+
 func collectEvents(t *testing.T, stream provider.Stream) []provider.Event {
 	t.Helper()
 	defer stream.Close()

@@ -66,8 +66,10 @@ type chunk struct {
 
 type choiceChunk struct {
 	Delta struct {
-		Content   string              `json:"content"`
-		ToolCalls []toolCallDeltaItem `json:"tool_calls"`
+		Content          string              `json:"content"`
+		ReasoningContent string              `json:"reasoning_content"`
+		Reasoning        string              `json:"reasoning"`
+		ToolCalls        []toolCallDeltaItem `json:"tool_calls"`
 	} `json:"delta"`
 	FinishReason string `json:"finish_reason"`
 }
@@ -87,6 +89,82 @@ type streamState struct {
 	finished   bool
 	usage      provider.Usage
 	stopReason provider.StopReason
+	splitter   thinkSplitter
+}
+
+// thinkSplitter extracts <think>...</think> segments from a streamed token
+// sequence. Tags may be split across chunks, so it buffers the trailing bytes
+// that could still be a tag prefix until enough input arrives to decide.
+type thinkSplitter struct {
+	inThink bool
+	buffer  string
+}
+
+const (
+	thinkOpen  = "<think>"
+	thinkClose = "</think>"
+)
+
+func (t *thinkSplitter) process(delta string) (text string, thinking string) {
+	t.buffer += delta
+	var textB, thinkB strings.Builder
+	for {
+		if t.inThink {
+			idx := strings.Index(t.buffer, thinkClose)
+			if idx >= 0 {
+				thinkB.WriteString(t.buffer[:idx])
+				t.buffer = t.buffer[idx+len(thinkClose):]
+				t.inThink = false
+				continue
+			}
+			safe := safeEmitLen(t.buffer, thinkClose)
+			thinkB.WriteString(t.buffer[:safe])
+			t.buffer = t.buffer[safe:]
+			break
+		}
+		idx := strings.Index(t.buffer, thinkOpen)
+		if idx >= 0 {
+			textB.WriteString(t.buffer[:idx])
+			t.buffer = t.buffer[idx+len(thinkOpen):]
+			t.inThink = true
+			continue
+		}
+		safe := safeEmitLen(t.buffer, thinkOpen)
+		textB.WriteString(t.buffer[:safe])
+		t.buffer = t.buffer[safe:]
+		break
+	}
+	return textB.String(), thinkB.String()
+}
+
+// flush drains any bytes still buffered at stream end. Residual inside a
+// <think> block is emitted as thinking; otherwise as text.
+func (t *thinkSplitter) flush() (text string, thinking string) {
+	if t.buffer == "" {
+		return "", ""
+	}
+	out := t.buffer
+	t.buffer = ""
+	if t.inThink {
+		return "", out
+	}
+	return out, ""
+}
+
+// safeEmitLen returns the count of leading bytes of s that cannot be the
+// start of target. The suffix that is withheld may complete into target on
+// the next chunk.
+func safeEmitLen(s, target string) int {
+	max := len(target) - 1
+	if max > len(s) {
+		max = len(s)
+	}
+	for k := max; k >= 1; k-- {
+		if strings.HasPrefix(target, s[len(s)-k:]) {
+			return len(s) - k
+		}
+	}
+	return len(s)
 }
 
 func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.Stream, error) {
@@ -154,11 +232,26 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 		}
 		if current.Data == "[DONE]" {
 			s.state.finished = true
-			return provider.Event{
+			if text, thinking := s.state.splitter.flush(); text != "" || thinking != "" {
+				if thinking != "" {
+					s.state.pending = append(s.state.pending, provider.Event{
+						Kind:     provider.EventThinkingDelta,
+						Thinking: thinking,
+					})
+				}
+				if text != "" {
+					s.state.pending = append(s.state.pending, provider.Event{
+						Kind: provider.EventTextDelta,
+						Text: text,
+					})
+				}
+			}
+			s.state.pending = append(s.state.pending, provider.Event{
 				Kind:       provider.EventDone,
 				Usage:      s.state.usage,
 				StopReason: s.state.stopReason,
-			}, nil
+			})
+			continue
 		}
 		var parsed chunk
 		if err := json.Unmarshal([]byte(current.Data), &parsed); err != nil {
@@ -172,11 +265,31 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 			}
 		}
 		for _, choice := range parsed.Choices {
-			if choice.Delta.Content != "" {
+			if reasoning := choice.Delta.ReasoningContent; reasoning != "" {
 				s.state.pending = append(s.state.pending, provider.Event{
-					Kind: provider.EventTextDelta,
-					Text: choice.Delta.Content,
+					Kind:     provider.EventThinkingDelta,
+					Thinking: reasoning,
 				})
+			} else if reasoning := choice.Delta.Reasoning; reasoning != "" {
+				s.state.pending = append(s.state.pending, provider.Event{
+					Kind:     provider.EventThinkingDelta,
+					Thinking: reasoning,
+				})
+			}
+			if choice.Delta.Content != "" {
+				text, thinking := s.state.splitter.process(choice.Delta.Content)
+				if thinking != "" {
+					s.state.pending = append(s.state.pending, provider.Event{
+						Kind:     provider.EventThinkingDelta,
+						Thinking: thinking,
+					})
+				}
+				if text != "" {
+					s.state.pending = append(s.state.pending, provider.Event{
+						Kind: provider.EventTextDelta,
+						Text: text,
+					})
+				}
 			}
 			for _, item := range choice.Delta.ToolCalls {
 				s.state.pending = append(s.state.pending, provider.Event{
