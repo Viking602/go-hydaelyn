@@ -102,6 +102,14 @@ func Validate(text string, spec OutputSpec) []Violation {
 	return violations
 }
 
+// MetricSink is the minimal counter/histogram surface the formatter needs
+// to report rumination and retry signals. It is intentionally structural
+// so any observe.Observer satisfies it without an import cycle.
+type MetricSink interface {
+	IncCounter(name string, delta int64, attrs map[string]string)
+	ObserveHistogram(name string, value float64, attrs map[string]string)
+}
+
 // Score summarises how much a block of text shows signs of self-correction
 // loops ("Wait, actually, let me re-check..."). It is a heuristic signal
 // suitable for observability dashboards, not a hard guard.
@@ -127,6 +135,17 @@ var ruminationPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`等一下`),
 	regexp.MustCompile(`再想想`),
 	regexp.MustCompile(`稍等`),
+}
+
+// Report emits the score as two metrics on sink under prefix: a hits
+// counter (prefix+".rumination_hits") and a ratio histogram
+// (prefix+".rumination_ratio"). No-op when sink is nil or prefix is empty.
+func (s Score) Report(sink MetricSink, prefix string, attrs map[string]string) {
+	if sink == nil || prefix == "" {
+		return
+	}
+	sink.IncCounter(prefix+".rumination_hits", int64(s.Hits), attrs)
+	sink.ObserveHistogram(prefix+".rumination_ratio", s.Ratio, attrs)
 }
 
 // RuminationScore scans text for reflection markers that usually indicate

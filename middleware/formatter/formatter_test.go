@@ -139,6 +139,56 @@ func TestRuminationScoreCJKTokenFallback(t *testing.T) {
 	}
 }
 
+type fakeSink struct {
+	counters   map[string]int64
+	histograms map[string][]float64
+	attrs      map[string]map[string]string
+}
+
+func newFakeSink() *fakeSink {
+	return &fakeSink{
+		counters:   map[string]int64{},
+		histograms: map[string][]float64{},
+		attrs:      map[string]map[string]string{},
+	}
+}
+
+func (f *fakeSink) IncCounter(name string, delta int64, attrs map[string]string) {
+	f.counters[name] += delta
+	f.attrs[name] = attrs
+}
+
+func (f *fakeSink) ObserveHistogram(name string, value float64, attrs map[string]string) {
+	f.histograms[name] = append(f.histograms[name], value)
+	f.attrs[name] = attrs
+}
+
+func TestScoreReportEmitsCounterAndHistogram(t *testing.T) {
+	sink := newFakeSink()
+	score := RuminationScore("Wait, actually let me reconsider again.")
+	score.Report(sink, "agent.output", map[string]string{"model": "test"})
+	if sink.counters["agent.output.rumination_hits"] != int64(score.Hits) {
+		t.Fatalf("counter mismatch: got %d want %d", sink.counters["agent.output.rumination_hits"], score.Hits)
+	}
+	hist := sink.histograms["agent.output.rumination_ratio"]
+	if len(hist) != 1 || hist[0] != score.Ratio {
+		t.Fatalf("histogram mismatch: got %#v want [%f]", hist, score.Ratio)
+	}
+	if sink.attrs["agent.output.rumination_hits"]["model"] != "test" {
+		t.Fatalf("attrs not forwarded: %#v", sink.attrs)
+	}
+}
+
+func TestScoreReportNoopOnNilSinkOrEmptyPrefix(t *testing.T) {
+	score := RuminationScore("Wait, actually")
+	score.Report(nil, "agent.output", nil) // must not panic
+	sink := newFakeSink()
+	score.Report(sink, "", nil)
+	if len(sink.counters) != 0 || len(sink.histograms) != 0 {
+		t.Fatalf("empty prefix should be a no-op, got %#v / %#v", sink.counters, sink.histograms)
+	}
+}
+
 func TestRenderEmptySpecReturnsEmpty(t *testing.T) {
 	if got := Render(OutputSpec{}); got != "" {
 		t.Fatalf("expected empty render for empty spec, got %q", got)

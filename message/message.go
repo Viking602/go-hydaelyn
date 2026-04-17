@@ -71,6 +71,7 @@ type Message struct {
 	Kind        Kind              `json:"kind,omitempty"`
 	Name        string            `json:"name,omitempty"`
 	Text        string            `json:"text,omitempty"`
+	Thinking    string            `json:"thinking,omitempty"`
 	ToolCalls   []ToolCall        `json:"toolCalls,omitempty"`
 	ToolResult  *ToolResult       `json:"toolResult,omitempty"`
 	TeamID      string            `json:"teamId,omitempty"`

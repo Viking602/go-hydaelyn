@@ -39,6 +39,12 @@ type Input struct {
 	// hand. Empty/zero values leave the provider default.
 	StopSequences  []string
 	ThinkingBudget int
+
+	// Observer, when non-nil, receives rumination/retry metrics at the end
+	// of a run. MetricPrefix namespaces them (defaults to "agent" when
+	// empty). Any observe.Observer satisfies MetricSink structurally.
+	Observer     formatter.MetricSink
+	MetricPrefix string
 }
 
 type Result struct {
@@ -47,6 +53,10 @@ type Result struct {
 	StopReason provider.StopReason
 	Iterations int
 	Retries    int
+	// Thinking is the concatenated reasoning stream from the final turn,
+	// when the provider emits EventThinkingDelta. Empty when the model
+	// didn't surface any reasoning or the driver discards it.
+	Thinking string
 }
 
 type Engine struct {
@@ -89,12 +99,14 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 					continue
 				}
 			}
+			reportMetrics(input, assistant, retriesUsed)
 			return Result{
 				Messages:   current,
 				Usage:      lastUsage,
 				StopReason: lastStopReason,
 				Iterations: iteration + 1,
 				Retries:    retriesUsed,
+				Thinking:   assistant.Thinking,
 			}, nil
 		}
 		results, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
@@ -112,6 +124,27 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 		Iterations: input.MaxIterations,
 		Retries:    retriesUsed,
 	}, nil
+}
+
+// reportMetrics emits retry counters and rumination histograms for the
+// terminal assistant turn. No-op when Observer is nil, so callers can
+// leave it unset without cost.
+func reportMetrics(input Input, assistant message.Message, retries int) {
+	if input.Observer == nil {
+		return
+	}
+	prefix := input.MetricPrefix
+	if prefix == "" {
+		prefix = "agent"
+	}
+	attrs := map[string]string{"model": input.Model}
+	input.Observer.IncCounter(prefix+".retries", int64(retries), attrs)
+	if assistant.Text != "" {
+		formatter.RuminationScore(assistant.Text).Report(input.Observer, prefix+".text", attrs)
+	}
+	if assistant.Thinking != "" {
+		formatter.RuminationScore(assistant.Thinking).Report(input.Observer, prefix+".thinking", attrs)
+	}
 }
 
 // runTurn executes a single model turn: context transform, request assembly,
@@ -192,6 +225,7 @@ func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent fun
 		Kind: message.KindStandard,
 	}
 	var text strings.Builder
+	var thinking strings.Builder
 	callBuilders := map[string]*toolCallBuilder{}
 	lastUsage := provider.Usage{}
 	stopReason := provider.StopReasonUnknown
@@ -214,6 +248,8 @@ func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent fun
 		switch event.Kind {
 		case provider.EventTextDelta:
 			text.WriteString(event.Text)
+		case provider.EventThinkingDelta:
+			thinking.WriteString(event.Thinking)
 		case provider.EventToolCall:
 			if event.ToolCall != nil {
 				assistant.ToolCalls = append(assistant.ToolCalls, *event.ToolCall)
@@ -241,6 +277,7 @@ func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent fun
 		}
 	}
 	assistant.Text = text.String()
+	assistant.Thinking = thinking.String()
 	if len(assistant.ToolCalls) == 0 && len(callBuilders) > 0 {
 		for _, builder := range callBuilders {
 			assistant.ToolCalls = append(assistant.ToolCalls, builder.build())

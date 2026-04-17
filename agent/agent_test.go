@@ -148,6 +148,98 @@ func TestEngineRetriesOnFormatViolation(t *testing.T) {
 	}
 }
 
+type fakeMetricSink struct {
+	counters   map[string]int64
+	histograms map[string][]float64
+}
+
+func newFakeMetricSink() *fakeMetricSink {
+	return &fakeMetricSink{
+		counters:   map[string]int64{},
+		histograms: map[string][]float64{},
+	}
+}
+
+func (f *fakeMetricSink) IncCounter(name string, delta int64, _ map[string]string) {
+	f.counters[name] += delta
+}
+
+func (f *fakeMetricSink) ObserveHistogram(name string, value float64, _ map[string]string) {
+	f.histograms[name] = append(f.histograms[name], value)
+}
+
+func TestEngineReportsRetriesAndRumination(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{
+			{
+				{Kind: provider.EventTextDelta, Text: "第一句。第二句。"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+			{
+				{Kind: provider.EventThinkingDelta, Thinking: "Wait, actually let me reconsider."},
+				{Kind: provider.EventTextDelta, Text: "合规结论"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		},
+	}
+	sink := newFakeMetricSink()
+	spec := formatter.OutputSpec{FirstParagraphSingleSentence: true}
+	engine := Engine{Provider: driver}
+	result, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 4,
+		OutputSpec:    &spec,
+		MaxRetries:    2,
+		Observer:      sink,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Retries != 1 {
+		t.Fatalf("expected 1 retry, got %d", result.Retries)
+	}
+	if sink.counters["agent.retries"] != 1 {
+		t.Fatalf("expected agent.retries=1, got %d", sink.counters["agent.retries"])
+	}
+	if _, ok := sink.histograms["agent.text.rumination_ratio"]; !ok {
+		t.Fatalf("expected text rumination histogram, got %#v", sink.histograms)
+	}
+	if _, ok := sink.histograms["agent.thinking.rumination_ratio"]; !ok {
+		t.Fatalf("expected thinking rumination histogram, got %#v", sink.histograms)
+	}
+}
+
+func TestEngineCollectsThinkingDeltas(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventThinkingDelta, Thinking: "思路一"},
+			{Kind: provider.EventThinkingDelta, Thinking: "；思路二"},
+			{Kind: provider.EventTextDelta, Text: "最终答案"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	}
+	engine := Engine{Provider: driver}
+	result, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Thinking != "思路一；思路二" {
+		t.Fatalf("expected accumulated thinking on Result, got %q", result.Thinking)
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if last.Thinking != "思路一；思路二" {
+		t.Fatalf("expected thinking on assistant message, got %q", last.Thinking)
+	}
+	if last.Text != "最终答案" {
+		t.Fatalf("expected text answer, got %q", last.Text)
+	}
+}
+
 func TestEngineForwardsStopAndThinkingBudget(t *testing.T) {
 	driver := &scriptedProvider{
 		turns: [][]provider.Event{{
