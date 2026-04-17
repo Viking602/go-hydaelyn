@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/middleware/formatter"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -20,6 +21,24 @@ type Input struct {
 	ToolMode      tool.Mode
 	MaxIterations int
 	OnEvent       func(provider.Event) error
+
+	// OutputSpec, when non-nil, enables automatic format validation of
+	// each terminal assistant message (turn without tool calls). Failed
+	// outputs trigger a retry with a formatter.BuildRetryMessage appended
+	// to the conversation, up to MaxRetries times.
+	OutputSpec *formatter.OutputSpec
+	// MaxRetries caps how many extra turns may be spent on format fixes.
+	// Retry turns still count against MaxIterations.
+	MaxRetries int
+	// OnRetry is invoked (if non-nil) with the violations that triggered
+	// a retry, before the retry message is appended.
+	OnRetry func([]formatter.Violation)
+
+	// StopSequences and ThinkingBudget are forwarded to provider.Request
+	// so guardrails can be set per-run without crafting the request by
+	// hand. Empty/zero values leave the provider default.
+	StopSequences  []string
+	ThinkingBudget int
 }
 
 type Result struct {
@@ -27,6 +46,7 @@ type Result struct {
 	Usage      provider.Usage
 	StopReason provider.StopReason
 	Iterations int
+	Retries    int
 }
 
 type Engine struct {
@@ -45,27 +65,13 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 	current := append([]message.Message{}, input.Messages...)
 	lastUsage := provider.Usage{}
 	lastStopReason := provider.StopReasonUnknown
+	retriesUsed := 0
+	retriesLeft := 0
+	if input.OutputSpec != nil {
+		retriesLeft = input.MaxRetries
+	}
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
-		transformed, err := e.Hooks.TransformContext(ctx, current)
-		if err != nil {
-			return Result{}, err
-		}
-		request := provider.Request{
-			Model:    input.Model,
-			Messages: transformed,
-			Metadata: input.Metadata,
-		}
-		if e.Tools != nil {
-			request.Tools = e.Tools.Definitions()
-		}
-		if err := e.Hooks.BeforeModelCall(ctx, &request); err != nil {
-			return Result{}, err
-		}
-		stream, err := e.Provider.Stream(ctx, request)
-		if err != nil {
-			return Result{}, err
-		}
-		assistant, usage, stopReason, err := e.collect(ctx, stream, input.OnEvent)
+		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
 		if err != nil {
 			return Result{}, err
 		}
@@ -75,11 +81,20 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 			current = append(current, assistant)
 		}
 		if len(assistant.ToolCalls) == 0 || e.Tools == nil {
+			if retriesLeft > 0 {
+				if retry := formatRetryMessage(assistant, input); retry != nil {
+					current = append(current, *retry)
+					retriesLeft--
+					retriesUsed++
+					continue
+				}
+			}
 			return Result{
 				Messages:   current,
 				Usage:      lastUsage,
 				StopReason: lastStopReason,
 				Iterations: iteration + 1,
+				Retries:    retriesUsed,
 			}, nil
 		}
 		results, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
@@ -95,7 +110,55 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 		Usage:      lastUsage,
 		StopReason: provider.StopReasonMaxTurns,
 		Iterations: input.MaxIterations,
+		Retries:    retriesUsed,
 	}, nil
+}
+
+// runTurn executes a single model turn: context transform, request assembly,
+// provider stream and event collection. It encapsulates the per-turn wiring
+// so the main loop only has to reason about iteration/retry bookkeeping.
+func (e Engine) runTurn(ctx context.Context, current []message.Message, input Input) (message.Message, provider.Usage, provider.StopReason, error) {
+	transformed, err := e.Hooks.TransformContext(ctx, current)
+	if err != nil {
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+	}
+	request := provider.Request{
+		Model:          input.Model,
+		Messages:       transformed,
+		Metadata:       input.Metadata,
+		StopSequences:  input.StopSequences,
+		ThinkingBudget: input.ThinkingBudget,
+	}
+	if e.Tools != nil {
+		request.Tools = e.Tools.Definitions()
+	}
+	if err := e.Hooks.BeforeModelCall(ctx, &request); err != nil {
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+	}
+	stream, err := e.Provider.Stream(ctx, request)
+	if err != nil {
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+	}
+	return e.collect(ctx, stream, input.OnEvent)
+}
+
+// formatRetryMessage validates the assistant text against input.OutputSpec
+// and, when it fails, returns the retry message to append to the
+// conversation. A nil return means either the feature is disabled or the
+// output already passes — the caller should finish the run in that case.
+func formatRetryMessage(assistant message.Message, input Input) *message.Message {
+	if input.OutputSpec == nil {
+		return nil
+	}
+	violations := formatter.Validate(assistant.Text, *input.OutputSpec)
+	if len(violations) == 0 {
+		return nil
+	}
+	if input.OnRetry != nil {
+		input.OnRetry(violations)
+	}
+	msg := formatter.BuildRetryMessage(violations)
+	return &msg
 }
 
 func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, error) {
