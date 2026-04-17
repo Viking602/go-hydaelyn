@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,53 @@ func TestDriverStreamParsesMessageSSE(t *testing.T) {
 	}
 	if last.Usage.OutputTokens != 15 {
 		t.Fatalf("expected usage in final event, got %#v", last)
+	}
+}
+
+func TestDriverStreamForwardsStopAndThinking(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewDecoder(request.Body).Decode(&captured)
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"reasoning...\"}}\n\n"))
+		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}\n\n"))
+		_, _ = writer.Write([]byte("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"))
+		_, _ = writer.Write([]byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:          "claude-test",
+		Messages:       []message.Message{message.NewText(message.RoleUser, "hi")},
+		StopSequences:  []string{"Wait,"},
+		ThinkingBudget: 500, // below 1024; driver should floor to 1024
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	events := collectAnthropicEvents(t, stream)
+
+	stop, _ := captured["stop_sequences"].([]any)
+	if len(stop) != 1 || stop[0] != "Wait," {
+		t.Fatalf("expected stop_sequences forwarded, got %#v", captured["stop_sequences"])
+	}
+	thinking, _ := captured["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" {
+		t.Fatalf("expected thinking enabled, got %#v", thinking)
+	}
+	if int(thinking["budget_tokens"].(float64)) != 1024 {
+		t.Fatalf("expected budget_tokens floored to 1024, got %#v", thinking["budget_tokens"])
+	}
+
+	var sawThinking bool
+	for _, ev := range events {
+		if ev.Kind == provider.EventThinkingDelta && ev.Thinking == "reasoning..." {
+			sawThinking = true
+		}
+	}
+	if !sawThinking {
+		t.Fatalf("expected EventThinkingDelta from thinking_delta, events=%#v", events)
 	}
 }
 

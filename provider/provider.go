@@ -49,10 +49,12 @@ type ToolCallDelta struct {
 }
 
 type Request struct {
-	Model    string                   `json:"model"`
-	Messages []message.Message        `json:"messages"`
-	Tools    []message.ToolDefinition `json:"tools,omitempty"`
-	Metadata map[string]string        `json:"metadata,omitempty"`
+	Model          string                   `json:"model"`
+	Messages       []message.Message        `json:"messages"`
+	Tools          []message.ToolDefinition `json:"tools,omitempty"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
+	StopSequences  []string                 `json:"stopSequences,omitempty"`
+	ThinkingBudget int                      `json:"thinkingBudget,omitempty"`
 }
 
 type Event struct {

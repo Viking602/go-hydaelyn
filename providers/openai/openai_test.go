@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -127,6 +128,37 @@ func TestDriverStreamExtractsInlineThinkTags(t *testing.T) {
 	}
 	if text != "pre  visible" {
 		t.Fatalf("text = %q, want %q", text, "pre  visible")
+	}
+}
+
+func TestDriverStreamForwardsStopAndReasoning(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewDecoder(request.Body).Decode(&captured)
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:          "gpt-5.4",
+		Messages:       []message.Message{message.NewText(message.RoleUser, "hi")},
+		StopSequences:  []string{"Wait,", "Actually,"},
+		ThinkingBudget: 5000,
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	_ = collectEvents(t, stream)
+
+	stop, _ := captured["stop"].([]any)
+	if len(stop) != 2 || stop[0] != "Wait," {
+		t.Fatalf("expected stop sequences forwarded, got %#v", captured["stop"])
+	}
+	reasoning, _ := captured["reasoning"].(map[string]any)
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("expected reasoning effort medium for budget=5000, got %#v", reasoning)
 	}
 }
 

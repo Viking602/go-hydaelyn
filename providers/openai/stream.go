@@ -15,11 +15,17 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model         string        `json:"model"`
-	Messages      []chatMessage `json:"messages"`
-	Tools         []chatTool    `json:"tools,omitempty"`
-	Stream        bool          `json:"stream"`
-	StreamOptions streamOptions `json:"stream_options,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []chatMessage     `json:"messages"`
+	Tools         []chatTool        `json:"tools,omitempty"`
+	Stream        bool              `json:"stream"`
+	StreamOptions streamOptions     `json:"stream_options,omitempty"`
+	Stop          []string          `json:"stop,omitempty"`
+	Reasoning     *reasoningOptions `json:"reasoning,omitempty"`
+}
+
+type reasoningOptions struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -181,6 +187,8 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		Tools:         toChatTools(request.Tools),
 		Stream:        true,
 		StreamOptions: streamOptions{IncludeUsage: true},
+		Stop:          request.StopSequences,
+		Reasoning:     reasoningFromBudget(request.ThinkingBudget),
 	})
 	if err != nil {
 		return nil, err
@@ -358,6 +366,23 @@ func toChatTools(defs []message.ToolDefinition) []chatTool {
 		})
 	}
 	return items
+}
+
+// reasoningFromBudget maps a token-style budget hint onto the OpenAI
+// reasoning.effort enum used by GPT-5 and o-series models. Returning nil
+// means the caller opted out and the field is omitted from the request.
+func reasoningFromBudget(budget int) *reasoningOptions {
+	if budget <= 0 {
+		return nil
+	}
+	switch {
+	case budget < 2000:
+		return &reasoningOptions{Effort: "low"}
+	case budget < 10000:
+		return &reasoningOptions{Effort: "medium"}
+	default:
+		return &reasoningOptions{Effort: "high"}
+	}
 }
 
 func mapOpenAIStopReason(reason string) provider.StopReason {

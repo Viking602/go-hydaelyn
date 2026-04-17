@@ -15,11 +15,18 @@ import (
 )
 
 type requestBody struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream"`
+	Model         string             `json:"model"`
+	MaxTokens     int                `json:"max_tokens"`
+	Messages      []anthropicMessage `json:"messages"`
+	Tools         []anthropicTool    `json:"tools,omitempty"`
+	Stream        bool               `json:"stream"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	Thinking      *thinkingOptions   `json:"thinking,omitempty"`
+}
+
+type thinkingOptions struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type anthropicMessage struct {
@@ -44,6 +51,7 @@ type eventEnvelope struct {
 	Delta struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
 		PartialJSON string `json:"partial_json"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
@@ -75,11 +83,13 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		maxTokens = 1024
 	}
 	body, err := json.Marshal(requestBody{
-		Model:     request.Model,
-		MaxTokens: maxTokens,
-		Messages:  toAnthropicMessages(request.Messages),
-		Tools:     toAnthropicTools(request.Tools),
-		Stream:    true,
+		Model:         request.Model,
+		MaxTokens:     maxTokens,
+		Messages:      toAnthropicMessages(request.Messages),
+		Tools:         toAnthropicTools(request.Tools),
+		Stream:        true,
+		StopSequences: request.StopSequences,
+		Thinking:      thinkingFromBudget(request.ThinkingBudget),
 	})
 	if err != nil {
 		return nil, err
@@ -159,6 +169,12 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 					Text: parsed.Delta.Text,
 				})
 			}
+			if parsed.Delta.Type == "thinking_delta" {
+				s.state.pending = append(s.state.pending, provider.Event{
+					Kind:     provider.EventThinkingDelta,
+					Thinking: parsed.Delta.Thinking,
+				})
+			}
 			if parsed.Delta.Type == "input_json_delta" {
 				current := s.state.toolCalls[parsed.Index]
 				current.ArgumentsDelta = parsed.Delta.PartialJSON
@@ -216,6 +232,19 @@ func toAnthropicTools(defs []message.ToolDefinition) []anthropicTool {
 		})
 	}
 	return items
+}
+
+// thinkingFromBudget enables Claude extended thinking with the supplied
+// budget. The API requires budget_tokens >= 1024, so the provided value is
+// floored; a non-positive budget leaves the feature disabled.
+func thinkingFromBudget(budget int) *thinkingOptions {
+	if budget <= 0 {
+		return nil
+	}
+	if budget < 1024 {
+		budget = 1024
+	}
+	return &thinkingOptions{Type: "enabled", BudgetTokens: budget}
 }
 
 func mapAnthropicStopReason(reason string) provider.StopReason {
