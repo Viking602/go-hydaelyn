@@ -304,7 +304,6 @@ func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID string
 			continue
 		}
 		if currentTask.Version > task.Version || currentTask.IsTerminal() {
-			r.recordLeaseExpiredEvent(ctx, teamID, task.ID, r.workerID, eventReasonStateVersionConflict)
 			return errQueuedTaskAlreadyCommitted
 		}
 	}
