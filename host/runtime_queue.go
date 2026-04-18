@@ -121,7 +121,25 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 		return taskOutcome{}, false
 	}
 	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
-	index := indexByTask[lease.TaskID]
+	if lease.TeamID != "" && lease.TeamID != current.ID {
+		r.recordLeaseExpiredEvent(ctx, lease.TeamID, lease.TaskID, r.workerID, eventReasonTaskAlreadyTerminal)
+		if err := r.nackQueuedLease(ctx, lease); err != nil {
+			return taskOutcome{err: err}, true
+		}
+		return taskOutcome{}, true
+	}
+	index, ok := indexByTask[lease.TaskID]
+	if !ok {
+		if lease.TeamID != "" {
+			r.recordLeaseExpiredEvent(ctx, lease.TeamID, lease.TaskID, r.workerID, eventReasonTaskAlreadyTerminal)
+			if err := r.nackQueuedLease(ctx, lease); err != nil {
+				return taskOutcome{err: err}, true
+			}
+		} else if err := r.queue.Release(ctx, lease); err != nil {
+			return taskOutcome{err: err}, true
+		}
+		return taskOutcome{}, true
+	}
 	original := current.Tasks[index]
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
@@ -140,6 +158,15 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	releaseSemaphore()
 	_ = r.queue.Release(ctx, lease)
 	return taskOutcome{index: index, task: item, err: err}, true
+}
+
+func (r *Runtime) nackQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
+	if err := r.queue.Release(ctx, lease); err != nil {
+		return err
+	}
+	lease.OwnerID = ""
+	lease.ExpiresAt = time.Time{}
+	return r.queue.Enqueue(ctx, lease)
 }
 
 func (r *Runtime) resolveQueuedState(ctx context.Context, current team.RunState) (team.RunState, bool, bool, error) {
