@@ -28,3 +28,27 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run race tests
+        run: go test -race -timeout=10m ./...
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Run coverage tests
+        run: go test ./... -coverprofile=coverage.out
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          if-no-files-found: error

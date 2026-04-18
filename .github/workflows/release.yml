@@ -27,6 +27,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
       - name: Validate release tag and module major version
         shell: bash
         run: |
@@ -48,8 +51,17 @@ jobs:
             fi
           fi
 
-      - name: Run tests
-        run: go test ./...
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -race ./...
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Collect coverage
+        run: go test -coverprofile=coverage.out ./...
 
       - name: Create GitHub release
         env:
