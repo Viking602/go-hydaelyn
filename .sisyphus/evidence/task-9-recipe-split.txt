@@ -1,0 +1,23 @@
+Task: split recipe/recipe.go into focused files without API changes
+
+Files created:
+- recipe/spec.go
+- recipe/decode.go
+- recipe/compile.go
+
+File removed:
+- recipe/recipe.go
+
+Verification:
+- gofmt -w recipe/spec.go recipe/decode.go recipe/compile.go
+- lsp_diagnostics(recipe/spec.go, warning) -> clean
+- lsp_diagnostics(recipe/decode.go, warning) -> clean
+- lsp_diagnostics(recipe/compile.go, warning) -> clean
+- go test ./recipe/... -> PASS
+
+Test output:
+ok  	github.com/Viking602/go-hydaelyn/recipe	0.340s
+
+Notes:
+- package remains recipe
+- decode and compile behavior intentionally unchanged; code was moved along the approved seam from task-5-split-matrix.md
