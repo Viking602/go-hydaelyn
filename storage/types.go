@@ -61,7 +61,7 @@ const (
 type Event struct {
 	RunID      string         `json:"runId"`
 	Sequence   int            `json:"sequence"`
-	RecordedAt time.Time      `json:"recordedAt"`
+	RecordedAt time.Time      `json:"recordedAt,omitempty"`
 	Type       EventType      `json:"type"`
 	TeamID     string         `json:"teamId,omitempty"`
 	TaskID     string         `json:"taskId,omitempty"`
