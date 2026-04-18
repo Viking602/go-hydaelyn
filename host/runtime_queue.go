@@ -14,6 +14,21 @@ const localQueueLeaseTTL = 40 * time.Millisecond
 
 var errQueuedTaskMissing = errors.New("queued task missing")
 
+type teamGuard interface {
+	IsRunnable(state team.RunState, task team.Task) bool
+	IsAborted(state team.RunState) bool
+}
+
+type defaultTeamGuard struct{}
+
+func (g *defaultTeamGuard) IsRunnable(state team.RunState, task team.Task) bool {
+	return !state.IsTerminal() && state.Status != team.StatusAborted && !task.IsTerminal()
+}
+
+func (g *defaultTeamGuard) IsAborted(state team.RunState) bool {
+	return state.Status == team.StatusAborted
+}
+
 func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, runnableSet map[string]struct{}, semByProfile map[string]chan struct{}) (<-chan taskOutcome, error) {
 	if err := r.enqueueTaskSet(ctx, current.ID, runnableSet); err != nil {
 		return nil, err
@@ -73,11 +88,7 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 		_ = r.queue.Release(ctx, lease)
 		return err
 	}
-	if state.IsTerminal() || state.Status == team.StatusAborted {
-		released = true
-		return r.queue.Release(ctx, lease)
-	}
-	if original.IsTerminal() {
+	if !r.teamGuard.IsRunnable(state, original) {
 		released = true
 		return r.queue.Release(ctx, lease)
 	}

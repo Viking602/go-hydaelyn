@@ -57,6 +57,7 @@ type Runtime struct {
 	capability       *capability.Invoker
 	plugins          *plugin.Registry
 	queue            scheduler.TaskQueue
+	teamGuard        teamGuard
 	providers        map[string]provider.Driver
 	profiles         map[string]team.Profile
 	patterns         map[string]team.Pattern
@@ -85,6 +86,7 @@ func New(config Config) *Runtime {
 		middlewares:      middleware.NewChain(config.Middlewares...),
 		capability:       capability.NewInvoker(),
 		plugins:          plugin.NewRegistry(),
+		teamGuard:        &defaultTeamGuard{},
 		providers:        map[string]provider.Driver{},
 		profiles:         map[string]team.Profile{},
 		patterns:         map[string]team.Pattern{},
