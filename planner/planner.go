@@ -12,16 +12,22 @@ type VerificationPolicy struct {
 }
 
 type TaskSpec struct {
-	ID                   string             `json:"id"`
-	Kind                 string             `json:"kind,omitempty"`
-	Title                string             `json:"title,omitempty"`
-	Input                string             `json:"input,omitempty"`
-	RequiredRole         team.Role          `json:"requiredRole,omitempty"`
-	RequiredCapabilities []string           `json:"requiredCapabilities,omitempty"`
-	Budget               team.Budget        `json:"budget,omitempty"`
-	AssigneeAgentID      string             `json:"assigneeAgentId,omitempty"`
-	DependsOn            []string           `json:"dependsOn,omitempty"`
-	FailurePolicy        team.FailurePolicy `json:"failurePolicy,omitempty"`
+	ID                   string                  `json:"id"`
+	Kind                 string                  `json:"kind,omitempty"`
+	Stage                team.TaskStage          `json:"stage,omitempty"`
+	Title                string                  `json:"title,omitempty"`
+	Input                string                  `json:"input,omitempty"`
+	RequiredRole         team.Role               `json:"requiredRole,omitempty"`
+	RequiredCapabilities []string                `json:"requiredCapabilities,omitempty"`
+	Budget               team.Budget             `json:"budget,omitempty"`
+	AssigneeAgentID      string                  `json:"assigneeAgentId,omitempty"`
+	DependsOn            []string                `json:"dependsOn,omitempty"`
+	Reads                []string                `json:"reads,omitempty"`
+	Writes               []string                `json:"writes,omitempty"`
+	Publish              []team.OutputVisibility `json:"publish,omitempty"`
+	Namespace            string                  `json:"namespace,omitempty"`
+	VerifierRequired     bool                    `json:"verifierRequired,omitempty"`
+	FailurePolicy        team.FailurePolicy      `json:"failurePolicy,omitempty"`
 }
 
 type Template struct {

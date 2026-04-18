@@ -9,12 +9,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/providers/anthropic"
 	"github.com/Viking602/go-hydaelyn/providers/openai"
+	"github.com/Viking602/go-hydaelyn/recipe"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -32,11 +36,14 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 func commandHandlers(ctx context.Context, stdout io.Writer) map[string]func([]string) error {
 	return map[string]func([]string) error{
-		"init":    func(args []string) error { return runInit(args, stdout) },
-		"new":     func(args []string) error { return runNew(args, stdout) },
-		"run":     func(args []string) error { return runRun(ctx, args, stdout) },
-		"inspect": func(args []string) error { return runInspect(args, stdout) },
-		"replay":  func(args []string) error { return runReplay(args, stdout) },
+		"init":     func(args []string) error { return runInit(args, stdout) },
+		"new":      func(args []string) error { return runNew(args, stdout) },
+		"run":      func(args []string) error { return runRun(ctx, args, stdout) },
+		"validate": func(args []string) error { return runValidate(args, stdout) },
+		"compile":  func(args []string) error { return runCompile(args, stdout) },
+		"inspect":  func(args []string) error { return runInspect(args, stdout) },
+		"evaluate": func(args []string) error { return runEvaluate(args, stdout) },
+		"replay":   func(args []string) error { return runReplay(args, stdout) },
 	}
 }
 
@@ -111,6 +118,105 @@ func runRun(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runInspect(args []string, stdout io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "team":
+			return runInspectTeam(args[1:], stdout)
+		case "events":
+			return runInspectEvents(args[1:], stdout)
+		}
+	}
+	return runInspectEvents(args, stdout)
+}
+
+func runValidate(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
+	recipePath := flags.String("recipe", "", "path to recipe yaml/json")
+	requestPath := flags.String("request", "", "path to team request json")
+	eventsPath := flags.String("events", "", "path to event log json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	switch {
+	case *recipePath != "":
+		spec, err := recipe.DecodeFile(*recipePath)
+		if err != nil {
+			return err
+		}
+		compiled, err := recipe.Compile(spec)
+		if err != nil {
+			return err
+		}
+		return encodeJSON(stdout, map[string]any{
+			"kind":      "recipe",
+			"ok":        true,
+			"pattern":   compiled.Request.Pattern,
+			"taskCount": len(compiled.Plan.Tasks),
+		})
+	case *requestPath != "":
+		request := host.StartTeamRequest{}
+		if err := readJSONFile(*requestPath, &request); err != nil {
+			return err
+		}
+		if request.Pattern == "" {
+			return errors.New("request pattern is required")
+		}
+		if request.SupervisorProfile == "" {
+			return errors.New("request supervisorProfile is required")
+		}
+		if len(request.WorkerProfiles) == 0 {
+			return errors.New("request workerProfiles must not be empty")
+		}
+		return encodeJSON(stdout, map[string]any{
+			"kind":        "request",
+			"ok":          true,
+			"pattern":     request.Pattern,
+			"planner":     request.Planner,
+			"workerCount": len(request.WorkerProfiles),
+		})
+	case *eventsPath != "":
+		var events []storage.Event
+		if err := readJSONFile(*eventsPath, &events); err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			return errors.New("event log is empty")
+		}
+		state := storage.ReplayTeam(events)
+		return encodeJSON(stdout, map[string]any{
+			"kind":       "events",
+			"ok":         true,
+			"teamId":     state.ID,
+			"eventCount": len(events),
+			"taskCount":  len(state.Tasks),
+			"status":     state.Status,
+		})
+	default:
+		return errors.New("validate requires --recipe, --request, or --events")
+	}
+}
+
+func runCompile(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("compile", flag.ContinueOnError)
+	recipePath := flags.String("recipe", "", "path to recipe yaml/json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *recipePath == "" {
+		return errors.New("compile requires --recipe")
+	}
+	spec, err := recipe.DecodeFile(*recipePath)
+	if err != nil {
+		return err
+	}
+	compiled, err := recipe.Compile(spec)
+	if err != nil {
+		return err
+	}
+	return encodeJSON(stdout, compiled)
+}
+
+func runInspectTeam(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	eventsPath := flags.String("events", "", "path to event log json")
 	if err := flags.Parse(args); err != nil {
@@ -123,13 +229,76 @@ func runInspect(args []string, stdout io.Writer) error {
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
-	summary := map[string]any{
-		"teamId":     firstTeamID(events),
-		"eventCount": len(events),
+	state := storage.ReplayTeam(events)
+	tasks := make([]map[string]any, 0, len(state.Tasks))
+	for _, task := range state.Tasks {
+		taskSummary := map[string]any{
+			"id":      task.ID,
+			"kind":    task.Kind,
+			"status":  task.Status,
+			"reads":   task.Reads,
+			"writes":  task.Writes,
+			"publish": task.Publish,
+		}
+		if task.Result != nil {
+			taskSummary["summary"] = task.Result.Summary
+			taskSummary["artifactIds"] = task.Result.ArtifactIDs
+		}
+		tasks = append(tasks, taskSummary)
 	}
-	encoder := json.NewEncoder(stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(summary)
+	return encodeJSON(stdout, map[string]any{
+		"teamId":            state.ID,
+		"status":            state.Status,
+		"phase":             state.Phase,
+		"eventCount":        len(events),
+		"taskCount":         len(state.Tasks),
+		"verificationCount": verificationCount(state.Blackboard),
+		"tasks":             tasks,
+	})
+}
+
+func runInspectEvents(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("inspect-events", flag.ContinueOnError)
+	eventsPath := flags.String("events", "", "path to event log json")
+	taskID := flags.String("task", "", "filter events by task id")
+	after := flags.String("after", "", "filter events recorded after RFC3339 time")
+	before := flags.String("before", "", "filter events recorded before RFC3339 time")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *eventsPath == "" {
+		return errors.New("inspect requires --events")
+	}
+	var events []storage.Event
+	if err := readJSONFile(*eventsPath, &events); err != nil {
+		return err
+	}
+	afterTime, err := parseOptionalTime(*after)
+	if err != nil {
+		return err
+	}
+	beforeTime, err := parseOptionalTime(*before)
+	if err != nil {
+		return err
+	}
+	filtered := make([]storage.Event, 0, len(events))
+	for _, event := range events {
+		if *taskID != "" && event.TaskID != *taskID {
+			continue
+		}
+		if !afterTime.IsZero() && event.RecordedAt.Before(afterTime) {
+			continue
+		}
+		if !beforeTime.IsZero() && event.RecordedAt.After(beforeTime) {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return encodeJSON(stdout, map[string]any{
+		"teamId":     firstTeamID(filtered),
+		"eventCount": len(filtered),
+		"events":     filtered,
+	})
 }
 
 func runReplay(args []string, stdout io.Writer) error {
@@ -146,9 +315,23 @@ func runReplay(args []string, stdout io.Writer) error {
 		return err
 	}
 	state := storage.ReplayTeam(events)
-	encoder := json.NewEncoder(stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(state)
+	return encodeJSON(stdout, state)
+}
+
+func runEvaluate(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("evaluate", flag.ContinueOnError)
+	eventsPath := flags.String("events", "", "path to event log json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *eventsPath == "" {
+		return errors.New("evaluate requires --events")
+	}
+	var events []storage.Event
+	if err := readJSONFile(*eventsPath, &events); err != nil {
+		return err
+	}
+	return encodeJSON(stdout, evaluation.Evaluate(events))
 }
 
 func newCLIRuntime(providerName string) (*host.Runtime, error) {
@@ -219,4 +402,24 @@ func firstTeamID(events []storage.Event) string {
 		return ""
 	}
 	return events[0].TeamID
+}
+
+func encodeJSON(stdout io.Writer, value any) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+func parseOptionalTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, value)
+}
+
+func verificationCount(board *blackboard.State) int {
+	if board == nil {
+		return 0
+	}
+	return len(board.Verifications)
 }

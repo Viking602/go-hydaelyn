@@ -1,6 +1,8 @@
 package blackboard
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,112 @@ func TestPipelinePublishNormalizesDedupesRedactsAndScores(t *testing.T) {
 	}
 	if state.Evidence[0].Score <= 0 || state.Findings[0].Confidence <= 0 {
 		t.Fatalf("expected publish pipeline to score evidence/finding, got %#v", state)
+	}
+}
+
+func TestStateUpsertExchangeDedupesAndSupportsDeterministicKeyReads(t *testing.T) {
+	state := &State{}
+
+	first := state.UpsertExchange(Exchange{
+		Key:       "research.branch",
+		TaskID:    "task-1",
+		ValueType: ExchangeValueTypeJSON,
+		Text:      "branch summary",
+		Structured: map[string]any{
+			"summary": "branch summary",
+		},
+		ArtifactIDs: []string{"artifact-1"},
+		Metadata:    map[string]string{"phase": "research"},
+	})
+	second := state.UpsertExchange(Exchange{
+		Key:       "research.branch",
+		TaskID:    "task-1",
+		ValueType: ExchangeValueTypeJSON,
+		Text:      "branch summary",
+		Structured: map[string]any{
+			"summary": "branch summary",
+		},
+		ArtifactIDs: []string{"artifact-1"},
+		Metadata:    map[string]string{"phase": "research"},
+	})
+	state.UpsertExchange(Exchange{
+		Key:        "supported_findings",
+		TaskID:     "task-1-verify",
+		ValueType:  ExchangeValueTypeFindingRef,
+		Text:       "branch summary",
+		FindingIDs: []string{"finding-task-1-1"},
+	})
+
+	if first.ID == "" || second.ID == "" {
+		t.Fatalf("expected exchange ids, got first=%#v second=%#v", first, second)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected duplicate upsert to reuse id, got first=%#v second=%#v", first, second)
+	}
+	if len(state.Exchanges) != 2 {
+		t.Fatalf("expected deduped exchanges, got %#v", state.Exchanges)
+	}
+
+	branch := state.ExchangesForKey("research.branch")
+	if len(branch) != 1 {
+		t.Fatalf("expected one exchange for research.branch, got %#v", branch)
+	}
+	if branch[0].ValueType != ExchangeValueTypeJSON {
+		t.Fatalf("expected json exchange, got %#v", branch[0])
+	}
+	if !reflect.DeepEqual(branch[0].ArtifactIDs, []string{"artifact-1"}) {
+		t.Fatalf("expected artifact refs to survive, got %#v", branch[0])
+	}
+
+	supported := state.ExchangesForKey("supported_findings")
+	if len(supported) != 1 || supported[0].Text != "branch summary" {
+		t.Fatalf("expected supported finding exchange, got %#v", supported)
+	}
+}
+
+func TestCollaborationBlackboard_RejectsStaleExchangeWrite(t *testing.T) {
+	state := &State{}
+
+	current, err := state.UpsertExchangeCAS(Exchange{
+		Key:       "branch.report",
+		Namespace: "impl.task-1",
+		TaskID:    "task-1",
+		Version:   2,
+		ValueType: ExchangeValueTypeJSON,
+		Text:      "fresh summary",
+		Structured: map[string]any{
+			"summary": "fresh summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertExchangeCAS() unexpected error = %v", err)
+	}
+	if current.ETag == "" {
+		t.Fatalf("expected CAS upsert to assign etag, got %#v", current)
+	}
+
+	if _, err := state.UpsertExchangeCAS(Exchange{
+		Key:       "branch.report",
+		Namespace: "impl.task-1",
+		TaskID:    "task-1",
+		Version:   1,
+		ValueType: ExchangeValueTypeJSON,
+		Text:      "stale summary",
+		Structured: map[string]any{
+			"summary": "stale summary",
+		},
+	}); !errors.Is(err, ErrExchangeConflict) {
+		t.Fatalf("expected stale write conflict, got %v", err)
+	}
+
+	items := state.ExchangesForKey("branch.report")
+	if len(items) != 1 {
+		t.Fatalf("expected authoritative exchange to remain singular, got %#v", items)
+	}
+	if items[0].Text != "fresh summary" {
+		t.Fatalf("expected stale write to leave authoritative exchange unchanged, got %#v", items[0])
+	}
+	if items[0].Version != 2 || items[0].Namespace != "impl.task-1" || items[0].ETag == "" {
+		t.Fatalf("expected namespaced CAS metadata to remain intact, got %#v", items[0])
 	}
 }

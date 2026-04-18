@@ -103,13 +103,16 @@ func TestRuntimePlannerGeneratesPlanAndAssignsWorkerByCapability(t *testing.T) {
 	if state.Planning == nil || state.Planning.PlannerName != "capability-planner" {
 		t.Fatalf("expected planning metadata, got %#v", state.Planning)
 	}
-	if len(state.Tasks) != 2 {
-		t.Fatalf("expected 2 planner tasks, got %#v", state.Tasks)
+	if len(state.Tasks) != 3 {
+		t.Fatalf("expected planner tasks plus synth task, got %#v", state.Tasks)
 	}
-	for _, task := range state.Tasks {
+	for _, task := range state.Tasks[:2] {
 		if task.AssigneeAgentID != "worker-2" {
 			t.Fatalf("expected capability-based assignment to worker-2, got %#v", state.Tasks)
 		}
+	}
+	if state.Tasks[2].Kind != team.TaskKindSynthesize || state.Tasks[2].AssigneeAgentID != "supervisor" {
+		t.Fatalf("expected appended synth task on supervisor, got %#v", state.Tasks[2])
 	}
 }
 
@@ -190,8 +193,11 @@ func TestRuntimePlannerReviewCanTriggerReplan(t *testing.T) {
 	if reviewCount == 0 || replanCount == 0 {
 		t.Fatalf("expected review and replan calls, review=%d replan=%d", reviewCount, replanCount)
 	}
-	if len(state.Tasks) != 2 || state.Tasks[1].ID != "task-2" {
-		t.Fatalf("expected replanned task to be appended, got %#v", state.Tasks)
+	if len(state.Tasks) != 3 || state.Tasks[1].ID != "task-2" {
+		t.Fatalf("expected replanned task and synth task to be appended, got %#v", state.Tasks)
+	}
+	if state.Tasks[2].Kind != team.TaskKindSynthesize {
+		t.Fatalf("expected synth task after replanning, got %#v", state.Tasks)
 	}
 }
 

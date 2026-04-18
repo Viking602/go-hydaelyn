@@ -2,10 +2,40 @@ package host
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"strings"
+	"time"
 
+	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/middleware"
+	"github.com/Viking602/go-hydaelyn/observe"
+	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
+
+const (
+	metadataCollaborationEvent   = "collaboration_event"
+	metadataCollaborationCounter = "collaboration_counter"
+	metadataCorrelationID        = "correlation_id"
+	metadataLifecycleReason      = "reason"
+	metadataLifecycleStatus      = "status"
+)
+
+type collaborationEvent struct {
+	Stage         middleware.Stage
+	Operation     string
+	TeamID        string
+	TaskID        string
+	AgentID       string
+	Type          storage.EventType
+	Counter       string
+	CorrelationID string
+	Metadata      map[string]string
+	Payload       map[string]any
+}
 
 func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 	existing, err := r.storage.Events().List(ctx, event.RunID)
@@ -14,6 +44,9 @@ func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 	}
 	if event.Sequence == 0 {
 		event.Sequence = len(existing) + 1
+	}
+	if event.RecordedAt.IsZero() {
+		event.RecordedAt = time.Now().UTC()
 	}
 	return r.storage.Events().Append(ctx, event)
 }
@@ -72,6 +105,13 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 				"assigneeAgent": task.AssigneeAgentID,
 				"failurePolicy": string(task.FailurePolicy),
 				"dependsOn":     task.DependsOn,
+				"reads":         task.Reads,
+				"writes":        task.Writes,
+				"publish":       outputVisibilities(task.Publish),
+				"budget": map[string]any{
+					"tokens":    task.Budget.Tokens,
+					"toolCalls": task.Budget.ToolCalls,
+				},
 			},
 		}); err != nil {
 			return err
@@ -82,16 +122,65 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 
 func (r *Runtime) recordTaskLifecycleEvent(ctx context.Context, state team.RunState, task team.Task, eventType storage.EventType) {
 	payload := map[string]any{
-		"status": string(task.Status),
+		"status":   string(task.Status),
+		"attempts": task.Attempts,
 	}
-	if task.Result != nil {
-		payload["summary"] = task.Result.Summary
-	}
+	mergeResultPayload(payload, task.Result)
 	_ = r.appendEvent(ctx, storage.Event{
 		RunID:   state.ID,
 		TeamID:  state.ID,
 		TaskID:  task.ID,
 		Type:    eventType,
+		Payload: payload,
+	})
+}
+
+func (r *Runtime) recordTaskToolEvents(ctx context.Context, state team.RunState, task team.Task, results []message.ToolResult) {
+	for _, result := range results {
+		_ = r.appendEvent(ctx, storage.Event{
+			RunID:   state.ID,
+			TeamID:  state.ID,
+			TaskID:  task.ID,
+			Type:    storage.EventToolCalled,
+			Payload: map[string]any{"name": result.Name, "toolCallId": result.ToolCallID},
+		})
+	}
+}
+
+func (r *Runtime) recordTaskInputsMaterializedEvent(ctx context.Context, state team.RunState, task team.Task, exchanges []blackboard.Exchange) {
+	if len(exchanges) == 0 {
+		return
+	}
+	_ = r.appendEvent(ctx, storage.Event{
+		RunID:   state.ID,
+		TeamID:  state.ID,
+		TaskID:  task.ID,
+		Type:    storage.EventTaskInputsMaterialized,
+		Payload: map[string]any{"inputs": exchangesPayload(exchanges)},
+	})
+}
+
+func (r *Runtime) recordTaskOutputsPublishedEvent(ctx context.Context, state team.RunState, task team.Task) {
+	if task.Result == nil {
+		return
+	}
+	payload := map[string]any{}
+	mergeResultPayload(payload, task.Result)
+	if state.Blackboard != nil {
+		exchanges := state.Blackboard.ExchangesForTask(task.ID)
+		if len(exchanges) > 0 {
+			payload["exchanges"] = exchangesPayload(exchanges)
+		}
+		verifications := verificationsForTask(state.Blackboard, task)
+		if len(verifications) > 0 {
+			payload["verifications"] = verificationPayload(verifications)
+		}
+	}
+	_ = r.appendEvent(ctx, storage.Event{
+		RunID:   state.ID,
+		TeamID:  state.ID,
+		TaskID:  task.ID,
+		Type:    storage.EventTaskOutputsPublished,
 		Payload: payload,
 	})
 }
@@ -116,10 +205,7 @@ func (r *Runtime) recordTeamTerminalEvent(ctx context.Context, state team.RunSta
 		eventType = storage.EventCheckpointSaved
 	}
 	payload := map[string]any{}
-	if state.Result != nil {
-		payload["summary"] = state.Result.Summary
-		payload["error"] = state.Result.Error
-	}
+	mergeResultPayload(payload, state.Result)
 	_ = r.appendEvent(ctx, storage.Event{
 		RunID:   state.ID,
 		TeamID:  state.ID,
@@ -128,10 +214,291 @@ func (r *Runtime) recordTeamTerminalEvent(ctx context.Context, state team.RunSta
 	})
 }
 
+func (r *Runtime) recordCollaborationEvent(ctx context.Context, event collaborationEvent) {
+	if strings.TrimSpace(event.TeamID) == "" {
+		return
+	}
+	payload := cloneAnyMap(event.Payload)
+	metadata := cloneStringMap(event.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	correlationID := event.CorrelationID
+	if correlationID == "" {
+		correlationID = collaborationCorrelationID(event.TeamID, event.TaskID)
+	}
+	metadata[metadataCollaborationEvent] = string(event.Type)
+	metadata[metadataCorrelationID] = correlationID
+	if event.Counter != "" {
+		metadata[metadataCollaborationCounter] = event.Counter
+	}
+	_ = r.runStage(ctx, &middleware.Envelope{
+		Stage:     event.Stage,
+		Operation: event.Operation,
+		TeamID:    event.TeamID,
+		TaskID:    event.TaskID,
+		AgentID:   event.AgentID,
+		Metadata:  metadata,
+		Request:   payload,
+	}, func(ctx context.Context, envelope *middleware.Envelope) error {
+		traceID := observe.TraceID(ctx)
+		payload["traceId"] = traceID
+		payload["correlationId"] = correlationID
+		payload["teamId"] = event.TeamID
+		if event.TaskID != "" {
+			payload["taskId"] = event.TaskID
+		}
+		envelope.Response = payload
+		return r.appendEvent(ctx, storage.Event{
+			RunID:   event.TeamID,
+			TeamID:  event.TeamID,
+			TaskID:  event.TaskID,
+			Type:    event.Type,
+			Payload: payload,
+		})
+	})
+}
+
+func (r *Runtime) recordLeaseAcquiredEvent(ctx context.Context, leaseTeamID, leaseTaskID, ownerID string, ttl time.Duration) {
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:     middleware.StageTask,
+		Operation: "queue_lease_acquired",
+		TeamID:    leaseTeamID,
+		TaskID:    leaseTaskID,
+		Type:      storage.EventLeaseAcquired,
+		Counter:   "collaboration_leases_acquired",
+		Metadata: map[string]string{
+			metadataLifecycleStatus: "acquired",
+		},
+		Payload: map[string]any{
+			"ownerId": ownerID,
+			"ttlMs":   ttl.Milliseconds(),
+		},
+	})
+}
+
+func (r *Runtime) recordLeaseExpiredEvent(ctx context.Context, teamID, taskID, ownerID, reason string) {
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:     middleware.StageTask,
+		Operation: "queue_lease_expired",
+		TeamID:    teamID,
+		TaskID:    taskID,
+		Type:      storage.EventLeaseExpired,
+		Counter:   "collaboration_leases_expired",
+		Metadata: map[string]string{
+			metadataLifecycleReason: reason,
+			metadataLifecycleStatus: "expired",
+		},
+		Payload: map[string]any{
+			"ownerId": ownerID,
+			"reason":  reason,
+		},
+	})
+}
+
+func (r *Runtime) recordStaleWriteRejectedEvent(ctx context.Context, teamID, taskID, workerID, reason string) {
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:     middleware.StageTask,
+		Operation: "collaboration_stale_write_rejected",
+		TeamID:    teamID,
+		TaskID:    taskID,
+		Type:      storage.EventStaleWriteRejected,
+		Counter:   "collaboration_stale_writes_rejected",
+		Metadata: map[string]string{
+			metadataLifecycleReason: reason,
+			metadataLifecycleStatus: "rejected",
+		},
+		Payload: map[string]any{
+			"workerId": workerID,
+			"reason":   reason,
+		},
+	})
+}
+
+func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.RunState, task team.Task) {
+	status := blackboard.InferVerificationStatus(task.Result.Summary)
+	eventType := storage.EventVerifierPassed
+	counter := "collaboration_verifier_passed"
+	decision := "passed"
+	if status != blackboard.VerificationStatusSupported {
+		eventType = storage.EventVerifierBlocked
+		counter = "collaboration_verifier_blocked"
+		decision = "blocked"
+	}
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:         middleware.StageVerify,
+		Operation:     "collaboration_verifier_decision",
+		TeamID:        state.ID,
+		TaskID:        task.ID,
+		Type:          eventType,
+		Counter:       counter,
+		CorrelationID: collaborationCorrelationID(state.ID, task.ID),
+		Metadata: map[string]string{
+			metadataLifecycleStatus: decision,
+		},
+		Payload: map[string]any{
+			"taskStage":           string(task.Stage),
+			"verificationStatus": string(status),
+			"summary":             task.Result.Summary,
+		},
+	})
+}
+
+func (r *Runtime) recordTaskCancelledEvent(ctx context.Context, state team.RunState, task team.Task, reason string) {
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:         middleware.StageTask,
+		Operation:     "collaboration_cancelled",
+		TeamID:        state.ID,
+		TaskID:        task.ID,
+		Type:          storage.EventTaskCancelled,
+		CorrelationID: collaborationCorrelationID(state.ID, task.ID),
+		Metadata: map[string]string{
+			metadataLifecycleReason: reason,
+			metadataLifecycleStatus: "cancelled",
+		},
+		Payload: map[string]any{
+			"reason":     reason,
+			"taskStage":  string(task.Stage),
+			"taskStatus": string(task.Status),
+		},
+	})
+}
+
+func (r *Runtime) recordSynthesisCommittedEvent(ctx context.Context, state team.RunState, task team.Task) {
+	r.recordCollaborationEvent(ctx, collaborationEvent{
+		Stage:         middleware.StageSynthesize,
+		Operation:     "collaboration_synthesis_committed",
+		TeamID:        state.ID,
+		TaskID:        task.ID,
+		Type:          storage.EventSynthesisCommitted,
+		CorrelationID: collaborationCorrelationID(state.ID, task.ID),
+		Metadata: map[string]string{
+			metadataLifecycleStatus: "committed",
+		},
+		Payload: map[string]any{
+			"summary":    resultSummary(task.Result),
+			"taskStage":  string(task.Stage),
+			"taskStatus": string(task.Status),
+		},
+	})
+}
+
+func collaborationCorrelationID(teamID, taskID string) string {
+	if taskID == "" {
+		return fmt.Sprintf("%s:team", teamID)
+	}
+	return fmt.Sprintf("%s:%s", teamID, taskID)
+}
+
+func cloneAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	maps.Copy(cloned, values)
+	return cloned
+}
+
+func resultSummary(result *team.Result) string {
+	if result == nil {
+		return ""
+	}
+	return result.Summary
+}
+
 func (r *Runtime) ReplayTeamState(ctx context.Context, teamID string) (team.RunState, error) {
 	events, err := r.storage.Events().List(ctx, teamID)
 	if err != nil {
 		return team.RunState{}, err
 	}
 	return storage.ReplayTeam(events), nil
+}
+
+func mergeResultPayload(payload map[string]any, result *team.Result) {
+	if result == nil {
+		return
+	}
+	payload["summary"] = result.Summary
+	payload["error"] = result.Error
+	if len(result.Structured) > 0 {
+		payload["structured"] = result.Structured
+	}
+	if len(result.ArtifactIDs) > 0 {
+		payload["artifactIds"] = result.ArtifactIDs
+	}
+	if result.Usage != (provider.Usage{}) {
+		payload["usage"] = map[string]any{
+			"inputTokens":  result.Usage.InputTokens,
+			"outputTokens": result.Usage.OutputTokens,
+			"totalTokens":  result.Usage.TotalTokens,
+		}
+	}
+	if result.ToolCallCount > 0 {
+		payload["toolCallCount"] = result.ToolCallCount
+	}
+}
+
+func outputVisibilities(items []team.OutputVisibility) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, string(item))
+	}
+	return result
+}
+
+func exchangesPayload(items []blackboard.Exchange) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":          item.ID,
+			"key":         item.Key,
+			"taskId":      item.TaskID,
+			"valueType":   string(item.ValueType),
+			"text":        item.Text,
+			"structured":  item.Structured,
+			"artifactIds": item.ArtifactIDs,
+			"claimIds":    item.ClaimIDs,
+			"findingIds":  item.FindingIDs,
+		})
+	}
+	return payload
+}
+
+func verificationPayload(items []blackboard.VerificationResult) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"claimId":     item.ClaimID,
+			"status":      string(item.Status),
+			"confidence":  item.Confidence,
+			"evidenceIds": item.EvidenceIDs,
+			"rationale":   item.Rationale,
+		})
+	}
+	return payload
+}
+
+func verificationsForTask(board *blackboard.State, task team.Task) []blackboard.VerificationResult {
+	if board == nil || task.Kind != team.TaskKindVerify {
+		return nil
+	}
+	claimIDs := map[string]struct{}{}
+	for _, dependencyID := range task.DependsOn {
+		for _, claim := range board.ClaimsForTask(dependencyID) {
+			claimIDs[claim.ID] = struct{}{}
+		}
+	}
+	items := make([]blackboard.VerificationResult, 0, len(claimIDs))
+	for _, verification := range board.Verifications {
+		if _, ok := claimIDs[verification.ClaimID]; ok {
+			items = append(items, verification)
+		}
+	}
+	return items
 }

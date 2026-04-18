@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -46,9 +47,12 @@ type WorkflowStore interface {
 
 type TeamStore interface {
 	Save(ctx context.Context, state team.RunState) error
+	SaveCAS(ctx context.Context, state team.RunState, expectedVersion int) (int, error)
 	Load(ctx context.Context, teamID string) (team.RunState, error)
 	List(ctx context.Context) ([]team.RunState, error)
 }
+
+var ErrStaleState = errors.New("stale team state")
 
 type Artifact struct {
 	ID        string            `json:"id"`
@@ -68,25 +72,36 @@ type ArtifactStore interface {
 type EventType string
 
 const (
-	EventTeamStarted       EventType = "TeamStarted"
-	EventPlanCreated       EventType = "PlanCreated"
-	EventTaskScheduled     EventType = "TaskScheduled"
-	EventTaskStarted       EventType = "TaskStarted"
-	EventToolCalled        EventType = "ToolCalled"
-	EventTaskCompleted     EventType = "TaskCompleted"
-	EventTaskFailed        EventType = "TaskFailed"
-	EventCheckpointSaved   EventType = "CheckpointSaved"
-	EventApprovalRequested EventType = "ApprovalRequested"
-	EventTeamCompleted     EventType = "TeamCompleted"
+	EventTeamStarted            EventType = "TeamStarted"
+	EventPlanCreated            EventType = "PlanCreated"
+	EventTaskScheduled          EventType = "TaskScheduled"
+	EventTaskStarted            EventType = "TaskStarted"
+	EventLeaseAcquired          EventType = "LeaseAcquired"
+	EventLeaseExpired           EventType = "LeaseExpired"
+	EventTaskInputsMaterialized EventType = "TaskInputsMaterialized"
+	EventToolCalled             EventType = "ToolCalled"
+	EventTaskCompleted          EventType = "TaskCompleted"
+	EventTaskOutputsPublished   EventType = "TaskOutputsPublished"
+	EventTaskFailed             EventType = "TaskFailed"
+	EventStaleWriteRejected     EventType = "StaleWriteRejected"
+	EventVerifierPassed         EventType = "VerifierPassed"
+	EventVerifierBlocked        EventType = "VerifierBlocked"
+	EventTaskCancelled          EventType = "TaskCancelled"
+	EventCancelled              EventType = EventTaskCancelled
+	EventSynthesisCommitted     EventType = "SynthesisCommitted"
+	EventCheckpointSaved        EventType = "CheckpointSaved"
+	EventApprovalRequested      EventType = "ApprovalRequested"
+	EventTeamCompleted          EventType = "TeamCompleted"
 )
 
 type Event struct {
-	RunID    string         `json:"runId"`
-	Sequence int            `json:"sequence"`
-	Type     EventType      `json:"type"`
-	TeamID   string         `json:"teamId,omitempty"`
-	TaskID   string         `json:"taskId,omitempty"`
-	Payload  map[string]any `json:"payload,omitempty"`
+	RunID      string         `json:"runId"`
+	Sequence   int            `json:"sequence"`
+	RecordedAt time.Time      `json:"recordedAt,omitempty"`
+	Type       EventType      `json:"type"`
+	TeamID     string         `json:"teamId,omitempty"`
+	TaskID     string         `json:"taskId,omitempty"`
+	Payload    map[string]any `json:"payload,omitempty"`
 }
 
 type EventStore interface {
@@ -229,12 +244,25 @@ type memoryTeamStore struct {
 func (s *memoryTeamStore) Save(_ context.Context, state team.RunState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state.UpdatedAt = time.Now().UTC()
-	if state.CreatedAt.IsZero() {
-		state.CreatedAt = state.UpdatedAt
-	}
+	state = prepareStoredTeamState(state, s.items[state.ID], true)
 	s.items[state.ID] = state
 	return nil
+}
+
+func (s *memoryTeamStore) SaveCAS(_ context.Context, state team.RunState, expectedVersion int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentVersion := 0
+	if existing, ok := s.items[state.ID]; ok {
+		currentVersion = normalizedRunStateVersion(existing.Version)
+	}
+	if expectedVersion != currentVersion {
+		return currentVersion, ErrStaleState
+	}
+	state = prepareStoredTeamState(state, s.items[state.ID], false)
+	s.items[state.ID] = state
+	return state.Version, nil
 }
 
 func (s *memoryTeamStore) Load(_ context.Context, teamID string) (team.RunState, error) {
@@ -251,6 +279,43 @@ func (s *memoryTeamStore) List(_ context.Context) ([]team.RunState, error) {
 		items = append(items, state)
 	}
 	return items, nil
+}
+
+func prepareStoredTeamState(state team.RunState, existing team.RunState, autoIncrement bool) team.RunState {
+	now := time.Now().UTC()
+	state.UpdatedAt = now
+	if !existing.CreatedAt.IsZero() {
+		state.CreatedAt = existing.CreatedAt
+	}
+	if state.CreatedAt.IsZero() {
+		state.CreatedAt = now
+	}
+	currentVersion := normalizedRunStateVersion(existing.Version)
+	if existing.ID == "" {
+		currentVersion = 0
+	}
+	if autoIncrement {
+		if currentVersion == 0 {
+			if state.Version <= 0 {
+				state.Version = 1
+			}
+		} else if state.Version <= currentVersion {
+			state.Version = currentVersion + 1
+		}
+		return state
+	}
+	state.Version = currentVersion + 1
+	if state.Version <= 0 {
+		state.Version = 1
+	}
+	return state
+}
+
+func normalizedRunStateVersion(version int) int {
+	if version <= 0 {
+		return 1
+	}
+	return version
 }
 
 func (s *memoryArtifactStore) Save(_ context.Context, artifact Artifact) error {

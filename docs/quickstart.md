@@ -1,8 +1,6 @@
 # Quickstart
 
-## 1. 最小运行
-
-使用内置 fake provider 跑一个 `deepsearch` team：
+## 1. Minimal Deepsearch Run
 
 ```go
 runtime := host.New(host.Config{})
@@ -23,34 +21,69 @@ state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
 })
 ```
 
-## 2. Planner 驱动启动
+`deepsearch` now runs as:
 
-如果注册了 planner plugin，可以直接在 `StartTeamRequest.Planner` 里指定：
+1. parallel research tasks
+2. optional verification tasks
+3. an explicit synthesize task
+
+Research tasks publish named outputs to the blackboard and the final synthesize task reads them explicitly.
+
+## 2. Planner-Driven Teams
+
+Planner tasks can now declare:
+
+- `reads`
+- `writes`
+- `publish`
 
 ```go
-state, err := runtime.StartTeam(ctx, host.StartTeamRequest{
-	Pattern:           "deepsearch",
-	Planner:           "supervisor-planner",
-	SupervisorProfile: "supervisor",
-	WorkerProfiles:    []string{"researcher"},
-	Input:             map[string]any{"query": "approval flow"},
-})
+plan := planner.Plan{
+	Tasks: []planner.TaskSpec{
+		{
+			ID:      "research-1",
+			Kind:    string(team.TaskKindResearch),
+			Input:   "branch one",
+			Writes:  []string{"research.branch-1"},
+			Publish: []team.OutputVisibility{team.OutputVisibilityShared, team.OutputVisibilityBlackboard},
+		},
+		{
+			ID:              "synth-1",
+			Kind:            string(team.TaskKindSynthesize),
+			AssigneeAgentID: "supervisor",
+			Reads:           []string{"research.branch-1"},
+			Publish:         []team.OutputVisibility{team.OutputVisibilityShared},
+			DependsOn:       []string{"research-1"},
+		},
+	},
+}
 ```
 
 ## 3. CLI
 
-当前 CLI 提供最小文件工作流：
-
 ```bash
 hydaelyn init .
 hydaelyn new team.json
+hydaelyn validate --recipe recipe.yaml
+hydaelyn compile --recipe recipe.yaml
+hydaelyn validate --request team.json
 hydaelyn run --request team.json --events events.json
-hydaelyn inspect --events events.json
+hydaelyn inspect team --events events.json
+hydaelyn inspect events --events events.json --task task-1
+hydaelyn evaluate --events events.json
 hydaelyn replay --events events.json
 ```
 
-## 4. Durable / Observe
+## 4. Replay And Durable Dataflow
 
-- `runtime.TeamEvents(ctx, teamID)` 可读取 team 事件流
-- `runtime.ReplayTeamState(ctx, teamID)` 可按事件流重建 `RunState`
-- `runtime.UseObserver(observer)` 可接 team/task/llm/tool 的 trace/counter/histogram/log
+- `runtime.TeamEvents(ctx, teamID)` returns the full event stream.
+- `runtime.ReplayTeamState(ctx, teamID)` rebuilds tasks, outputs, artifact refs, and blackboard exchanges.
+- `TaskInputsMaterialized` and `TaskOutputsPublished` events make dataflow visible in replay and inspection.
+
+## 5. Next Docs
+
+- [Task Dataflow](task-dataflow.md)
+- [Recipe Compiler](recipe.md)
+- [Evaluation](evaluation.md)
+- [Durable Execution](durable-execution.md)
+- [Plugin Development](plugin-development.md)

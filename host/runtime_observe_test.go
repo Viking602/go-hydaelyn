@@ -8,9 +8,12 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/middleware"
 	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/storage"
+	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/toolkit"
 )
 
@@ -117,5 +120,56 @@ func TestRuntimeObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
 	}
 	if logs[0].Attrs["trace_id"] == "" {
 		t.Fatalf("expected trace_id in logs, got %#v", logs[0])
+	}
+}
+
+func TestMultiAgentCollaboration_LogsConflictTraceContext(t *testing.T) {
+	observer := observe.NewMemoryObserver()
+	runtime := New(Config{})
+	runtime.UseObserver(observer)
+	state := team.RunState{
+		ID:     "team-observe-collab",
+		Status: team.StatusRunning,
+		Tasks: []team.Task{{ID: "verify-1", Kind: team.TaskKindVerify, Stage: team.TaskStageVerify, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "unsupported by verifier"}}, {ID: "task-2", Kind: team.TaskKindResearch, Stage: team.TaskStageImplement, Status: team.TaskStatusRunning}},
+	}
+	var rootTrace string
+	err := runtime.runStage(context.Background(), &middleware.Envelope{Stage: middleware.StageTeam, Operation: "observe_collaboration", TeamID: state.ID}, func(ctx context.Context, _ *middleware.Envelope) error {
+		rootTrace = observe.TraceID(ctx)
+		runtime.recordStaleWriteRejectedEvent(ctx, state.ID, "verify-1", "worker-a", "state_version_conflict")
+		runtime.recordVerifierDecisionEvent(ctx, state, state.Tasks[0])
+		runtime.recordTaskCancelledEvent(ctx, state, state.Tasks[1], "team_aborted")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("runStage() error = %v", err)
+	}
+	if rootTrace == "" {
+		t.Fatal("expected root trace id")
+	}
+	logs := observer.Logs()
+	if len(logs) < 3 {
+		t.Fatalf("expected collaboration logs, got %#v", logs)
+	}
+	seen := map[string]bool{}
+	for _, log := range logs {
+		switch log.Message {
+		case string(storage.EventStaleWriteRejected), string(storage.EventVerifierBlocked), string(storage.EventTaskCancelled):
+			if log.Attrs["trace_id"] != rootTrace {
+				t.Fatalf("expected trace %q on %#v", rootTrace, log)
+			}
+			if log.Attrs["correlation_id"] == "" || log.Attrs["team_id"] == "" {
+				t.Fatalf("expected correlation attrs on %#v", log)
+			}
+			seen[log.Message] = true
+		}
+	}
+	for _, message := range []string{string(storage.EventStaleWriteRejected), string(storage.EventVerifierBlocked), string(storage.EventTaskCancelled)} {
+		if !seen[message] {
+			t.Fatalf("expected log for %s in %#v", message, logs)
+		}
+	}
+	counters := observer.Counters()
+	if counters["collaboration_stale_writes_rejected"] == 0 || counters["collaboration_verifier_blocked"] == 0 {
+		t.Fatalf("expected collaboration counters, got %#v", counters)
 	}
 }

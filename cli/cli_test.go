@@ -58,11 +58,35 @@ func TestRunInspectReplayCommandsWorkOnEventFile(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if err := Execute(context.Background(), []string{"inspect", "--events", eventsPath}, &stdout, &stderr); err != nil {
-		t.Fatalf("inspect error = %v", err)
+	if err := Execute(context.Background(), []string{"validate", "--request", requestPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("validate request error = %v", err)
 	}
-	if !strings.Contains(stdout.String(), "teamId") {
-		t.Fatalf("expected inspect output to include teamId, got %s", stdout.String())
+	if !strings.Contains(stdout.String(), "\"ok\": true") {
+		t.Fatalf("expected validate output to confirm success, got %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"inspect", "team", "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("inspect team error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"tasks\"") {
+		t.Fatalf("expected inspect team output to include tasks, got %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"inspect", "events", "--events", eventsPath, "--task", "task-1"}, &stdout, &stderr); err != nil {
+		t.Fatalf("inspect events error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"eventCount\"") {
+		t.Fatalf("expected inspect events output to include eventCount, got %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"validate", "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("validate events error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"kind\": \"events\"") {
+		t.Fatalf("expected validate events output, got %s", stdout.String())
 	}
 
 	stdout.Reset()
@@ -71,5 +95,63 @@ func TestRunInspectReplayCommandsWorkOnEventFile(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "\"status\": \"completed\"") {
 		t.Fatalf("expected replay output to include completed status, got %s", stdout.String())
+	}
+}
+
+func TestCompileAndEvaluateCommandsWork(t *testing.T) {
+	dir := t.TempDir()
+	recipePath := filepath.Join(dir, "recipe.yaml")
+	requestPath := filepath.Join(dir, "team.json")
+	eventsPath := filepath.Join(dir, "events.json")
+	recipeContent := `
+pattern: deepsearch
+supervisor_profile: supervisor
+worker_profiles: [researcher]
+input:
+  query: compile example
+flow:
+  - task:
+      id: branch-1
+      kind: research
+      input: branch
+      required_role: researcher
+      writes: [branch.one]
+      publish: [shared, blackboard]
+`
+	if err := os.WriteFile(recipePath, []byte(recipeContent), 0o644); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	request := host.StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input: map[string]any{
+			"query":      "cli run",
+			"subqueries": []string{"branch"},
+		},
+	}
+	payload, _ := json.MarshalIndent(request, "", "  ")
+	if err := os.WriteFile(requestPath, payload, 0o644); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{"compile", "--recipe", recipePath}, &stdout, &stderr); err != nil {
+		t.Fatalf("compile error = %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "\"plan\"") || !strings.Contains(stdout.String(), "\"request\"") {
+		t.Fatalf("expected compile output to include request and plan, got %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"run", "--request", requestPath, "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("run error = %v stderr=%s", err, stderr.String())
+	}
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"evaluate", "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("evaluate error = %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "\"taskCompletionRate\"") {
+		t.Fatalf("expected evaluate output to include metrics, got %s", stdout.String())
 	}
 }

@@ -1,7 +1,12 @@
 package blackboard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -69,6 +74,34 @@ type VerificationResult struct {
 	Rationale   string             `json:"rationale,omitempty"`
 }
 
+type ExchangeValueType string
+
+const (
+	ExchangeValueTypeText        ExchangeValueType = "text"
+	ExchangeValueTypeJSON        ExchangeValueType = "json"
+	ExchangeValueTypeArtifactRef ExchangeValueType = "artifact_ref"
+	ExchangeValueTypeClaimRef    ExchangeValueType = "claim_ref"
+	ExchangeValueTypeFindingRef  ExchangeValueType = "finding_ref"
+)
+
+type Exchange struct {
+	ID          string            `json:"id"`
+	Key         string            `json:"key"`
+	Namespace   string            `json:"namespace,omitempty"`
+	TaskID      string            `json:"taskId,omitempty"`
+	Version     int               `json:"version,omitempty"`
+	ETag        string            `json:"etag,omitempty"`
+	ValueType   ExchangeValueType `json:"valueType,omitempty"`
+	Text        string            `json:"text,omitempty"`
+	Structured  map[string]any    `json:"structured,omitempty"`
+	ArtifactIDs []string          `json:"artifactIds,omitempty"`
+	ClaimIDs    []string          `json:"claimIds,omitempty"`
+	FindingIDs  []string          `json:"findingIds,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+var ErrExchangeConflict = errors.New("blackboard exchange conflict")
+
 type State struct {
 	Sources       []Source             `json:"sources,omitempty"`
 	Artifacts     []Artifact           `json:"artifacts,omitempty"`
@@ -76,6 +109,7 @@ type State struct {
 	Claims        []Claim              `json:"claims,omitempty"`
 	Findings      []Finding            `json:"findings,omitempty"`
 	Verifications []VerificationResult `json:"verifications,omitempty"`
+	Exchanges     []Exchange           `json:"exchanges,omitempty"`
 }
 
 type PublishRequest struct {
@@ -99,11 +133,11 @@ func NewPipeline() Pipeline {
 }
 
 var piiPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),                                       // API keys
-	regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`),           // email
-	regexp.MustCompile(`\b\d{3}[-.]?\d{2}[-.]?\d{4}\b`),                               // SSN
-	regexp.MustCompile(`\b(?:\d[ -]*?){13,16}\b`),                                      // credit card
-	regexp.MustCompile(`\b\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`),         // US phone
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),                                // API keys
+	regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`),    // email
+	regexp.MustCompile(`\b\d{3}[-.]?\d{2}[-.]?\d{4}\b`),                       // SSN
+	regexp.MustCompile(`\b(?:\d[ -]*?){13,16}\b`),                             // credit card
+	regexp.MustCompile(`\b\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`), // US phone
 }
 
 func (Pipeline) Publish(state *State, request PublishRequest) PublishResult {
@@ -148,11 +182,97 @@ func (s *State) UpsertVerification(result VerificationResult) {
 	s.Verifications = append(s.Verifications, result)
 }
 
+func (s *State) UpsertExchange(exchange Exchange) Exchange {
+	if s == nil {
+		return Exchange{}
+	}
+	exchange = normalizeExchange(exchange)
+	for idx := range s.Exchanges {
+		if sameExchange(s.Exchanges[idx], exchange) {
+			exchange.ID = s.Exchanges[idx].ID
+			s.Exchanges[idx] = exchange
+			return exchange
+		}
+	}
+	return s.appendExchange(exchange)
+}
+
+func (s *State) UpsertExchangeCAS(exchange Exchange) (Exchange, error) {
+	if s == nil {
+		return Exchange{}, nil
+	}
+	exchange = normalizeExchange(exchange)
+	for idx := range s.Exchanges {
+		current := s.Exchanges[idx]
+		if !sameExchangeSlot(current, exchange) {
+			continue
+		}
+		if !exchangeUsesCAS(current) && !exchangeUsesCAS(exchange) {
+			if sameExchange(current, exchange) {
+				exchange.ID = current.ID
+				s.Exchanges[idx] = exchange
+				return exchange, nil
+			}
+			return s.appendExchange(exchange), nil
+		}
+		exchange.ETag = effectiveExchangeETag(exchange)
+		currentETag := effectiveExchangeETag(current)
+		currentVersion := normalizedExchangeVersion(current)
+		nextVersion := normalizedExchangeVersion(exchange)
+		switch {
+		case nextVersion < currentVersion:
+			return Exchange{}, fmt.Errorf("%w: stale exchange write for %q in namespace %q", ErrExchangeConflict, exchange.Key, exchange.Namespace)
+		case nextVersion == currentVersion && currentETag != exchange.ETag:
+			return Exchange{}, fmt.Errorf("%w: conflicting exchange write for %q in namespace %q", ErrExchangeConflict, exchange.Key, exchange.Namespace)
+		}
+		exchange.ID = current.ID
+		s.Exchanges[idx] = exchange
+		return exchange, nil
+	}
+	if exchangeUsesCAS(exchange) {
+		exchange.ETag = effectiveExchangeETag(exchange)
+	}
+	return s.appendExchange(exchange), nil
+}
+
 func (s State) ClaimsForTask(taskID string) []Claim {
 	items := make([]Claim, 0, len(s.Claims))
 	for _, claim := range s.Claims {
 		if claim.TaskID == taskID {
 			items = append(items, claim)
+		}
+	}
+	return items
+}
+
+func (s State) ExchangesForKey(key string) []Exchange {
+	items := make([]Exchange, 0, len(s.Exchanges))
+	for _, exchange := range s.Exchanges {
+		if exchange.Key == key {
+			items = append(items, cloneExchange(exchange))
+		}
+	}
+	return items
+}
+
+func (s State) ExchangesForTask(taskID string) []Exchange {
+	items := make([]Exchange, 0, len(s.Exchanges))
+	for _, exchange := range s.Exchanges {
+		if exchange.TaskID == taskID {
+			items = append(items, cloneExchange(exchange))
+		}
+	}
+	return items
+}
+
+func (s State) FindingsForClaim(claimID string) []Finding {
+	items := make([]Finding, 0, len(s.Findings))
+	for _, finding := range s.Findings {
+		for _, current := range finding.ClaimIDs {
+			if current == claimID {
+				items = append(items, finding)
+				break
+			}
 		}
 	}
 	return items
@@ -284,7 +404,6 @@ func normalize(value string) string {
 	return strings.TrimSpace(value)
 }
 
-
 func redact(value string) string {
 	if value == "" {
 		return value
@@ -300,4 +419,125 @@ func score(confidence float64) float64 {
 		return confidence
 	}
 	return 0.5
+}
+
+func sameExchange(left, right Exchange) bool {
+	return left.Key == right.Key &&
+		left.Namespace == right.Namespace &&
+		left.TaskID == right.TaskID &&
+		left.Version == right.Version &&
+		left.ETag == right.ETag &&
+		left.ValueType == right.ValueType &&
+		left.Text == right.Text &&
+		reflect.DeepEqual(left.Structured, right.Structured) &&
+		reflect.DeepEqual(left.ArtifactIDs, right.ArtifactIDs) &&
+		reflect.DeepEqual(left.ClaimIDs, right.ClaimIDs) &&
+		reflect.DeepEqual(left.FindingIDs, right.FindingIDs) &&
+		reflect.DeepEqual(left.Metadata, right.Metadata)
+}
+
+func sameExchangeSlot(left, right Exchange) bool {
+	if left.Key != right.Key || left.Namespace != right.Namespace || left.TaskID != right.TaskID || left.ValueType != right.ValueType {
+		return false
+	}
+	if left.Key != "supported_findings" {
+		return true
+	}
+	return reflect.DeepEqual(left.ClaimIDs, right.ClaimIDs) &&
+		reflect.DeepEqual(left.FindingIDs, right.FindingIDs)
+}
+
+func cloneExchange(exchange Exchange) Exchange {
+	exchange.Structured = cloneStructuredMap(exchange.Structured)
+	exchange.ArtifactIDs = append([]string{}, exchange.ArtifactIDs...)
+	exchange.ClaimIDs = append([]string{}, exchange.ClaimIDs...)
+	exchange.FindingIDs = append([]string{}, exchange.FindingIDs...)
+	exchange.Metadata = cloneStringMap(exchange.Metadata)
+	return exchange
+}
+
+func (s *State) appendExchange(exchange Exchange) Exchange {
+	exchange.ID = fmt.Sprintf("exchange-%d", len(s.Exchanges)+1)
+	s.Exchanges = append(s.Exchanges, exchange)
+	return exchange
+}
+
+func normalizeExchange(exchange Exchange) Exchange {
+	exchange.Key = normalize(exchange.Key)
+	exchange.Namespace = normalize(exchange.Namespace)
+	exchange.ETag = normalize(exchange.ETag)
+	exchange.Text = normalize(exchange.Text)
+	exchange.Metadata = cloneStringMap(exchange.Metadata)
+	exchange.Structured = cloneStructuredMap(exchange.Structured)
+	exchange.ArtifactIDs = append([]string{}, exchange.ArtifactIDs...)
+	exchange.ClaimIDs = append([]string{}, exchange.ClaimIDs...)
+	exchange.FindingIDs = append([]string{}, exchange.FindingIDs...)
+	return exchange
+}
+
+func exchangeUsesCAS(exchange Exchange) bool {
+	return exchange.Version > 0 || exchange.ETag != ""
+}
+
+func normalizedExchangeVersion(exchange Exchange) int {
+	if exchange.Version > 0 {
+		return exchange.Version
+	}
+	return 0
+}
+
+func effectiveExchangeETag(exchange Exchange) string {
+	if exchange.ETag != "" {
+		return exchange.ETag
+	}
+	payload, err := json.Marshal(struct {
+		Key         string            `json:"key,omitempty"`
+		Namespace   string            `json:"namespace,omitempty"`
+		TaskID      string            `json:"taskId,omitempty"`
+		ValueType   ExchangeValueType `json:"valueType,omitempty"`
+		Text        string            `json:"text,omitempty"`
+		Structured  map[string]any    `json:"structured,omitempty"`
+		ArtifactIDs []string          `json:"artifactIds,omitempty"`
+		ClaimIDs    []string          `json:"claimIds,omitempty"`
+		FindingIDs  []string          `json:"findingIds,omitempty"`
+		Metadata    map[string]string `json:"metadata,omitempty"`
+	}{
+		Key:         exchange.Key,
+		Namespace:   exchange.Namespace,
+		TaskID:      exchange.TaskID,
+		ValueType:   exchange.ValueType,
+		Text:        exchange.Text,
+		Structured:  exchange.Structured,
+		ArtifactIDs: exchange.ArtifactIDs,
+		ClaimIDs:    exchange.ClaimIDs,
+		FindingIDs:  exchange.FindingIDs,
+		Metadata:    exchange.Metadata,
+	})
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:])
+}
+
+func cloneStructuredMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	clone := make(map[string]any, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	clone := make(map[string]string, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
 }

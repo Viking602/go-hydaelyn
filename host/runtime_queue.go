@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/scheduler"
+	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
@@ -56,6 +57,7 @@ func mapTaskIndexes(tasks []team.Task) map[string]int {
 }
 
 func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
+	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
 	state, index, original, err := r.loadQueuedExecutionState(ctx, lease)
 	if err != nil {
 		if errors.Is(err, errQueuedTaskMissing) {
@@ -63,17 +65,38 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 		}
 		return err
 	}
-	item, err := r.executeQueuedTask(ctx, state, original, lease)
+	if original.HasAuthoritativeCompletion() {
+		return r.queue.Release(ctx, lease)
+	}
+	item, stopHeartbeat, err := r.executeQueuedTask(ctx, state, original, lease)
+	defer stopHeartbeat()
 	if err != nil {
 		return err
 	}
-	state.Tasks[index] = item
-	state = r.applyQueuedTaskResult(state, item)
-	return r.persistQueuedState(ctx, state)
+	state = r.applyQueuedTaskResult(state, index, item)
+	applied := state.Tasks[index]
+	if errors.Is(err, context.Canceled) {
+		r.recordTaskCancelledEvent(ctx, state, applied, "cancellation_propagated")
+	}
+	if applied.Status == team.TaskStatusCompleted {
+		if applied.Kind == team.TaskKindVerify || applied.Stage == team.TaskStageVerify {
+			r.recordVerifierDecisionEvent(ctx, state, applied)
+		}
+		if applied.Kind == team.TaskKindSynthesize || applied.Stage == team.TaskStageSynthesize {
+			r.recordSynthesisCommittedEvent(ctx, state, applied)
+		}
+	}
+	if err := r.persistQueuedState(ctx, state, item.ID); err != nil {
+		if errors.Is(err, errQueuedTaskAlreadyCommitted) {
+			return r.queue.Release(ctx, lease)
+		}
+		return err
+	}
+	return r.queue.Release(ctx, lease)
 }
 
 func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
-	for step := 0; step < 24; step++ {
+	for range 24 {
 		next, terminal, err := r.continueQueuedStep(ctx, pattern, current)
 		if err != nil {
 			return team.RunState{}, false, err
@@ -97,6 +120,7 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	if !ok {
 		return taskOutcome{}, false
 	}
+	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
 	index := indexByTask[lease.TaskID]
 	original := current.Tasks[index]
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
@@ -119,7 +143,7 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 
 func (r *Runtime) resolveQueuedState(ctx context.Context, current team.RunState) (team.RunState, bool, bool, error) {
 	if current.IsTerminal() {
-		if err := r.saveTeam(ctx, current); err != nil {
+		if err := r.saveTeam(ctx, &current); err != nil {
 			return team.RunState{}, false, false, err
 		}
 		return current, true, true, nil
@@ -176,35 +200,60 @@ func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.
 	return state, index, state.Tasks[index], nil
 }
 
-func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, original team.Task, lease scheduler.TaskLease) (team.Task, error) {
+func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, original team.Task, lease scheduler.TaskLease) (team.Task, func(), error) {
 	agentInstance, profile, err := r.resolveTaskExecution(state, original)
 	if err != nil {
-		_ = r.queue.Release(ctx, lease)
-		return team.Task{}, err
+		return team.Task{}, func() {}, err
 	}
 	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
 	item, err := r.executeTask(ctx, state, original, agentInstance, profile)
-	stopHeartbeat()
-	_ = r.queue.Release(ctx, lease)
-	return item, err
+	return item, stopHeartbeat, err
 }
 
-func (r *Runtime) applyQueuedTaskResult(state team.RunState, item team.Task) team.RunState {
-	state = r.applyBlackboardUpdate(state, item)
+
+var errQueuedTaskAlreadyCommitted = errors.New("queued task already committed")
+
+func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item team.Task) team.RunState {
+	state, _, _ = r.applyTaskOutcome(state, index, item)
 	state.UpdatedAt = time.Now().UTC()
 	return state
 }
 
-func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState) error {
+func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState, taskID string) error {
+	state = r.ensureCommittedTaskOutputs(state)
 	pattern, err := r.lookupPattern(state.Pattern)
 	if err != nil {
 		return err
 	}
 	next, terminal, err := r.continueQueuedTeam(ctx, pattern, state)
-	if err != nil || terminal {
+	if err != nil {
+		return r.resolveQueuedCommitConflict(ctx, state.ID, taskID, err)
+	}
+	next = r.ensureCommittedTaskOutputs(next)
+	if terminal {
+		return nil
+	}
+	_, err = r.storage.Teams().SaveCAS(ctx, next, next.Version)
+	return r.resolveQueuedCommitConflict(ctx, state.ID, taskID, err)
+}
+
+func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID, taskID string, err error) error {
+	if !errors.Is(err, storage.ErrStaleState) {
 		return err
 	}
-	return r.storage.Teams().Save(ctx, next)
+	r.recordStaleWriteRejectedEvent(ctx, teamID, taskID, r.workerID, "state_version_conflict")
+	current, loadErr := r.storage.Teams().Load(ctx, teamID)
+	if loadErr != nil {
+		return err
+	}
+	current.Normalize()
+	for _, task := range current.Tasks {
+		if task.ID == taskID && task.HasAuthoritativeCompletion() {
+			r.recordLeaseExpiredEvent(ctx, teamID, taskID, r.workerID, "heartbeat_expired")
+			return errQueuedTaskAlreadyCommitted
+		}
+	}
+	return err
 }
 
 func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, lease scheduler.TaskLease, ttl time.Duration) func() {

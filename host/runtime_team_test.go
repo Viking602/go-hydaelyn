@@ -141,10 +141,13 @@ func TestRuntimeStartTeamKeepsDistinctAgentInstancesForSameProfileWorkers(t *tes
 	if state.Workers[0].EffectiveProfileName() != "researcher" || state.Workers[1].EffectiveProfileName() != "researcher" {
 		t.Fatalf("expected shared profile template, got %#v", state.Workers)
 	}
-	if len(state.Tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %#v", state.Tasks)
+	if len(state.Tasks) != 3 {
+		t.Fatalf("expected 2 research tasks plus synth task, got %#v", state.Tasks)
 	}
 	if state.Tasks[0].AssigneeAgentID == state.Tasks[1].AssigneeAgentID {
 		t.Fatalf("expected different assignee agent ids, got %#v", state.Tasks)
+	}
+	if state.Tasks[2].Kind != team.TaskKindSynthesize || state.Tasks[2].AssigneeAgentID != "supervisor" {
+		t.Fatalf("expected synth task assigned to supervisor, got %#v", state.Tasks[2])
 	}
 }

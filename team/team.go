@@ -3,10 +3,12 @@ package team
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/provider"
 )
 
 type Role string
@@ -58,6 +60,16 @@ const (
 	TaskKindSynthesize TaskKind = "synthesize"
 )
 
+type TaskStage string
+
+const (
+	TaskStagePlan       TaskStage = "plan"
+	TaskStageImplement  TaskStage = "implement"
+	TaskStageReview     TaskStage = "review"
+	TaskStageVerify     TaskStage = "verify"
+	TaskStageSynthesize TaskStage = "synthesize"
+)
+
 type FailurePolicy string
 
 const (
@@ -65,6 +77,14 @@ const (
 	FailurePolicyRetry        FailurePolicy = "retry"
 	FailurePolicyDegrade      FailurePolicy = "degrade"
 	FailurePolicySkipOptional FailurePolicy = "skip_optional"
+)
+
+type OutputVisibility string
+
+const (
+	OutputVisibilityPrivate    OutputVisibility = "private"
+	OutputVisibilityShared     OutputVisibility = "shared"
+	OutputVisibilityBlackboard OutputVisibility = "blackboard"
 )
 
 type Budget struct {
@@ -112,11 +132,15 @@ type Finding struct {
 }
 
 type Result struct {
-	Summary    string     `json:"summary"`
-	Findings   []Finding  `json:"findings,omitempty"`
-	Evidence   []Evidence `json:"evidence,omitempty"`
-	Confidence float64    `json:"confidence,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	Summary       string         `json:"summary"`
+	Structured    map[string]any `json:"structured,omitempty"`
+	ArtifactIDs   []string       `json:"artifactIds,omitempty"`
+	Findings      []Finding      `json:"findings,omitempty"`
+	Evidence      []Evidence     `json:"evidence,omitempty"`
+	Confidence    float64        `json:"confidence,omitempty"`
+	Usage         provider.Usage `json:"usage,omitempty"`
+	ToolCallCount int            `json:"toolCallCount,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 type PlanningState struct {
@@ -130,31 +154,42 @@ type PlanningState struct {
 }
 
 type Task struct {
-	ID                   string        `json:"id"`
-	Kind                 TaskKind      `json:"kind"`
-	Title                string        `json:"title,omitempty"`
-	Input                string        `json:"input,omitempty"`
-	RequiredRole         Role          `json:"requiredRole,omitempty"`
-	RequiredCapabilities []string      `json:"requiredCapabilities,omitempty"`
-	Budget               Budget        `json:"budget,omitempty"`
-	AssigneeAgentID      string        `json:"assigneeAgentId,omitempty"`
-	Assignee             string        `json:"assignee,omitempty"`
-	DependsOn            []string      `json:"dependsOn,omitempty"`
-	FailurePolicy        FailurePolicy `json:"failurePolicy,omitempty"`
-	MaxAttempts          int           `json:"maxAttempts,omitempty"`
-	Attempts             int           `json:"attempts,omitempty"`
-	Status               TaskStatus    `json:"status"`
-	SessionID            string        `json:"sessionId,omitempty"`
-	Result               *Result       `json:"result,omitempty"`
-	Error                string        `json:"error,omitempty"`
-	StartedAt            time.Time     `json:"startedAt,omitempty"`
-	FinishedAt           time.Time     `json:"finishedAt,omitempty"`
+	ID                   string             `json:"id"`
+	Kind                 TaskKind           `json:"kind"`
+	Stage                TaskStage          `json:"stage,omitempty"`
+	Title                string             `json:"title,omitempty"`
+	Input                string             `json:"input,omitempty"`
+	RequiredRole         Role               `json:"requiredRole,omitempty"`
+	RequiredCapabilities []string           `json:"requiredCapabilities,omitempty"`
+	Budget               Budget             `json:"budget,omitempty"`
+	AssigneeAgentID      string             `json:"assigneeAgentId,omitempty"`
+	Assignee             string             `json:"assignee,omitempty"`
+	DependsOn            []string           `json:"dependsOn,omitempty"`
+	Reads                []string           `json:"reads,omitempty"`
+	Writes               []string           `json:"writes,omitempty"`
+	Publish              []OutputVisibility `json:"publish,omitempty"`
+	Namespace            string             `json:"namespace,omitempty"`
+	VerifierRequired     bool               `json:"verifierRequired,omitempty"`
+	FailurePolicy        FailurePolicy      `json:"failurePolicy,omitempty"`
+	IdempotencyKey       string             `json:"idempotencyKey,omitempty"`
+	Version              int                `json:"version,omitempty"`
+	MaxAttempts          int                `json:"maxAttempts,omitempty"`
+	Attempts             int                `json:"attempts,omitempty"`
+	Status               TaskStatus         `json:"status"`
+	SessionID            string             `json:"sessionId,omitempty"`
+	Result               *Result            `json:"result,omitempty"`
+	Error                string             `json:"error,omitempty"`
+	StartedAt            time.Time          `json:"startedAt,omitempty"`
+	CompletedAt          time.Time          `json:"completedAt,omitempty"`
+	CompletedBy          string             `json:"completedBy,omitempty"`
+	FinishedAt           time.Time          `json:"finishedAt,omitempty"`
 }
 
 type RunState struct {
 	ID                  string            `json:"id"`
 	Pattern             string            `json:"pattern"`
 	SessionID           string            `json:"sessionId,omitempty"`
+	Version             int               `json:"version,omitempty"`
 	Status              Status            `json:"status"`
 	Phase               Phase             `json:"phase"`
 	Supervisor          AgentInstance     `json:"supervisor"`
@@ -244,15 +279,48 @@ func (t Task) EffectiveAssigneeAgentID() string {
 	return t.Assignee
 }
 
+func (t Task) PublishesTo(target OutputVisibility) bool {
+	if len(t.Publish) == 0 {
+		return target == OutputVisibilityShared
+	}
+	return slices.Contains(t.Publish, target)
+}
+
 func (t *Task) Normalize() {
+	if t.Stage == "" {
+		t.Stage = t.defaultStage()
+	}
 	if t.AssigneeAgentID == "" {
 		t.AssigneeAgentID = t.Assignee
 	}
 	if t.Assignee == "" {
 		t.Assignee = t.AssigneeAgentID
 	}
+	if t.Namespace == "" {
+		t.Namespace = t.ID
+	}
 	if t.FailurePolicy == "" {
 		t.FailurePolicy = FailurePolicyFailFast
+	}
+	if t.IdempotencyKey == "" {
+		t.IdempotencyKey = t.ID
+	}
+	if t.Version <= 0 {
+		t.Version = 1
+	}
+	if t.Status == TaskStatusCompleted && t.CompletedAt.IsZero() && !t.FinishedAt.IsZero() {
+		t.CompletedAt = t.FinishedAt
+	}
+}
+
+func (t Task) defaultStage() TaskStage {
+	switch t.Kind {
+	case TaskKindVerify:
+		return TaskStageVerify
+	case TaskKindSynthesize:
+		return TaskStageSynthesize
+	default:
+		return TaskStageImplement
 	}
 }
 
@@ -297,7 +365,14 @@ func (t Task) BlocksTeamOnFailure() bool {
 	}
 }
 
+func (t Task) HasAuthoritativeCompletion() bool {
+	return t.Status == TaskStatusCompleted || !t.CompletedAt.IsZero() || t.CompletedBy != ""
+}
+
 func (s *RunState) Normalize() {
+	if s.Version <= 0 {
+		s.Version = 1
+	}
 	s.Supervisor.Normalize()
 	for idx := range s.Workers {
 		s.Workers[idx].Normalize()

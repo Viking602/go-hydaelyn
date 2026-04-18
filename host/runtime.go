@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -509,7 +510,7 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 		if err := r.enqueueRunnableTasks(ctx, state); err != nil {
 			return team.RunState{}, err
 		}
-		if err := r.storage.Teams().Save(ctx, state); err != nil {
+		if err := r.saveTeam(ctx, &state); err != nil {
 			return team.RunState{}, err
 		}
 		return state, nil
@@ -577,7 +578,7 @@ func (r *Runtime) AbortWorkflow(ctx context.Context, workflowID string) (workflo
 func (r *Runtime) driveTeam(ctx context.Context, pattern team.Pattern, state team.RunState) (team.RunState, error) {
 	current := state
 	current.Normalize()
-	for step := 0; step < 24; step++ {
+	for range 24 {
 		next, terminal, err := r.driveTeamStep(ctx, pattern, current)
 		if err != nil {
 			return team.RunState{}, err
@@ -591,7 +592,7 @@ func (r *Runtime) driveTeam(ctx context.Context, pattern team.Pattern, state tea
 	if current.Result == nil {
 		current.Result = &team.Result{Error: "team exceeded execution steps"}
 	}
-	_ = r.saveTeam(ctx, current)
+	_ = r.saveTeam(ctx, &current)
 	return current, nil
 }
 
@@ -616,19 +617,99 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 		outcomes = r.executeRunnableTasks(ctx, current, runnableSet, semByProfile)
 	}
 	for outcome := range outcomes {
-		current.Tasks[outcome.index] = outcome.task
-		switch outcome.task.Status {
-		case team.TaskStatusRunning:
-			r.recordTaskLifecycleEvent(ctx, current, outcome.task, storage.EventTaskStarted)
-		case team.TaskStatusCompleted:
-			r.recordTaskLifecycleEvent(ctx, current, outcome.task, storage.EventTaskCompleted)
-		case team.TaskStatusFailed:
-			r.recordTaskLifecycleEvent(ctx, current, outcome.task, storage.EventTaskFailed)
+		updated, applied, published := r.applyTaskOutcome(current, outcome.index, outcome.task)
+		if !applied {
+			continue
 		}
-		current = r.applyBlackboardUpdate(current, outcome.task)
+		current = updated
+		task := current.Tasks[outcome.index]
+		if errors.Is(outcome.err, context.Canceled) {
+			r.recordTaskCancelledEvent(ctx, current, task, "cancellation_propagated")
+		}
+		switch task.Status {
+		case team.TaskStatusRunning:
+			r.recordTaskLifecycleEvent(ctx, current, task, storage.EventTaskStarted)
+		case team.TaskStatusCompleted:
+			r.recordTaskLifecycleEvent(ctx, current, task, storage.EventTaskCompleted)
+			if task.Kind == team.TaskKindVerify || task.Stage == team.TaskStageVerify {
+				r.recordVerifierDecisionEvent(ctx, current, task)
+			}
+			if task.Kind == team.TaskKindSynthesize || task.Stage == team.TaskStageSynthesize {
+				r.recordSynthesisCommittedEvent(ctx, current, task)
+			}
+		case team.TaskStatusFailed:
+			r.recordTaskLifecycleEvent(ctx, current, task, storage.EventTaskFailed)
+		}
+		if published {
+			r.recordTaskOutputsPublishedEvent(ctx, current, task)
+		}
 	}
 	current.UpdatedAt = time.Now().UTC()
 	return current, nil
+}
+
+func (r *Runtime) applyTaskOutcome(state team.RunState, index int, item team.Task) (team.RunState, bool, bool) {
+	current := state.Tasks[index]
+	if current.HasAuthoritativeCompletion() {
+		return state, false, false
+	}
+	if item.Status == team.TaskStatusCompleted {
+		item = r.markTaskCompletion(item)
+	}
+	state.Tasks[index] = item
+	if item.Status != team.TaskStatusCompleted {
+		return state, true, false
+	}
+	state = r.applyBlackboardUpdate(state, item)
+	return state, true, true
+}
+
+func (r *Runtime) ensureCommittedTaskOutputs(state team.RunState) team.RunState {
+	for _, task := range state.Tasks {
+		if !task.HasAuthoritativeCompletion() || task.Result == nil {
+			continue
+		}
+		if hasCommittedBlackboardOutputs(state, task) {
+			continue
+		}
+		state = r.applyBlackboardUpdate(state, task)
+	}
+	return state
+}
+
+func hasCommittedBlackboardOutputs(state team.RunState, task team.Task) bool {
+	if !needsBlackboard(task) {
+		return true
+	}
+	if state.Blackboard == nil {
+		return false
+	}
+	if task.Kind == team.TaskKindResearch || task.Kind == team.TaskKindVerify {
+		if len(state.Blackboard.ClaimsForTask(task.ID)) == 0 && len(state.Blackboard.ExchangesForTask(task.ID)) == 0 {
+			return false
+		}
+	}
+	if task.PublishesTo(team.OutputVisibilityBlackboard) && len(state.Blackboard.ExchangesForTask(task.ID)) == 0 {
+		return false
+	}
+	return true
+}
+
+func (r *Runtime) markTaskCompletion(task team.Task) team.Task {
+	if task.Status != team.TaskStatusCompleted {
+		return task
+	}
+	now := time.Now().UTC()
+	if task.CompletedAt.IsZero() {
+		task.CompletedAt = now
+	}
+	if task.FinishedAt.IsZero() {
+		task.FinishedAt = task.CompletedAt
+	}
+	if task.CompletedBy == "" {
+		task.CompletedBy = r.workerID
+	}
+	return task
 }
 
 type taskOutcome struct {
@@ -639,7 +720,7 @@ type taskOutcome struct {
 
 func (r *Runtime) driveTeamStep(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
 	if current.IsTerminal() {
-		if err := r.saveTeam(ctx, current); err != nil {
+		if err := r.saveTeam(ctx, &current); err != nil {
 			return team.RunState{}, false, err
 		}
 		return current, true, nil
@@ -718,12 +799,12 @@ func (r *Runtime) persistTeamProgress(ctx context.Context, current team.RunState
 		return team.RunState{}, err
 	}
 	if terminal.IsTerminal() {
-		if err := r.saveTeam(ctx, terminal); err != nil {
+		if err := r.saveTeam(ctx, &terminal); err != nil {
 			return team.RunState{}, err
 		}
 		return terminal, nil
 	}
-	if err := r.saveTeam(ctx, current); err != nil {
+	if err := r.saveTeam(ctx, &current); err != nil {
 		return team.RunState{}, err
 	}
 	return current, nil
@@ -757,6 +838,7 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 	// terminally we cancel the context for its siblings so they abort quickly
 	// without tearing down the parent runtime.
 	siblingCtx, siblingCancel := context.WithCancel(ctx)
+	defer siblingCancel()
 	var cancelOnce sync.Once
 
 	for idx, task := range current.Tasks {
@@ -834,39 +916,17 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 	if err != nil {
 		return finalizeTaskFailure(task, err)
 	}
-	if err := r.persistTaskMessages(ctx, task, generated); err != nil {
+	if err := r.persistTaskMessages(ctx, task, generated.Messages); err != nil {
 		return finalizeTaskFailure(task, err)
 	}
 	task.Status = team.TaskStatusCompleted
-	task.Result = r.buildTaskResult(task, generated)
+	task.Result = r.buildTaskResult(task, generated.Messages)
+	task.Result.Usage = generated.Usage
+	task.Result.ToolCallCount = len(generated.ToolResults)
 	task.FinishedAt = time.Now().UTC()
-	r.publishTaskSummary(ctx, state, task, agentInstance)
+	r.recordTaskToolEvents(ctx, state, task, generated.ToolResults)
+	r.publishTaskOutputMessages(ctx, state, task, agentInstance)
 	return task, nil
-}
-
-func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) *team.Result {
-	summary := task.Input
-	confidence := 0.5 // fallback: no substantive LLM output
-	for idx := len(generated) - 1; idx >= 0; idx-- {
-		if strings.TrimSpace(generated[idx].Text) != "" {
-			summary = generated[idx].Text
-			confidence = 0.85 // substantive LLM output available
-			break
-		}
-	}
-	return &team.Result{
-		Summary: summary,
-		Findings: []team.Finding{
-			{
-				Summary:    summary,
-				Confidence: confidence,
-			},
-		},
-		Evidence: []team.Evidence{
-			{Source: task.Title, Snippet: summary},
-		},
-		Confidence: confidence,
-	}
 }
 
 func (r *Runtime) initialTaskMessages(state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) []message.Message {
@@ -996,7 +1056,7 @@ func failTeam(state team.RunState, failed team.Task) team.RunState {
 func (r *Runtime) saveIfFailed(ctx context.Context, state team.RunState) (team.RunState, error) {
 	if failed := state.FirstBlockingFailure(); failed != nil {
 		next := failTeam(state, *failed)
-		if err := r.saveTeam(ctx, next); err != nil {
+		if err := r.saveTeam(ctx, &next); err != nil {
 			return team.RunState{}, err
 		}
 		return next, nil
@@ -1004,9 +1064,18 @@ func (r *Runtime) saveIfFailed(ctx context.Context, state team.RunState) (team.R
 	return state, nil
 }
 
-func (r *Runtime) saveTeam(ctx context.Context, state team.RunState) error {
-	r.recordTeamTerminalEvent(ctx, state)
-	return r.storage.Teams().Save(ctx, state)
+func (r *Runtime) saveTeam(ctx context.Context, state *team.RunState) error {
+	state.Normalize()
+	r.recordTeamTerminalEvent(ctx, *state)
+	version, err := r.storage.Teams().SaveCAS(ctx, *state, state.Version)
+	if err == nil {
+		state.Version = version
+		return nil
+	}
+	if errors.Is(err, storage.ErrStaleState) {
+		return err
+	}
+	return err
 }
 
 func (r *Runtime) ensureTaskSession(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) (team.Task, error) {
@@ -1040,17 +1109,29 @@ func (r *Runtime) loadInitialTaskMessages(ctx context.Context, state team.RunSta
 		return r.compactMessages(ctx, snapshot.Messages), nil
 	}
 	initialMessages := r.initialTaskMessages(state, task, agentInstance, profile)
+	if materialized, text := r.materializeTaskInputs(state, task); len(materialized) > 0 && strings.TrimSpace(text) != "" {
+		input := message.NewText(message.RoleUser, text)
+		input.TeamID = state.ID
+		input.AgentID = agentInstance.ID
+		input.Visibility = message.VisibilityPrivate
+		input.Metadata = map[string]string{
+			"taskId":           task.ID,
+			"materializedRead": strings.Join(task.Reads, ","),
+		}
+		initialMessages = append(initialMessages, input)
+		r.recordTaskInputsMaterializedEvent(ctx, state, task, materialized)
+	}
 	if _, err := r.appendSessionMessages(ctx, task.SessionID, initialMessages...); err != nil {
 		return nil, err
 	}
 	return initialMessages, nil
 }
 
-func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile, initialMessages []message.Message) ([]message.Message, error) {
+func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile, initialMessages []message.Message) (taskExecution, error) {
 	initialMessages = r.compactMessages(ctx, initialMessages)
 	currentProvider, err := r.lookupProvider(profile.Provider)
 	if err != nil {
-		return nil, err
+		return taskExecution{}, err
 	}
 	engine := agent.Engine{
 		Provider: currentProvider,
@@ -1089,9 +1170,14 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return taskExecution{}, err
 	}
-	return result.Messages[len(initialMessages):], nil
+	generated := append([]message.Message{}, result.Messages[len(initialMessages):]...)
+	return taskExecution{
+		Messages:    generated,
+		Usage:       result.Usage,
+		ToolResults: toolResultsFromMessages(generated),
+	}, nil
 }
 
 func (r *Runtime) compactMessages(ctx context.Context, messages []message.Message) []message.Message {
@@ -1112,17 +1198,6 @@ func (r *Runtime) persistTaskMessages(ctx context.Context, task team.Task, gener
 	}
 	_, err := r.appendSessionMessages(ctx, task.SessionID, generated...)
 	return err
-}
-
-func (r *Runtime) publishTaskSummary(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance) {
-	shared := message.NewText(message.RoleAssistant, task.Result.Summary)
-	shared.TeamID = state.ID
-	shared.AgentID = agentInstance.ID
-	shared.Visibility = message.VisibilityShared
-	shared.Metadata = map[string]string{
-		"taskId": task.ID,
-	}
-	_, _ = r.appendSessionMessages(ctx, state.SessionID, shared)
 }
 
 func (r *Runtime) applyPlugin(spec plugin.Spec) error {
@@ -1189,9 +1264,7 @@ func (r *Runtime) engineHooks() hook.Chain {
 }
 
 func mergeStringMap(target map[string]string, source map[string]string) {
-	for key, value := range source {
-		target[key] = value
-	}
+	maps.Copy(target, source)
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -1199,9 +1272,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
+	maps.Copy(out, values)
 	return out
 }
 
@@ -1215,11 +1286,4 @@ func (r *Runtime) nextTeamID() string {
 
 func (r *Runtime) nextWorkerID() string {
 	return fmt.Sprintf("runtime-worker-%d", atomic.AddUint64(&r.teamSeq, 1))
-}
-
-func max(left, right int) int {
-	if left > right {
-		return left
-	}
-	return right
 }

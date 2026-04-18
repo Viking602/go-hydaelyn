@@ -2,6 +2,7 @@ package observe
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"strconv"
 	"sync"
@@ -56,8 +57,14 @@ func NewMemoryObserver() *memoryObserver {
 }
 
 func (m *memoryObserver) StartSpan(name string, attrs map[string]string) (context.Context, Span) {
-	traceID := nextTraceID(&m.seq)
 	attrs = cloneAttrs(attrs)
+	traceID := ""
+	if attrs != nil {
+		traceID = attrs["trace_id"]
+	}
+	if traceID == "" {
+		traceID = nextTraceID(&m.seq)
+	}
 	if attrs == nil {
 		attrs = map[string]string{}
 	}
@@ -93,9 +100,7 @@ func (m *memoryObserver) Counters() map[string]int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	items := make(map[string]int64, len(m.counters))
-	for key, value := range m.counters {
-		items[key] = value
-	}
+	maps.Copy(items, m.counters)
 	return items
 }
 
@@ -149,9 +154,34 @@ func RuntimeMiddleware(observer Observer) middleware.Handler {
 		attrs := map[string]string{
 			"stage": string(envelope.Stage),
 		}
+		if envelope.TeamID != "" {
+			attrs["team_id"] = envelope.TeamID
+		}
+		if envelope.TaskID != "" {
+			attrs["task_id"] = envelope.TaskID
+		}
+		if envelope.AgentID != "" {
+			attrs["agent_id"] = envelope.AgentID
+		}
+		for key, value := range envelope.Metadata {
+			if value != "" {
+				attrs[key] = value
+			}
+		}
+		if traceID := TraceID(ctx); traceID != "" {
+			attrs["trace_id"] = traceID
+		}
 		spanCtx, span := observer.StartSpan(string(envelope.Stage)+"."+envelope.Operation, attrs)
 		defer span.End()
 		observer.IncCounter(string(envelope.Stage)+".calls", 1, attrs)
+		if counter := envelope.Metadata["collaboration_counter"]; counter != "" {
+			observer.IncCounter(counter, 1, attrs)
+		}
+		if event := envelope.Metadata["collaboration_event"]; event != "" {
+			logAttrs := cloneAttrs(attrs)
+			logAttrs["trace_id"] = TraceID(spanCtx)
+			observer.Log("info", event, logAttrs)
+		}
 		err := next(spanCtx, envelope)
 		if err != nil {
 			logAttrs := cloneAttrs(attrs)
@@ -188,9 +218,7 @@ func cloneAttrs(attrs map[string]string) map[string]string {
 		return nil
 	}
 	items := make(map[string]string, len(attrs))
-	for key, value := range attrs {
-		items[key] = value
-	}
+	maps.Copy(items, attrs)
 	return items
 }
 

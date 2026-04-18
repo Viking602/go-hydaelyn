@@ -1,8 +1,8 @@
 # Public API Freeze
 
-## v1 Public API
+## Stable Packages
 
-从 `v1.0.0` 开始，下列包视为稳定 public API：
+The v1 public surface still includes:
 
 - `agent`
 - `blackboard`
@@ -12,69 +12,51 @@
 - `observe`
 - `planner`
 - `plugin`
+- `recipe`
 - `scheduler`
 - `team`
 - `tool`
 - `toolkit`
+- `evaluation`
 
-这些包的兼容承诺受 [SemVer And Compatibility](semver.md) 约束。
+These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
+
+## Additive v1.1 Dataflow Surface
+
+The following additive fields are now part of the public model:
+
+### `planner.TaskSpec`
+
+- `Reads []string`
+- `Writes []string`
+- `Publish []team.OutputVisibility`
+
+### `team.Task`
+
+- `Reads []string`
+- `Writes []string`
+- `Publish []team.OutputVisibility`
+
+### `team.Result`
+
+- `Structured map[string]any`
+- `ArtifactIDs []string`
+
+### `blackboard.State`
+
+- `Exchanges []blackboard.Exchange`
+
+## Compatibility Rules
+
+- Adding optional fields to frozen structs is allowed.
+- Removing fields or changing field meaning requires a major version.
+- Adding commands to the CLI is allowed.
+- Removing commands from the CLI requires a major version.
 
 ## Internal Surface
 
-以下包当前仍视为实现面，不承诺长期稳定：
+These packages remain implementation detail:
 
 - `providers/*`
 - `transport/*`
 - `tooltest`
-
-## Frozen Contracts
-
-### Runtime
-
-- `host.Config`
-- `host.StartTeamRequest`
-- `host.PromptRequest`
-- `host.ContinueRequest`
-- `host.DumpConfigRequest`
-- `host.Runtime` 的已公开方法
-
-### Team Model
-
-- `team.Profile`
-- `team.AgentInstance`
-- `team.Task`
-- `team.RunState`
-- `team.Result`
-
-### Planner
-
-- `planner.PlanRequest`
-- `planner.Plan`
-- `planner.TaskSpec`
-- `planner.ReviewDecision`
-- `planner.ReplanInput`
-- `planner.Planner`
-
-### Capability
-
-- `capability.Call`
-- `capability.Result`
-- `capability.Error`
-- `capability.Middleware`
-- `capability.Type*`
-
-### Plugin
-
-- `plugin.Spec`
-- `plugin.Ref`
-- `plugin.Type*`
-- `plugin.Registry`
-
-## Change Rules
-
-- 给 frozen struct 增加可选字段：允许
-- 删除字段、改字段含义、改返回类型：需要 MAJOR
-- 删除 public method：需要 MAJOR
-- 新增 public method：允许
-- CLI 新增命令：允许
-- 删除 CLI 命令：需要 MAJOR

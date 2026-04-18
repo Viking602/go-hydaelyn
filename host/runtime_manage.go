@@ -99,11 +99,18 @@ func (r *Runtime) abortTeam(ctx context.Context, teamID string) error {
 	if err != nil {
 		return err
 	}
+	state.Normalize()
+	for _, task := range state.Tasks {
+		if task.HasAuthoritativeCompletion() {
+			continue
+		}
+		r.recordTaskCancelledEvent(ctx, state, task, "team_aborted")
+	}
 	state.Status = team.StatusAborted
 	state.UpdatedAt = time.Now().UTC()
 	if state.Result == nil {
 		state.Result = &team.Result{}
 	}
 	state.Result.Error = "team aborted"
-	return r.saveTeam(ctx, state)
+	return r.saveTeam(ctx, &state)
 }

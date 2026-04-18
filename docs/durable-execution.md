@@ -1,18 +1,48 @@
 # Durable Execution
 
-## 当前能力
+## Current Capabilities
 
-当前 runtime 已支持：
+Hydaelyn now persists enough runtime detail to replay task dataflow, not only final summaries.
+
+Current durable surfaces:
 
 - `EventStore`
 - `ReplayTeamState`
+- `recipe.Compile(...)`
+- `evaluation.Evaluate(...)`
 - `pause / resume / abort`
-- `ApprovalRequested` 事件
-- `QueueTeam / RunQueueWorker / RecoverQueueLeases`
+- queue-backed `QueueTeam / RunQueueWorker / RecoverQueueLeases`
+- task input/output dataflow events
 
-## Admin
+## Event Types
 
-当前 admin 已支持：
+Important team events now include:
+
+- `TaskScheduled`
+- `TaskStarted`
+- `TaskInputsMaterialized`
+- `TaskCompleted`
+- `TaskOutputsPublished`
+- `ApprovalRequested`
+- `TeamCompleted`
+
+`TaskOutputsPublished` carries named exchanges, artifact refs, and verification deltas needed for replay.
+
+## Replay Scope
+
+`ReplayTeamState` restores:
+
+- task status
+- task results
+- structured outputs
+- artifact ids
+- blackboard exchanges
+- verification state
+- final team result
+
+## Admin Surface
+
+Current admin endpoints:
 
 - `/teams`
 - `/teams/{id}`
@@ -23,8 +53,8 @@
 - `/scheduler/drain`
 - `/scheduler/recover`
 
-## 当前限制
+## Current Limits
 
-- queue 仍以内存模型为主
-- 还没有真正的外部 durable backend
-- checkpoint 还没有细粒度 payload
+- The default queue is still in-memory.
+- There is still no external production durable backend in-tree.
+- Replay is deterministic over recorded events, but richer evaluation tooling remains an ecosystem-layer follow-up.

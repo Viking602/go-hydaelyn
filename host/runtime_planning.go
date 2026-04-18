@@ -144,6 +144,7 @@ func (r *Runtime) planTasksToRuntimeTasks(specs []planner.TaskSpec, workers []te
 		task := team.Task{
 			ID:                   spec.ID,
 			Kind:                 kind,
+			Stage:                spec.Stage,
 			Title:                spec.Title,
 			Input:                spec.Input,
 			RequiredRole:         spec.RequiredRole,
@@ -151,6 +152,11 @@ func (r *Runtime) planTasksToRuntimeTasks(specs []planner.TaskSpec, workers []te
 			Budget:               spec.Budget,
 			AssigneeAgentID:      assignee,
 			DependsOn:            append([]string{}, spec.DependsOn...),
+			Reads:                append([]string{}, spec.Reads...),
+			Writes:               append([]string{}, spec.Writes...),
+			Publish:              append([]team.OutputVisibility{}, spec.Publish...),
+			Namespace:            spec.Namespace,
+			VerifierRequired:     spec.VerifierRequired,
 			FailurePolicy:        spec.FailurePolicy,
 			Status:               team.TaskStatusPending,
 		}
@@ -341,7 +347,7 @@ func (r *Runtime) finishReviewedTeam(ctx context.Context, state team.RunState, s
 	}
 	state.Result.Error = reason
 	state.UpdatedAt = time.Now().UTC()
-	if err := r.saveTeam(ctx, state); err != nil {
+	if err := r.saveTeam(ctx, &state); err != nil {
 		return team.RunState{}, false, false, err
 	}
 	return state, true, true, nil

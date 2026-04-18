@@ -1,6 +1,10 @@
 package storage
 
-import "github.com/Viking602/go-hydaelyn/team"
+import (
+	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/team"
+)
 
 func ReplayTeam(events []Event) team.RunState {
 	state := team.RunState{}
@@ -43,17 +47,43 @@ func ReplayTeam(events []Event) team.RunState {
 				AssigneeAgentID: stringValue(event.Payload["assigneeAgent"]),
 				FailurePolicy:   team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
 				DependsOn:       stringSlice(event.Payload["dependsOn"]),
+				Reads:           stringSlice(event.Payload["reads"]),
+				Writes:          stringSlice(event.Payload["writes"]),
+				Publish:         outputVisibilitySlice(event.Payload["publish"]),
+				Budget:          budgetValue(event.Payload["budget"]),
 			}
 			tasks[event.TaskID] = len(state.Tasks)
 			state.Tasks = append(state.Tasks, task)
 		case EventTaskStarted:
 			if idx, ok := tasks[event.TaskID]; ok {
 				state.Tasks[idx].Status = team.TaskStatusRunning
+				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
+			}
+		case EventTaskInputsMaterialized:
+			if idx, ok := tasks[event.TaskID]; ok && state.Tasks[idx].Result == nil {
+				state.Tasks[idx].Result = &team.Result{}
 			}
 		case EventTaskCompleted:
 			if idx, ok := tasks[event.TaskID]; ok {
 				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusCompleted)))
-				state.Tasks[idx].Result = &team.Result{Summary: stringValue(event.Payload["summary"])}
+				state.Tasks[idx].Result = &team.Result{
+					Summary:       stringValue(event.Payload["summary"]),
+					Structured:    structuredMap(event.Payload["structured"]),
+					ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
+					Usage:         usageValue(event.Payload["usage"]),
+					ToolCallCount: intValue(event.Payload["toolCallCount"]),
+				}
+				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
+			}
+		case EventTaskOutputsPublished:
+			if state.Blackboard == nil {
+				state.Blackboard = &blackboard.State{}
+			}
+			for _, exchange := range exchangesValue(event.Payload["exchanges"]) {
+				state.Blackboard.UpsertExchange(exchange)
+			}
+			for _, verification := range verificationsValue(event.Payload["verifications"]) {
+				state.Blackboard.UpsertVerification(verification)
 			}
 		case EventTaskFailed:
 			if idx, ok := tasks[event.TaskID]; ok {
@@ -69,9 +99,17 @@ func ReplayTeam(events []Event) team.RunState {
 			}
 			state.Result.Summary = stringValue(event.Payload["summary"])
 			state.Result.Error = stringValue(event.Payload["error"])
+			state.Result.Structured = structuredMap(event.Payload["structured"])
+			state.Result.ArtifactIDs = stringSlice(event.Payload["artifactIds"])
 		case EventTeamCompleted:
 			state.Status = team.StatusCompleted
-			state.Result = &team.Result{Summary: stringValue(event.Payload["summary"])}
+			state.Result = &team.Result{
+				Summary:       stringValue(event.Payload["summary"]),
+				Structured:    structuredMap(event.Payload["structured"]),
+				ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
+				Usage:         usageValue(event.Payload["usage"]),
+				ToolCallCount: intValue(event.Payload["toolCallCount"]),
+			}
 		}
 	}
 	return state
@@ -106,5 +144,133 @@ func stringSlice(value any) []string {
 		return result
 	default:
 		return nil
+	}
+}
+
+func outputVisibilitySlice(value any) []team.OutputVisibility {
+	items := stringSlice(value)
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]team.OutputVisibility, 0, len(items))
+	for _, item := range items {
+		result = append(result, team.OutputVisibility(item))
+	}
+	return result
+}
+
+func structuredMap(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	items, ok := value.(map[string]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(items))
+	for key, item := range items {
+		result[key] = item
+	}
+	return result
+}
+
+func exchangesValue(value any) []blackboard.Exchange {
+	result := []blackboard.Exchange{}
+	for _, payload := range payloadMaps(value) {
+		result = append(result, blackboard.Exchange{
+			ID:          stringValue(payload["id"]),
+			Key:         stringValue(payload["key"]),
+			TaskID:      stringValue(payload["taskId"]),
+			ValueType:   blackboard.ExchangeValueType(stringValue(payload["valueType"])),
+			Text:        stringValue(payload["text"]),
+			Structured:  structuredMap(payload["structured"]),
+			ArtifactIDs: stringSlice(payload["artifactIds"]),
+			ClaimIDs:    stringSlice(payload["claimIds"]),
+			FindingIDs:  stringSlice(payload["findingIds"]),
+		})
+	}
+	return result
+}
+
+func verificationsValue(value any) []blackboard.VerificationResult {
+	result := []blackboard.VerificationResult{}
+	for _, payload := range payloadMaps(value) {
+		result = append(result, blackboard.VerificationResult{
+			ClaimID:     stringValue(payload["claimId"]),
+			Status:      blackboard.VerificationStatus(stringValue(payload["status"])),
+			Confidence:  floatValue(payload["confidence"]),
+			EvidenceIDs: stringSlice(payload["evidenceIds"]),
+			Rationale:   stringValue(payload["rationale"]),
+		})
+	}
+	return result
+}
+
+func payloadMaps(value any) []map[string]any {
+	switch items := value.(type) {
+	case []map[string]any:
+		return append([]map[string]any{}, items...)
+	case []any:
+		result := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			payload, ok := item.(map[string]any)
+			if ok {
+				result = append(result, payload)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func floatValue(value any) float64 {
+	switch current := value.(type) {
+	case float64:
+		return current
+	case float32:
+		return float64(current)
+	case int:
+		return float64(current)
+	default:
+		return 0
+	}
+}
+
+func intValue(value any) int {
+	switch current := value.(type) {
+	case int:
+		return current
+	case int64:
+		return int(current)
+	case float64:
+		return int(current)
+	case float32:
+		return int(current)
+	default:
+		return 0
+	}
+}
+
+func budgetValue(value any) team.Budget {
+	items := structuredMap(value)
+	if len(items) == 0 {
+		return team.Budget{}
+	}
+	return team.Budget{
+		Tokens:    intValue(items["tokens"]),
+		ToolCalls: intValue(items["toolCalls"]),
+	}
+}
+
+func usageValue(value any) provider.Usage {
+	items := structuredMap(value)
+	if len(items) == 0 {
+		return provider.Usage{}
+	}
+	return provider.Usage{
+		InputTokens:  intValue(items["inputTokens"]),
+		OutputTokens: intValue(items["outputTokens"]),
+		TotalTokens:  intValue(items["totalTokens"]),
 	}
 }
