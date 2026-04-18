@@ -347,6 +347,9 @@ func (s *memoryArtifactStore) List(_ context.Context) ([]Artifact, error) {
 func (s *memoryEventStore) Append(_ context.Context, event Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if event.Sequence == 0 {
+		event.Sequence = len(s.items[event.RunID]) + 1
+	}
 	s.items[event.RunID] = append(s.items[event.RunID], event)
 	return nil
 }

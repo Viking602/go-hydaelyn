@@ -38,14 +38,7 @@ type collaborationEvent struct {
 }
 
 func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
-	existing, err := r.storage.Events().List(ctx, event.RunID)
-	if err != nil {
-		return err
-	}
-	if event.Sequence == 0 {
-		event.Sequence = len(existing) + 1
-	}
-	if event.RecordedAt.IsZero() {
+	if event.Sequence == 0 && event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
 	}
 	return r.storage.Events().Append(ctx, event)
