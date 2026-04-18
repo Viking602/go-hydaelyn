@@ -29,6 +29,28 @@ func (g *defaultTeamGuard) IsAborted(state team.RunState) bool {
 	return state.Status == team.StatusAborted
 }
 
+type LeaseReleaser interface {
+	Release(ctx context.Context, lease scheduler.TaskLease) error
+}
+
+type defaultLeaseReleaser struct {
+	queue scheduler.TaskQueue
+}
+
+func (r *defaultLeaseReleaser) Release(ctx context.Context, lease scheduler.TaskLease) error {
+	return r.queue.Release(ctx, lease)
+}
+
+func (r *Runtime) syncLeaseReleaser() {
+	if r.leaseReleaser == nil {
+		r.leaseReleaser = &defaultLeaseReleaser{queue: r.queue}
+		return
+	}
+	if releaser, ok := r.leaseReleaser.(*defaultLeaseReleaser); ok && releaser.queue != r.queue {
+		releaser.queue = r.queue
+	}
+}
+
 func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, runnableSet map[string]struct{}, semByProfile map[string]chan struct{}) (<-chan taskOutcome, error) {
 	if err := r.enqueueTaskSet(ctx, current.ID, runnableSet); err != nil {
 		return nil, err
@@ -72,11 +94,12 @@ func mapTaskIndexes(tasks []team.Task) map[string]int {
 }
 
 func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
+	r.syncLeaseReleaser()
 	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
 	released := false
 	defer func() {
 		if !released {
-			_ = r.queue.Release(ctx, lease)
+			_ = r.leaseReleaser.Release(ctx, lease)
 		}
 	}()
 	state, index, original, err := r.loadQueuedExecutionState(ctx, lease)
@@ -85,18 +108,18 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 			return nil
 		}
 		released = true
-		_ = r.queue.Release(ctx, lease)
+		_ = r.leaseReleaser.Release(ctx, lease)
 		return err
 	}
 	if !r.teamGuard.IsRunnable(state, original) {
 		released = true
-		return r.queue.Release(ctx, lease)
+		return r.leaseReleaser.Release(ctx, lease)
 	}
 	item, stopHeartbeat, err := r.executeQueuedTask(ctx, state, original, lease)
 	defer stopHeartbeat()
 	if err != nil && item.ID == "" {
 		released = true
-		_ = r.queue.Release(ctx, lease)
+		_ = r.leaseReleaser.Release(ctx, lease)
 		return err
 	}
 	state = r.applyQueuedTaskResult(state, index, item)
@@ -115,14 +138,14 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 	if err := r.persistQueuedTaskState(ctx, state, item); err != nil {
 		if errors.Is(err, errQueuedTaskAlreadyCommitted) {
 			released = true
-			return r.queue.Release(ctx, lease)
+			return r.leaseReleaser.Release(ctx, lease)
 		}
 		released = true
-		_ = r.queue.Release(ctx, lease)
+		_ = r.leaseReleaser.Release(ctx, lease)
 		return err
 	}
 	released = true
-	return r.queue.Release(ctx, lease)
+	return r.leaseReleaser.Release(ctx, lease)
 }
 
 func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
@@ -143,6 +166,7 @@ func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, 
 }
 
 func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState, indexByTask map[string]int, semByProfile map[string]chan struct{}) (taskOutcome, bool) {
+	r.syncLeaseReleaser()
 	lease, ok, err := r.queue.Acquire(ctx, r.workerID, localQueueLeaseTTL)
 	if err != nil {
 		return taskOutcome{err: err}, true
@@ -165,7 +189,7 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 			if err := r.nackQueuedLease(ctx, lease); err != nil {
 				return taskOutcome{err: err}, true
 			}
-		} else if err := r.queue.Release(ctx, lease); err != nil {
+		} else if err := r.leaseReleaser.Release(ctx, lease); err != nil {
 			return taskOutcome{err: err}, true
 		}
 		return taskOutcome{}, true
@@ -173,7 +197,7 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	original := current.Tasks[index]
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
-		_ = r.queue.Release(ctx, lease)
+		_ = r.leaseReleaser.Release(ctx, lease)
 		failed, _ := finalizeTaskFailure(original, err)
 		return taskOutcome{index: index, task: failed, err: err}, true
 	}
@@ -186,12 +210,13 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	item, err := r.executeTask(ctx, current, original, agentInstance, profile)
 	stopHeartbeat()
 	releaseSemaphore()
-	_ = r.queue.Release(ctx, lease)
+	_ = r.leaseReleaser.Release(ctx, lease)
 	return taskOutcome{index: index, task: item, err: err}, true
 }
 
 func (r *Runtime) nackQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
-	if err := r.queue.Release(ctx, lease); err != nil {
+	r.syncLeaseReleaser()
+	if err := r.leaseReleaser.Release(ctx, lease); err != nil {
 		return err
 	}
 	lease.OwnerID = ""
@@ -245,6 +270,7 @@ func (r *Runtime) continueQueuedStep(ctx context.Context, pattern team.Pattern, 
 }
 
 func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.TaskLease) (team.RunState, int, team.Task, error) {
+	r.syncLeaseReleaser()
 	state, err := r.storage.Teams().Load(ctx, lease.TeamID)
 	if err != nil {
 		return team.RunState{}, 0, team.Task{}, err
@@ -252,7 +278,7 @@ func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.
 	state.Normalize()
 	index, ok := mapTaskIndexes(state.Tasks)[lease.TaskID]
 	if !ok {
-		_ = r.queue.Release(ctx, lease)
+		_ = r.leaseReleaser.Release(ctx, lease)
 		return team.RunState{}, 0, team.Task{}, errQueuedTaskMissing
 	}
 	return state, index, state.Tasks[index], nil

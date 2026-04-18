@@ -57,6 +57,7 @@ type Runtime struct {
 	capability       *capability.Invoker
 	plugins          *plugin.Registry
 	queue            scheduler.TaskQueue
+	leaseReleaser    LeaseReleaser
 	teamGuard        teamGuard
 	providers        map[string]provider.Driver
 	profiles         map[string]team.Profile
@@ -97,6 +98,7 @@ func New(config Config) *Runtime {
 		activeRuns:       map[string]context.CancelFunc{},
 		activeTeams:      map[string]context.CancelFunc{},
 	}
+	runtime.leaseReleaser = &defaultLeaseReleaser{queue: runtime.queue}
 	if runtime.workerID == "" {
 		runtime.workerID = runtime.nextWorkerID()
 	}
@@ -1418,6 +1420,7 @@ func (r *Runtime) applyPlugin(spec plugin.Spec) error {
 			return fmt.Errorf("plugin %s/%s does not implement scheduler.TaskQueue", spec.Type, spec.Name)
 		}
 		r.queue = queue
+		r.leaseReleaser = &defaultLeaseReleaser{queue: queue}
 	case plugin.TypeMCPGateway:
 		gateway, ok := spec.Component.(mcp.Gateway)
 		if !ok {
