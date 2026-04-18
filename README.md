@@ -93,3 +93,7 @@ Hydaelyn is intentionally scoped:
 - **Not an MCP server** - MCP tools are imported as external integrations, not the core model
 - **Not a distributed system** - V1 is single-process
 - **Not a framework to subclass** - It is an embeddable runtime you compose into your application
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for coding standards and contribution guidelines.
