@@ -383,6 +383,16 @@ func (s *RunState) Normalize() {
 		s.Version = 1
 	}
 	s.Supervisor.Normalize()
+	// Clone Workers and Tasks slices to avoid aliasing the backing array
+	// when normalizing elements. This prevents data races when the caller
+	// uses a pattern like `current := s; current.Normalize()` while other
+	// goroutines concurrently modify the original state's slices.
+	if s.Workers != nil {
+		s.Workers = slices.Clone(s.Workers)
+	}
+	if s.Tasks != nil {
+		s.Tasks = slices.Clone(s.Tasks)
+	}
 	for idx := range s.Workers {
 		s.Workers[idx].Normalize()
 	}
