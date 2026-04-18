@@ -67,17 +67,6 @@ func main() {
 
 Hydaelyn centers on the `deepsearch` pattern: parallel research tasks run simultaneously, optional verification checks their outputs, and a final synthesize task produces the result. The `host` runtime embeds into your application and coordinates supervisor and worker profiles. Supervisors orchestrate the workflow while workers execute tasks. All task outputs publish to a shared blackboard that downstream tasks read explicitly.
 
-## Development
-
-Run the same validation commands used in CI:
-
-```bash
-go test ./...                  # Run tests
-go vet ./...                   # Static analysis
-go test -race -timeout=10m ./... # Race detection
-staticcheck ./...              # Deep static analysis
-```
-
 ## Examples + Read Next
 
 ### Examples
@@ -92,8 +81,9 @@ staticcheck ./...              # Deep static analysis
 
 - [Quickstart](docs/quickstart.md) - Deep-dive tutorial
 - [Task Dataflow](docs/task-dataflow.md) - Dataflow documentation
-- [Plugin Development](docs/plugin-development.md) - Extending the runtime
-- [Architecture](docs/architecture/north-star-runtime.md) - Design philosophy
+- [Recipe Compiler](docs/recipe.md) - Recipe/YAML configuration
+- [Evaluation](docs/evaluation.md) - Performance evaluation
+- [Durable Execution](docs/durable-execution.md) - Replay and durability
 
 ## Boundaries
 
