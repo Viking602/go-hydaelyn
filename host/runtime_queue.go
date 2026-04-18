@@ -65,6 +65,9 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 		}
 		return err
 	}
+	if state.IsTerminal() || state.Status == team.StatusAborted {
+		return r.queue.Release(ctx, lease)
+	}
 	if original.IsTerminal() {
 		return r.queue.Release(ctx, lease)
 	}
