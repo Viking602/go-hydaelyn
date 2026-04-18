@@ -13,9 +13,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/toolkit"
 )
 
-type fakeProvider struct {
-	streams []provider.Event
-}
+type fakeProvider struct{}
 
 func (fakeProvider) Metadata() provider.Metadata {
 	return provider.Metadata{Name: "fake"}

@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -131,6 +130,4 @@ func toolCapabilityHandler(driver tool.Driver) capability.Handler {
 	}
 }
 
-func toToolCall(call message.ToolCall) tool.Call {
-	return tool.Call(call)
-}
+
