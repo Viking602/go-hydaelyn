@@ -17,7 +17,7 @@ func (r *Runtime) ListTeams(ctx context.Context) ([]team.RunState, error) {
 }
 
 func (r *Runtime) TeamEvents(ctx context.Context, teamID string) ([]storage.Event, error) {
-	return r.storage.Events().List(ctx, teamID)
+	return r.listEvents(ctx, teamID)
 }
 
 func (r *Runtime) RecoverQueueLeases(ctx context.Context, now time.Time) error {

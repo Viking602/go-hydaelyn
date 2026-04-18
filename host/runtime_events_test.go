@@ -41,22 +41,7 @@ func newSequenceBarrierEventStore(inner storage.EventStore, workers int) *sequen
 }
 
 func (s *sequenceBarrierEventStore) List(ctx context.Context, runID string) ([]storage.Event, error) {
-	events, err := s.inner.List(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	round := s.round
-	s.listed++
-	if s.listed == s.workers {
-		s.cond.Broadcast()
-	} else {
-		for round == s.round && s.listed < s.workers {
-			s.cond.Wait()
-		}
-	}
-	return events, nil
+	return s.inner.List(ctx, runID)
 }
 
 func (s *sequenceBarrierEventStore) Append(ctx context.Context, event storage.Event) error {

@@ -16,6 +16,23 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
+type EventSink interface {
+	AppendEvent(ctx context.Context, event storage.Event) error
+	ListEvents(ctx context.Context, runID string) ([]storage.Event, error)
+}
+
+type runtimeEventSink struct {
+	store storage.EventStore
+}
+
+func (s *runtimeEventSink) AppendEvent(ctx context.Context, event storage.Event) error {
+	return s.store.Append(ctx, event)
+}
+
+func (s *runtimeEventSink) ListEvents(ctx context.Context, runID string) ([]storage.Event, error) {
+	return s.store.List(ctx, runID)
+}
+
 const (
 	metadataCollaborationEvent   = "collaboration_event"
 	metadataCollaborationCounter = "collaboration_counter"
@@ -41,7 +58,10 @@ func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 	if event.Sequence == 0 && event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
 	}
-	return r.storage.Events().Append(ctx, event)
+	if r.eventSink != nil {
+		return r.eventSink.AppendEvent(ctx, event)
+	}
+	return (&runtimeEventSink{store: r.storage.Events()}).AppendEvent(ctx, event)
 }
 
 func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) error {
@@ -406,11 +426,18 @@ func resultSummary(result *team.Result) string {
 }
 
 func (r *Runtime) ReplayTeamState(ctx context.Context, teamID string) (team.RunState, error) {
-	events, err := r.storage.Events().List(ctx, teamID)
+	events, err := r.listEvents(ctx, teamID)
 	if err != nil {
 		return team.RunState{}, err
 	}
 	return storage.ReplayTeam(events), nil
+}
+
+func (r *Runtime) listEvents(ctx context.Context, runID string) ([]storage.Event, error) {
+	if r.eventSink != nil {
+		return r.eventSink.ListEvents(ctx, runID)
+	}
+	return (&runtimeEventSink{store: r.storage.Events()}).ListEvents(ctx, runID)
 }
 
 func mergeResultPayload(payload map[string]any, result *team.Result) {

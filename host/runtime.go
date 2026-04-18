@@ -48,6 +48,7 @@ type Config struct {
 
 type Runtime struct {
 	storage          storage.Driver
+	eventSink        EventSink
 	auth             auth.Driver
 	tools            *tool.Bus
 	workflows        *workflow.Registry
@@ -77,6 +78,7 @@ func New(config Config) *Runtime {
 	}
 	runtime := &Runtime{
 		storage:          driver,
+		eventSink:        &runtimeEventSink{store: driver.Events()},
 		auth:             config.Auth,
 		tools:            tool.NewBus(),
 		workflows:        workflow.NewRegistry(),
