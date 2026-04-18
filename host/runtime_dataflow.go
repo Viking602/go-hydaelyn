@@ -106,7 +106,7 @@ func filterMaterializedExchanges(task team.Task, items []blackboard.Exchange) []
 	}
 	filtered := make([]blackboard.Exchange, 0, len(items))
 	for _, item := range items {
-		if strings.HasPrefix(item.Namespace, "verify.") {
+		if strings.HasPrefix(item.Namespace, verifierNamespacePrefix) {
 			filtered = append(filtered, item)
 		}
 	}

@@ -54,6 +54,51 @@
       "agent": "Sisyphus-Junior",
       "category": "deep",
       "updated_at": "2026-04-18T09:35:20.579Z"
+    },
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "Implement `patterns/collab` as the generalized collaboration seed pattern",
+      "session_id": "ses_2600d715cffeVF5KBE6qqHEYgH",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-04-18T09:42:05.300Z"
+    },
+    "todo:7": {
+      "task_key": "todo:7",
+      "task_label": "7",
+      "task_title": "Make verifier outputs the only synthesis gate in guarded collaboration flows",
+      "session_id": "ses_26007465cffe0Y4cgMoIUiDpTT",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-04-18T09:48:57.264Z"
+    },
+    "todo:8": {
+      "task_key": "todo:8",
+      "task_label": "8",
+      "task_title": "Make cancellation and replanning respect explicit failure policy",
+      "session_id": "ses_2600155efffe6IvcaSaUyw0rjK",
+      "agent": "Sisyphus-Junior",
+      "category": "ultrabrain",
+      "updated_at": "2026-04-18T10:06:02.153Z"
+    },
+    "todo:9": {
+      "task_key": "todo:9",
+      "task_label": "9",
+      "task_title": "Map engineering workflow phases onto planner-managed collaboration tasks",
+      "session_id": "ses_25ff1728dffe3n5REjXqwg1LxC",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-04-18T10:11:46.268Z"
+    },
+    "todo:10": {
+      "task_key": "todo:10",
+      "task_label": "10",
+      "task_title": "Preserve deepsearch behavior and isolate rollout of the generalized pattern",
+      "session_id": "ses_25fec6f09ffetU8mh97EEHoDq8",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-04-18T10:14:36.695Z"
     }
   }
 }

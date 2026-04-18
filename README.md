@@ -9,7 +9,8 @@ It is designed around supervisor-controlled teams, full subagents, isolated work
 - `agent`: single-agent worker kernel with model loop and tool orchestration.
 - `team`: supervisor, worker profile, task, result, and run-state models.
 - `host`: embeddable runtime with both low-level `Prompt()` and high-level `StartTeam()/ResumeTeam()/AbortTeam()`.
-- `patterns/deepsearch`: first multi-agent pattern for parallel research, verification, and synthesis-style flows.
+- `patterns/deepsearch`: first multi-agent pattern for parallel research, verification, and synthesis-style flows; remains the default/reference pattern.
+- `patterns/collab`: opt-in generalized collaboration pattern derived from deepsearch for staged implement/review/verify/synthesize flows.
 - `session`: isolated team sessions and worker sessions.
 - `toolkit`: developer-facing APIs for local tools, HTTP/process tools, MCP tool import, and team/profile builders.
 - `transport/mcp/client`: low-level MCP client transport for importing external MCP tools.
@@ -90,6 +91,10 @@ state, _ := runtime.StartTeam(context.Background(), host.StartTeamRequest{
 fmt.Println(state.Result.Summary)
 ```
 
+## Opt-in collaboration pattern
+
+`deepsearch` remains the reference pattern and existing callers can keep using `deepsearch.New()` unchanged. Teams that want the generalized staged workflow can register `collab.New()` separately and select `Pattern: "collab"` explicitly.
+
 ## MCP integration
 
 Use MCP only to import external tools into worker profiles:
@@ -107,6 +112,7 @@ Those imported tools can then be attached to any worker profile via `ToolNames`.
 ## Official examples
 
 - [examples/research](examples/research/main.go)
+- [examples/collab](examples/collab/main.go)
 - [examples/tooling](examples/tooling/main.go)
 - [examples/approval](examples/approval/main.go)
 - [examples/durable](examples/durable/main.go)

@@ -254,3 +254,75 @@ func TestRuntimePlannerAskHumanPausesTeam(t *testing.T) {
 		t.Fatalf("expected pause reason in result, got %#v", state.Result)
 	}
 }
+
+func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T) {
+	runtime := New(Config{})
+	current := team.RunState{
+		ID:      "team-replan-stale",
+		Pattern: "deepsearch",
+		Status:  team.StatusRunning,
+		Phase:   team.PhaseResearch,
+		Workers: []team.AgentInstance{{ID: "worker-1", Role: team.RoleResearcher, ProfileName: "researcher"}},
+		Tasks: []team.Task{
+			{ID: "task-1", Kind: team.TaskKindResearch, Title: "original", Input: "old branch", AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast, SessionID: "stale-session", Status: team.TaskStatusRunning},
+			{ID: "task-2", Kind: team.TaskKindResearch, Title: "dropped", Input: "drop me", AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast, Status: team.TaskStatusPending},
+		},
+		Planning: &team.PlanningState{PlannerName: "replan", PlanVersion: 1},
+	}
+	current.Normalize()
+
+	next, err := runtime.replanTeam(context.Background(), fakePlanner{
+		replanFn: func(_ context.Context, input planner.ReplanInput) (planner.Plan, error) {
+			if got := len(input.State.Tasks); got != 2 {
+				t.Fatalf("expected current tasks in replan input, got %d", got)
+			}
+			return planner.Plan{
+				Goal: "replanned",
+				Tasks: []planner.TaskSpec{
+					{ID: "task-1", Kind: string(team.TaskKindResearch), Title: "replacement", Input: "new branch", AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast},
+					{ID: "task-3", Kind: string(team.TaskKindResearch), Title: "fresh", Input: "fresh branch", AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast},
+				},
+			}, nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatalf("replanTeam() error = %v", err)
+	}
+	if next.Planning.PlanVersion != 2 {
+		t.Fatalf("expected plan version 2 after replan, got %#v", next.Planning)
+	}
+	if len(next.Tasks) != 3 {
+		t.Fatalf("expected replaced task, aborted stale task, and new task, got %#v", next.Tasks)
+	}
+	if next.Tasks[0].Version != current.Tasks[0].Version+1 || next.Tasks[0].Status != team.TaskStatusPending || next.Tasks[0].Input != "new branch" || next.Tasks[0].SessionID != "" {
+		t.Fatalf("expected task-1 to be superseded in place, got %#v", next.Tasks[0])
+	}
+	if next.Tasks[1].Status != team.TaskStatusAborted || next.Tasks[1].Error != "superseded by planner replan" {
+		t.Fatalf("expected dropped task to be aborted, got %#v", next.Tasks[1])
+	}
+	if next.Tasks[2].ID != "task-3" || next.Tasks[2].Status != team.TaskStatusPending {
+		t.Fatalf("expected fresh replanned task to be appended, got %#v", next.Tasks[2])
+	}
+
+	lateReplacement := current.Tasks[0]
+	lateReplacement.Status = team.TaskStatusCompleted
+	lateReplacement.Result = &team.Result{Summary: "late stale result"}
+	ignored, applied, published := runtime.applyTaskOutcome(next, 0, lateReplacement)
+	if applied || published {
+		t.Fatalf("expected superseded version result to be ignored, applied=%v published=%v", applied, published)
+	}
+	if ignored.Tasks[0].Version != next.Tasks[0].Version || ignored.Tasks[0].Result != nil {
+		t.Fatalf("expected authoritative task-1 state to remain unchanged, got %#v", ignored.Tasks[0])
+	}
+
+	lateDropped := current.Tasks[1]
+	lateDropped.Status = team.TaskStatusCompleted
+	lateDropped.Result = &team.Result{Summary: "late dropped result"}
+	ignored, applied, published = runtime.applyTaskOutcome(next, 1, lateDropped)
+	if applied || published {
+		t.Fatalf("expected aborted stale branch result to be ignored, applied=%v published=%v", applied, published)
+	}
+	if ignored.Tasks[1].Status != team.TaskStatusAborted || ignored.Tasks[1].Result == nil || ignored.Tasks[1].Result.Error != "superseded by planner replan" {
+		t.Fatalf("expected aborted stale branch to remain authoritative, got %#v", ignored.Tasks[1])
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/auth"
+	"github.com/Viking602/go-hydaelyn/blackboard"
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/compact"
 	"github.com/Viking602/go-hydaelyn/hook"
@@ -603,6 +604,10 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 	if len(runnable) == 0 {
 		return current, nil
 	}
+	if guarded, blocked := r.blockGuardedSynthesis(current, runnableSet); blocked {
+		guarded.UpdatedAt = time.Now().UTC()
+		return guarded, nil
+	}
 	semByProfile, err := r.buildProfileSemaphores(current, runnableSet)
 	if err != nil {
 		return team.RunState{}, err
@@ -648,20 +653,169 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 	return current, nil
 }
 
+func (r *Runtime) blockGuardedSynthesis(state team.RunState, runnableSet map[string]struct{}) (team.RunState, bool) {
+	current := state
+	blocked := false
+	now := time.Now().UTC()
+	for idx, task := range current.Tasks {
+		if _, ok := runnableSet[task.ID]; !ok {
+			continue
+		}
+		reason, shouldBlock := synthesisVerifierBlockReason(current, task)
+		if !shouldBlock {
+			continue
+		}
+		task.Status = team.TaskStatusFailed
+		task.Error = reason
+		task.Result = &team.Result{Error: reason}
+		task.FinishedAt = now
+		current.Tasks[idx] = task
+		blocked = true
+	}
+	return current, blocked
+}
+
+func synthesisVerifierBlockReason(state team.RunState, task team.Task) (string, bool) {
+	if !task.VerifierRequired {
+		return "", false
+	}
+	if task.Kind != team.TaskKindSynthesize && task.Stage != team.TaskStageSynthesize {
+		return "", false
+	}
+	verifiers := verifierDependenciesForTask(state, task)
+	if len(verifiers) == 0 {
+		return fmt.Sprintf("task %s blocked: missing verifier dependencies for guarded synthesis", task.ID), true
+	}
+	if state.Blackboard == nil {
+		return fmt.Sprintf("task %s blocked: missing verifier evidence", task.ID), true
+	}
+	for _, verifier := range verifiers {
+		decision, status, ok := verifierGateEvidence(state.Blackboard, verifier)
+		if !ok {
+			return fmt.Sprintf("task %s blocked: missing verifier evidence for %s", task.ID, verifier.ID), true
+		}
+		if decision != verifierGatePassDecision {
+			return fmt.Sprintf("task %s blocked by verifier %s (%s)", task.ID, verifier.ID, status), true
+		}
+	}
+	return "", false
+}
+
+func verifierDependenciesForTask(state team.RunState, task team.Task) []team.Task {
+	if len(task.DependsOn) == 0 {
+		return nil
+	}
+	index := make(map[string]team.Task, len(state.Tasks))
+	for _, current := range state.Tasks {
+		index[current.ID] = current
+	}
+	items := make([]team.Task, 0, len(task.DependsOn))
+	for _, dependencyID := range task.DependsOn {
+		dependency, ok := index[dependencyID]
+		if !ok {
+			continue
+		}
+		if dependency.Kind == team.TaskKindVerify || dependency.Stage == team.TaskStageVerify {
+			items = append(items, dependency)
+		}
+	}
+	return items
+}
+
+func verifierGateEvidence(board *blackboard.State, task team.Task) (string, string, bool) {
+	if board == nil {
+		return "", "", false
+	}
+	for _, exchange := range board.ExchangesForTask(task.ID) {
+		decision, status, ok := verifierGateDecisionFromExchange(exchange)
+		if ok {
+			return decision, status, true
+		}
+	}
+	return "", "", false
+}
+
+func verifierGateDecisionFromExchange(exchange blackboard.Exchange) (string, string, bool) {
+	decision := strings.TrimSpace(exchange.Metadata[verifierGateDecisionField])
+	status := strings.TrimSpace(exchange.Metadata[verifierGateStatusField])
+	if decision == "" && len(exchange.Structured) > 0 {
+		if value, ok := exchange.Structured[verifierGateDecisionField].(string); ok {
+			decision = strings.TrimSpace(value)
+		}
+		if value, ok := exchange.Structured[verifierGateStatusField].(string); ok {
+			status = strings.TrimSpace(value)
+		}
+	}
+	if decision == "" {
+		return "", "", false
+	}
+	if status == "" {
+		status = string(blackboard.InferVerificationStatus(exchange.Text))
+	}
+	return decision, status, true
+}
+
 func (r *Runtime) applyTaskOutcome(state team.RunState, index int, item team.Task) (team.RunState, bool, bool) {
 	current := state.Tasks[index]
-	if current.HasAuthoritativeCompletion() {
+	if current.Version != item.Version || current.IsTerminal() {
 		return state, false, false
 	}
 	if item.Status == team.TaskStatusCompleted {
 		item = r.markTaskCompletion(item)
 	}
 	state.Tasks[index] = item
+	if taskFailureCancelsDependents(item) {
+		state = abortDependentTasks(state, item)
+	}
 	if item.Status != team.TaskStatusCompleted {
 		return state, true, false
 	}
 	state = r.applyBlackboardUpdate(state, item)
 	return state, true, true
+}
+
+func taskFailureCancelsDependents(task team.Task) bool {
+	if !task.BlocksTeamOnFailure() {
+		return false
+	}
+	switch task.Status {
+	case team.TaskStatusFailed, team.TaskStatusAborted:
+		return true
+	default:
+		return false
+	}
+}
+
+func abortDependentTasks(state team.RunState, task team.Task) team.RunState {
+	now := time.Now().UTC()
+	reason := fmt.Sprintf("cancelled because dependency %s ended with status %s", task.ID, task.Status)
+	blocked := map[string]struct{}{task.ID: {}}
+	changed := true
+	for changed {
+		changed = false
+		for idx, current := range state.Tasks {
+			if current.IsTerminal() || !dependsOnAny(current, blocked) {
+				continue
+			}
+			current.Status = team.TaskStatusAborted
+			current.Error = reason
+			current.Result = &team.Result{Error: reason}
+			current.FinishedAt = now
+			state.Tasks[idx] = current
+			blocked[current.ID] = struct{}{}
+			changed = true
+		}
+	}
+	return state
+}
+
+func dependsOnAny(task team.Task, ids map[string]struct{}) bool {
+	for _, dep := range task.DependsOn {
+		if _, ok := ids[dep]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runtime) ensureCommittedTaskOutputs(state team.RunState) team.RunState {
@@ -855,8 +1009,11 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 
 			agentInstance, profile, err := r.resolveTaskExecution(current, original)
 			if err != nil {
-				results <- taskOutcome{index: index, task: original, err: err}
-				cancelOnce.Do(siblingCancel)
+				failed, _ := finalizeTaskFailure(original, err)
+				results <- taskOutcome{index: index, task: failed, err: err}
+				if shouldCancelSiblingBatch(failed, err) {
+					cancelOnce.Do(siblingCancel)
+				}
 				return
 			}
 			if sem, ok := semByProfile[profile.Name]; ok {
@@ -864,8 +1021,7 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 				defer func() { <-sem }()
 			}
 			item, err := r.executeTask(taskCtx, current, original, agentInstance, profile)
-			if err != nil {
-				// Terminal failure: ask siblings to stop early.
+			if shouldCancelSiblingBatch(item, err) {
 				cancelOnce.Do(siblingCancel)
 			}
 			results <- taskOutcome{index: index, task: item, err: err}
@@ -874,6 +1030,13 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 	wg.Wait()
 	close(results)
 	return results
+}
+
+func shouldCancelSiblingBatch(task team.Task, err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return task.BlocksTeamOnFailure()
 }
 
 func (r *Runtime) executeTask(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) (team.Task, error) {
@@ -1033,13 +1196,28 @@ func (r *Runtime) resolveTaskExecution(state team.RunState, task team.Task) (tea
 
 func finalizeTaskFailure(task team.Task, err error) (team.Task, error) {
 	task.Error = err.Error()
+	if errors.Is(err, context.Canceled) {
+		task.Status = team.TaskStatusAborted
+		task.Result = &team.Result{Error: err.Error()}
+		task.FinishedAt = time.Now().UTC()
+		return task, err
+	}
 	if task.CanRetry() {
 		task.Status = team.TaskStatusPending
+		return task, nil
+	}
+	if task.FailurePolicy == team.FailurePolicySkipOptional {
+		task.Status = team.TaskStatusSkipped
+		task.Result = &team.Result{Error: err.Error()}
+		task.FinishedAt = time.Now().UTC()
 		return task, nil
 	}
 	task.Status = team.TaskStatusFailed
 	task.Result = &team.Result{Error: err.Error()}
 	task.FinishedAt = time.Now().UTC()
+	if task.FailurePolicy == team.FailurePolicyDegrade {
+		return task, nil
+	}
 	return task, err
 }
 

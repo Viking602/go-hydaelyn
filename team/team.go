@@ -365,6 +365,15 @@ func (t Task) BlocksTeamOnFailure() bool {
 	}
 }
 
+func (t Task) IsTerminal() bool {
+	switch t.Status {
+	case TaskStatusCompleted, TaskStatusFailed, TaskStatusAborted, TaskStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 func (t Task) HasAuthoritativeCompletion() bool {
 	return t.Status == TaskStatusCompleted || !t.CompletedAt.IsZero() || t.CompletedBy != ""
 }

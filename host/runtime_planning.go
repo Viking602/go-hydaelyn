@@ -334,10 +334,62 @@ func (r *Runtime) replanTeam(ctx context.Context, driver planner.Planner, curren
 		return team.RunState{}, err
 	}
 	next := current
-	next.Tasks = append(next.Tasks, tasks...)
+	next.Tasks = reconcileReplannedTasks(next.Tasks, tasks)
 	next.UpdatedAt = time.Now().UTC()
 	next.Planning.PlanVersion++
 	return next, nil
+}
+
+func reconcileReplannedTasks(existing []team.Task, replanned []team.Task) []team.Task {
+	next := append([]team.Task{}, existing...)
+	indexByID := make(map[string]int, len(next))
+	retained := make(map[string]struct{}, len(replanned))
+	for idx, task := range next {
+		indexByID[task.ID] = idx
+	}
+	for _, task := range replanned {
+		retained[task.ID] = struct{}{}
+		if idx, ok := indexByID[task.ID]; ok {
+			next[idx] = supersededReplanTask(next[idx], task)
+			continue
+		}
+		indexByID[task.ID] = len(next)
+		next = append(next, task)
+	}
+	now := time.Now().UTC()
+	for idx, task := range next {
+		if task.IsTerminal() {
+			continue
+		}
+		if _, ok := retained[task.ID]; ok {
+			continue
+		}
+		next[idx] = abortSupersededTask(task, now)
+	}
+	return next
+}
+
+func supersededReplanTask(previous, next team.Task) team.Task {
+	next.Normalize()
+	next.Version = previous.Version + 1
+	next.Attempts = 0
+	next.Status = team.TaskStatusPending
+	next.SessionID = ""
+	next.Result = nil
+	next.Error = ""
+	next.StartedAt = time.Time{}
+	next.CompletedAt = time.Time{}
+	next.CompletedBy = ""
+	next.FinishedAt = time.Time{}
+	return next
+}
+
+func abortSupersededTask(task team.Task, now time.Time) team.Task {
+	task.Status = team.TaskStatusAborted
+	task.Error = "superseded by planner replan"
+	task.Result = &team.Result{Error: task.Error}
+	task.FinishedAt = now
+	return task
 }
 
 func (r *Runtime) finishReviewedTeam(ctx context.Context, state team.RunState, status team.Status, reason string) (team.RunState, bool, bool, error) {

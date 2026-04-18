@@ -318,7 +318,7 @@ Wave 2: collaboration behavior, engineering workflow mapping, backward compatibi
 
   **Commit**: NO | Message: `defer to wave commit` | Files: `host/runtime_events.go`, observer/middleware wiring, matching tests
 
-- [ ] 6. Implement `patterns/collab` as the generalized collaboration seed pattern
+- [x] 6. Implement `patterns/collab` as the generalized collaboration seed pattern
 
   **What to do**: Create a new `patterns/collab` package by extracting the reusable control shape from `patterns/deepsearch`: supervisor start, branch task creation, optional verifier stage, and final synthesis. Keep the runtime generic and let the new pattern specialize task generation/metadata for collaboration flows. Preserve the deepsearch reference path instead of mutating it into an incompatible abstraction.
   **Must NOT do**: Do not fork the runtime into “deepsearch runtime” vs “collaboration runtime”; do not break direct `deepsearch.New()` registration.
@@ -359,7 +359,7 @@ Wave 2: collaboration behavior, engineering workflow mapping, backward compatibi
 
   **Commit**: NO | Message: `defer to wave commit` | Files: `patterns/collab/*`, shared tests if needed, no breaking rename of `patterns/deepsearch/*`
 
-- [ ] 7. Make verifier outputs the only synthesis gate in guarded collaboration flows
+- [x] 7. Make verifier outputs the only synthesis gate in guarded collaboration flows
 
   **What to do**: Implement the verifier contract so verifier tasks consume published branch outputs, publish structured pass/fail evidence, and explicitly block synthesis/finalization when required evidence is missing or contradicted. Engineering-style tasks must route through this same gate. Reuse the existing supported-findings logic as the compatibility anchor, but generalize it to collaboration namespaces.
   **Must NOT do**: Do not let synthesis read implementation outputs directly when verification is required; do not bury verifier logic inside ad hoc pattern code.
@@ -400,7 +400,7 @@ Wave 2: collaboration behavior, engineering workflow mapping, backward compatibi
 
   **Commit**: NO | Message: `defer to wave commit` | Files: verifier-related host/dataflow/blackboard logic and matching tests
 
-- [ ] 8. Make cancellation and replanning respect explicit failure policy
+- [x] 8. Make cancellation and replanning respect explicit failure policy
 
   **What to do**: Implement a per-task failure-policy matrix (`fail_fast`, `retry`, `degrade`, `skip_optional`) that controls sibling cancellation, retry scheduling, and replan eligibility. Ensure parent/child cancellation, optional branches, and post-replan stale results all resolve deterministically. Keep planner `Review/Replan` as the only authority for global route changes.
   **Must NOT do**: Do not cancel all siblings on every failure; do not let workers mutate global plan semantics outside planner review/replan.
@@ -441,7 +441,7 @@ Wave 2: collaboration behavior, engineering workflow mapping, backward compatibi
 
   **Commit**: NO | Message: `defer to wave commit` | Files: runtime/planner cancellation logic and matching tests
 
-- [ ] 9. Map engineering workflow phases onto planner-managed collaboration tasks
+- [x] 9. Map engineering workflow phases onto planner-managed collaboration tasks
 
   **What to do**: Add an engineering workflow template over the new collaboration pattern so `plan -> implement -> review -> verify -> synthesize` is expressed as planner tasks with explicit Reads/Writes/Publish and verifier rules. Reuse normal agent roles/profiles and task metadata rather than inventing a separate workflow runtime. Scope v1 to one concrete engineering flow template; defer generalized workflow authoring APIs.
   **Must NOT do**: Do not build a new workflow engine, YAML DSL, or user-facing universal config system in v1; do not bypass `planner.Plan/Review/Replan`.
@@ -482,7 +482,7 @@ Wave 2: collaboration behavior, engineering workflow mapping, backward compatibi
 
   **Commit**: NO | Message: `defer to wave commit` | Files: planner template/plugin wiring, collaboration pattern integration, matching tests
 
-- [ ] 10. Preserve deepsearch behavior and isolate rollout of the generalized pattern
+- [x] 10. Preserve deepsearch behavior and isolate rollout of the generalized pattern
 
   **What to do**: Keep `deepsearch` behaviorally intact while introducing the generalized collaboration pattern. Add regression tests that prove deepsearch still performs research -> verify -> synthesize correctly, then add isolated registration / example wiring for the new collaboration pattern so adopters can opt in without migrating existing teams immediately.
   **Must NOT do**: Do not silently change deepsearch semantics; do not force existing callers to adopt collaboration metadata before the compatibility layer exists.

@@ -199,3 +199,153 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 		t.Fatalf("expected guarded synthesis text to include verifier-approved exchanges, got %q", text)
 	}
 }
+
+func TestMultiAgentCollaboration_VerifierPublishesSynthesisGate(t *testing.T) {
+	runtime := New(Config{})
+	state := team.RunState{Blackboard: &blackboard.State{}}
+	if _, err := state.Blackboard.UpsertExchangeCAS(blackboard.Exchange{
+		Key:       "review.impl-api",
+		Namespace: "review.impl-api",
+		TaskID:    "impl-api-review",
+		Version:   1,
+		ValueType: blackboard.ExchangeValueTypeText,
+		Text:      "reviewed implementation output",
+	}); err != nil {
+		t.Fatalf("UpsertExchangeCAS() review input error = %v", err)
+	}
+	state.Blackboard.Claims = []blackboard.Claim{{ID: "claim-1", TaskID: "impl-api-review"}}
+	state.Blackboard.Findings = []blackboard.Finding{{
+		ID:       "finding-1",
+		TaskID:   "impl-api-review",
+		Summary:  "reviewed implementation output",
+		ClaimIDs: []string{"claim-1"},
+	}}
+
+	verifyTask := team.Task{
+		ID:        "impl-api-verify",
+		Kind:      team.TaskKindVerify,
+		Stage:     team.TaskStageVerify,
+		Namespace: "verify.impl-api",
+		Version:   1,
+		Reads:     []string{"review.impl-api"},
+		Writes:    []string{"verify.impl-api"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		DependsOn: []string{"impl-api-review"},
+		Result: &team.Result{
+			Summary:    "supported",
+			Confidence: 0.9,
+		},
+	}
+
+	state = runtime.applyBlackboardUpdate(state, verifyTask)
+	exchanges := state.Blackboard.ExchangesForTask(verifyTask.ID)
+	if len(exchanges) == 0 {
+		t.Fatalf("expected verifier exchanges, got %#v", state.Blackboard)
+	}
+
+	var gate *blackboard.Exchange
+	var published *blackboard.Exchange
+	for idx := range exchanges {
+		exchange := exchanges[idx]
+		switch exchange.Key {
+		case verifierGateExchangeKey:
+			gate = &exchange
+		case "verify.impl-api":
+			published = &exchange
+		}
+	}
+	if gate == nil {
+		t.Fatalf("expected explicit verifier gate exchange, got %#v", exchanges)
+	}
+	if gate.Namespace != "verify.impl-api" {
+		t.Fatalf("expected verifier gate namespace to stay under verify.*, got %#v", gate)
+	}
+	if decision := gate.Metadata[verifierGateDecisionField]; decision != verifierGatePassDecision {
+		t.Fatalf("expected pass decision metadata, got %#v", gate.Metadata)
+	}
+	if status := gate.Metadata[verifierGateStatusField]; status != string(blackboard.VerificationStatusSupported) {
+		t.Fatalf("expected supported status metadata, got %#v", gate.Metadata)
+	}
+	if count, ok := gate.Structured[verifierGateEvidenceCountField].(int); !ok || count != 1 {
+		t.Fatalf("expected consumed published input count, got %#v", gate.Structured)
+	}
+	if published == nil {
+		t.Fatalf("expected verifier write exchange, got %#v", exchanges)
+	}
+	if published.Namespace != "verify.impl-api" {
+		t.Fatalf("expected published verifier output in verify namespace, got %#v", published)
+	}
+	if published.Metadata[verifierGateDecisionField] != verifierGatePassDecision {
+		t.Fatalf("expected synthesis gate metadata on verifier output, got %#v", published.Metadata)
+	}
+	if published.Structured[verifierGateStatusField] != string(blackboard.VerificationStatusSupported) {
+		t.Fatalf("expected structured verification status on verifier output, got %#v", published.Structured)
+	}
+	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGatePassDecision || status != string(blackboard.VerificationStatusSupported) {
+		t.Fatalf("expected verifier evidence lookup to resolve explicit gate, got decision=%q status=%q ok=%v", decision, status, ok)
+	}
+	if len(state.Blackboard.ExchangesForKey("supported_findings")) != 1 {
+		t.Fatalf("expected supported findings compatibility exchange, got %#v", state.Blackboard.ExchangesForKey("supported_findings"))
+	}
+}
+
+func TestMultiAgentCollaboration_VerifierBlocksSynthesisOnMissingEvidence(t *testing.T) {
+	runtime := New(Config{})
+	state := team.RunState{
+		ID:     "team-1",
+		Status: team.StatusRunning,
+		Tasks: []team.Task{
+			{
+				ID:        "impl-api-verify",
+				Kind:      team.TaskKindVerify,
+				Stage:     team.TaskStageVerify,
+				Namespace: "verify.impl-api",
+				Status:    team.TaskStatusCompleted,
+			},
+			{
+				ID:               "task-synthesize",
+				Kind:             team.TaskKindSynthesize,
+				Stage:            team.TaskStageSynthesize,
+				AssigneeAgentID:  "supervisor",
+				DependsOn:        []string{"impl-api-verify"},
+				Reads:            []string{"verify.impl-api"},
+				VerifierRequired: true,
+				Status:           team.TaskStatusPending,
+			},
+		},
+	}
+
+	next, err := runtime.executeTasks(context.Background(), state)
+	if err != nil {
+		t.Fatalf("executeTasks() error = %v", err)
+	}
+	synth := next.Tasks[1]
+	if synth.Status != team.TaskStatusFailed {
+		t.Fatalf("expected guarded synthesis to fail without verifier evidence, got %#v", synth)
+	}
+	if !strings.Contains(synth.Error, "missing verifier evidence") {
+		t.Fatalf("expected missing verifier evidence error, got %#v", synth)
+	}
+
+	next.Blackboard = &blackboard.State{}
+	if _, err := next.Blackboard.UpsertExchangeCAS(blackboard.Exchange{
+		Key:       verifierGateExchangeKey,
+		Namespace: "verify.impl-api",
+		TaskID:    "impl-api-verify",
+		Version:   1,
+		ValueType: blackboard.ExchangeValueTypeJSON,
+		Structured: map[string]any{
+			verifierGateDecisionField: verifierGateBlockDecision,
+			verifierGateStatusField:   string(blackboard.VerificationStatusContradicted),
+		},
+		Metadata: map[string]string{
+			verifierGateDecisionField: verifierGateBlockDecision,
+			verifierGateStatusField:   string(blackboard.VerificationStatusContradicted),
+		},
+	}); err != nil {
+		t.Fatalf("UpsertExchangeCAS() blocked gate error = %v", err)
+	}
+	if reason, blocked := synthesisVerifierBlockReason(next, next.Tasks[1]); !blocked || !strings.Contains(reason, "blocked by verifier") {
+		t.Fatalf("expected contradicted verifier evidence to block synthesis, got reason=%q blocked=%v", reason, blocked)
+	}
+}

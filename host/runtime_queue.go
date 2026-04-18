@@ -65,12 +65,12 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 		}
 		return err
 	}
-	if original.HasAuthoritativeCompletion() {
+	if original.IsTerminal() {
 		return r.queue.Release(ctx, lease)
 	}
 	item, stopHeartbeat, err := r.executeQueuedTask(ctx, state, original, lease)
 	defer stopHeartbeat()
-	if err != nil {
+	if err != nil && item.ID == "" {
 		return err
 	}
 	state = r.applyQueuedTaskResult(state, index, item)
@@ -86,7 +86,7 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 			r.recordSynthesisCommittedEvent(ctx, state, applied)
 		}
 	}
-	if err := r.persistQueuedState(ctx, state, item.ID); err != nil {
+	if err := r.persistQueuedTaskState(ctx, state, item); err != nil {
 		if errors.Is(err, errQueuedTaskAlreadyCommitted) {
 			return r.queue.Release(ctx, lease)
 		}
@@ -126,7 +126,8 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
 		_ = r.queue.Release(ctx, lease)
-		return taskOutcome{index: index, task: original, err: err}, true
+		failed, _ := finalizeTaskFailure(original, err)
+		return taskOutcome{index: index, task: failed, err: err}, true
 	}
 	releaseSemaphore := func() {}
 	if sem, ok := semByProfile[profile.Name]; ok {
@@ -210,7 +211,6 @@ func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, or
 	return item, stopHeartbeat, err
 }
 
-
 var errQueuedTaskAlreadyCommitted = errors.New("queued task already committed")
 
 func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item team.Task) team.RunState {
@@ -220,6 +220,10 @@ func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item tea
 }
 
 func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState, taskID string) error {
+	return r.persistQueuedTaskState(ctx, state, team.Task{ID: taskID})
+}
+
+func (r *Runtime) persistQueuedTaskState(ctx context.Context, state team.RunState, task team.Task) error {
 	state = r.ensureCommittedTaskOutputs(state)
 	pattern, err := r.lookupPattern(state.Pattern)
 	if err != nil {
@@ -227,29 +231,32 @@ func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState, t
 	}
 	next, terminal, err := r.continueQueuedTeam(ctx, pattern, state)
 	if err != nil {
-		return r.resolveQueuedCommitConflict(ctx, state.ID, taskID, err)
+		return r.resolveQueuedCommitConflict(ctx, state.ID, task, err)
 	}
 	next = r.ensureCommittedTaskOutputs(next)
 	if terminal {
 		return nil
 	}
 	_, err = r.storage.Teams().SaveCAS(ctx, next, next.Version)
-	return r.resolveQueuedCommitConflict(ctx, state.ID, taskID, err)
+	return r.resolveQueuedCommitConflict(ctx, state.ID, task, err)
 }
 
-func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID, taskID string, err error) error {
+func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID string, task team.Task, err error) error {
 	if !errors.Is(err, storage.ErrStaleState) {
 		return err
 	}
-	r.recordStaleWriteRejectedEvent(ctx, teamID, taskID, r.workerID, "state_version_conflict")
+	r.recordStaleWriteRejectedEvent(ctx, teamID, task.ID, r.workerID, "state_version_conflict")
 	current, loadErr := r.storage.Teams().Load(ctx, teamID)
 	if loadErr != nil {
 		return err
 	}
 	current.Normalize()
-	for _, task := range current.Tasks {
-		if task.ID == taskID && task.HasAuthoritativeCompletion() {
-			r.recordLeaseExpiredEvent(ctx, teamID, taskID, r.workerID, "heartbeat_expired")
+	for _, currentTask := range current.Tasks {
+		if currentTask.ID != task.ID {
+			continue
+		}
+		if currentTask.Version > task.Version || currentTask.IsTerminal() {
+			r.recordLeaseExpiredEvent(ctx, teamID, task.ID, r.workerID, "heartbeat_expired")
 			return errQueuedTaskAlreadyCommitted
 		}
 	}

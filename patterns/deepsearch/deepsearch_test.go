@@ -8,7 +8,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-func TestPatternCreatesResearchTasksVerificationAndExplicitSynthesisPhase(t *testing.T) {
+func TestDeepsearchCompatibility_ResearchVerifySynthesize(t *testing.T) {
 	pattern := New()
 	state, err := pattern.Start(context.Background(), team.StartRequest{
 		Pattern:           "deepsearch",
@@ -29,6 +29,11 @@ func TestPatternCreatesResearchTasksVerificationAndExplicitSynthesisPhase(t *tes
 	if len(state.Tasks) != 2 {
 		t.Fatalf("expected 2 research tasks, got %d", len(state.Tasks))
 	}
+	for _, task := range state.Tasks {
+		if task.Kind != team.TaskKindResearch || len(task.Writes) != 1 || task.Writes[0] != researchWriteKey(task.ID) {
+			t.Fatalf("expected deepsearch to start with research-only tasks, got %#v", state.Tasks)
+		}
+	}
 	for idx := range state.Tasks {
 		state.Tasks[idx].Status = team.TaskStatusCompleted
 		state.Tasks[idx].Result = &team.Result{
@@ -44,6 +49,11 @@ func TestPatternCreatesResearchTasksVerificationAndExplicitSynthesisPhase(t *tes
 	}
 	if len(next.Tasks) != 4 {
 		t.Fatalf("expected research + verifier tasks to be present, got %d", len(next.Tasks))
+	}
+	for _, task := range next.Tasks[:2] {
+		if task.Kind != team.TaskKindResearch {
+			t.Fatalf("expected research tasks to remain intact before verification, got %#v", next.Tasks)
+		}
 	}
 	for _, task := range next.Tasks[2:] {
 		if task.Kind != team.TaskKindVerify {
@@ -85,6 +95,9 @@ func TestPatternCreatesResearchTasksVerificationAndExplicitSynthesisPhase(t *tes
 	if len(last.Reads) != 1 || last.Reads[0] != "supported_findings" {
 		t.Fatalf("expected synth task to read supported_findings, got %#v", last)
 	}
+	if len(last.DependsOn) != 2 || last.DependsOn[0] != "task-1-verify" || last.DependsOn[1] != "task-2-verify" {
+		t.Fatalf("expected synth task to depend on verifier tasks, got %#v", last.DependsOn)
+	}
 	last.Status = team.TaskStatusCompleted
 	last.Result = &team.Result{Summary: "architecture", Findings: []team.Finding{{Summary: "architecture", Confidence: 0.9}}}
 	synth.Tasks[len(synth.Tasks)-1] = last
@@ -97,5 +110,8 @@ func TestPatternCreatesResearchTasksVerificationAndExplicitSynthesisPhase(t *tes
 	}
 	if completed.Result.Summary != "architecture" {
 		t.Fatalf("expected synth result to become team result, got %#v", completed.Result)
+	}
+	if len(completed.Result.Findings) != 1 || completed.Result.Findings[0].Summary != "architecture" {
+		t.Fatalf("expected supported findings to flow into final result, got %#v", completed.Result)
 	}
 }
