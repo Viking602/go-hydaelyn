@@ -58,22 +58,34 @@ func mapTaskIndexes(tasks []team.Task) map[string]int {
 
 func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
 	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
+	released := false
+	defer func() {
+		if !released {
+			_ = r.queue.Release(ctx, lease)
+		}
+	}()
 	state, index, original, err := r.loadQueuedExecutionState(ctx, lease)
 	if err != nil {
 		if errors.Is(err, errQueuedTaskMissing) {
 			return nil
 		}
+		released = true
+		_ = r.queue.Release(ctx, lease)
 		return err
 	}
 	if state.IsTerminal() || state.Status == team.StatusAborted {
+		released = true
 		return r.queue.Release(ctx, lease)
 	}
 	if original.IsTerminal() {
+		released = true
 		return r.queue.Release(ctx, lease)
 	}
 	item, stopHeartbeat, err := r.executeQueuedTask(ctx, state, original, lease)
 	defer stopHeartbeat()
 	if err != nil && item.ID == "" {
+		released = true
+		_ = r.queue.Release(ctx, lease)
 		return err
 	}
 	state = r.applyQueuedTaskResult(state, index, item)
@@ -91,10 +103,14 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 	}
 	if err := r.persistQueuedTaskState(ctx, state, item); err != nil {
 		if errors.Is(err, errQueuedTaskAlreadyCommitted) {
+			released = true
 			return r.queue.Release(ctx, lease)
 		}
+		released = true
+		_ = r.queue.Release(ctx, lease)
 		return err
 	}
+	released = true
 	return r.queue.Release(ctx, lease)
 }
 
