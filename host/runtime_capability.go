@@ -129,5 +129,3 @@ func toolCapabilityHandler(driver tool.Driver) capability.Handler {
 		}, nil
 	}
 }
-
-

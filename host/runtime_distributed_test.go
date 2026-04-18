@@ -150,12 +150,12 @@ func (singleTaskPattern) Name() string { return "single-task" }
 func (singleTaskPattern) Start(_ context.Context, request team.StartRequest) (team.RunState, error) {
 	input, _ := request.Input["task"].(string)
 	return team.RunState{
-		ID:      request.TeamID,
-		Pattern: "single-task",
-		Status:  team.StatusRunning,
-		Phase:   team.PhaseResearch,
+		ID:         request.TeamID,
+		Pattern:    "single-task",
+		Status:     team.StatusRunning,
+		Phase:      team.PhaseResearch,
 		Supervisor: team.AgentInstance{ID: "supervisor", Role: team.RoleSupervisor, ProfileName: request.SupervisorProfile},
-		Workers: []team.AgentInstance{{ID: "worker-1", Role: team.RoleResearcher, ProfileName: request.WorkerProfiles[0]}},
+		Workers:    []team.AgentInstance{{ID: "worker-1", Role: team.RoleResearcher, ProfileName: request.WorkerProfiles[0]}},
 		Tasks: []team.Task{{
 			ID:              "task-1",
 			Kind:            team.TaskKindResearch,

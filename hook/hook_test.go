@@ -11,12 +11,12 @@ import (
 )
 
 type mockHandler struct {
-	transformCalled    bool
-	beforeModelCalled  bool
-	beforeToolCalled   bool
-	afterToolCalled    bool
-	onEventCalled      bool
-	returnError        bool
+	transformCalled   bool
+	beforeModelCalled bool
+	beforeToolCalled  bool
+	afterToolCalled   bool
+	onEventCalled     bool
+	returnError       bool
 }
 
 func (m *mockHandler) TransformContext(ctx context.Context, messages []message.Message) ([]message.Message, error) {
@@ -97,12 +97,12 @@ func TestChain_Append(t *testing.T) {
 
 func TestChain_TransformContext(t *testing.T) {
 	tests := []struct {
-		name         string
-		handlers     []Handler
-		messages     []message.Message
-		wantErr      bool
-		wantLen      int
-		wantCalled   []bool
+		name       string
+		handlers   []Handler
+		messages   []message.Message
+		wantErr    bool
+		wantLen    int
+		wantCalled []bool
 	}{
 		{
 			name:       "empty chain",

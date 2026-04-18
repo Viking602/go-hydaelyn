@@ -11,12 +11,12 @@ import (
 
 func TestUsage_Add(t *testing.T) {
 	tests := []struct {
-		name         string
-		u1           Usage
-		u2           Usage
-		wantInput    int
-		wantOutput   int
-		wantTotal    int
+		name       string
+		u1         Usage
+		u2         Usage
+		wantInput  int
+		wantOutput int
+		wantTotal  int
 	}{
 		{
 			name:       "add two usages",

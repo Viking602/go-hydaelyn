@@ -52,9 +52,9 @@ func TestStaticDriver_ResolveProviderCredentials(t *testing.T) {
 			if got.APIKey != tt.want.APIKey {
 				t.Errorf("APIKey = %v, want %v", got.APIKey, tt.want.APIKey)
 			}
-		if !reflect.DeepEqual(got.Headers, tt.want.Headers) {
-			t.Errorf("Headers = %v, want %v", got.Headers, tt.want.Headers)
-		}
+			if !reflect.DeepEqual(got.Headers, tt.want.Headers) {
+				t.Errorf("Headers = %v, want %v", got.Headers, tt.want.Headers)
+			}
 		})
 	}
 }
@@ -96,9 +96,9 @@ func TestStaticDriver_ResolveRuntimeIdentity(t *testing.T) {
 			if got.Subject != tt.want.Subject {
 				t.Errorf("Subject = %v, want %v", got.Subject, tt.want.Subject)
 			}
-		if !reflect.DeepEqual(got.Claims, tt.want.Claims) {
-			t.Errorf("Claims = %v, want %v", got.Claims, tt.want.Claims)
-		}
+			if !reflect.DeepEqual(got.Claims, tt.want.Claims) {
+				t.Errorf("Claims = %v, want %v", got.Claims, tt.want.Claims)
+			}
 		})
 	}
 }

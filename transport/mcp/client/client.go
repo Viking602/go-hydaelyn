@@ -115,8 +115,8 @@ type PromptArgument struct {
 }
 
 type PromptMessage struct {
-	Role    string         `json:"role"`
-	Content ContentBlock   `json:"content"`
+	Role    string       `json:"role"`
+	Content ContentBlock `json:"content"`
 }
 
 func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {

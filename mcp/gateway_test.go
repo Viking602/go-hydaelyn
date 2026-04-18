@@ -24,7 +24,7 @@ func TestClientGateway_ImportTools_NilClient(t *testing.T) {
 	gateway := ClientGateway{}
 
 	ctx := context.Background()
-	
+
 	// This will panic with nil client - use defer/recover to test this
 	defer func() {
 		if r := recover(); r != nil {
@@ -32,7 +32,7 @@ func TestClientGateway_ImportTools_NilClient(t *testing.T) {
 			t.Logf("Expected panic occurred: %v", r)
 		}
 	}()
-	
+
 	_, err := gateway.ImportTools(ctx)
 
 	// Should error with nil client (but actually panics)

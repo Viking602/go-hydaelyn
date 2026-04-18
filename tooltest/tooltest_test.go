@@ -109,4 +109,3 @@ func TestMustCall_ResultFields(t *testing.T) {
 		t.Error("Result.Structured should not be nil")
 	}
 }
-

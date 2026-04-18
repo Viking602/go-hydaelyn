@@ -65,7 +65,7 @@ func (r *Reader) Next() (Event, error) {
 			data = append(data, value)
 		case "id":
 			id = value
-		// retry: is intentionally ignored
+			// retry: is intentionally ignored
 		}
 	}
 	if err := r.scanner.Err(); err != nil {

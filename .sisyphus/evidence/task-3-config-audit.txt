@@ -1,0 +1,4 @@
+Task 3 formatter config audit
+
+Checked for new formatter/lint config files during this task.
+Result: no new formatter config files introduced.
