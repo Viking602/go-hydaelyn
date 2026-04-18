@@ -386,7 +386,7 @@ func supersededReplanTask(previous, next team.Task) team.Task {
 
 func abortSupersededTask(task team.Task, now time.Time) team.Task {
 	task.Status = team.TaskStatusAborted
-	task.Error = "superseded by planner replan"
+	task.Error = eventReasonSupersededByReplan
 	task.Result = &team.Result{Error: task.Error}
 	task.FinishedAt = now
 	return task

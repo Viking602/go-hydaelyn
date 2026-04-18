@@ -213,6 +213,8 @@ func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, or
 
 var errQueuedTaskAlreadyCommitted = errors.New("queued task already committed")
 
+var _ = (*Runtime).persistQueuedState
+
 func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item team.Task) team.RunState {
 	state, _, _ = r.applyTaskOutcome(state, index, item)
 	state.UpdatedAt = time.Now().UTC()
@@ -245,7 +247,7 @@ func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID string
 	if !errors.Is(err, storage.ErrStaleState) {
 		return err
 	}
-	r.recordStaleWriteRejectedEvent(ctx, teamID, task.ID, r.workerID, "state_version_conflict")
+	r.recordStaleWriteRejectedEvent(ctx, teamID, task.ID, r.workerID, eventReasonStateVersionConflict)
 	current, loadErr := r.storage.Teams().Load(ctx, teamID)
 	if loadErr != nil {
 		return err
@@ -256,7 +258,7 @@ func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID string
 			continue
 		}
 		if currentTask.Version > task.Version || currentTask.IsTerminal() {
-			r.recordLeaseExpiredEvent(ctx, teamID, task.ID, r.workerID, "heartbeat_expired")
+			r.recordLeaseExpiredEvent(ctx, teamID, task.ID, r.workerID, eventReasonStateVersionConflict)
 			return errQueuedTaskAlreadyCommitted
 		}
 	}

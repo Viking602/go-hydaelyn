@@ -281,6 +281,7 @@ func (r *Runtime) recordLeaseAcquiredEvent(ctx context.Context, leaseTeamID, lea
 }
 
 func (r *Runtime) recordLeaseExpiredEvent(ctx context.Context, teamID, taskID, ownerID, reason string) {
+	reason = normalizeLifecycleReason(reason)
 	r.recordCollaborationEvent(ctx, collaborationEvent{
 		Stage:     middleware.StageTask,
 		Operation: "queue_lease_expired",
@@ -300,6 +301,7 @@ func (r *Runtime) recordLeaseExpiredEvent(ctx context.Context, teamID, taskID, o
 }
 
 func (r *Runtime) recordStaleWriteRejectedEvent(ctx context.Context, teamID, taskID, workerID, reason string) {
+	reason = normalizeLifecycleReason(reason)
 	r.recordCollaborationEvent(ctx, collaborationEvent{
 		Stage:     middleware.StageTask,
 		Operation: "collaboration_stale_write_rejected",
@@ -340,14 +342,15 @@ func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.Ru
 			metadataLifecycleStatus: decision,
 		},
 		Payload: map[string]any{
-			"taskStage":           string(task.Stage),
+			"taskStage":          string(task.Stage),
 			"verificationStatus": string(status),
-			"summary":             task.Result.Summary,
+			"summary":            task.Result.Summary,
 		},
 	})
 }
 
 func (r *Runtime) recordTaskCancelledEvent(ctx context.Context, state team.RunState, task team.Task, reason string) {
+	reason = normalizeLifecycleReason(reason)
 	r.recordCollaborationEvent(ctx, collaborationEvent{
 		Stage:         middleware.StageTask,
 		Operation:     "collaboration_cancelled",

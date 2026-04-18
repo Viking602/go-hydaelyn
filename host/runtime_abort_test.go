@@ -2,12 +2,42 @@ package host
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
+	"github.com/Viking602/go-hydaelyn/plugin"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/scheduler"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
+
+type abortCountingProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *abortCountingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "abort-counting"}
+}
+
+func (p *abortCountingProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	last := request.Messages[len(request.Messages)-1].Text
+	return provider.NewSliceStream([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: last},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}), nil
+}
+
+func (p *abortCountingProvider) Calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
 
 func TestAbortTeamPersistsAbortedStateAndEvent(t *testing.T) {
 	runtime := New(Config{})
@@ -50,6 +80,123 @@ func TestAbortTeamPersistsAbortedStateAndEvent(t *testing.T) {
 	}
 	if !foundCheckpoint {
 		t.Fatalf("expected checkpoint event on abort, got %#v", events)
+	}
+}
+
+func TestAbortTeamMarksActiveTasksAborted(t *testing.T) {
+	driver := storage.NewMemoryDriver()
+	runtime := New(Config{Storage: driver})
+
+	state := team.RunState{
+		ID:      "team-abort-active-tasks",
+		Pattern: "abort-test",
+		Status:  team.StatusRunning,
+		Phase:   team.PhaseResearch,
+		Tasks: []team.Task{
+			{ID: "pending-task", Status: team.TaskStatusPending},
+			{ID: "running-task", Status: team.TaskStatusRunning},
+			{ID: "completed-task", Status: team.TaskStatusCompleted, CompletedBy: "worker-1", Result: &team.Result{Summary: "done"}},
+			{ID: "failed-task", Status: team.TaskStatusFailed, Error: "failed before abort"},
+			{ID: "skipped-task", Status: team.TaskStatusSkipped, Error: "skipped before abort"},
+		},
+	}
+	state.Normalize()
+	if err := driver.Teams().Save(context.Background(), state); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err := runtime.AbortTeam(context.Background(), state.ID); err != nil {
+		t.Fatalf("AbortTeam() error = %v", err)
+	}
+
+	current, err := runtime.GetTeam(context.Background(), state.ID)
+	if err != nil {
+		t.Fatalf("GetTeam() error = %v", err)
+	}
+	if current.Status != team.StatusAborted {
+		t.Fatalf("expected aborted team state, got %#v", current)
+	}
+
+	statuses := map[string]team.TaskStatus{}
+	for _, task := range current.Tasks {
+		statuses[task.ID] = task.Status
+	}
+	if statuses["pending-task"] != team.TaskStatusAborted {
+		t.Fatalf("expected pending task to abort, got %s", statuses["pending-task"])
+	}
+	if statuses["running-task"] != team.TaskStatusAborted {
+		t.Fatalf("expected running task to abort, got %s", statuses["running-task"])
+	}
+	if statuses["completed-task"] != team.TaskStatusCompleted {
+		t.Fatalf("expected completed task to remain completed, got %s", statuses["completed-task"])
+	}
+	if statuses["failed-task"] != team.TaskStatusFailed {
+		t.Fatalf("expected failed task to remain failed, got %s", statuses["failed-task"])
+	}
+	if statuses["skipped-task"] != team.TaskStatusSkipped {
+		t.Fatalf("expected skipped task to remain skipped, got %s", statuses["skipped-task"])
+	}
+}
+
+func TestAbortTeamPreventsQueuedTaskExecution(t *testing.T) {
+	driver := storage.NewMemoryDriver()
+	queue := scheduler.NewMemoryQueue()
+	provider := &abortCountingProvider{}
+	newRuntime := func(workerID string) *Runtime {
+		runtime := New(Config{Storage: driver, WorkerID: workerID})
+		if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
+			t.Fatalf("RegisterPlugin() error = %v", err)
+		}
+		runtime.RegisterProvider("abort-counting", provider)
+		runtime.RegisterPattern(singleTaskPattern{})
+		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "abort-counting", Model: "test"})
+		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "abort-counting", Model: "test"})
+		return runtime
+	}
+
+	coordinator := newRuntime("coordinator")
+	worker := newRuntime("worker-a")
+
+	state, err := coordinator.QueueTeam(context.Background(), StartTeamRequest{
+		Pattern:           "single-task",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"task": "queued task must not run after abort"},
+	})
+	if err != nil {
+		t.Fatalf("QueueTeam() error = %v", err)
+	}
+	if len(state.Tasks) != 1 || state.Tasks[0].Status != team.TaskStatusPending {
+		t.Fatalf("expected queued pending task, got %#v", state.Tasks)
+	}
+
+	if err := coordinator.AbortTeam(context.Background(), state.ID); err != nil {
+		t.Fatalf("AbortTeam() error = %v", err)
+	}
+
+	processed, err := worker.RunQueueWorker(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("RunQueueWorker() error = %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected worker to release one queued lease, got %d", processed)
+	}
+	if provider.Calls() != 0 {
+		t.Fatalf("expected aborted queued task to never execute, got %d provider calls", provider.Calls())
+	}
+
+	current, err := coordinator.GetTeam(context.Background(), state.ID)
+	if err != nil {
+		t.Fatalf("GetTeam() error = %v", err)
+	}
+	if current.Status != team.StatusAborted {
+		t.Fatalf("expected aborted team state, got %#v", current)
+	}
+	if len(current.Tasks) != 1 || current.Tasks[0].Status != team.TaskStatusAborted {
+		t.Fatalf("expected queued task to remain aborted, got %#v", current.Tasks)
+	}
+	if _, ok, err := queue.Acquire(context.Background(), "worker-b", localQueueLeaseTTL); err != nil || ok {
+		t.Fatalf("expected queue to be empty after releasing aborted task lease, got ok=%v err=%v", ok, err)
 	}
 }
 

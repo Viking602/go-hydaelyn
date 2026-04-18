@@ -130,14 +130,14 @@ func TestMultiAgentCollaboration_LogsConflictTraceContext(t *testing.T) {
 	state := team.RunState{
 		ID:     "team-observe-collab",
 		Status: team.StatusRunning,
-		Tasks: []team.Task{{ID: "verify-1", Kind: team.TaskKindVerify, Stage: team.TaskStageVerify, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "unsupported by verifier"}}, {ID: "task-2", Kind: team.TaskKindResearch, Stage: team.TaskStageImplement, Status: team.TaskStatusRunning}},
+		Tasks:  []team.Task{{ID: "verify-1", Kind: team.TaskKindVerify, Stage: team.TaskStageVerify, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "unsupported by verifier"}}, {ID: "task-2", Kind: team.TaskKindResearch, Stage: team.TaskStageImplement, Status: team.TaskStatusRunning}},
 	}
 	var rootTrace string
 	err := runtime.runStage(context.Background(), &middleware.Envelope{Stage: middleware.StageTeam, Operation: "observe_collaboration", TeamID: state.ID}, func(ctx context.Context, _ *middleware.Envelope) error {
 		rootTrace = observe.TraceID(ctx)
-		runtime.recordStaleWriteRejectedEvent(ctx, state.ID, "verify-1", "worker-a", "state_version_conflict")
+		runtime.recordStaleWriteRejectedEvent(ctx, state.ID, "verify-1", "worker-a", eventReasonStateVersionConflict)
 		runtime.recordVerifierDecisionEvent(ctx, state, state.Tasks[0])
-		runtime.recordTaskCancelledEvent(ctx, state, state.Tasks[1], "team_aborted")
+		runtime.recordTaskCancelledEvent(ctx, state, state.Tasks[1], eventReasonTeamAborted)
 		return nil
 	})
 	if err != nil {

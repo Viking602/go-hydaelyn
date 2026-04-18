@@ -297,7 +297,7 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	if next.Tasks[0].Version != current.Tasks[0].Version+1 || next.Tasks[0].Status != team.TaskStatusPending || next.Tasks[0].Input != "new branch" || next.Tasks[0].SessionID != "" {
 		t.Fatalf("expected task-1 to be superseded in place, got %#v", next.Tasks[0])
 	}
-	if next.Tasks[1].Status != team.TaskStatusAborted || next.Tasks[1].Error != "superseded by planner replan" {
+	if next.Tasks[1].Status != team.TaskStatusAborted || next.Tasks[1].Error != eventReasonSupersededByReplan {
 		t.Fatalf("expected dropped task to be aborted, got %#v", next.Tasks[1])
 	}
 	if next.Tasks[2].ID != "task-3" || next.Tasks[2].Status != team.TaskStatusPending {
@@ -322,7 +322,7 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	if applied || published {
 		t.Fatalf("expected aborted stale branch result to be ignored, applied=%v published=%v", applied, published)
 	}
-	if ignored.Tasks[1].Status != team.TaskStatusAborted || ignored.Tasks[1].Result == nil || ignored.Tasks[1].Result.Error != "superseded by planner replan" {
+	if ignored.Tasks[1].Status != team.TaskStatusAborted || ignored.Tasks[1].Result == nil || ignored.Tasks[1].Result.Error != eventReasonSupersededByReplan {
 		t.Fatalf("expected aborted stale branch to remain authoritative, got %#v", ignored.Tasks[1])
 	}
 }

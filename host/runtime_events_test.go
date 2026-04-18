@@ -2,16 +2,83 @@ package host
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/observe"
+	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/plugin"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/scheduler"
-	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
+
+type sequenceBarrierDriver struct {
+	*storage.MemoryDriver
+	events storage.EventStore
+}
+
+func (d *sequenceBarrierDriver) Events() storage.EventStore {
+	return d.events
+}
+
+type sequenceBarrierEventStore struct {
+	inner   storage.EventStore
+	workers int
+
+	mu       sync.Mutex
+	cond     *sync.Cond
+	listed   int
+	appended int
+	round    int
+}
+
+func newSequenceBarrierEventStore(inner storage.EventStore, workers int) *sequenceBarrierEventStore {
+	store := &sequenceBarrierEventStore{inner: inner, workers: workers}
+	store.cond = sync.NewCond(&store.mu)
+	return store
+}
+
+func (s *sequenceBarrierEventStore) List(ctx context.Context, runID string) ([]storage.Event, error) {
+	events, err := s.inner.List(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	round := s.round
+	s.listed++
+	if s.listed == s.workers {
+		s.cond.Broadcast()
+	} else {
+		for round == s.round && s.listed < s.workers {
+			s.cond.Wait()
+		}
+	}
+	return events, nil
+}
+
+func (s *sequenceBarrierEventStore) Append(ctx context.Context, event storage.Event) error {
+	if err := s.inner.Append(ctx, event); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	round := s.round
+	s.appended++
+	if s.appended == s.workers {
+		s.listed = 0
+		s.appended = 0
+		s.round++
+		s.cond.Broadcast()
+	} else {
+		for round == s.round && s.appended < s.workers {
+			s.cond.Wait()
+		}
+	}
+	return nil
+}
 
 type collaborationObservabilityProvider struct{}
 
@@ -37,12 +104,12 @@ func (collaborationObservabilityPattern) Name() string { return "collaboration-o
 
 func (collaborationObservabilityPattern) Start(_ context.Context, request team.StartRequest) (team.RunState, error) {
 	return team.RunState{
-		ID:      request.TeamID,
-		Pattern: "collaboration-observability",
-		Status:  team.StatusRunning,
-		Phase:   team.PhaseVerify,
+		ID:         request.TeamID,
+		Pattern:    "collaboration-observability",
+		Status:     team.StatusRunning,
+		Phase:      team.PhaseVerify,
 		Supervisor: team.AgentInstance{ID: "supervisor", Role: team.RoleSupervisor, ProfileName: request.SupervisorProfile},
-		Workers: []team.AgentInstance{{ID: "worker-1", Role: team.RoleResearcher, ProfileName: request.WorkerProfiles[0]}},
+		Workers:    []team.AgentInstance{{ID: "worker-1", Role: team.RoleResearcher, ProfileName: request.WorkerProfiles[0]}},
 		Tasks: []team.Task{
 			{ID: "verify-1", Kind: team.TaskKindVerify, Stage: team.TaskStageVerify, Input: "verify-pass", RequiredRole: team.RoleResearcher, AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast, Status: team.TaskStatusPending},
 			{ID: "synth-1", Kind: team.TaskKindSynthesize, Stage: team.TaskStageSynthesize, Input: "synthesize", RequiredRole: team.RoleResearcher, AssigneeAgentID: "worker-1", FailurePolicy: team.FailurePolicyFailFast, DependsOn: []string{"verify-1"}, Status: team.TaskStatusPending},
@@ -143,8 +210,8 @@ func TestMultiAgentCollaboration_EmitsLifecycleObservability(t *testing.T) {
 	if current.Status != team.StatusCompleted {
 		t.Fatalf("expected completed team, got %#v", current)
 	}
-	runtime.recordLeaseExpiredEvent(context.Background(), current.ID, "verify-1", "worker-observe", "heartbeat_expired")
-	runtime.recordStaleWriteRejectedEvent(context.Background(), current.ID, "verify-1", "worker-observe", "state_version_conflict")
+	runtime.recordLeaseExpiredEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonHeartbeatExpired)
+	runtime.recordStaleWriteRejectedEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonStateVersionConflict)
 
 	events, err := runtime.TeamEvents(context.Background(), current.ID)
 	if err != nil {
@@ -188,5 +255,74 @@ func TestMultiAgentCollaboration_EmitsLifecycleObservability(t *testing.T) {
 	logs := observer.Logs()
 	if len(logs) == 0 {
 		t.Fatalf("expected collaboration logs")
+	}
+}
+
+func TestAppendEventConcurrentSequenceUniqueness(t *testing.T) {
+	const (
+		workers   = 10
+		perWorker = 10
+	)
+
+	driver := storage.NewMemoryDriver()
+	runtime := New(Config{Storage: &sequenceBarrierDriver{
+		MemoryDriver: driver,
+		events:       newSequenceBarrierEventStore(driver.Events(), workers),
+	}})
+
+	ctx := context.Background()
+	runID := "run-concurrent-sequences"
+	start := make(chan struct{})
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for index := range perWorker {
+				if err := runtime.appendEvent(ctx, storage.Event{
+					RunID: runID,
+					Type:  storage.EventTaskStarted,
+					Payload: map[string]any{
+						"worker": worker,
+						"index":  index,
+					},
+				}); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}(worker)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("appendEvent() error = %v", err)
+		}
+	}
+
+	events, err := runtime.storage.Events().List(ctx, runID)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(events) != workers*perWorker {
+		t.Fatalf("expected %d events, got %d", workers*perWorker, len(events))
+	}
+
+	seen := make(map[int]storage.Event, len(events))
+	for i, event := range events {
+		if previous, ok := seen[event.Sequence]; ok {
+			t.Fatalf("duplicate sequence %d: first=%#v second=%#v", event.Sequence, previous, event)
+		}
+		seen[event.Sequence] = event
+		if event.Sequence != i+1 {
+			t.Fatalf("expected append order sequence %d at index %d, got %#v", i+1, i, event)
+		}
 	}
 }

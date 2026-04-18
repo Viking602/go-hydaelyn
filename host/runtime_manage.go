@@ -104,7 +104,7 @@ func (r *Runtime) abortTeam(ctx context.Context, teamID string) error {
 		if task.HasAuthoritativeCompletion() {
 			continue
 		}
-		r.recordTaskCancelledEvent(ctx, state, task, "team_aborted")
+		r.recordTaskCancelledEvent(ctx, state, task, eventReasonTeamAborted)
 	}
 	state.Status = team.StatusAborted
 	state.UpdatedAt = time.Now().UTC()
