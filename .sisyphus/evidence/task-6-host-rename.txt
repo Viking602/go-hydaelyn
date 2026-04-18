@@ -1,0 +1,17 @@
+Task 6 host support file rename evidence
+
+Approved renames applied with git mv:
+- host/runtime_blackboard.go -> host/blackboard.go
+- host/runtime_dataflow.go -> host/dataflow.go
+- host/runtime_events.go -> host/events.go
+- host/runtime_event_reasons.go -> host/event_reasons.go
+- host/runtime_planning.go -> host/planning.go
+- host/runtime_queue.go -> host/queue.go
+- host/runtime_manage.go -> host/team_ops.go
+- host/runtime_stage.go -> host/stages.go
+- host/runtime_capability.go -> host/capability_handlers.go
+
+Verification:
+- go test ./host/... -> ok github.com/Viking602/go-hydaelyn/host
+- Package name preserved: host
+- Exported identifiers unchanged (cosmetic file renames only)

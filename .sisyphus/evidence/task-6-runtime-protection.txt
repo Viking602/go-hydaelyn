@@ -1,0 +1,9 @@
+Task 6 runtime composition root protection evidence
+
+Protected file retained:
+- host/runtime.go exists after renames
+
+Protection checks:
+- host/runtime.go was not renamed
+- host/runtime.go still defines Config
+- host/runtime.go still defines Runtime
