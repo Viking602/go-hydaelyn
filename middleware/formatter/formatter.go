@@ -157,9 +157,7 @@ func RuminationScore(text string) Score {
 	}
 	var markers []string
 	for _, pattern := range ruminationPatterns {
-		for _, match := range pattern.FindAllString(text, -1) {
-			markers = append(markers, match)
-		}
+		markers = append(markers, pattern.FindAllString(text, -1)...)
 	}
 	tokens := len(strings.Fields(text))
 	if tokens == 0 {

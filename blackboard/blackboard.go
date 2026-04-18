@@ -151,10 +151,8 @@ func (Pipeline) Publish(state *State, request PublishRequest) PublishResult {
 	evidenceIDs := make([]string, 0, len(request.Evidence))
 	for idx, item := range request.Evidence {
 		snippet := redact(normalize(item.Snippet))
-		sourceTitle := title
 		if source := normalize(item.Source); source != "" {
-			sourceTitle = source
-			sourceID = ensureSource(state, request.TaskID, sourceTitle)
+			sourceID = ensureSource(state, request.TaskID, source)
 		}
 		evidenceID := ensureEvidence(state, request.TaskID, sourceID, artifactID, summary, snippet, score(request.Confidence))
 		if evidenceID == "" {
