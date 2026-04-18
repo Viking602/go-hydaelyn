@@ -1,0 +1,7 @@
+Transport guardrail verification:
+- transport/mcp/client/client.go remains unchanged
+- transport/mcp/jsonrpc/jsonrpc.go remains unchanged
+- transport/http/admin/admin.go remains unchanged
+
+Observed during git status:
+- only provider files show rename entries for this task

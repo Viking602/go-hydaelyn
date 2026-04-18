@@ -1,0 +1,7 @@
+Renamed provider driver files with git mv:
+- providers/openai/openai.go -> providers/openai/driver.go
+- providers/anthropic/anthropic.go -> providers/anthropic/driver.go
+
+Verification:
+- go test ./providers/... ./transport/... passed
+- transport filenames were not renamed
