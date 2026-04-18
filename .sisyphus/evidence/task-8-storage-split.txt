@@ -1,0 +1,17 @@
+storage split completed
+
+created files:
+- storage/types.go
+- storage/interfaces.go
+- storage/memory.go
+
+removed file:
+- storage/storage.go
+
+verification:
+- gofmt -w storage/types.go storage/interfaces.go storage/memory.go
+- go test ./storage/... ./host/...
+
+result:
+- ok github.com/Viking602/go-hydaelyn/storage
+- ok github.com/Viking602/go-hydaelyn/host

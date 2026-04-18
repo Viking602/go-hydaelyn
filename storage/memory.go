@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -10,113 +9,6 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/workflow"
 )
-
-type RunStatus string
-
-const (
-	RunStatusPending   RunStatus = "pending"
-	RunStatusRunning   RunStatus = "running"
-	RunStatusCompleted RunStatus = "completed"
-	RunStatusFailed    RunStatus = "failed"
-	RunStatusAborted   RunStatus = "aborted"
-)
-
-type Run struct {
-	ID        string            `json:"id"`
-	SessionID string            `json:"sessionId,omitempty"`
-	Status    RunStatus         `json:"status"`
-	Provider  string            `json:"provider,omitempty"`
-	Model     string            `json:"model,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
-}
-
-type RunStore interface {
-	Save(ctx context.Context, run Run) error
-	Load(ctx context.Context, runID string) (Run, error)
-	List(ctx context.Context) ([]Run, error)
-}
-
-type WorkflowStore interface {
-	Save(ctx context.Context, state workflow.State) error
-	Load(ctx context.Context, workflowID string) (workflow.State, error)
-	List(ctx context.Context) ([]workflow.State, error)
-}
-
-type TeamStore interface {
-	Save(ctx context.Context, state team.RunState) error
-	SaveCAS(ctx context.Context, state team.RunState, expectedVersion int) (int, error)
-	Load(ctx context.Context, teamID string) (team.RunState, error)
-	List(ctx context.Context) ([]team.RunState, error)
-}
-
-var ErrStaleState = errors.New("stale team state")
-
-type Artifact struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	MIMEType  string            `json:"mimeType,omitempty"`
-	Data      []byte            `json:"data,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"createdAt"`
-}
-
-type ArtifactStore interface {
-	Save(ctx context.Context, artifact Artifact) error
-	Load(ctx context.Context, artifactID string) (Artifact, error)
-	List(ctx context.Context) ([]Artifact, error)
-}
-
-type EventType string
-
-const (
-	EventTeamStarted            EventType = "TeamStarted"
-	EventPlanCreated            EventType = "PlanCreated"
-	EventTaskScheduled          EventType = "TaskScheduled"
-	EventTaskStarted            EventType = "TaskStarted"
-	EventLeaseAcquired          EventType = "LeaseAcquired"
-	EventLeaseExpired           EventType = "LeaseExpired"
-	EventTaskInputsMaterialized EventType = "TaskInputsMaterialized"
-	EventToolCalled             EventType = "ToolCalled"
-	EventTaskCompleted          EventType = "TaskCompleted"
-	EventTaskOutputsPublished   EventType = "TaskOutputsPublished"
-	EventTaskFailed             EventType = "TaskFailed"
-	EventStaleWriteRejected     EventType = "StaleWriteRejected"
-	EventVerifierPassed         EventType = "VerifierPassed"
-	EventVerifierBlocked        EventType = "VerifierBlocked"
-	EventTaskCancelled          EventType = "TaskCancelled"
-	EventCancelled              EventType = EventTaskCancelled
-	EventSynthesisCommitted     EventType = "SynthesisCommitted"
-	EventCheckpointSaved        EventType = "CheckpointSaved"
-	EventApprovalRequested      EventType = "ApprovalRequested"
-	EventTeamCompleted          EventType = "TeamCompleted"
-)
-
-type Event struct {
-	RunID      string         `json:"runId"`
-	Sequence   int            `json:"sequence"`
-	RecordedAt time.Time      `json:"recordedAt,omitempty"`
-	Type       EventType      `json:"type"`
-	TeamID     string         `json:"teamId,omitempty"`
-	TaskID     string         `json:"taskId,omitempty"`
-	Payload    map[string]any `json:"payload,omitempty"`
-}
-
-type EventStore interface {
-	Append(ctx context.Context, event Event) error
-	List(ctx context.Context, runID string) ([]Event, error)
-}
-
-type Driver interface {
-	Sessions() session.Store
-	Runs() RunStore
-	Workflows() WorkflowStore
-	Teams() TeamStore
-	Artifacts() ArtifactStore
-	Events() EventStore
-}
 
 type MemoryDriver struct {
 	sessions  session.Store
