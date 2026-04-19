@@ -32,8 +32,6 @@ type SecurityContext struct {
 	IdempotencyKey string                     `json:"idempotencyKey,omitempty"`
 }
 
-type securityContextKey struct{}
-
 func WithSecurityContext(ctx context.Context, security SecurityContext) context.Context {
 	return securityctx.WithContext(ctx, toSecurityContext(security))
 }
@@ -90,10 +88,6 @@ func hasPermissionGrant(ctx context.Context, permission string) bool {
 	}
 	_, ok = security.Permissions[permission]
 	return ok
-}
-
-func cloneSecurityContext(security SecurityContext) SecurityContext {
-	return fromSecurityContext(toSecurityContext(security))
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {
