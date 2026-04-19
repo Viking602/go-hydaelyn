@@ -1,6 +1,0 @@
-Task 3 gofmt baseline
-
-Before gofmt -w: drift detected in 59 Go files (see initial gofmt -l . output).
-After gofmt -w: no output from gofmt -l .
-
-Result: formatting drift was corrected with gofmt only.
