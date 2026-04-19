@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/Viking602/go-hydaelyn/benchmark"
+	"github.com/Viking602/go-hydaelyn/evaluation"
 )
 
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -183,13 +184,23 @@ func runLive(ctx context.Context, args []string, stdout io.Writer) error {
 func runReport(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("report", flag.ContinueOnError)
 	runPath := flags.String("run-file", "", "path to a run.json file")
-	format := flags.String("format", "markdown", "report format: markdown or json")
+	scorePath := flags.String("score-file", "", "path to a score.json file")
+	format := flags.String("format", "markdown", "report format: markdown, json, radar, or summary")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *runPath == "" {
-		return errors.New("report requires --run-file")
+
+	// Support both run-file and score-file inputs
+	if *runPath == "" && *scorePath == "" {
+		return errors.New("report requires --run-file or --score-file")
 	}
+
+	// If score file provided, generate capability report
+	if *scorePath != "" {
+		return generateScoreReport(*scorePath, *format, stdout)
+	}
+
+	// Legacy run-file based reporting
 	data, err := os.ReadFile(*runPath)
 	if err != nil {
 		return err
@@ -205,7 +216,47 @@ func runReport(args []string, stdout io.Writer) error {
 		_, err := io.WriteString(stdout, benchmark.RenderComparisonMarkdown(result.Comparison))
 		return err
 	default:
-		return fmt.Errorf("unsupported format: %s", *format)
+		return fmt.Errorf("unsupported format for run-file: %s", *format)
+	}
+}
+
+func generateScoreReport(scorePath string, format string, stdout io.Writer) error {
+	data, err := os.ReadFile(scorePath)
+	if err != nil {
+		return fmt.Errorf("read score file: %w", err)
+	}
+
+	var score evaluation.ScorePayload
+	if err := json.Unmarshal(data, &score); err != nil {
+		return fmt.Errorf("decode score: %w", err)
+	}
+
+	switch format {
+	case "radar":
+		// Output capability radar JSON with all dimensions
+		report := evaluation.GenerateCapabilityReport(&score)
+		return encodeJSON(stdout, report)
+	case "json":
+		// Output full score payload with release decision
+		output := struct {
+			*evaluation.ScorePayload
+			ReleaseDecision evaluation.ReleaseDecision `json:"releaseDecision"`
+		}{
+			ScorePayload:    &score,
+			ReleaseDecision: evaluation.EvaluateReleaseGate(&score),
+		}
+		return encodeJSON(stdout, output)
+	case "summary":
+		// Output human-readable summary
+		summary := evaluation.GenerateSummaryReportFromPayload(&score)
+		_, err := io.WriteString(stdout, summary)
+		return err
+	case "gate":
+		// Output release gate decision only
+		gateOutput := evaluation.EvaluateReleaseGateWithOutput(&score)
+		return encodeJSON(stdout, gateOutput)
+	default:
+		return fmt.Errorf("unsupported format for score-file: %s", format)
 	}
 }
 

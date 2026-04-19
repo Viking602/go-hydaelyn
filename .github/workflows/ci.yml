@@ -52,3 +52,28 @@ jobs:
           name: coverage-report
           path: coverage.out
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Run deterministic eval suite
+        run: go test ./evaluation/... -run 'TestDeterministicEval' -count=1 -v
+
+      - name: Run safety critical tests
+        run: go test ./evaluation/... -run 'TestSafetyCritical' -count=1 -v
+
+      - name: Run replay invariant tests
+        run: go test ./evaluation/... -run 'TestReplayInvariant' -count=1 -v
+
+      - name: Run release gate tests
+        run: go test ./evaluation/... -run 'TestReleaseGate' -count=1 -v
+
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: |
+            **/score.json
+            **/summary.md
+            **/evaluation_report.json
+            **/policy_outcomes.json
+          if-no-files-found: ignore
+          retention-days: 90

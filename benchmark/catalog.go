@@ -18,6 +18,49 @@ type Catalog struct {
 	DefaultOutputDir string          `json:"defaultOutputDir,omitempty"`
 	Benchmarks       []BenchmarkSpec `json:"benchmarks"`
 	Lanes            []LaneSpec      `json:"lanes"`
+	EvalLanes        []EvalLaneSpec  `json:"evalLanes,omitempty"`
+	CaseRegistry     []EvalCaseEntry `json:"caseRegistry,omitempty"`
+}
+
+// EvalLaneSpec defines configuration for evaluation lanes (deterministic, safety, replay)
+type EvalLaneSpec struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name,omitempty"`
+	Type               EvalLaneType      `json:"type"`
+	Enabled            bool              `json:"enabled,omitempty"`
+	RequiredCases      []string          `json:"requiredCases,omitempty"`
+	RequiredTags       []string          `json:"requiredTags,omitempty"`
+	ExcludeTags        []string          `json:"excludeTags,omitempty"`
+	TimeoutSeconds     int               `json:"timeoutSeconds,omitempty"`
+	MaxRetries         int               `json:"maxRetries,omitempty"`
+	Parallelism        int               `json:"parallelism,omitempty"`
+	Required           bool              `json:"required,omitempty"`
+	Blocking           bool              `json:"blocking,omitempty"`
+	ArtifactRetention  string            `json:"artifactRetention,omitempty"`
+	Environment        map[string]string `json:"environment,omitempty"`
+}
+
+// EvalLaneType categorizes evaluation lanes
+type EvalLaneType string
+
+const (
+	EvalLaneTypeDeterministic EvalLaneType = "deterministic"
+	EvalLaneTypeSafety        EvalLaneType = "safety"
+	EvalLaneTypeReplay        EvalLaneType = "replay"
+	EvalLaneTypeLive          EvalLaneType = "live"
+	EvalLaneTypePerformance   EvalLaneType = "performance"
+)
+
+// EvalCaseEntry registers an evaluation case in the catalog
+type EvalCaseEntry struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Path        string   `json:"path"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Level       string   `json:"level,omitempty"`
+	RequiredBy  []string `json:"requiredBy,omitempty"`
+	Enabled     bool     `json:"enabled,omitempty"`
 }
 
 type BenchmarkSpec struct {
@@ -112,11 +155,11 @@ func ValidateCatalog(catalog Catalog) error {
 	if strings.TrimSpace(catalog.Version) == "" {
 		return errors.New("catalog version is required")
 	}
-	if len(catalog.Benchmarks) == 0 {
-		return errors.New("catalog must contain at least one benchmark")
+	if len(catalog.Benchmarks) == 0 && len(catalog.CaseRegistry) == 0 {
+		return errors.New("catalog must contain at least one benchmark or case")
 	}
-	if len(catalog.Lanes) == 0 {
-		return errors.New("catalog must contain at least one lane")
+	if len(catalog.Lanes) == 0 && len(catalog.EvalLanes) == 0 {
+		return errors.New("catalog must contain at least one lane or eval lane")
 	}
 	benchmarkIDs := map[string]struct{}{}
 	for _, bench := range catalog.Benchmarks {
@@ -192,6 +235,65 @@ func ValidateCatalog(catalog Catalog) error {
 			}
 		}
 	}
+
+	// Validate eval lanes
+	evalLaneIDs := map[string]struct{}{}
+	for _, evalLane := range catalog.EvalLanes {
+		if strings.TrimSpace(evalLane.ID) == "" {
+			return errors.New("eval lane id is required")
+		}
+		if _, exists := evalLaneIDs[evalLane.ID]; exists {
+			return fmt.Errorf("duplicate eval lane id: %s", evalLane.ID)
+		}
+		evalLaneIDs[evalLane.ID] = struct{}{}
+		if evalLane.Type == "" {
+			return fmt.Errorf("eval lane %s must have a type", evalLane.ID)
+		}
+		validTypes := map[EvalLaneType]bool{
+			EvalLaneTypeDeterministic: true,
+			EvalLaneTypeSafety:        true,
+			EvalLaneTypeReplay:        true,
+			EvalLaneTypeLive:          true,
+			EvalLaneTypePerformance:   true,
+		}
+		if !validTypes[evalLane.Type] {
+			return fmt.Errorf("eval lane %s has invalid type: %s", evalLane.ID, evalLane.Type)
+		}
+		if evalLane.TimeoutSeconds < 0 {
+			return fmt.Errorf("eval lane %s has negative timeout", evalLane.ID)
+		}
+		if evalLane.MaxRetries < 0 {
+			return fmt.Errorf("eval lane %s has negative maxRetries", evalLane.ID)
+		}
+		if evalLane.Parallelism < 0 {
+			return fmt.Errorf("eval lane %s has negative parallelism", evalLane.ID)
+		}
+	}
+
+	// Validate case registry
+	caseIDs := map[string]struct{}{}
+	for _, entry := range catalog.CaseRegistry {
+		if strings.TrimSpace(entry.ID) == "" {
+			return errors.New("case registry entry id is required")
+		}
+		if _, exists := caseIDs[entry.ID]; exists {
+			return fmt.Errorf("duplicate case registry entry id: %s", entry.ID)
+		}
+		caseIDs[entry.ID] = struct{}{}
+		if strings.TrimSpace(entry.Path) == "" {
+			return fmt.Errorf("case %s must have a path", entry.ID)
+		}
+	}
+
+	// Validate that eval lane required cases exist
+	for _, evalLane := range catalog.EvalLanes {
+		for _, caseID := range evalLane.RequiredCases {
+			if _, exists := caseIDs[caseID]; !exists {
+				return fmt.Errorf("eval lane %s references unknown case: %s", evalLane.ID, caseID)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -213,6 +315,59 @@ func (catalog Catalog) Lane(id string) (LaneSpec, bool) {
 	return LaneSpec{}, false
 }
 
+// EvalLane retrieves an eval lane by ID
+func (catalog Catalog) EvalLane(id string) (EvalLaneSpec, bool) {
+	for _, lane := range catalog.EvalLanes {
+		if lane.ID == id {
+			return lane, true
+		}
+	}
+	return EvalLaneSpec{}, false
+}
+
+// EvalCase retrieves a case entry by ID
+func (catalog Catalog) EvalCase(id string) (EvalCaseEntry, bool) {
+	for _, entry := range catalog.CaseRegistry {
+		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return EvalCaseEntry{}, false
+}
+
+// EvalLanesByType returns all eval lanes of a specific type
+func (catalog Catalog) EvalLanesByType(laneType EvalLaneType) []EvalLaneSpec {
+	var result []EvalLaneSpec
+	for _, lane := range catalog.EvalLanes {
+		if lane.Type == laneType {
+			result = append(result, lane)
+		}
+	}
+	return result
+}
+
+// EnabledEvalLanes returns all enabled eval lanes
+func (catalog Catalog) EnabledEvalLanes() []EvalLaneSpec {
+	var result []EvalLaneSpec
+	for _, lane := range catalog.EvalLanes {
+		if lane.Enabled {
+			result = append(result, lane)
+		}
+	}
+	return result
+}
+
+// RequiredEvalLanes returns all required eval lanes
+func (catalog Catalog) RequiredEvalLanes() []EvalLaneSpec {
+	var result []EvalLaneSpec
+	for _, lane := range catalog.EvalLanes {
+		if lane.Required {
+			result = append(result, lane)
+		}
+	}
+	return result
+}
+
 func (catalog Catalog) Summary() map[string]any {
 	benchmarks := make([]map[string]any, 0, len(catalog.Benchmarks))
 	for _, bench := range catalog.Benchmarks {
@@ -232,15 +387,42 @@ func (catalog Catalog) Summary() map[string]any {
 			"model":    lane.Model,
 		})
 	}
+	evalLanes := make([]map[string]any, 0, len(catalog.EvalLanes))
+	for _, lane := range catalog.EvalLanes {
+		evalLanes = append(evalLanes, map[string]any{
+			"id":      lane.ID,
+			"name":    lane.Name,
+			"type":    lane.Type,
+			"enabled": lane.Enabled,
+			"required": lane.Required,
+		})
+	}
+	cases := make([]map[string]any, 0, len(catalog.CaseRegistry))
+	for _, entry := range catalog.CaseRegistry {
+		cases = append(cases, map[string]any{
+			"id":     entry.ID,
+			"name":   entry.Name,
+			"path":   entry.Path,
+			"tags":   entry.Tags,
+			"level":  entry.Level,
+			"enabled": entry.Enabled,
+		})
+	}
 	sort.Slice(benchmarks, func(i, j int) bool { return benchmarks[i]["id"].(string) < benchmarks[j]["id"].(string) })
 	sort.Slice(lanes, func(i, j int) bool { return lanes[i]["id"].(string) < lanes[j]["id"].(string) })
+	sort.Slice(evalLanes, func(i, j int) bool { return evalLanes[i]["id"].(string) < evalLanes[j]["id"].(string) })
+	sort.Slice(cases, func(i, j int) bool { return cases[i]["id"].(string) < cases[j]["id"].(string) })
 	return map[string]any{
 		"version":          catalog.Version,
 		"defaultOutputDir": catalog.DefaultOutputDir,
 		"benchmarkCount":   len(catalog.Benchmarks),
 		"laneCount":        len(catalog.Lanes),
+		"evalLaneCount":    len(catalog.EvalLanes),
+		"caseCount":        len(catalog.CaseRegistry),
 		"benchmarks":       benchmarks,
 		"lanes":            lanes,
+		"evalLanes":        evalLanes,
+		"cases":            cases,
 	}
 }
 
