@@ -51,5 +51,5 @@ func (t *FlakyTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink
 		t.failuresRemaining--
 		return tool.Result{}, &capability.Error{Kind: capability.ErrorKindUpstream, Message: "flaky fixture failure", Temporary: true}
 	}
-	return jsonResult(call, t.Definition().Name, flakyOutput{Value: input.Value})
+	return jsonResult(call, t.Definition().Name, flakyOutput(input))
 }

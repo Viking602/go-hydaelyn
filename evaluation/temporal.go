@@ -1,7 +1,5 @@
 package evaluation
 
-import "time"
-
 func ResolveTemporalConflicts(claims []Claim, corpus Corpus) []Claim {
 	resolved := make([]Claim, 0, len(claims))
 	for _, claim := range claims {
@@ -43,24 +41,4 @@ func latestDocumentByID(ids []string, corpus Corpus) *CorpusDocument {
 		}
 	}
 	return latest
-}
-
-func newerOf(left, right *CorpusDocument) *CorpusDocument {
-	if left == nil {
-		return right
-	}
-	if right == nil {
-		return left
-	}
-	if right.Date.After(left.Date) || (right.Date.Equal(left.Date) && right.ID > left.ID) {
-		return right
-	}
-	return left
-}
-
-func newerTime(left, right time.Time) time.Time {
-	if right.After(left) {
-		return right
-	}
-	return left
 }
