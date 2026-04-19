@@ -29,7 +29,7 @@ That means the metrics depend on runtime recording:
 ## Example
 
 ```go
-events, err := runtime.TeamEvents(ctx, teamID)
+events, err := runner.TeamEvents(ctx, teamID)
 if err != nil {
 	return err
 }

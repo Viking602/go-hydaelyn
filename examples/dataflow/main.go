@@ -145,17 +145,17 @@ func (examplePlanner) Replan(_ context.Context, _ planner.ReplanInput) (planner.
 
 func main() {
 	driver := storage.NewMemoryDriver()
-	runtime := host.New(host.Config{Storage: driver})
-	runtime.RegisterProvider("example", exampleProvider{})
-	runtime.RegisterTool(exampleTool{artifacts: driver.Artifacts()})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "example", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "example", Model: "test", ToolNames: []string{"artifact_tool"}})
-	if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "dataflow", Component: examplePlanner{}}); err != nil {
+	runner := host.New(host.Config{Storage: driver})
+	runner.RegisterProvider("example", exampleProvider{})
+	runner.RegisterTool(exampleTool{artifacts: driver.Artifacts()})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "example", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "example", Model: "test", ToolNames: []string{"artifact_tool"}})
+	if err := runner.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "dataflow", Component: examplePlanner{}}); err != nil {
 		panic(err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "dataflow",
 		SupervisorProfile: "supervisor",

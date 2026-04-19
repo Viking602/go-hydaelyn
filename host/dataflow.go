@@ -282,7 +282,7 @@ func (r *Runtime) publishTaskOutputMessages(ctx context.Context, state team.RunS
 	}
 }
 
-func appendTaskOutputMessage(ctx context.Context, runtime *Runtime, sessionID, teamID, agentID string, visibility message.Visibility, text string, metadata map[string]string) {
+func appendTaskOutputMessage(ctx context.Context, runner *Runtime, sessionID, teamID, agentID string, visibility message.Visibility, text string, metadata map[string]string) {
 	if sessionID == "" {
 		return
 	}
@@ -291,7 +291,7 @@ func appendTaskOutputMessage(ctx context.Context, runtime *Runtime, sessionID, t
 	msg.AgentID = agentID
 	msg.Visibility = visibility
 	msg.Metadata = cloneStringMap(metadata)
-	_, _ = runtime.appendSessionMessages(ctx, sessionID, msg)
+	_, _ = runner.appendSessionMessages(ctx, sessionID, msg)
 }
 
 func toolResultsFromMessages(messages []message.Message) []message.ToolResult {

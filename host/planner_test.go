@@ -38,15 +38,15 @@ func (f fakePlanner) Replan(ctx context.Context, input planner.ReplanInput) (pla
 	return planner.Plan{}, fmt.Errorf("unexpected Replan call")
 }
 
-func TestRuntimePlannerGeneratesPlanAndAssignsWorkerByCapability(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "research-search", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"search"}})
-	runtime.RegisterProfile(team.Profile{Name: "research-fetch", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"fetch"}})
+func TestPlannerGeneratesPlanAndAssignsWorkerByCapability(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "research-search", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"search"}})
+	runner.RegisterProfile(team.Profile{Name: "research-fetch", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"fetch"}})
 
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "capability-planner",
 		Component: fakePlanner{
@@ -84,7 +84,7 @@ func TestRuntimePlannerGeneratesPlanAndAssignsWorkerByCapability(t *testing.T) {
 		t.Fatalf("RegisterPlugin(planner) error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "capability-planner",
 		SupervisorProfile: "supervisor",
@@ -116,16 +116,16 @@ func TestRuntimePlannerGeneratesPlanAndAssignsWorkerByCapability(t *testing.T) {
 	}
 }
 
-func TestRuntimePlannerReviewCanTriggerReplan(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"search"}})
+func TestPlannerReviewCanTriggerReplan(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test", ToolNames: []string{"search"}})
 
 	reviewCount := 0
 	replanCount := 0
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "replanning",
 		Component: fakePlanner{
@@ -175,7 +175,7 @@ func TestRuntimePlannerReviewCanTriggerReplan(t *testing.T) {
 		t.Fatalf("RegisterPlugin(planner) error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "replanning",
 		SupervisorProfile: "supervisor",
@@ -201,14 +201,14 @@ func TestRuntimePlannerReviewCanTriggerReplan(t *testing.T) {
 	}
 }
 
-func TestRuntimePlannerAskHumanPausesTeam(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+func TestPlannerAskHumanPausesTeam(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "ask-human",
 		Component: fakePlanner{
@@ -235,7 +235,7 @@ func TestRuntimePlannerAskHumanPausesTeam(t *testing.T) {
 		t.Fatalf("RegisterPlugin(planner) error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "ask-human",
 		SupervisorProfile: "supervisor",
@@ -256,7 +256,7 @@ func TestRuntimePlannerAskHumanPausesTeam(t *testing.T) {
 }
 
 func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T) {
-	runtime := New(Config{})
+	runner := New(Config{})
 	current := team.RunState{
 		ID:      "team-replan-stale",
 		Pattern: "deepsearch",
@@ -271,7 +271,7 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	}
 	current.Normalize()
 
-	next, err := runtime.replanTeam(context.Background(), fakePlanner{
+	next, err := runner.replanTeam(context.Background(), fakePlanner{
 		replanFn: func(_ context.Context, input planner.ReplanInput) (planner.Plan, error) {
 			if got := len(input.State.Tasks); got != 2 {
 				t.Fatalf("expected current tasks in replan input, got %d", got)
@@ -307,7 +307,7 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	lateReplacement := current.Tasks[0]
 	lateReplacement.Status = team.TaskStatusCompleted
 	lateReplacement.Result = &team.Result{Summary: "late stale result"}
-	ignored, applied, published := runtime.applyTaskOutcome(next, 0, lateReplacement)
+	ignored, applied, published := runner.applyTaskOutcome(next, 0, lateReplacement)
 	if applied || published {
 		t.Fatalf("expected superseded version result to be ignored, applied=%v published=%v", applied, published)
 	}
@@ -318,7 +318,7 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	lateDropped := current.Tasks[1]
 	lateDropped.Status = team.TaskStatusCompleted
 	lateDropped.Result = &team.Result{Summary: "late dropped result"}
-	ignored, applied, published = runtime.applyTaskOutcome(next, 1, lateDropped)
+	ignored, applied, published = runner.applyTaskOutcome(next, 1, lateDropped)
 	if applied || published {
 		t.Fatalf("expected aborted stale branch result to be ignored, applied=%v published=%v", applied, published)
 	}

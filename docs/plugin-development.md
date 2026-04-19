@@ -19,7 +19,7 @@ Supported plugin types:
 ## Registration
 
 ```go
-err := runtime.RegisterPlugin(plugin.Spec{
+err := runner.RegisterPlugin(plugin.Spec{
 	Type:      plugin.TypeProvider,
 	Name:      "openai",
 	Component: myProvider,

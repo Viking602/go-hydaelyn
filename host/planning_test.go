@@ -8,12 +8,12 @@ import (
 )
 
 func TestBuildPlannedStatePreservesCollaborationContract(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor})
-	runtime.RegisterProfile(team.Profile{Name: "engineer", Role: team.RoleResearcher})
-	runtime.RegisterProfile(team.Profile{Name: "verifier", Role: team.RoleVerifier})
+	runner := New(Config{})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor})
+	runner.RegisterProfile(team.Profile{Name: "engineer", Role: team.RoleResearcher})
+	runner.RegisterProfile(team.Profile{Name: "verifier", Role: team.RoleVerifier})
 
-	state, err := runtime.buildPlannedState(team.StartRequest{
+	state, err := runner.buildPlannedState(team.StartRequest{
 		TeamID:            "team-1",
 		Pattern:           "deepsearch",
 		Planner:           "collab-planner",

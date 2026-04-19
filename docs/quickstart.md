@@ -3,14 +3,14 @@
 ## 1. Minimal Deepsearch Run
 
 ```go
-runtime := host.New(host.Config{})
-runtime.RegisterProvider("fake", myProvider)
-runtime.RegisterPattern(deepsearch.New())
+runner := host.New(host.Config{})
+runner.RegisterProvider("fake", myProvider)
+runner.RegisterPattern(deepsearch.New())
 
-runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
+runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
 
-state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
+state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 	Pattern:           "deepsearch",
 	SupervisorProfile: "supervisor",
 	WorkerProfiles:    []string{"researcher", "researcher"},
@@ -76,8 +76,8 @@ hydaelyn replay --events events.json
 
 ## 4. Replay And Durable Dataflow
 
-- `runtime.TeamEvents(ctx, teamID)` returns the full event stream.
-- `runtime.ReplayTeamState(ctx, teamID)` rebuilds tasks, outputs, artifact refs, and blackboard exchanges.
+- `runner.TeamEvents(ctx, teamID)` returns the full event stream.
+- `runner.ReplayTeamState(ctx, teamID)` rebuilds tasks, outputs, artifact refs, and blackboard exchanges.
 - `TaskInputsMaterialized` and `TaskOutputsPublished` events make dataflow visible in replay and inspection.
 
 ## 5. Next Docs

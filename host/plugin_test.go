@@ -45,21 +45,21 @@ func (o *observerSpy) OnEvent(_ context.Context, _ provider.Event) error {
 
 var _ hook.Handler = (*observerSpy)(nil)
 
-func TestRuntimeRegisterPluginExposesRegistryAndDumpConfig(t *testing.T) {
-	runtime := New(Config{
+func TestRegisterPluginExposesRegistryAndDumpConfig(t *testing.T) {
+	runner := New(Config{
 		Defaults: map[string]string{
 			"timeout": "default",
 			"retry":   "default",
 		},
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name: "researcher",
 		Metadata: map[string]string{
 			"timeout": "profile",
 			"profile": "value",
 		},
 	})
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeProvider,
 		Name:      "fake",
 		Component: fakeProvider{},
@@ -70,10 +70,10 @@ func TestRuntimeRegisterPluginExposesRegistryAndDumpConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	if _, ok := runtime.Plugins().Lookup(plugin.TypeProvider, "fake"); !ok {
+	if _, ok := runner.Plugins().Lookup(plugin.TypeProvider, "fake"); !ok {
 		t.Fatalf("expected provider plugin to be visible in registry")
 	}
-	dump, err := runtime.DumpConfig(DumpConfigRequest{
+	dump, err := runner.DumpConfig(DumpConfigRequest{
 		Plugins: []plugin.Ref{
 			{Type: plugin.TypeProvider, Name: "fake"},
 		},
@@ -104,18 +104,18 @@ func TestRuntimeRegisterPluginExposesRegistryAndDumpConfig(t *testing.T) {
 	}
 }
 
-func TestRuntimeObserverPluginAndMiddlewareAreInvoked(t *testing.T) {
-	runtime := New(Config{})
+func TestObserverPluginAndMiddlewareAreInvoked(t *testing.T) {
+	runner := New(Config{})
 	trace := make([]string, 0, 4)
 	observer := &observerSpy{}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeObserver,
 		Name:      "audit",
 		Component: observer,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(observer) error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeProvider,
 		Name:      "fake",
 		Component: fakeProvider{},
@@ -130,22 +130,22 @@ func TestRuntimeObserverPluginAndMiddlewareAreInvoked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeTool,
 		Name:      "answer",
 		Component: driver,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(tool) error = %v", err)
 	}
-	runtime.UseMiddleware(middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
+	runner.UseMiddleware(middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
 		trace = append(trace, string(envelope.Stage)+":"+envelope.Operation)
 		return next(ctx, envelope)
 	}))
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	if _, err := runtime.Prompt(context.Background(), PromptRequest{
+	if _, err := runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "fake",
 		Model:     "test",
@@ -171,24 +171,24 @@ func TestRuntimeObserverPluginAndMiddlewareAreInvoked(t *testing.T) {
 	}
 }
 
-func TestRuntimeTeamExecutionFlowsThroughRuntimeMiddlewareStages(t *testing.T) {
-	runtime := New(Config{})
+func TestTeamExecutionFlowsThroughRuntimeMiddlewareStages(t *testing.T) {
+	runner := New(Config{})
 	trace := make([]string, 0, 16)
-	runtime.UseMiddleware(middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
+	runner.UseMiddleware(middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
 		trace = append(trace, string(envelope.Stage)+":"+envelope.Operation)
 		return next(ctx, envelope)
 	}))
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeProvider,
 		Name:      "team-fake",
 		Component: teamFakeProvider{},
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(provider) error = %v", err)
 	}
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
@@ -222,14 +222,14 @@ func TestRuntimeTeamExecutionFlowsThroughRuntimeMiddlewareStages(t *testing.T) {
 	}
 }
 
-func TestRuntimeProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing.T) {
-	runtime := New(Config{})
+func TestProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing.T) {
+	runner := New(Config{})
 	trace := make([]string, 0, 4)
-	runtime.UseCapabilityMiddleware(capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
+	runner.UseCapabilityMiddleware(capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
 		trace = append(trace, string(call.Type)+":"+call.Name)
 		return next(ctx, call)
 	}))
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeProvider,
 		Name:      "fake",
 		Component: fakeProvider{},
@@ -244,18 +244,18 @@ func TestRuntimeProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeTool,
 		Name:      "answer",
 		Component: driver,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(tool) error = %v", err)
 	}
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	if _, err := runtime.Prompt(context.Background(), PromptRequest{
+	if _, err := runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "fake",
 		Model:     "test",
@@ -278,17 +278,17 @@ func TestRuntimeProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing
 	}
 }
 
-func TestRuntimeObserverPluginAcceptsObserveObserver(t *testing.T) {
-	runtime := New(Config{})
+func TestObserverPluginAcceptsObserveObserver(t *testing.T) {
+	runner := New(Config{})
 	observer := observe.NewMemoryObserver()
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeObserver,
 		Name:      "memory-observer",
 		Component: observer,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(observer) error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeProvider,
 		Name:      "fake",
 		Component: fakeProvider{},
@@ -303,18 +303,18 @@ func TestRuntimeObserverPluginAcceptsObserveObserver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeTool,
 		Name:      "answer",
 		Component: driver,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(tool) error = %v", err)
 	}
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	if _, err := runtime.Prompt(context.Background(), PromptRequest{
+	if _, err := runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "fake",
 		Model:     "test",

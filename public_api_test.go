@@ -32,11 +32,11 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ tool.Mode
 	_ = toolkit.Profile("researcher")
 
-	runtime := host.New(host.Config{})
-	runtime.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {
+	runner := host.New(host.Config{})
+	runner.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {
 		return capability.Result{Output: "ok"}, nil
 	})
-	if _, err := runtime.InvokeCapability(context.Background(), capability.Call{Type: capability.TypeSearch, Name: "web"}); err != nil {
+	if _, err := runner.InvokeCapability(context.Background(), capability.Call{Type: capability.TypeSearch, Name: "web"}); err != nil {
 		t.Fatalf("InvokeCapability() error = %v", err)
 	}
 }

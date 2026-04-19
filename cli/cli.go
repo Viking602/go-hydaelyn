@@ -95,16 +95,16 @@ func runRun(ctx context.Context, args []string, stdout io.Writer) error {
 	if err := readJSONFile(*requestPath, &request); err != nil {
 		return err
 	}
-	runtime, err := newCLIRuntime(*providerName)
+	runner, err := newCLIRuntime(*providerName)
 	if err != nil {
 		return err
 	}
-	state, err := runtime.StartTeam(ctx, request)
+	state, err := runner.StartTeam(ctx, request)
 	if err != nil {
 		return err
 	}
 	if *eventsPath != "" {
-		events, err := runtime.TeamEvents(ctx, state.ID)
+		events, err := runner.TeamEvents(ctx, state.ID)
 		if err != nil {
 			return err
 		}
@@ -335,8 +335,8 @@ func runEvaluate(args []string, stdout io.Writer) error {
 }
 
 func newCLIRuntime(providerName string) (*host.Runtime, error) {
-	runtime := host.New(host.Config{})
-	runtime.RegisterPattern(deepsearch.New())
+	runner := host.New(host.Config{})
+	runner.RegisterPattern(deepsearch.New())
 	switch providerName {
 	case "openai":
 		apiKey := os.Getenv("OPENAI_API_KEY")
@@ -344,24 +344,24 @@ func newCLIRuntime(providerName string) (*host.Runtime, error) {
 			return nil, errors.New("OPENAI_API_KEY environment variable required")
 		}
 		drv := openai.New(openai.Config{APIKey: apiKey})
-		runtime.RegisterProvider("openai", drv)
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "openai", Model: "gpt-5.4-mini"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "openai", Model: "gpt-5.4-mini"})
+		runner.RegisterProvider("openai", drv)
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "openai", Model: "gpt-5.4-mini"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "openai", Model: "gpt-5.4-mini"})
 	case "anthropic":
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
 		if apiKey == "" {
 			return nil, errors.New("ANTHROPIC_API_KEY environment variable required")
 		}
 		drv := anthropic.New(anthropic.Config{APIKey: apiKey})
-		runtime.RegisterProvider("anthropic", drv)
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "anthropic", Model: "claude-sonnet-4"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "anthropic", Model: "claude-sonnet-4"})
+		runner.RegisterProvider("anthropic", drv)
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "anthropic", Model: "claude-sonnet-4"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "anthropic", Model: "claude-sonnet-4"})
 	default:
-		runtime.RegisterProvider("fake", cliProvider{})
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+		runner.RegisterProvider("fake", cliProvider{})
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
 	}
-	return runtime, nil
+	return runner, nil
 }
 
 type cliProvider struct{}

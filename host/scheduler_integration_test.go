@@ -57,22 +57,22 @@ func (q *queueSpy) RecoverExpired(ctx context.Context, now time.Time) error {
 	return q.inner.RecoverExpired(ctx, now)
 }
 
-func TestRuntimeUsesSchedulerQueueWhenRegistered(t *testing.T) {
+func TestUsesSchedulerQueueWhenRegistered(t *testing.T) {
 	queue := &queueSpy{inner: scheduler.NewMemoryQueue()}
-	runtime := New(Config{})
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	runner := New(Config{})
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeScheduler,
 		Name:      "memory-queue",
 		Component: queue,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher", "researcher"},
@@ -98,22 +98,22 @@ func TestRuntimeUsesSchedulerQueueWhenRegistered(t *testing.T) {
 	}
 }
 
-func TestRuntimeQueueWorkerHeartbeatsLongRunningTask(t *testing.T) {
+func TestQueueWorkerHeartbeatsLongRunningTask(t *testing.T) {
 	queue := &queueSpy{inner: scheduler.NewMemoryQueue()}
-	runtime := New(Config{WorkerID: "worker-a"})
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	runner := New(Config{WorkerID: "worker-a"})
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeScheduler,
 		Name:      "memory-queue",
 		Component: queue,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},

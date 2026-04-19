@@ -11,13 +11,13 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-func TestRuntimePausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
-	if err := runtime.RegisterPlugin(plugin.Spec{
+func TestPausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "ask-human",
 		Component: fakePlanner{
@@ -37,7 +37,7 @@ func TestRuntimePausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "ask-human",
 		SupervisorProfile: "supervisor",
@@ -50,7 +50,7 @@ func TestRuntimePausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
 	if state.Status != team.StatusPaused {
 		t.Fatalf("expected paused state, got %#v", state)
 	}
-	events, err := runtime.storage.Events().List(context.Background(), state.ID)
+	events, err := runner.storage.Events().List(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRuntimePausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
 	if !foundApproval {
 		t.Fatalf("expected approval requested event, got %#v", events)
 	}
-	replayed, err := runtime.ReplayTeamState(context.Background(), state.ID)
+	replayed, err := runner.ReplayTeamState(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("ReplayTeamState() error = %v", err)
 	}
@@ -72,14 +72,14 @@ func TestRuntimePausedTeamRecordsApprovalRequestedEvent(t *testing.T) {
 	}
 }
 
-func TestRuntimeResumeTeamContinuesAfterPause(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+func TestResumeTeamContinuesAfterPause(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 	reviewCount := 0
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "resume-after-approval",
 		Component: fakePlanner{
@@ -103,7 +103,7 @@ func TestRuntimeResumeTeamContinuesAfterPause(t *testing.T) {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "resume-after-approval",
 		SupervisorProfile: "supervisor",
@@ -116,7 +116,7 @@ func TestRuntimeResumeTeamContinuesAfterPause(t *testing.T) {
 	if state.Status != team.StatusPaused {
 		t.Fatalf("expected paused state, got %#v", state)
 	}
-	resumed, err := runtime.ResumeTeam(context.Background(), state.ID)
+	resumed, err := runner.ResumeTeam(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("ResumeTeam() error = %v", err)
 	}

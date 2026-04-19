@@ -33,13 +33,13 @@ func (fakeProvider) Stream(_ context.Context, _ provider.Request) (provider.Stre
 }
 
 func TestAdminHandlerPrompt(t *testing.T) {
-	runtime := host.New(host.Config{})
-	runtime.RegisterProvider("fake", fakeProvider{})
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	runner := host.New(host.Config{})
+	runner.RegisterProvider("fake", fakeProvider{})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	server := New(runtime)
+	server := New(runner)
 	body, _ := json.Marshal(map[string]any{
 		"provider": "fake",
 		"model":    "test",
@@ -54,20 +54,20 @@ func TestAdminHandlerPrompt(t *testing.T) {
 }
 
 func TestAdminHandlerTeamRoutes(t *testing.T) {
-	runtime := host.New(host.Config{})
+	runner := host.New(host.Config{})
 	queue := scheduler.NewMemoryQueue()
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeScheduler,
 		Name:      "memory",
 		Component: queue,
 	}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	runtime.RegisterProvider("fake", fakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
-	state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
+	runner.RegisterProvider("fake", fakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
@@ -76,7 +76,7 @@ func TestAdminHandlerTeamRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTeam() error = %v", err)
 	}
-	server := New(runtime)
+	server := New(runner)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/teams", nil)
 	listRes := httptest.NewRecorder()

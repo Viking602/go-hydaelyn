@@ -16,8 +16,8 @@ import (
 
 func TestQueuedStatePersistRejectsStaleVersion(t *testing.T) {
 	driver := storage.NewMemoryDriver()
-	runtime := New(Config{Storage: driver})
-	runtime.RegisterPattern(linearPattern{})
+	runner := New(Config{Storage: driver})
+	runner.RegisterPattern(linearPattern{})
 
 	base := team.RunState{ID: "team-1", Pattern: "linear", Status: team.StatusCompleted, Phase: team.PhaseComplete}
 	base.Normalize()
@@ -33,7 +33,7 @@ func TestQueuedStatePersistRejectsStaleVersion(t *testing.T) {
 	if _, err := driver.Teams().SaveCAS(context.Background(), newer, stale.Version); err != nil {
 		t.Fatalf("SaveCAS() error = %v", err)
 	}
-	err = runtime.persistQueuedTaskState(context.Background(), stale, team.Task{})
+	err = runner.persistQueuedTaskState(context.Background(), stale, team.Task{})
 	if !errors.Is(err, storage.ErrStaleState) {
 		t.Fatalf("expected ErrStaleState, got %v", err)
 	}
@@ -50,7 +50,7 @@ func TestQueuedStatePersistRejectsStaleVersion(t *testing.T) {
 }
 
 func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
-	runtime := New(Config{WorkerID: "worker-a"})
+	runner := New(Config{WorkerID: "worker-a"})
 	state := team.RunState{
 		ID:      "team-queued-idempotent",
 		Pattern: "linear",
@@ -69,7 +69,7 @@ func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
 	first := state.Tasks[0]
 	first.Status = team.TaskStatusCompleted
 	first.Result = &team.Result{Summary: "authoritative result"}
-	state = runtime.applyQueuedTaskResult(state, 0, first)
+	state = runner.applyQueuedTaskResult(state, 0, first)
 	completedAt := state.Tasks[0].CompletedAt
 	completedBy := state.Tasks[0].CompletedBy
 	if completedAt.IsZero() || completedBy != "worker-a" {
@@ -77,7 +77,7 @@ func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
 	}
 	duplicate := state.Tasks[0]
 	duplicate.Result = &team.Result{Summary: "duplicate result must be ignored"}
-	state = runtime.applyQueuedTaskResult(state, 0, duplicate)
+	state = runner.applyQueuedTaskResult(state, 0, duplicate)
 	if state.Tasks[0].CompletedAt != completedAt || state.Tasks[0].CompletedBy != completedBy {
 		t.Fatalf("expected retry to preserve original completion metadata, got %#v", state.Tasks[0])
 	}
@@ -144,7 +144,7 @@ func TestResolveQueuedCommitConflictUsesStateVersionConflictReason(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			driver := storage.NewMemoryDriver()
-			runtime := New(Config{Storage: driver, WorkerID: "worker-a"})
+			runner := New(Config{Storage: driver, WorkerID: "worker-a"})
 
 			initial := tc.staleState
 			initial.Normalize()
@@ -164,7 +164,7 @@ func TestResolveQueuedCommitConflictUsesStateVersionConflictReason(t *testing.T)
 				t.Fatalf("SaveCAS() error = %v", err)
 			}
 
-			commitErr := runtime.resolveQueuedCommitConflict(ctx, stale.ID, stale.Tasks[0], storage.ErrStaleState)
+			commitErr := runner.resolveQueuedCommitConflict(ctx, stale.ID, stale.Tasks[0], storage.ErrStaleState)
 			if !errors.Is(commitErr, errQueuedTaskAlreadyCommitted) {
 				t.Fatalf("expected errQueuedTaskAlreadyCommitted, got %v", commitErr)
 			}
@@ -186,17 +186,17 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 		errLoadFailed := errors.New("load failed")
 		baseDriver := storage.NewMemoryDriver()
 		queue := &queuedLeaseSpy{inner: scheduler.NewMemoryQueue()}
-		runtime := New(Config{
+		runner := New(Config{
 			Storage: &queuedLeaseDriver{
 				inner: baseDriver,
 				teams: &queuedLeaseTeamStore{inner: baseDriver.Teams(), loadErr: errLoadFailed},
 			},
 			WorkerID: "worker-a",
 		})
-		runtime.queue = queue
+		runner.queue = queue
 
-		lease := queuedLeaseAcquire(t, ctx, queue, runtime.workerID, scheduler.TaskLease{TeamID: "team-load", TaskID: "task-load"})
-		err := runtime.runQueuedLease(ctx, lease)
+		lease := queuedLeaseAcquire(t, ctx, queue, runner.workerID, scheduler.TaskLease{TeamID: "team-load", TaskID: "task-load"})
+		err := runner.runQueuedLease(ctx, lease)
 		if !errors.Is(err, errLoadFailed) {
 			t.Fatalf("expected load error %v, got %v", errLoadFailed, err)
 		}
@@ -208,8 +208,8 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 	t.Run("executeQueuedTask empty item error releases lease", func(t *testing.T) {
 		driver := storage.NewMemoryDriver()
 		queue := &queuedLeaseSpy{inner: scheduler.NewMemoryQueue()}
-		runtime := New(Config{Storage: driver, WorkerID: "worker-a"})
-		runtime.queue = queue
+		runner := New(Config{Storage: driver, WorkerID: "worker-a"})
+		runner.queue = queue
 
 		state := team.RunState{
 			ID:         "team-execute",
@@ -233,8 +233,8 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 			t.Fatalf("Save() error = %v", err)
 		}
 
-		lease := queuedLeaseAcquire(t, ctx, queue, runtime.workerID, scheduler.TaskLease{TeamID: state.ID, TaskID: state.Tasks[0].ID})
-		err := runtime.runQueuedLease(ctx, lease)
+		lease := queuedLeaseAcquire(t, ctx, queue, runner.workerID, scheduler.TaskLease{TeamID: state.ID, TaskID: state.Tasks[0].ID})
+		err := runner.runQueuedLease(ctx, lease)
 		if !errors.Is(err, ErrInvalidTeamState) {
 			t.Fatalf("expected ErrInvalidTeamState, got %v", err)
 		}
@@ -247,18 +247,18 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 		errSaveFailed := errors.New("save failed")
 		baseDriver := storage.NewMemoryDriver()
 		queue := &queuedLeaseSpy{inner: scheduler.NewMemoryQueue()}
-		runtime := New(Config{
+		runner := New(Config{
 			Storage: &queuedLeaseDriver{
 				inner: baseDriver,
 				teams: &queuedLeaseTeamStore{inner: baseDriver.Teams(), saveCASErr: errSaveFailed},
 			},
 			WorkerID: "worker-a",
 		})
-		runtime.queue = queue
-		runtime.RegisterProvider("team-fake", teamFakeProvider{})
-		runtime.RegisterPattern(queuedLeasePattern{})
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-		runtime.RegisterProfile(team.Profile{Name: "worker", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+		runner.queue = queue
+		runner.RegisterProvider("team-fake", teamFakeProvider{})
+		runner.RegisterPattern(queuedLeasePattern{})
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+		runner.RegisterProfile(team.Profile{Name: "worker", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
 		state := team.RunState{
 			ID:         "team-persist",
@@ -282,8 +282,8 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 			t.Fatalf("Save() error = %v", err)
 		}
 
-		lease := queuedLeaseAcquire(t, ctx, queue, runtime.workerID, scheduler.TaskLease{TeamID: state.ID, TaskID: state.Tasks[0].ID})
-		err := runtime.runQueuedLease(ctx, lease)
+		lease := queuedLeaseAcquire(t, ctx, queue, runner.workerID, scheduler.TaskLease{TeamID: state.ID, TaskID: state.Tasks[0].ID})
+		err := runner.runQueuedLease(ctx, lease)
 		if !errors.Is(err, errSaveFailed) {
 			t.Fatalf("expected persist error %v, got %v", errSaveFailed, err)
 		}
@@ -296,15 +296,15 @@ func TestRunQueuedLeaseReleasesLeaseOnAllErrorPaths(t *testing.T) {
 func TestQueuedLeaseRejectsForeignTeamLease(t *testing.T) {
 	newQueueRuntime := func(t *testing.T, workerID string, queue scheduler.TaskQueue) *Runtime {
 		t.Helper()
-		runtime := New(Config{Storage: storage.NewMemoryDriver(), WorkerID: workerID})
-		if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
+		runner := New(Config{Storage: storage.NewMemoryDriver(), WorkerID: workerID})
+		if err := runner.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
 			t.Fatalf("RegisterPlugin() error = %v", err)
 		}
-		runtime.RegisterProvider("team-fake", teamFakeProvider{})
-		runtime.RegisterPattern(singleTaskPattern{})
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
-		return runtime
+		runner.RegisterProvider("team-fake", teamFakeProvider{})
+		runner.RegisterPattern(singleTaskPattern{})
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+		return runner
 	}
 
 	newSingleTaskState := func(t *testing.T, teamID, input string) team.RunState {
@@ -337,14 +337,14 @@ func TestQueuedLeaseRejectsForeignTeamLease(t *testing.T) {
 		}
 	}
 
-	runLease := func(t *testing.T, runtime *Runtime, current team.RunState) (taskOutcome, bool) {
+	runLease := func(t *testing.T, runner *Runtime, current team.RunState) (taskOutcome, bool) {
 		t.Helper()
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				t.Fatalf("processQueuedLease() panicked: %v", recovered)
 			}
 		}()
-		return runtime.processQueuedLease(context.Background(), current, mapTaskIndexes(current.Tasks), nil)
+		return runner.processQueuedLease(context.Background(), current, mapTaskIndexes(current.Tasks), nil)
 	}
 
 	t.Run("foreign team same task id is ignored", func(t *testing.T) {
