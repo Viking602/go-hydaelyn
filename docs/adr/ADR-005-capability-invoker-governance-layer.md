@@ -36,7 +36,7 @@
 - approval
 - rate limit
 
-这些能力都通过 capability middleware 注入，而不是分散到 provider/tool 各自实现里。
+这些能力都通过 capability policy 注入，而不是分散到 provider/tool 各自实现里。
 
 ## 影响
 

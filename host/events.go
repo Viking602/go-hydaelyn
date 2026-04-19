@@ -83,9 +83,18 @@ func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 
 func (r *Runtime) RecordPolicyOutcome(ctx context.Context, outcome storage.PolicyOutcomeEvent) {
 	metadata := policyOutcomeMetadata(outcome)
-	runID := strings.TrimSpace(metadata["runId"])
-	teamID := strings.TrimSpace(metadata["teamId"])
-	taskID := strings.TrimSpace(metadata["taskId"])
+	runID := strings.TrimSpace(outcome.RunID)
+	teamID := strings.TrimSpace(outcome.TeamID)
+	taskID := strings.TrimSpace(outcome.TaskID)
+	if runID == "" {
+		runID = strings.TrimSpace(metadata["runId"])
+	}
+	if teamID == "" {
+		teamID = strings.TrimSpace(metadata["teamId"])
+	}
+	if taskID == "" {
+		taskID = strings.TrimSpace(metadata["taskId"])
+	}
 	if runID == "" {
 		runID = teamID
 	}
@@ -395,11 +404,18 @@ func (r *Runtime) recordStaleWriteRejectedEvent(ctx context.Context, teamID, tas
 	})
 	r.RecordPolicyOutcome(ctx, storage.PolicyOutcomeEvent{
 		SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+		Layer:         "capability",
+		Stage:         "task",
+		Operation:     "invoke",
+		Action:        "block",
 		Policy:        "capability.stale_write",
 		Outcome:       "rejected",
 		Severity:      "error",
 		Message:       fmt.Sprintf("stale write rejected for %s", taskID),
 		Blocking:      true,
+		RunID:         teamID,
+		TeamID:        teamID,
+		TaskID:        taskID,
 		Reference:     collaborationCorrelationID(teamID, taskID),
 		Timestamp:     time.Now().UTC(),
 		Evidence: &storage.PolicyOutcomeEvidence{Metadata: map[string]string{
@@ -427,11 +443,18 @@ func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.Ru
 	}
 	outcome := storage.PolicyOutcomeEvent{
 		SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+		Layer:         "stage",
+		Stage:         string(middleware.StageVerify),
+		Operation:     "check",
+		Action:        map[bool]string{true: "block", false: "allow"}[blocking],
 		Policy:        "verifier.decision",
 		Outcome:       decision,
 		Severity:      severity,
 		Message:       task.Result.Summary,
 		Blocking:      blocking,
+		RunID:         state.ID,
+		TeamID:        state.ID,
+		TaskID:        task.ID,
 		Reference:     collaborationCorrelationID(state.ID, task.ID),
 		Timestamp:     time.Now().UTC(),
 		Evidence: &storage.PolicyOutcomeEvidence{Metadata: map[string]string{
@@ -748,11 +771,19 @@ func verificationPayload(items []blackboard.VerificationResult) []map[string]any
 func policyOutcomePayload(outcome storage.PolicyOutcomeEvent) map[string]any {
 	payload := map[string]any{
 		"schemaVersion": outcome.SchemaVersion,
+		"layer":         outcome.Layer,
+		"stage":         outcome.Stage,
+		"operation":     outcome.Operation,
+		"action":        outcome.Action,
 		"policy":        outcome.Policy,
 		"outcome":       outcome.Outcome,
 		"severity":      outcome.Severity,
 		"message":       outcome.Message,
 		"blocking":      outcome.Blocking,
+		"runId":         outcome.RunID,
+		"teamId":        outcome.TeamID,
+		"taskId":        outcome.TaskID,
+		"agentId":       outcome.AgentID,
 		"reference":     outcome.Reference,
 		"timestamp":     outcome.Timestamp,
 	}
@@ -778,10 +809,26 @@ func policyOutcomePayload(outcome storage.PolicyOutcomeEvent) map[string]any {
 }
 
 func policyOutcomeMetadata(outcome storage.PolicyOutcomeEvent) map[string]string {
-	if outcome.Evidence == nil || len(outcome.Evidence.Metadata) == 0 {
+	metadata := map[string]string{}
+	if outcome.Evidence != nil && len(outcome.Evidence.Metadata) > 0 {
+		metadata = cloneStringMap(outcome.Evidence.Metadata)
+	}
+	if outcome.RunID != "" {
+		metadata["runId"] = outcome.RunID
+	}
+	if outcome.TeamID != "" {
+		metadata["teamId"] = outcome.TeamID
+	}
+	if outcome.TaskID != "" {
+		metadata["taskId"] = outcome.TaskID
+	}
+	if outcome.AgentID != "" {
+		metadata["agentId"] = outcome.AgentID
+	}
+	if len(metadata) == 0 {
 		return nil
 	}
-	return cloneStringMap(outcome.Evidence.Metadata)
+	return metadata
 }
 
 func verificationsForTask(board *blackboard.State, task team.Task) []blackboard.VerificationResult {

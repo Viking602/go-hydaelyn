@@ -32,6 +32,7 @@ type Input struct {
 	// policies because they operate on the final assistant answer rather
 	// than prompt/tool/runtime stages.
 	OutputGuardrails []OutputGuardrail
+	OutputRecorder   OutputGuardrailRecorder
 }
 
 type Result struct {
@@ -69,13 +70,16 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 		totalUsage = totalUsage.Add(usage)
 		lastStopReason = stopReason
 		if len(assistant.ToolCalls) == 0 {
-			finalOutput, retryMessages, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, lastStopReason)
+			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, lastStopReason)
 			if err != nil {
 				return Result{}, err
 			}
 			if len(retryMessages) > 0 {
-				if assistant.Text != "" || assistant.Thinking != "" {
+				if retryPolicy.IncludeRejectedOutput && (assistant.Text != "" || assistant.Thinking != "") {
 					current = append(current, assistant)
+				}
+				if len(retryPolicy.ReplacementContext) > 0 {
+					current = append(current, cloneMessages(retryPolicy.ReplacementContext)...)
 				}
 				current = append(current, retryMessages...)
 				continue
@@ -113,9 +117,9 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 	}, nil
 }
 
-func (e Engine) applyOutputGuardrails(ctx context.Context, input Input, current []message.Message, assistant message.Message, iteration int, usage provider.Usage, stopReason provider.StopReason) (message.Message, []message.Message, error) {
+func (e Engine) applyOutputGuardrails(ctx context.Context, input Input, current []message.Message, assistant message.Message, iteration int, usage provider.Usage, stopReason provider.StopReason) (message.Message, []message.Message, RetryPolicy, error) {
 	if len(input.OutputGuardrails) == 0 {
-		return assistant, nil, nil
+		return assistant, nil, RetryPolicy{}, nil
 	}
 	candidate := assistant
 	for _, guardrail := range input.OutputGuardrails {
@@ -133,34 +137,57 @@ func (e Engine) applyOutputGuardrails(ctx context.Context, input Input, current 
 			Metadata:      cloneStringMap(input.Metadata),
 		})
 		if err != nil {
-			return message.Message{}, nil, err
+			return message.Message{}, nil, RetryPolicy{}, err
 		}
 		normalized, err := normalizeOutputGuardrailResult(result)
 		if err != nil {
-			return message.Message{}, nil, err
+			return message.Message{}, nil, RetryPolicy{}, err
 		}
 		switch normalized.Action {
 		case OutputGuardrailActionAllow:
 			continue
 		case OutputGuardrailActionReplace:
+			e.recordOutputGuardrailDecision(ctx, input, guardrail.Name(), normalized.Action, normalized.Reason, iteration, normalized.Metadata)
 			candidate = *normalized.Replacement
 		case OutputGuardrailActionRetry:
+			e.recordOutputGuardrailDecision(ctx, input, guardrail.Name(), normalized.Action, normalized.Reason, iteration, normalized.Metadata)
 			if iteration >= input.MaxIterations {
-				return message.Message{}, nil, &OutputGuardrailRetryLimitExceededError{
+				return message.Message{}, nil, RetryPolicy{}, &OutputGuardrailRetryLimitExceededError{
 					Guardrail: guardrail.Name(),
 					Output:    candidate,
 				}
 			}
-			return candidate, normalized.RetryMessages, nil
+			return candidate, normalized.RetryMessages, normalized.RetryPolicy, nil
 		case OutputGuardrailActionBlock:
-			return message.Message{}, nil, &OutputGuardrailTripwireTriggeredError{
+			e.recordOutputGuardrailDecision(ctx, input, guardrail.Name(), normalized.Action, normalized.Reason, iteration, normalized.Metadata)
+			return message.Message{}, nil, RetryPolicy{}, &OutputGuardrailTripwireTriggeredError{
 				Guardrail: guardrail.Name(),
 				Reason:    normalized.Reason,
 				Output:    candidate,
 			}
 		}
 	}
-	return candidate, nil, nil
+	return candidate, nil, RetryPolicy{}, nil
+}
+
+func (e Engine) recordOutputGuardrailDecision(ctx context.Context, input Input, name string, action OutputGuardrailAction, reason string, iteration int, metadata map[string]string) {
+	if input.OutputRecorder == nil {
+		return
+	}
+	merged := cloneStringMap(input.Metadata)
+	if merged == nil {
+		merged = map[string]string{}
+	}
+	for key, value := range metadata {
+		merged[key] = value
+	}
+	input.OutputRecorder.RecordOutputGuardrailDecision(ctx, OutputGuardrailDecision{
+		GuardrailName: name,
+		Action:        action,
+		Reason:        reason,
+		Iteration:     iteration,
+		Metadata:      merged,
+	})
 }
 
 func cloneStringMap(values map[string]string) map[string]string {

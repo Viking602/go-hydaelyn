@@ -134,6 +134,21 @@ func TestPolicyOutcomeEmission(t *testing.T) {
 	if got := event.Payload["policy"]; got != "capability.permission" {
 		t.Fatalf("expected permission policy, got %#v", event.Payload)
 	}
+	if got := event.Payload["schemaVersion"]; got != "1.1" {
+		t.Fatalf("expected v1.1 schema version, got %#v", event.Payload)
+	}
+	if got := event.Payload["layer"]; got != "capability" {
+		t.Fatalf("expected capability layer, got %#v", event.Payload)
+	}
+	if got := event.Payload["stage"]; got != "tool" {
+		t.Fatalf("expected tool stage, got %#v", event.Payload)
+	}
+	if got := event.Payload["operation"]; got != "invoke" {
+		t.Fatalf("expected invoke operation, got %#v", event.Payload)
+	}
+	if got := event.Payload["action"]; got != "block" {
+		t.Fatalf("expected block action, got %#v", event.Payload)
+	}
 	if got := event.Payload["outcome"]; got != "denied" {
 		t.Fatalf("expected denied outcome, got %#v", event.Payload)
 	}
@@ -156,7 +171,7 @@ func TestCapabilityToolDriverUsesTrustedSecurityContextPermissions(t *testing.T)
 	driver, err := toolkit.Tool(
 		"guarded-write",
 		func(_ context.Context, _ struct{}) (string, error) { return "ok", nil },
-		toolkit.Metadata(map[string]string{"permission": "tool:guarded-write"}),
+		toolkit.RequiredPermissions("tool:guarded-write"),
 	)
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
@@ -179,5 +194,30 @@ func TestCapabilityToolDriverUsesTrustedSecurityContextPermissions(t *testing.T)
 	}
 	if result.Name != "guarded-write" || result.Content != "ok" {
 		t.Fatalf("unexpected tool result %#v", result)
+	}
+}
+
+func TestCapabilityToolDriverFallsBackToMetadataPermissions(t *testing.T) {
+	t.Parallel()
+
+	runner := New(Config{})
+	runner.UseCapabilityMiddleware(capability.RequirePermissions())
+	driver, err := toolkit.Tool(
+		"legacy-guarded-write",
+		func(_ context.Context, _ struct{}) (string, error) { return "ok", nil },
+		toolkit.Metadata(map[string]string{"permission": "tool:legacy-guarded-write"}),
+	)
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	runner.RegisterTool(driver)
+
+	_, err = runner.tools.Execute(context.Background(), tool.Call{ID: "call-1", Name: "legacy-guarded-write", Arguments: []byte(`{}`)}, nil)
+	if err == nil {
+		t.Fatal("expected metadata permission fallback to deny without trusted grant")
+	}
+	ctx := capability.WithPermissionGrant(context.Background(), capability.PermissionGrant{Name: "tool:legacy-guarded-write", GrantedBy: "policy"})
+	if _, err := runner.tools.Execute(ctx, tool.Call{ID: "call-2", Name: "legacy-guarded-write", Arguments: []byte(`{}`)}, nil); err != nil {
+		t.Fatalf("expected metadata permission fallback to allow trusted grant, got %v", err)
 	}
 }

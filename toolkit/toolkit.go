@@ -15,10 +15,13 @@ import (
 type ToolOption func(*toolConfig)
 
 type toolConfig struct {
-	description string
-	tags        []string
-	metadata    map[string]string
-	origin      string
+	description         string
+	tags                []string
+	metadata            map[string]string
+	origin              string
+	requiredPermissions []string
+	requiresApproval    bool
+	riskLevel           string
 }
 
 func Description(description string) ToolOption {
@@ -42,6 +45,24 @@ func Metadata(metadata map[string]string) ToolOption {
 func Origin(origin string) ToolOption {
 	return func(cfg *toolConfig) {
 		cfg.origin = origin
+	}
+}
+
+func RequiredPermissions(permissions ...string) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.requiredPermissions = append([]string{}, permissions...)
+	}
+}
+
+func RequiresApproval() ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.requiresApproval = true
+	}
+}
+
+func RiskLevel(level string) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.riskLevel = level
 	}
 }
 
@@ -135,6 +156,14 @@ func newFunctionTool(name string, fn any, cfg toolConfig) (*functionTool, error)
 			Tags:        cfg.tags,
 			Metadata:    cfg.metadata,
 			Origin:      cfg.origin,
+			Security: message.ToolSecurity{
+				RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
+				RequiresApproval:    cfg.requiresApproval,
+				RiskLevel:           cfg.riskLevel,
+			},
+			RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
+			RequiresApproval:    cfg.requiresApproval,
+			RiskLevel:           cfg.riskLevel,
 		},
 		fn:         value,
 		inputType:  inputType,

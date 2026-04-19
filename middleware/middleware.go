@@ -111,6 +111,15 @@ func (h hookAdapter) TransformContext(ctx context.Context, messages []message.Me
 	if err := h.chain.Handle(ctx, envelope, func(_ context.Context, _ *Envelope) error { return nil }); err != nil {
 		return nil, err
 	}
+	switch response := envelope.Response.(type) {
+	case []message.Message:
+		return append([]message.Message{}, response...), nil
+	case *[]message.Message:
+		if response == nil {
+			return nil, nil
+		}
+		return append([]message.Message{}, (*response)...), nil
+	}
 	return current, nil
 }
 

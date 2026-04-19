@@ -48,8 +48,9 @@ For declarative authoring, use the in-tree [`recipe`](recipe.md) compiler. It pr
 
 Prefer integrating cross-cutting behavior through:
 
-- runtime middleware
-- capability middleware
+- stage middleware
+- capability policy
+- output guardrails
 - observer plugins
 
 instead of re-implementing timeout, retry, and permission handling independently inside each plugin.

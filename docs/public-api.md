@@ -12,6 +12,7 @@ The v1 public surface includes:
 - `observe`
 - `planner`
 - `plugin`
+- `security`
 - `recipe`
 - `scheduler`
 - `team`

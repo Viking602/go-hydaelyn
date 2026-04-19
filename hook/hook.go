@@ -30,6 +30,16 @@ func (c Chain) Append(handler Handler) Chain {
 	return Chain{handlers: next}
 }
 
+func (c Chain) Prepend(handler Handler) Chain {
+	if handler == nil {
+		return c
+	}
+	next := make([]Handler, 0, len(c.handlers)+1)
+	next = append(next, handler)
+	next = append(next, c.handlers...)
+	return Chain{handlers: next}
+}
+
 func (c Chain) TransformContext(ctx context.Context, messages []message.Message) ([]message.Message, error) {
 	current := append([]message.Message{}, messages...)
 	for _, handler := range c.handlers {

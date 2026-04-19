@@ -227,7 +227,10 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	fastFailure.Status = team.TaskStatusFailed
 	fastFailure.Error = "fast failure"
 	fastFailure.Result = &team.Result{Error: fastFailure.Error}
-	updated, applied, published := runner.applyTaskOutcome(state, 0, fastFailure)
+	updated, applied, published, _, err := runner.applyTaskOutcome(context.Background(), state, 0, fastFailure)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if !applied || published {
 		t.Fatalf("expected fail-fast outcome to apply without publish, applied=%v published=%v", applied, published)
 	}
@@ -242,7 +245,10 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	retryFailure.Attempts = 1
 	retryFailure.Status = team.TaskStatusPending
 	retryFailure.Error = "retry later"
-	updated, applied, published = runner.applyTaskOutcome(updated, 3, retryFailure)
+	updated, applied, published, _, err = runner.applyTaskOutcome(context.Background(), updated, 3, retryFailure)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if !applied || published {
 		t.Fatalf("expected retry outcome to requeue without publish, applied=%v published=%v", applied, published)
 	}
@@ -255,7 +261,10 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	degradeFailure.Status = team.TaskStatusFailed
 	degradeFailure.Error = "degraded failure"
 	degradeFailure.Result = &team.Result{Error: degradeFailure.Error}
-	updated, applied, published = runner.applyTaskOutcome(updated, 5, degradeFailure)
+	updated, applied, published, _, err = runner.applyTaskOutcome(context.Background(), updated, 5, degradeFailure)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if !applied || published {
 		t.Fatalf("expected degrade outcome to apply without publish, applied=%v published=%v", applied, published)
 	}
@@ -268,7 +277,10 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	optionalFailure.Status = team.TaskStatusSkipped
 	optionalFailure.Error = "optional branch skipped"
 	optionalFailure.Result = &team.Result{Error: optionalFailure.Error}
-	updated, applied, published = runner.applyTaskOutcome(updated, 7, optionalFailure)
+	updated, applied, published, _, err = runner.applyTaskOutcome(context.Background(), updated, 7, optionalFailure)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if !applied || published {
 		t.Fatalf("expected optional outcome to skip without publish, applied=%v published=%v", applied, published)
 	}

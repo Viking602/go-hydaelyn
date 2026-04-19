@@ -159,6 +159,12 @@ func TestToolDefinition_Struct(t *testing.T) {
 		Tags:        []string{"test", "demo"},
 		Metadata:    map[string]string{"version": "1.0"},
 		Origin:      "test",
+		Security: ToolSecurity{
+			RequiredPermissions: []string{"tool:test"},
+			RequiresApproval:    true,
+			RiskLevel:           "high",
+			Idempotent:          false,
+		},
 	}
 
 	if def.Name != "test-tool" {
@@ -172,6 +178,9 @@ func TestToolDefinition_Struct(t *testing.T) {
 	}
 	if len(def.Tags) != 2 {
 		t.Errorf("len(Tags) = %v, want 2", len(def.Tags))
+	}
+	if len(def.Security.RequiredPermissions) != 1 || def.Security.RequiredPermissions[0] != "tool:test" {
+		t.Errorf("unexpected tool security %#v", def.Security)
 	}
 }
 

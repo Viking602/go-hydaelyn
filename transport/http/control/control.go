@@ -32,6 +32,7 @@ type PromptRequest struct {
 	Messages []message.Message `json:"messages,omitempty"`
 	ToolMode tool.Mode         `json:"toolMode,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+	Agent    host.AgentOptions `json:"agent,omitempty"`
 }
 
 type ContinueRequest struct {
@@ -39,6 +40,7 @@ type ContinueRequest struct {
 	Model    string            `json:"model"`
 	ToolMode tool.Mode         `json:"toolMode,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+	Agent    host.AgentOptions `json:"agent,omitempty"`
 }
 
 type DrainSchedulerRequest struct {
@@ -80,6 +82,7 @@ func (a *API) Prompt(ctx context.Context, sessionID string, request PromptReques
 		Messages:  request.Messages,
 		ToolMode:  request.ToolMode,
 		Metadata:  request.Metadata,
+		Agent:     request.Agent,
 	})
 }
 
@@ -90,6 +93,7 @@ func (a *API) Continue(ctx context.Context, sessionID string, request ContinueRe
 		Model:     request.Model,
 		ToolMode:  request.ToolMode,
 		Metadata:  request.Metadata,
+		Agent:     request.Agent,
 	})
 }
 
@@ -101,6 +105,7 @@ func (a *API) StreamPrompt(ctx context.Context, sessionID string, request Prompt
 		Messages:  request.Messages,
 		ToolMode:  request.ToolMode,
 		Metadata:  request.Metadata,
+		Agent:     request.Agent,
 	}, emit)
 }
 

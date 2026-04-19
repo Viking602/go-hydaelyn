@@ -317,7 +317,7 @@ var errQueuedTaskAlreadyCommitted = errors.New("queued task already committed")
 var _ = (*Runtime).persistQueuedState
 
 func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item team.Task) team.RunState {
-	state, _, _ = r.applyTaskOutcome(state, index, item)
+	state, _, _, _, _ = r.applyTaskOutcome(context.Background(), state, index, item)
 	state.UpdatedAt = time.Now().UTC()
 	return state
 }

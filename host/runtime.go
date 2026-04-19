@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/auth"
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/compact"
@@ -45,31 +46,35 @@ type Config struct {
 }
 
 type Runtime struct {
-	storage           storage.Driver
-	eventSink         EventSink
-	auth              auth.Driver
-	tools             *tool.Bus
-	workflows         *workflow.Registry
-	hooks             hook.Chain
-	middlewares       middleware.Chain
-	capability        *capability.Invoker
-	plugins           *plugin.Registry
-	queue             scheduler.TaskQueue
-	leaseReleaser     LeaseReleaser
-	teamGuard         teamGuard
-	providers         map[string]provider.Driver
-	profiles          map[string]team.Profile
-	patterns          map[string]team.Pattern
-	defaults          map[string]string
-	workerID          string
-	compactor         compact.Compactor
-	compactThreshold  int
-	maxTeamDriveSteps int
-	mu                sync.RWMutex
-	runSeq            uint64
-	teamSeq           uint64
-	activeRuns        map[string]context.CancelFunc
-	activeTeams       map[string]context.CancelFunc
+	storage                    storage.Driver
+	eventSink                  EventSink
+	auth                       auth.Driver
+	tools                      *tool.Bus
+	workflows                  *workflow.Registry
+	hooks                      hook.Chain
+	middlewares                middleware.Chain
+	capability                 *capability.Invoker
+	plugins                    *plugin.Registry
+	queue                      scheduler.TaskQueue
+	leaseReleaser              LeaseReleaser
+	teamGuard                  teamGuard
+	providers                  map[string]provider.Driver
+	profiles                   map[string]team.Profile
+	patterns                   map[string]team.Pattern
+	outputGuardrails           map[string]agent.OutputGuardrail
+	defaultOutputGuardrails    []agent.OutputGuardrail
+	teamGuardrails             map[string]TeamOutputGuardrail
+	defaults                   map[string]string
+	workerID                   string
+	compactor                  compact.Compactor
+	compactThreshold           int
+	maxTeamDriveSteps          int
+	mu                         sync.RWMutex
+	runSeq                     uint64
+	teamSeq                    uint64
+	activeRuns                 map[string]context.CancelFunc
+	activeTeams                map[string]context.CancelFunc
+	inlineTeamOutputGuardrails map[string][]agent.OutputGuardrail
 }
 
 func New(config Config) *Runtime {
@@ -86,25 +91,29 @@ func NewWithError(config Config) (*Runtime, error) {
 		driver = storage.NewMemoryDriver()
 	}
 	runner := &Runtime{
-		storage:           driver,
-		eventSink:         &runtimeEventSink{store: driver.Events()},
-		auth:              config.Auth,
-		tools:             tool.NewBus(),
-		workflows:         workflow.NewRegistry(),
-		middlewares:       middleware.NewChain(config.Middlewares...),
-		capability:        capability.NewInvoker(),
-		plugins:           plugin.NewRegistry(),
-		teamGuard:         &defaultTeamGuard{},
-		providers:         map[string]provider.Driver{},
-		profiles:          map[string]team.Profile{},
-		patterns:          map[string]team.Pattern{},
-		defaults:          cloneStringMap(config.Defaults),
-		workerID:          config.WorkerID,
-		compactor:         config.Compactor,
-		compactThreshold:  config.CompactThreshold,
-		maxTeamDriveSteps: config.MaxTeamDriveSteps,
-		activeRuns:        map[string]context.CancelFunc{},
-		activeTeams:       map[string]context.CancelFunc{},
+		storage:                    driver,
+		eventSink:                  &runtimeEventSink{store: driver.Events()},
+		auth:                       config.Auth,
+		tools:                      tool.NewBus(),
+		workflows:                  workflow.NewRegistry(),
+		middlewares:                middleware.NewChain(config.Middlewares...),
+		capability:                 capability.NewInvoker(),
+		plugins:                    plugin.NewRegistry(),
+		teamGuard:                  &defaultTeamGuard{},
+		providers:                  map[string]provider.Driver{},
+		profiles:                   map[string]team.Profile{},
+		patterns:                   map[string]team.Pattern{},
+		outputGuardrails:           map[string]agent.OutputGuardrail{},
+		defaultOutputGuardrails:    []agent.OutputGuardrail{},
+		teamGuardrails:             map[string]TeamOutputGuardrail{},
+		defaults:                   cloneStringMap(config.Defaults),
+		workerID:                   config.WorkerID,
+		compactor:                  config.Compactor,
+		compactThreshold:           config.CompactThreshold,
+		maxTeamDriveSteps:          config.MaxTeamDriveSteps,
+		activeRuns:                 map[string]context.CancelFunc{},
+		activeTeams:                map[string]context.CancelFunc{},
+		inlineTeamOutputGuardrails: map[string][]agent.OutputGuardrail{},
 	}
 	runner.leaseReleaser = &defaultLeaseReleaser{queue: runner.queue}
 	if runner.workerID == "" {
@@ -122,6 +131,7 @@ func (r *Runtime) RegisterProvider(name string, driver provider.Driver) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.capability.Register(capability.TypeLLM, name, providerCapabilityHandler(driver))
+	r.capability.RegisterStream(capability.TypeLLM, name, providerCapabilityStreamHandler(driver))
 	r.providers[name] = capabilityProviderDriver{
 		name:     name,
 		metadata: driver.Metadata(),
@@ -169,16 +179,53 @@ func (r *Runtime) Plugins() *plugin.Registry {
 	return r.plugins
 }
 
+// Deprecated: use UseStageMiddleware instead.
 func (r *Runtime) UseMiddleware(handler middleware.Handler) {
 	r.middlewares = r.middlewares.Append(handler)
 }
 
+func (r *Runtime) UseStageMiddleware(handler middleware.Handler) {
+	r.UseMiddleware(handler)
+}
+
+// Deprecated: use UseCapabilityPolicy instead.
 func (r *Runtime) UseCapabilityMiddleware(handler capability.Middleware) {
 	r.capability.Use(handler)
 }
 
+func (r *Runtime) UseCapabilityPolicy(policy capability.Policy) {
+	r.capability.UsePolicy(policy)
+}
+
 func (r *Runtime) RegisterCapability(callType capability.Type, name string, handler capability.Handler) {
 	r.capability.Register(callType, name, handler)
+}
+
+func (r *Runtime) UseOutputGuardrail(guardrail agent.OutputGuardrail) {
+	if guardrail == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.defaultOutputGuardrails = append(r.defaultOutputGuardrails, guardrail)
+}
+
+func (r *Runtime) RegisterOutputGuardrail(name string, guardrail agent.OutputGuardrail) {
+	if guardrail == nil || name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outputGuardrails[name] = guardrail
+}
+
+func (r *Runtime) RegisterTeamOutputGuardrail(name string, guardrail TeamOutputGuardrail) {
+	if guardrail == nil || name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.teamGuardrails[name] = guardrail
 }
 
 func (r *Runtime) InvokeCapability(ctx context.Context, call capability.Call) (capability.Result, error) {
@@ -189,8 +236,8 @@ func (r *Runtime) UseObserver(observer observe.Observer) {
 	if observer == nil {
 		return
 	}
-	r.UseMiddleware(observe.RuntimeMiddleware(observer))
-	r.UseCapabilityMiddleware(observe.CapabilityMiddleware(observer))
+	r.UseStageMiddleware(observe.RuntimeMiddleware(observer))
+	r.UseCapabilityPolicy(observe.CapabilityMiddleware(observer))
 }
 
 func (r *Runtime) RegisterProfile(profile team.Profile) {
@@ -317,7 +364,7 @@ func (r *Runtime) engineHooks() hook.Chain {
 	if r.middlewares.Len() == 0 {
 		return r.hooks
 	}
-	return r.hooks.Append(r.middlewares.HookAdapter())
+	return r.hooks.Prepend(r.middlewares.HookAdapter())
 }
 
 func mergeStringMap(target map[string]string, source map[string]string) {

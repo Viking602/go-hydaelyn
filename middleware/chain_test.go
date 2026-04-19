@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 
@@ -83,5 +84,43 @@ func TestHookAdapterMapsLLMAndToolStages(t *testing.T) {
 		if trace[idx] != want[idx] {
 			t.Fatalf("trace[%d] = %q, want %q", idx, trace[idx], want[idx])
 		}
+	}
+}
+
+func TestHookAdapterTransformContextUsesSliceResponse(t *testing.T) {
+	chain := NewChain(Func(func(ctx context.Context, envelope *Envelope, next Next) error {
+		envelope.Response = []message.Message{message.NewText(message.RoleSystem, "rewritten")}
+		return next(ctx, envelope)
+	}))
+	adapter := chain.HookAdapter()
+	got, err := adapter.TransformContext(context.Background(), []message.Message{
+		message.NewText(message.RoleUser, "hello"),
+	})
+	if err != nil {
+		t.Fatalf("TransformContext() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Role != message.RoleSystem || got[0].Text != "rewritten" {
+		t.Fatalf("expected rewritten slice response, got %#v", got)
+	}
+}
+
+func TestHookAdapterTransformContextPreservesPointerResponse(t *testing.T) {
+	chain := NewChain(Func(func(ctx context.Context, envelope *Envelope, next Next) error {
+		response, ok := envelope.Response.(*[]message.Message)
+		if !ok {
+			t.Fatalf("expected *[]message.Message response, got %T", envelope.Response)
+		}
+		*response = []message.Message{message.NewText(message.RoleSystem, "pointer")}
+		return next(ctx, envelope)
+	}))
+	adapter := chain.HookAdapter()
+	got, err := adapter.TransformContext(context.Background(), []message.Message{
+		message.NewText(message.RoleUser, "hello"),
+	})
+	if err != nil {
+		t.Fatalf("TransformContext() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Role != message.RoleSystem || got[0].Text != "pointer" {
+		t.Fatalf("expected pointer mutation to survive, got %#v", got)
 	}
 }

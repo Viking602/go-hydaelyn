@@ -307,7 +307,10 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	lateReplacement := current.Tasks[0]
 	lateReplacement.Status = team.TaskStatusCompleted
 	lateReplacement.Result = &team.Result{Summary: "late stale result"}
-	ignored, applied, published := runner.applyTaskOutcome(next, 0, lateReplacement)
+	ignored, applied, published, _, err := runner.applyTaskOutcome(context.Background(), next, 0, lateReplacement)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if applied || published {
 		t.Fatalf("expected superseded version result to be ignored, applied=%v published=%v", applied, published)
 	}
@@ -318,7 +321,10 @@ func TestMultiAgentCollaboration_ReplanRejectsLateSupersededResult(t *testing.T)
 	lateDropped := current.Tasks[1]
 	lateDropped.Status = team.TaskStatusCompleted
 	lateDropped.Result = &team.Result{Summary: "late dropped result"}
-	ignored, applied, published = runner.applyTaskOutcome(next, 1, lateDropped)
+	ignored, applied, published, _, err = runner.applyTaskOutcome(context.Background(), next, 1, lateDropped)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
 	if applied || published {
 		t.Fatalf("expected aborted stale branch result to be ignored, applied=%v published=%v", applied, published)
 	}

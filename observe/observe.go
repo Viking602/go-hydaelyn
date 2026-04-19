@@ -11,6 +11,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/middleware"
+	"github.com/Viking602/go-hydaelyn/provider"
 )
 
 type Span interface {
@@ -149,67 +150,192 @@ func (s *memorySpan) End() {
 	})
 }
 
+type OperationKind string
+
+const (
+	OperationStage           OperationKind = "stage"
+	OperationCapability      OperationKind = "capability"
+	OperationOutputGuardrail OperationKind = "output_guardrail"
+)
+
+type OperationInput struct {
+	Kind      OperationKind
+	Name      string
+	Counter   string
+	Stage     string
+	Operation string
+	Metadata  map[string]string
+}
+
+func (o OperationInput) Attrs() map[string]string {
+	attrs := cloneAttrs(o.Metadata)
+	if attrs == nil {
+		attrs = map[string]string{}
+	}
+	if o.Kind != "" {
+		attrs["kind"] = string(o.Kind)
+	}
+	if o.Stage != "" {
+		attrs["stage"] = o.Stage
+	}
+	if o.Operation != "" {
+		attrs["operation"] = o.Operation
+	}
+	return attrs
+}
+
+func ObserveOperation(ctx context.Context, observer Observer, input OperationInput, fn func(context.Context, map[string]string) error) error {
+	attrs := input.Attrs()
+	if traceID := TraceID(ctx); traceID != "" {
+		attrs["trace_id"] = traceID
+	}
+	spanCtx, span := observer.StartSpan(input.Name, attrs)
+	defer span.End()
+	counter := input.Counter
+	if counter == "" {
+		counter = input.Name
+	}
+	observer.IncCounter(counter+".calls", 1, attrs)
+	err := fn(spanCtx, attrs)
+	if err != nil {
+		logAttrs := cloneAttrs(attrs)
+		logAttrs["trace_id"] = TraceID(spanCtx)
+		observer.Log("error", err.Error(), logAttrs)
+	}
+	return err
+}
+
 func RuntimeMiddleware(observer Observer) middleware.Handler {
 	return middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
-		attrs := map[string]string{
-			"stage": string(envelope.Stage),
-		}
+		metadata := map[string]string{}
 		if envelope.TeamID != "" {
-			attrs["team_id"] = envelope.TeamID
+			metadata["team_id"] = envelope.TeamID
 		}
 		if envelope.TaskID != "" {
-			attrs["task_id"] = envelope.TaskID
+			metadata["task_id"] = envelope.TaskID
 		}
 		if envelope.AgentID != "" {
-			attrs["agent_id"] = envelope.AgentID
+			metadata["agent_id"] = envelope.AgentID
 		}
 		for key, value := range envelope.Metadata {
 			if value != "" {
-				attrs[key] = value
+				metadata[key] = value
 			}
 		}
-		if traceID := TraceID(ctx); traceID != "" {
-			attrs["trace_id"] = traceID
-		}
-		spanCtx, span := observer.StartSpan(string(envelope.Stage)+"."+envelope.Operation, attrs)
-		defer span.End()
-		observer.IncCounter(string(envelope.Stage)+".calls", 1, attrs)
-		if counter := envelope.Metadata["collaboration_counter"]; counter != "" {
-			observer.IncCounter(counter, 1, attrs)
-		}
-		if event := envelope.Metadata["collaboration_event"]; event != "" {
-			logAttrs := cloneAttrs(attrs)
-			logAttrs["trace_id"] = TraceID(spanCtx)
-			observer.Log("info", event, logAttrs)
-		}
-		err := next(spanCtx, envelope)
-		if err != nil {
-			logAttrs := cloneAttrs(attrs)
-			logAttrs["trace_id"] = TraceID(spanCtx)
-			observer.Log("error", err.Error(), logAttrs)
-		}
-		return err
+		return ObserveOperation(ctx, observer, OperationInput{
+			Kind:      OperationStage,
+			Name:      string(envelope.Stage) + "." + envelope.Operation,
+			Counter:   string(envelope.Stage),
+			Stage:     string(envelope.Stage),
+			Operation: envelope.Operation,
+			Metadata:  metadata,
+		}, func(spanCtx context.Context, attrs map[string]string) error {
+			if counter := envelope.Metadata["collaboration_counter"]; counter != "" {
+				observer.IncCounter(counter, 1, attrs)
+			}
+			if event := envelope.Metadata["collaboration_event"]; event != "" {
+				logAttrs := cloneAttrs(attrs)
+				logAttrs["trace_id"] = TraceID(spanCtx)
+				observer.Log("info", event, logAttrs)
+			}
+			if err := next(spanCtx, envelope); err != nil {
+				return err
+			}
+			return nil
+		})
 	})
 }
 
 func CapabilityMiddleware(observer Observer) capability.Middleware {
-	return capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
-		attrs := map[string]string{
+	return capabilityObserverMiddleware{observer: observer}
+}
+
+type capabilityObserverMiddleware struct {
+	observer Observer
+}
+
+func (m capabilityObserverMiddleware) Handle(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
+	var result capability.Result
+	err := ObserveOperation(ctx, m.observer, OperationInput{
+		Kind:      OperationCapability,
+		Name:      string(call.Type) + "." + call.Name,
+		Counter:   string(call.Type),
+		Stage:     string(call.Type),
+		Operation: "invoke",
+		Metadata: map[string]string{
 			"type": string(call.Type),
 			"name": call.Name,
+		},
+	}, func(spanCtx context.Context, attrs map[string]string) error {
+		current, err := next(spanCtx, call)
+		if err != nil {
+			return err
 		}
-		spanCtx, span := observer.StartSpan(string(call.Type)+"."+call.Name, attrs)
-		defer span.End()
-		observer.IncCounter(string(call.Type)+".calls", 1, attrs)
-		result, err := next(spanCtx, call)
-		if err == nil {
-			observer.ObserveHistogram(string(call.Type)+".duration_ms", float64(result.Usage.Duration.Milliseconds()), attrs)
-		} else {
-			logAttrs := cloneAttrs(attrs)
-			logAttrs["trace_id"] = TraceID(spanCtx)
-			observer.Log("error", err.Error(), logAttrs)
-		}
-		return result, err
+		result = current
+		m.observer.ObserveHistogram(string(call.Type)+".duration_ms", float64(result.Usage.Duration.Milliseconds()), attrs)
+		return nil
+	})
+	return result, err
+}
+
+func (m capabilityObserverMiddleware) HandleStream(ctx context.Context, call capability.Call, next capability.StreamNext) (provider.Stream, error) {
+	attrs := map[string]string{
+		"type": string(call.Type),
+		"name": call.Name,
+	}
+	spanCtx, span := m.observer.StartSpan(string(call.Type)+"."+call.Name, attrs)
+	m.observer.IncCounter(string(call.Type)+".calls", 1, attrs)
+	started := time.Now()
+	stream, err := next(spanCtx, call)
+	if err != nil {
+		logAttrs := cloneAttrs(attrs)
+		logAttrs["trace_id"] = TraceID(spanCtx)
+		m.observer.Log("error", err.Error(), logAttrs)
+		span.End()
+		return nil, err
+	}
+	return &capabilityStreamObserver{
+		Stream:    stream,
+		observer:  m.observer,
+		attrs:     attrs,
+		spanCtx:   spanCtx,
+		span:      span,
+		startedAt: started,
+	}, nil
+}
+
+type capabilityStreamObserver struct {
+	provider.Stream
+	observer  Observer
+	attrs     map[string]string
+	spanCtx   context.Context
+	span      Span
+	startedAt time.Time
+	doneOnce  sync.Once
+}
+
+func (s *capabilityStreamObserver) Recv() (provider.Event, error) {
+	event, err := s.Stream.Recv()
+	if err != nil {
+		s.finish()
+		return event, err
+	}
+	if event.Kind == provider.EventDone {
+		s.finish()
+	}
+	return event, err
+}
+
+func (s *capabilityStreamObserver) Close() error {
+	err := s.Stream.Close()
+	s.finish()
+	return err
+}
+
+func (s *capabilityStreamObserver) finish() {
+	s.doneOnce.Do(func() {
+		s.observer.ObserveHistogram(s.attrs["type"]+".duration_ms", float64(time.Since(s.startedAt).Milliseconds()), s.attrs)
+		s.span.End()
 	})
 }
 

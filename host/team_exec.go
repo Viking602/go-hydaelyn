@@ -26,6 +26,7 @@ type StartTeamRequest struct {
 	WorkerProfiles    []string
 	Input             map[string]any
 	Metadata          map[string]string
+	Agent             AgentOptions
 }
 
 func (r *Runtime) StartTeam(ctx context.Context, request StartTeamRequest) (team.RunState, error) {
@@ -74,6 +75,9 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 	if request.TeamID == "" {
 		request.TeamID = r.nextTeamID()
 	}
+	if len(request.Agent.OutputGuardrails) > 0 {
+		r.storeInlineTeamOutputGuardrails(request.TeamID, request.Agent.OutputGuardrails)
+	}
 	if _, err := r.lookupProfile(request.SupervisorProfile); err != nil {
 		return team.RunState{}, err
 	}
@@ -89,6 +93,7 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 		SupervisorProfile: request.SupervisorProfile,
 		WorkerProfiles:    request.WorkerProfiles,
 		Input:             request.Input,
+		AgentOptions:      toTeamAgentOptions(request.Agent),
 		Metadata:          request.Metadata,
 	}
 	var state team.RunState
@@ -109,6 +114,7 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 	if state.Pattern == "" {
 		state.Pattern = request.Pattern
 	}
+	state.AgentOptions = mergeTeamAgentOptions(state.AgentOptions, startRequest.AgentOptions)
 	state.Normalize()
 	if err := r.validateTeamState(state); err != nil {
 		return team.RunState{}, err
@@ -203,7 +209,10 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 	}
 	for outcome := range outcomes {
 		before := current.Tasks[outcome.index]
-		updated, applied, published := r.applyTaskOutcome(current, outcome.index, outcome.task)
+		updated, applied, blackboardPublished, messagePublished, applyErr := r.applyTaskOutcome(ctx, current, outcome.index, outcome.task)
+		if applyErr != nil {
+			return team.RunState{}, applyErr
+		}
 		if !applied {
 			continue
 		}
@@ -227,7 +236,12 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 		case team.TaskStatusFailed:
 			r.recordTaskLifecycleEvent(eventCtx, current, before, task, storage.EventTaskFailed)
 		}
-		if published {
+		if messagePublished {
+			if agentInstance, ok := current.Agent(task.EffectiveAssigneeAgentID()); ok {
+				r.publishTaskOutputMessages(eventCtx, current, task, agentInstance)
+			}
+		}
+		if blackboardPublished {
 			r.recordTaskOutputsPublishedEvent(eventCtx, current, task)
 		}
 	}
@@ -366,10 +380,10 @@ func normalizeVerificationDecision(value string) string {
 	}
 }
 
-func (r *Runtime) applyTaskOutcome(state team.RunState, index int, item team.Task) (team.RunState, bool, bool) {
+func (r *Runtime) applyTaskOutcome(ctx context.Context, state team.RunState, index int, item team.Task) (team.RunState, bool, bool, bool, error) {
 	current := state.Tasks[index]
 	if current.Version != item.Version || current.IsTerminal() {
-		return state, false, false
+		return state, false, false, false, nil
 	}
 	if item.Status == team.TaskStatusCompleted {
 		item = r.markTaskCompletion(item)
@@ -379,10 +393,44 @@ func (r *Runtime) applyTaskOutcome(state team.RunState, index int, item team.Tas
 		state = abortDependentTasks(state, item)
 	}
 	if item.Status != team.TaskStatusCompleted {
-		return state, true, false
+		return state, true, false, false, nil
 	}
-	state = r.applyBlackboardUpdate(state, item)
-	return state, true, true
+	options, err := r.resolvedAgentOptionsForTask(state, item)
+	if err != nil {
+		return state, false, false, false, err
+	}
+	messageResult := item.Result
+	blackboardResult, allowBlackboard, err := r.applyTeamOutputGuardrails(ctx, state.ID, item.ID, TeamOutputBoundaryBlackboard, item.Result, options.TeamOutputGuardrails, map[string]string{
+		"teamId": state.ID,
+		"taskId": item.ID,
+		"runId":  state.ID,
+	})
+	if err != nil {
+		return state, false, false, false, err
+	}
+	if blackboardResult != nil {
+		item.Result = blackboardResult
+		messageResult = blackboardResult
+	}
+	var blackboardPublished bool
+	if allowBlackboard {
+		state.Tasks[index] = item
+		state = r.applyBlackboardUpdate(state, item)
+		blackboardPublished = true
+	}
+	taskOutputResult, allowTaskOutput, err := r.applyTeamOutputGuardrails(ctx, state.ID, item.ID, TeamOutputBoundaryTaskOutput, messageResult, options.TeamOutputGuardrails, map[string]string{
+		"teamId": state.ID,
+		"taskId": item.ID,
+		"runId":  state.ID,
+	})
+	if err != nil {
+		return state, false, false, false, err
+	}
+	if taskOutputResult != nil {
+		item.Result = taskOutputResult
+	}
+	state.Tasks[index] = item
+	return state, true, blackboardPublished, allowTaskOutput, nil
 }
 
 func taskFailureCancelsDependents(task team.Task) bool {
@@ -706,7 +754,6 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 	task.Result.ToolCallCount = len(generated.ToolResults)
 	task.FinishedAt = time.Now().UTC()
 	r.recordTaskToolEvents(ctx, state, task, generated.ToolResults)
-	r.publishTaskOutputMessages(ctx, state, task, agentInstance)
 	return task, nil
 }
 
@@ -819,6 +866,22 @@ func (r *Runtime) saveIfFailed(ctx context.Context, state team.RunState) (team.R
 
 func (r *Runtime) saveTeam(ctx context.Context, state *team.RunState) error {
 	state.Normalize()
+	if state.IsTerminal() && state.Result != nil {
+		finalResult, allowed, err := r.applyTeamOutputGuardrails(ctx, state.ID, "", TeamOutputBoundaryFinal, state.Result, state.AgentOptions.TeamOutputGuardrails, map[string]string{
+			"runId":  state.ID,
+			"teamId": state.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if finalResult != nil {
+			state.Result = finalResult
+		}
+		if !allowed {
+			state.Status = team.StatusFailed
+			state.Result = &team.Result{Error: "team final result blocked by output guardrail"}
+		}
+	}
 	r.recordTeamTerminalEvent(ctx, *state)
 	version, err := r.storage.Teams().SaveCAS(ctx, *state, state.Version)
 	if err == nil {
@@ -886,6 +949,14 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 	if err != nil {
 		return taskExecution{}, err
 	}
+	options, err := r.resolvedAgentOptionsForTask(state, task)
+	if err != nil {
+		return taskExecution{}, err
+	}
+	outputGuardrails, err := r.resolveOutputGuardrails(options)
+	if err != nil {
+		return taskExecution{}, err
+	}
 	engine := agent.Engine{
 		Provider: currentProvider,
 		Tools:    r.tools.Subset(profile.ToolNames),
@@ -903,17 +974,23 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 		},
 		Request: initialMessages,
 	}, func(ctx context.Context, envelope *middleware.Envelope) error {
+		metadata := map[string]string{
+			"agentId": agentInstance.ID,
+			"teamId":  state.ID,
+			"taskId":  task.ID,
+			"profile": profile.Name,
+			"runId":   state.ID,
+		}
 		runResult, runErr := engine.Run(ctx, agent.Input{
-			Model:         profile.Model,
-			Messages:      initialMessages,
-			ToolMode:      tool.ModeParallel,
-			MaxIterations: max(1, profile.MaxTurns),
-			Metadata: map[string]string{
-				"agentId": agentInstance.ID,
-				"teamId":  state.ID,
-				"taskId":  task.ID,
-				"profile": profile.Name,
-			},
+			Model:            profile.Model,
+			Messages:         initialMessages,
+			ToolMode:         tool.ModeParallel,
+			MaxIterations:    max(1, options.maxIterationsOrDefault(4)),
+			StopSequences:    append([]string{}, options.StopSequences...),
+			ThinkingBudget:   options.ThinkingBudget,
+			OutputGuardrails: outputGuardrails,
+			OutputRecorder:   r,
+			Metadata:         metadata,
 		})
 		if runErr != nil {
 			return runErr

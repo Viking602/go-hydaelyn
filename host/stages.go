@@ -2,10 +2,12 @@ package host
 
 import (
 	"context"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/middleware"
 	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
@@ -71,7 +73,35 @@ func (r *Runtime) runStage(ctx context.Context, envelope *middleware.Envelope, n
 	if envelope == nil {
 		envelope = &middleware.Envelope{}
 	}
-	return r.middlewares.Handle(ctx, envelope, next)
+	finalReached := false
+	err := r.middlewares.Handle(ctx, envelope, func(ctx context.Context, envelope *middleware.Envelope) error {
+		finalReached = true
+		return next(ctx, envelope)
+	})
+	if err != nil && !finalReached {
+		r.RecordPolicyOutcome(ctx, storage.PolicyOutcomeEvent{
+			SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+			Layer:         "stage",
+			Stage:         string(envelope.Stage),
+			Operation:     envelope.Operation,
+			Action:        "block",
+			Policy:        "stage.middleware",
+			Outcome:       "blocked",
+			Severity:      "error",
+			Message:       err.Error(),
+			Blocking:      true,
+			RunID:         envelope.Metadata["runId"],
+			TeamID:        envelope.TeamID,
+			TaskID:        envelope.TaskID,
+			AgentID:       envelope.AgentID,
+			Reference:     string(envelope.Stage),
+			Timestamp:     time.Now().UTC(),
+			Evidence: &storage.PolicyOutcomeEvidence{
+				Metadata: cloneStringMap(envelope.Metadata),
+			},
+		})
+	}
+	return err
 }
 
 func phaseStage(phase team.Phase) middleware.Stage {

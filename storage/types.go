@@ -2,7 +2,7 @@ package storage
 
 import "time"
 
-const PolicyOutcomeEventSchemaVersion = "1.0"
+const PolicyOutcomeEventSchemaVersion = "1.1"
 
 type RunStatus string
 
@@ -63,11 +63,19 @@ const (
 
 type PolicyOutcomeEvent struct {
 	SchemaVersion string                 `json:"schemaVersion"`
+	Layer         string                 `json:"layer,omitempty"`
+	Stage         string                 `json:"stage,omitempty"`
+	Operation     string                 `json:"operation,omitempty"`
+	Action        string                 `json:"action,omitempty"`
 	Policy        string                 `json:"policy"`
 	Outcome       string                 `json:"outcome,omitempty"`
 	Severity      string                 `json:"severity,omitempty"`
 	Message       string                 `json:"message,omitempty"`
 	Blocking      bool                   `json:"blocking,omitempty"`
+	RunID         string                 `json:"runId,omitempty"`
+	TeamID        string                 `json:"teamId,omitempty"`
+	TaskID        string                 `json:"taskId,omitempty"`
+	AgentID       string                 `json:"agentId,omitempty"`
 	Reference     string                 `json:"reference,omitempty"`
 	Attempt       int                    `json:"attempt,omitempty"`
 	Timestamp     time.Time              `json:"timestamp"`

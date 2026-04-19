@@ -22,6 +22,7 @@ type PromptRequest struct {
 	Messages  []message.Message
 	ToolMode  tool.Mode
 	Metadata  map[string]string
+	Agent     AgentOptions
 }
 
 type PromptResponse struct {
@@ -62,6 +63,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 		Status:    storage.RunStatusRunning,
 		Provider:  request.Provider,
 		Model:     request.Model,
+		Metadata:  cloneStringMap(request.Metadata),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -83,20 +85,36 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 		Hooks:    r.engineHooks(),
 	}
 	var result agent.Result
+	runMetadata := cloneStringMap(request.Metadata)
+	if runMetadata == nil {
+		runMetadata = map[string]string{}
+	}
+	runMetadata["runId"] = run.ID
+	outputGuardrails, err := r.resolveOutputGuardrails(request.Agent)
+	if err != nil {
+		run.Status = storage.RunStatusFailed
+		run.Error = err.Error()
+		_ = r.storage.Runs().Save(ctx, run)
+		return PromptResponse{}, err
+	}
 	compactedMessages := r.compactMessages(runCtx, snapshot.Messages)
 	err = r.runStage(runCtx, &middleware.Envelope{
 		Stage:     middleware.StageAgent,
 		Operation: "prompt",
-		Metadata:  cloneStringMap(request.Metadata),
+		Metadata:  cloneStringMap(runMetadata),
 		Request:   request,
 	}, func(ctx context.Context, envelope *middleware.Envelope) error {
 		runResult, runErr := engine.Run(ctx, agent.Input{
-			Model:         request.Model,
-			Messages:      compactedMessages,
-			Metadata:      request.Metadata,
-			ToolMode:      request.ToolMode,
-			MaxIterations: 6,
-			OnEvent:       onEvent,
+			Model:            request.Model,
+			Messages:         compactedMessages,
+			Metadata:         runMetadata,
+			ToolMode:         request.ToolMode,
+			MaxIterations:    max(1, request.Agent.maxIterationsOrDefault(6)),
+			OnEvent:          onEvent,
+			StopSequences:    append([]string{}, request.Agent.StopSequences...),
+			ThinkingBudget:   request.Agent.ThinkingBudget,
+			OutputGuardrails: outputGuardrails,
+			OutputRecorder:   r,
 		})
 		if runErr != nil {
 			return runErr
@@ -140,6 +158,7 @@ type ContinueRequest struct {
 	Model     string
 	ToolMode  tool.Mode
 	Metadata  map[string]string
+	Agent     AgentOptions
 }
 
 type DumpConfigRequest struct {
@@ -161,6 +180,7 @@ func (r *Runtime) Continue(ctx context.Context, request ContinueRequest) (Prompt
 		Model:     request.Model,
 		ToolMode:  request.ToolMode,
 		Metadata:  request.Metadata,
+		Agent:     request.Agent,
 	})
 }
 

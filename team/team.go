@@ -92,6 +92,14 @@ type Budget struct {
 	ToolCalls int `json:"toolCalls,omitempty"`
 }
 
+type AgentOptions struct {
+	MaxIterations        int      `json:"maxIterations,omitempty"`
+	StopSequences        []string `json:"stopSequences,omitempty"`
+	ThinkingBudget       int      `json:"thinkingBudget,omitempty"`
+	OutputGuardrails     []string `json:"outputGuardrails,omitempty"`
+	TeamOutputGuardrails []string `json:"teamOutputGuardrails,omitempty"`
+}
+
 type AgentProfile struct {
 	Name           string            `json:"name"`
 	Role           Role              `json:"role"`
@@ -103,6 +111,7 @@ type AgentProfile struct {
 	ToolNames      []string          `json:"toolNames,omitempty"`
 	MaxTurns       int               `json:"maxTurns,omitempty"`
 	MaxConcurrency int               `json:"maxConcurrency,omitempty"`
+	AgentOptions   AgentOptions      `json:"agentOptions,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
@@ -199,6 +208,7 @@ type RunState struct {
 	Planning            *PlanningState    `json:"planning,omitempty"`
 	Blackboard          *blackboard.State `json:"blackboard,omitempty"`
 	Input               map[string]any    `json:"input,omitempty"`
+	AgentOptions        AgentOptions      `json:"agentOptions,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
 	RequireVerification bool              `json:"requireVerification,omitempty"`
 	CreatedAt           time.Time         `json:"createdAt"`
@@ -212,6 +222,7 @@ type StartRequest struct {
 	SupervisorProfile string            `json:"supervisorProfile"`
 	WorkerProfiles    []string          `json:"workerProfiles"`
 	Input             map[string]any    `json:"input,omitempty"`
+	AgentOptions      AgentOptions      `json:"agentOptions,omitempty"`
 	Metadata          map[string]string `json:"metadata,omitempty"`
 }
 

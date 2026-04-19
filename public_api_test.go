@@ -13,6 +13,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/plugin"
 	"github.com/Viking602/go-hydaelyn/scheduler"
+	"github.com/Viking602/go-hydaelyn/security"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/toolkit"
@@ -22,11 +23,13 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.Engine
 	var _ blackboard.State
 	var _ capability.Call
+	var _ capability.Policy
 	var _ host.Runtime
 	var _ mcp.Gateway
 	var _ observe.Observer = observe.NewMemoryObserver()
 	var _ planner.Plan
 	var _ plugin.Spec
+	var _ security.Context
 	var _ scheduler.TaskLease
 	var _ team.RunState
 	var _ tool.Mode

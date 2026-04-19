@@ -42,13 +42,24 @@ type JSONSchema struct {
 	AdditionalProperties bool                  `json:"additionalProperties,omitempty"`
 }
 
+type ToolSecurity struct {
+	RequiredPermissions []string `json:"requiredPermissions,omitempty"`
+	RequiresApproval    bool     `json:"requiresApproval,omitempty"`
+	RiskLevel           string   `json:"riskLevel,omitempty"`
+	Idempotent          bool     `json:"idempotent,omitempty"`
+}
+
 type ToolDefinition struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	InputSchema JSONSchema        `json:"inputSchema"`
-	Tags        []string          `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	Origin      string            `json:"origin,omitempty"`
+	Name                string            `json:"name"`
+	Description         string            `json:"description,omitempty"`
+	InputSchema         JSONSchema        `json:"inputSchema"`
+	Tags                []string          `json:"tags,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	Origin              string            `json:"origin,omitempty"`
+	Security            ToolSecurity      `json:"security,omitempty"`
+	RequiredPermissions []string          `json:"requiredPermissions,omitempty"`
+	RequiresApproval    bool              `json:"requiresApproval,omitempty"`
+	RiskLevel           string            `json:"riskLevel,omitempty"`
 }
 
 type ToolCall struct {

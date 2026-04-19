@@ -57,3 +57,69 @@ func TestBudgetAttack(t *testing.T) {
 		})
 	}
 }
+
+func TestBudgetScopePrincipalIsolatedBetweenPrincipals(t *testing.T) {
+	t.Parallel()
+
+	invoker := NewInvoker()
+	invoker.Use(BudgetEnforcer())
+	invoker.Register(TypeLLM, "expensive", func(context.Context, Call) (Result, error) {
+		return Result{Output: "ok", Usage: Usage{TotalTokens: 5}}, nil
+	})
+	call := Call{
+		Type:   TypeLLM,
+		Name:   "expensive",
+		Budget: Budget{Tokens: 5, Scope: BudgetScopePrincipal},
+	}
+	aliceCtx := WithSecurityContext(context.Background(), SecurityContext{Principal: "alice"})
+	bobCtx := WithSecurityContext(context.Background(), SecurityContext{Principal: "bob"})
+
+	if _, err := invoker.Invoke(aliceCtx, call); err != nil {
+		t.Fatalf("alice first invoke error = %v", err)
+	}
+	if _, err := invoker.Invoke(bobCtx, call); err != nil {
+		t.Fatalf("bob first invoke error = %v", err)
+	}
+	if _, err := invoker.Invoke(aliceCtx, call); err == nil {
+		t.Fatal("expected alice to exhaust her own principal-scoped budget")
+	}
+	if _, err := invoker.Invoke(bobCtx, call); err == nil {
+		t.Fatal("expected bob to exhaust his own principal-scoped budget independently")
+	}
+}
+
+func TestBudgetScopeDefaultsToRunWhenRunIDPresent(t *testing.T) {
+	t.Parallel()
+
+	invoker := NewInvoker()
+	invoker.Use(BudgetEnforcer())
+	invoker.Register(TypeLLM, "expensive", func(context.Context, Call) (Result, error) {
+		return Result{Output: "ok", Usage: Usage{TotalTokens: 5}}, nil
+	})
+	call := Call{
+		Type:   TypeLLM,
+		Name:   "expensive",
+		Budget: Budget{Tokens: 5},
+	}
+
+	firstRun := context.Background()
+	secondRun := context.Background()
+
+	if _, err := invoker.Invoke(firstRun, withMetadata(call, map[string]string{"runId": "run-1"})); err != nil {
+		t.Fatalf("run-1 first invoke error = %v", err)
+	}
+	if _, err := invoker.Invoke(secondRun, withMetadata(call, map[string]string{"runId": "run-2"})); err != nil {
+		t.Fatalf("run-2 first invoke error = %v", err)
+	}
+	if _, err := invoker.Invoke(firstRun, withMetadata(call, map[string]string{"runId": "run-1"})); err == nil {
+		t.Fatal("expected run-1 budget exhaustion on second invoke")
+	}
+	if _, err := invoker.Invoke(secondRun, withMetadata(call, map[string]string{"runId": "run-2"})); err == nil {
+		t.Fatal("expected run-2 budget exhaustion on second invoke")
+	}
+}
+
+func withMetadata(call Call, metadata map[string]string) Call {
+	call.Metadata = metadata
+	return call
+}

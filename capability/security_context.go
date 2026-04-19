@@ -2,8 +2,9 @@ package capability
 
 import (
 	"context"
-	"maps"
 	"time"
+
+	securityctx "github.com/Viking602/go-hydaelyn/security"
 )
 
 type ApprovalGrant struct {
@@ -34,15 +35,15 @@ type SecurityContext struct {
 type securityContextKey struct{}
 
 func WithSecurityContext(ctx context.Context, security SecurityContext) context.Context {
-	return context.WithValue(ctx, securityContextKey{}, cloneSecurityContext(security))
+	return securityctx.WithContext(ctx, toSecurityContext(security))
 }
 
 func SecurityContextFromContext(ctx context.Context) (SecurityContext, bool) {
-	security, ok := ctx.Value(securityContextKey{}).(SecurityContext)
+	security, ok := securityctx.FromContext(ctx)
 	if !ok {
 		return SecurityContext{}, false
 	}
-	return cloneSecurityContext(security), true
+	return fromSecurityContext(security), true
 }
 
 func WithApprovalGrant(ctx context.Context, grant ApprovalGrant) context.Context {
@@ -83,7 +84,7 @@ func WithIdempotencyKey(ctx context.Context, idempotencyKey string) context.Cont
 }
 
 func hasPermissionGrant(ctx context.Context, permission string) bool {
-	security, ok := SecurityContextFromContext(ctx)
+	security, ok := securityctx.FromContext(ctx)
 	if !ok || len(security.Permissions) == 0 {
 		return false
 	}
@@ -92,20 +93,7 @@ func hasPermissionGrant(ctx context.Context, permission string) bool {
 }
 
 func cloneSecurityContext(security SecurityContext) SecurityContext {
-	security.TrustedClaims = cloneAnyMap(security.TrustedClaims)
-	security.UserMetadata = cloneAnyMap(security.UserMetadata)
-	security.ModelMetadata = cloneAnyMap(security.ModelMetadata)
-	if len(security.ApprovalGrants) > 0 {
-		cloned := make(map[string]ApprovalGrant, len(security.ApprovalGrants))
-		maps.Copy(cloned, security.ApprovalGrants)
-		security.ApprovalGrants = cloned
-	}
-	if len(security.Permissions) > 0 {
-		cloned := make(map[string]PermissionGrant, len(security.Permissions))
-		maps.Copy(cloned, security.Permissions)
-		security.Permissions = cloned
-	}
-	return security
+	return fromSecurityContext(toSecurityContext(security))
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {
@@ -113,6 +101,76 @@ func cloneAnyMap(values map[string]any) map[string]any {
 		return nil
 	}
 	cloned := make(map[string]any, len(values))
-	maps.Copy(cloned, values)
+	for key, value := range values {
+		cloned[key] = value
+	}
 	return cloned
+}
+
+func toSecurityContext(security SecurityContext) securityctx.Context {
+	current := securityctx.Context{
+		Principal:      security.Principal,
+		TrustedClaims:  cloneAnyMap(security.TrustedClaims),
+		UserMetadata:   cloneAnyMap(security.UserMetadata),
+		ModelMetadata:  cloneAnyMap(security.ModelMetadata),
+		IdempotencyKey: security.IdempotencyKey,
+	}
+	if len(security.ApprovalGrants) > 0 {
+		current.ApprovalGrants = make(map[string]securityctx.ApprovalGrant, len(security.ApprovalGrants))
+		for key, grant := range security.ApprovalGrants {
+			current.ApprovalGrants[key] = securityctx.ApprovalGrant{
+				Type:       string(grant.Type),
+				Name:       grant.Name,
+				ApprovedBy: grant.ApprovedBy,
+				Reason:     grant.Reason,
+				GrantedAt:  grant.GrantedAt,
+			}
+		}
+	}
+	if len(security.Permissions) > 0 {
+		current.Permissions = make(map[string]securityctx.PermissionGrant, len(security.Permissions))
+		for key, grant := range security.Permissions {
+			current.Permissions[key] = securityctx.PermissionGrant{
+				Name:      grant.Name,
+				GrantedBy: grant.GrantedBy,
+				Scope:     grant.Scope,
+				GrantedAt: grant.GrantedAt,
+			}
+		}
+	}
+	return current
+}
+
+func fromSecurityContext(security securityctx.Context) SecurityContext {
+	current := SecurityContext{
+		Principal:      security.Principal,
+		TrustedClaims:  cloneAnyMap(security.TrustedClaims),
+		UserMetadata:   cloneAnyMap(security.UserMetadata),
+		ModelMetadata:  cloneAnyMap(security.ModelMetadata),
+		IdempotencyKey: security.IdempotencyKey,
+	}
+	if len(security.ApprovalGrants) > 0 {
+		current.ApprovalGrants = make(map[string]ApprovalGrant, len(security.ApprovalGrants))
+		for key, grant := range security.ApprovalGrants {
+			current.ApprovalGrants[key] = ApprovalGrant{
+				Type:       Type(grant.Type),
+				Name:       grant.Name,
+				ApprovedBy: grant.ApprovedBy,
+				Reason:     grant.Reason,
+				GrantedAt:  grant.GrantedAt,
+			}
+		}
+	}
+	if len(security.Permissions) > 0 {
+		current.Permissions = make(map[string]PermissionGrant, len(security.Permissions))
+		for key, grant := range security.Permissions {
+			current.Permissions[key] = PermissionGrant{
+				Name:      grant.Name,
+				GrantedBy: grant.GrantedBy,
+				Scope:     grant.Scope,
+				GrantedAt: grant.GrantedAt,
+			}
+		}
+	}
+	return current
 }

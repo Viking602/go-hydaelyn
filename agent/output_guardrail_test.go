@@ -94,6 +94,86 @@ func TestEngineOutputGuardrailCanRetryFinalOutput(t *testing.T) {
 	}
 }
 
+func TestEngineOutputGuardrailRetryDoesNotIncludeRejectedOutputByDefault(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{
+			{
+				{Kind: provider.EventTextDelta, Text: "draft answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+			{
+				{Kind: provider.EventTextDelta, Text: "safe answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		},
+	}
+	engine := Engine{Provider: driver}
+	_, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 3,
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("retry", func(_ context.Context, input OutputGuardrailInput) (OutputGuardrailResult, error) {
+				if input.Output.Text == "draft answer" {
+					return RetryOutput(message.NewText(message.RoleUser, "please revise safely")), nil
+				}
+				return AllowOutput(), nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	second := driver.requests[1].Messages
+	if len(second) != 2 {
+		t.Fatalf("expected original user message plus retry feedback only, got %#v", second)
+	}
+	for _, msg := range second {
+		if msg.Role == message.RoleAssistant && msg.Text == "draft answer" {
+			t.Fatalf("expected rejected assistant output to stay out of retry context, got %#v", second)
+		}
+	}
+}
+
+func TestEngineOutputGuardrailRetryCanIncludeRejectedOutputWithPolicy(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{
+			{
+				{Kind: provider.EventTextDelta, Text: "draft answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+			{
+				{Kind: provider.EventTextDelta, Text: "safe answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		},
+	}
+	engine := Engine{Provider: driver}
+	_, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 3,
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("retry", func(_ context.Context, input OutputGuardrailInput) (OutputGuardrailResult, error) {
+				if input.Output.Text == "draft answer" {
+					return RetryOutputWithPolicy(RetryPolicy{IncludeRejectedOutput: true}, message.NewText(message.RoleUser, "please revise safely")), nil
+				}
+				return AllowOutput(), nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	second := driver.requests[1].Messages
+	if len(second) != 3 {
+		t.Fatalf("expected original user message, rejected output, and feedback, got %#v", second)
+	}
+	if second[1].Role != message.RoleAssistant || second[1].Text != "draft answer" {
+		t.Fatalf("expected rejected assistant output to be included when policy allows it, got %#v", second)
+	}
+}
+
 func TestEngineOutputGuardrailCanBlockFinalOutput(t *testing.T) {
 	driver := &scriptedProvider{
 		turns: [][]provider.Event{{

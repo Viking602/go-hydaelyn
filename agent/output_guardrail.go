@@ -62,8 +62,27 @@ type OutputGuardrailResult struct {
 	Action        OutputGuardrailAction
 	Replacement   *message.Message
 	RetryMessages []message.Message
+	RetryPolicy   RetryPolicy
 	Reason        string
 	Metadata      map[string]string
+}
+
+type RetryPolicy struct {
+	IncludeRejectedOutput bool              `json:"includeRejectedOutput,omitempty"`
+	RedactRejectedOutput  bool              `json:"redactRejectedOutput,omitempty"`
+	ReplacementContext    []message.Message `json:"replacementContext,omitempty"`
+}
+
+type OutputGuardrailDecision struct {
+	GuardrailName string
+	Action        OutputGuardrailAction
+	Reason        string
+	Iteration     int
+	Metadata      map[string]string
+}
+
+type OutputGuardrailRecorder interface {
+	RecordOutputGuardrailDecision(ctx context.Context, decision OutputGuardrailDecision)
 }
 
 func AllowOutput() OutputGuardrailResult {
@@ -78,9 +97,18 @@ func ReplaceOutput(output message.Message) OutputGuardrailResult {
 }
 
 func RetryOutput(messages ...message.Message) OutputGuardrailResult {
+	return RetryOutputWithPolicy(RetryPolicy{}, messages...)
+}
+
+func RetryOutputWithPolicy(policy RetryPolicy, messages ...message.Message) OutputGuardrailResult {
 	return OutputGuardrailResult{
 		Action:        OutputGuardrailActionRetry,
 		RetryMessages: cloneMessages(messages),
+		RetryPolicy: RetryPolicy{
+			IncludeRejectedOutput: policy.IncludeRejectedOutput,
+			RedactRejectedOutput:  policy.RedactRejectedOutput,
+			ReplacementContext:    cloneMessages(policy.ReplacementContext),
+		},
 	}
 }
 
@@ -153,6 +181,7 @@ func normalizeOutputGuardrailResult(result OutputGuardrailResult) (OutputGuardra
 			return OutputGuardrailResult{}, fmt.Errorf("%w: retry requires at least one retry message", ErrOutputGuardrailInvalidResult)
 		}
 		result.RetryMessages = cloneMessages(result.RetryMessages)
+		result.RetryPolicy.ReplacementContext = cloneMessages(result.RetryPolicy.ReplacementContext)
 		return result, nil
 	case OutputGuardrailActionBlock:
 		return result, nil

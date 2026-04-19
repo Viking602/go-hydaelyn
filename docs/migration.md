@@ -46,7 +46,7 @@
 新模型：
 
 - provider/tool 已接入统一 `CapabilityInvoker`
-- timeout / retry / permission / approval / rate limit 已进入 capability middleware
+- timeout / retry / permission / approval / rate limit 已进入 capability policy
 
 ### 5. Durable runtime
 

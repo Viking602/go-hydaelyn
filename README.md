@@ -80,6 +80,7 @@ Hydaelyn centers on the `deepsearch` pattern: parallel research tasks run simult
 ### Read Next
 
 - [Quickstart](docs/quickstart.md) - Deep-dive tutorial
+- [Extensions](docs/extensions.md) - Stage / Capability / Output / Hook guide
 - [Task Dataflow](docs/task-dataflow.md) - Dataflow documentation
 - [Recipe Compiler](docs/recipe.md) - Recipe/YAML configuration
 - [Evaluation](docs/evaluation.md) - Performance evaluation

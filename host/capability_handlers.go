@@ -24,7 +24,7 @@ func (d capabilityProviderDriver) Metadata() provider.Metadata {
 
 func (d capabilityProviderDriver) Stream(ctx context.Context, request provider.Request) (provider.Stream, error) {
 	ctx = capability.WithPolicyOutcomeRecorder(ctx, d.recorder)
-	result, err := d.invoker.Invoke(ctx, capability.Call{
+	stream, err := d.invoker.Stream(ctx, capability.Call{
 		Type:     capability.TypeLLM,
 		Name:     d.name,
 		Input:    request,
@@ -33,11 +33,7 @@ func (d capabilityProviderDriver) Stream(ctx context.Context, request provider.R
 	if err != nil {
 		return nil, err
 	}
-	events, ok := result.Output.([]provider.Event)
-	if !ok {
-		return nil, fmt.Errorf("capability provider returned unexpected output type %T", result.Output)
-	}
-	return provider.NewSliceStream(events), nil
+	return stream, nil
 }
 
 type capabilityToolDriver struct {
@@ -78,13 +74,19 @@ type toolCapabilityInput struct {
 }
 
 func capabilityPermissionsForDefinition(definition tool.Definition) []capability.Permission {
-	raw := strings.TrimSpace(definition.Metadata["permission"])
-	if raw == "" {
-		return nil
+	names := append([]string{}, definition.Security.RequiredPermissions...)
+	if len(names) == 0 {
+		names = append([]string{}, definition.RequiredPermissions...)
 	}
-	items := strings.Split(raw, ",")
-	permissions := make([]capability.Permission, 0, len(items))
-	for _, item := range items {
+	if len(names) == 0 {
+		raw := strings.TrimSpace(definition.Metadata["permission"])
+		if raw == "" {
+			return nil
+		}
+		names = strings.Split(raw, ",")
+	}
+	permissions := make([]capability.Permission, 0, len(names))
+	for _, item := range names {
 		name := strings.TrimSpace(item)
 		if name == "" {
 			continue
@@ -132,6 +134,16 @@ func providerCapabilityHandler(driver provider.Driver) capability.Handler {
 				"provider": driver.Metadata().Name,
 			},
 		}, nil
+	}
+}
+
+func providerCapabilityStreamHandler(driver provider.Driver) capability.StreamHandler {
+	return func(ctx context.Context, call capability.Call) (provider.Stream, error) {
+		request, ok := call.Input.(provider.Request)
+		if !ok {
+			return nil, fmt.Errorf("expected provider.Request input, got %T", call.Input)
+		}
+		return driver.Stream(ctx, request)
 	}
 }
 
