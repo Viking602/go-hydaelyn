@@ -1,0 +1,16 @@
+{
+  "name": "fixture_search",
+  "description": "Searches the local deterministic fixture corpus",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string"
+      },
+      "limit": {
+        "type": "number"
+      }
+    },
+    "required": ["query"]
+  }
+}

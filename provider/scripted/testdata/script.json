@@ -1,0 +1,25 @@
+[
+  {
+    "kind": "text_delta",
+    "text": "Searching fixtures..."
+  },
+  {
+    "kind": "tool_call",
+    "toolCall": {
+      "id": "tool-1",
+      "name": "calculator",
+      "arguments": {
+        "operation": "add",
+        "operands": [2, 3]
+      }
+    }
+  },
+  {
+    "kind": "done",
+    "stopReason": "complete",
+    "usage": {
+      "outputTokens": 12,
+      "totalTokens": 12
+    }
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "name": "calculator",
+  "description": "Deterministic arithmetic fixture tool",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": {
+        "type": "string"
+      },
+      "operands": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "required": ["operation", "operands"]
+  }
+}

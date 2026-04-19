@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "id": "case-loader",
+  "suite": "fixture-suite",
+  "pattern": "deepsearch",
+  "input": {
+    "query": "Summarize retention requirements"
+  },
+  "profiles": {
+    "supervisor": "eval-supervisor",
+    "worker": "eval-worker"
+  },
+  "tools": ["fixture_search", "calculator"],
+  "fixtures": {
+    "corpusIds": ["policy-001"],
+    "paths": ["fixtures/corpus/policies/retention_policy.json"]
+  },
+  "expected": {
+    "mustInclude": ["retain customer data"],
+    "mustNotInclude": ["delete immediately"],
+    "requiredCitations": ["policy-001"]
+  },
+  "thresholds": {
+    "taskCompletionRate": 1,
+    "groundedness": 0.9,
+    "supportedClaimRatio": 0.9,
+    "retrySuccessRate": 1
+  },
+  "limits": {
+    "maxToolCalls": 4,
+    "maxLatencyMs": 1000,
+    "maxTokens": 800
+  }
+}
