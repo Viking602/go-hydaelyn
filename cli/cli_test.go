@@ -88,7 +88,7 @@ func TestRunInspectReplayCommandsWorkOnEventFile(t *testing.T) {
 	if err := Execute(context.Background(), []string{"validate", "--events", eventsPath}, &stdout, &stderr); err != nil {
 		t.Fatalf("validate events error = %v", err)
 	}
-	if !strings.Contains(stdout.String(), "\"kind\": \"events\"") {
+	if !strings.Contains(stdout.String(), "\"kind\": \"events\"") || !strings.Contains(stdout.String(), "\"valid\": true") {
 		t.Fatalf("expected validate events output, got %s", stdout.String())
 	}
 
@@ -250,5 +250,94 @@ func TestCLIUsesCanonicalEvalOutput(t *testing.T) {
 	}
 	if payload.RunID == "" {
 		t.Fatalf("expected canonical payload run id: %#v", payload)
+	}
+}
+
+func TestCLIReplayRoundTripsStateFromRunOutput(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	requestPath := filepath.Join(dir, "team.json")
+	eventsPath := filepath.Join(dir, "events.json")
+	statePath := filepath.Join(dir, "state.json")
+	request := host.StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input: map[string]any{
+			"query":      "round trip",
+			"subqueries": []string{"branch"},
+		},
+	}
+	data, _ := json.MarshalIndent(request, "", "  ")
+	if err := os.WriteFile(requestPath, data, 0o644); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{"run", "--request", requestPath, "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("run error = %v stderr=%s", err, stderr.String())
+	}
+	if err := os.WriteFile(statePath, stdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"replay", "--events", eventsPath, "--state", statePath}, &stdout, &stderr); err != nil {
+		t.Fatalf("replay error = %v output=%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\"valid\": true") {
+		t.Fatalf("expected replay output to validate round-tripped state, got %s", stdout.String())
+	}
+}
+
+func TestCLIRunDeterministic(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	caseRoot := filepath.Join(workspace, "cases")
+	if err := os.MkdirAll(caseRoot, 0o755); err != nil {
+		t.Fatalf("mkdir case root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "scripts", "provider.json"), []byte(`[
+  {"kind":"text_delta","text":"alpha"},
+  {"kind":"done","stopReason":"complete"}
+]`), 0o644); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseRoot, "case-a.json"), []byte(`{"schemaVersion":"1.0","id":"case-a","suite":"agent_core","pattern":"deepsearch","provider":{"scriptPath":"scripts/provider.json"},"expected":{"mustInclude":["alpha"]}}`), 0o644); err != nil {
+		t.Fatalf("write case-a: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseRoot, "case-b.json"), []byte(`{"schemaVersion":"1.0","id":"case-b","suite":"agent_core","pattern":"deepsearch","provider":{"scriptPath":"scripts/provider.json"},"expected":{"mustInclude":["beta"]}}`), 0o644); err != nil {
+		t.Fatalf("write case-b: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"run-deterministic",
+		"--case-dir", caseRoot,
+		"--workspace", workspace,
+		"--output-dir", filepath.Join(workspace, "out"),
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("run-deterministic error = %v stderr=%s", err, stderr.String())
+	}
+
+	var suite struct {
+		TotalCases int    `json:"totalCases"`
+		Passed     int    `json:"passed"`
+		Failed     int    `json:"failed"`
+		OutputDir  string `json:"outputDir"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &suite); err != nil {
+		t.Fatalf("decode suite output: %v output=%s", err, stdout.String())
+	}
+	if suite.TotalCases != 2 || suite.Passed != 1 || suite.Failed != 1 {
+		t.Fatalf("unexpected suite output: %#v", suite)
+	}
+	if suite.OutputDir == "" {
+		t.Fatalf("expected output dir in suite output: %#v", suite)
 	}
 }

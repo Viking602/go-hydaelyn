@@ -382,6 +382,9 @@ func (s *RunState) Normalize() {
 	if s.Version <= 0 {
 		s.Version = 1
 	}
+	if s.Status == StatusCompleted {
+		s.Phase = PhaseComplete
+	}
 	s.Supervisor.Normalize()
 	// Clone Workers and Tasks slices to avoid aliasing the backing array
 	// when normalizing elements. This prevents data races when the caller

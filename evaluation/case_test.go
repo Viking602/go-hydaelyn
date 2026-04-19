@@ -25,6 +25,7 @@ func TestEvalCaseSchema(t *testing.T) {
 		Profiles: &EvalCaseProfiles{
 			Supervisor: "supervisor",
 			Worker:     "researcher",
+			Workers:    []string{"researcher-2", "researcher-3"},
 		},
 		Tools: []string{"search", "calculator"},
 		Fixtures: &EvalCaseFixtures{
@@ -37,10 +38,17 @@ func TestEvalCaseSchema(t *testing.T) {
 			RequiredCitations: []string{"corpus-deepsearch/doc-1"},
 		},
 		Thresholds: &EvalCaseThresholds{
-			TaskCompletionRate:  1,
-			Groundedness:        0.9,
-			SupportedClaimRatio: 0.8,
-			RetrySuccessRate:    0.5,
+			TaskCompletionRate:     1,
+			AnswerCorrectness:      0.95,
+			Groundedness:           0.9,
+			SupportedClaimRatio:    0.8,
+			CitationPrecision:      0.9,
+			CitationRecall:         0.85,
+			ToolPrecision:          0.9,
+			ToolRecall:             0.85,
+			ToolArgAccuracy:        0.8,
+			SynthesisInputCoverage: 0.95,
+			RetrySuccessRate:       0.5,
 		},
 		Limits: &EvalCaseLimits{
 			MaxToolCalls: 8,

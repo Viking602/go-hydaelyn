@@ -238,6 +238,9 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 		if err != nil {
 			return provider.Event{}, err
 		}
+		if strings.TrimSpace(current.Data) == "" {
+			continue
+		}
 		if current.Data == "[DONE]" {
 			s.state.finished = true
 			if text, thinking := s.state.splitter.flush(); text != "" || thinking != "" {

@@ -128,29 +128,33 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 		}
 	}
 	for _, task := range state.Tasks {
-		if err := r.appendEvent(ctx, storage.Event{
-			RunID:  state.ID,
-			TeamID: state.ID,
-			TaskID: task.ID,
-			Type:   storage.EventTaskScheduled,
-			Payload: map[string]any{
-				"title":         task.Title,
-				"input":         task.Input,
-				"status":        string(task.Status),
-				"kind":          string(task.Kind),
-				"requiredRole":  string(task.RequiredRole),
-				"assigneeAgent": task.AssigneeAgentID,
-				"failurePolicy": string(task.FailurePolicy),
-				"dependsOn":     task.DependsOn,
-				"reads":         task.Reads,
-				"writes":        task.Writes,
-				"publish":       outputVisibilities(task.Publish),
-				"budget": map[string]any{
-					"tokens":    task.Budget.Tokens,
-					"toolCalls": task.Budget.ToolCalls,
-				},
-			},
-		}); err != nil {
+		if err := r.recordTaskScheduledEvent(ctx, state, task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) recordTaskScheduledEvent(ctx context.Context, state team.RunState, task team.Task) error {
+	return r.appendEvent(ctx, storage.Event{
+		RunID:   state.ID,
+		TeamID:  state.ID,
+		TaskID:  task.ID,
+		Type:    storage.EventTaskScheduled,
+		Payload: taskScheduledPayload(task),
+	})
+}
+
+func (r *Runtime) recordNewTaskScheduledEvents(ctx context.Context, previous, current team.RunState) error {
+	known := make(map[string]struct{}, len(previous.Tasks))
+	for _, task := range previous.Tasks {
+		known[task.ID] = struct{}{}
+	}
+	for _, task := range current.Tasks {
+		if _, ok := known[task.ID]; ok {
+			continue
+		}
+		if err := r.recordTaskScheduledEvent(ctx, current, task); err != nil {
 			return err
 		}
 	}
@@ -204,6 +208,26 @@ func (r *Runtime) recordTaskOutputsPublishedEvent(ctx context.Context, state tea
 	payload := map[string]any{}
 	mergeResultPayload(payload, task.Result)
 	if state.Blackboard != nil {
+		sources := sourcesForTask(state.Blackboard, task.ID)
+		if len(sources) > 0 {
+			payload["sources"] = sourcePayload(sources)
+		}
+		artifacts := artifactsForTask(state.Blackboard, task.ID)
+		if len(artifacts) > 0 {
+			payload["artifacts"] = artifactPayload(artifacts)
+		}
+		evidence := evidenceForTask(state.Blackboard, task.ID)
+		if len(evidence) > 0 {
+			payload["evidence"] = evidencePayload(evidence)
+		}
+		claims := state.Blackboard.ClaimsForTask(task.ID)
+		if len(claims) > 0 {
+			payload["claims"] = claimPayload(claims)
+		}
+		findings := findingsForTask(state.Blackboard, task.ID)
+		if len(findings) > 0 {
+			payload["findings"] = findingPayload(findings)
+		}
 		exchanges := state.Blackboard.ExchangesForTask(task.ID)
 		if len(exchanges) > 0 {
 			payload["exchanges"] = exchangesPayload(exchanges)
@@ -539,19 +563,115 @@ func outputVisibilities(items []team.OutputVisibility) []string {
 	return result
 }
 
+func taskScheduledPayload(task team.Task) map[string]any {
+	return map[string]any{
+		"title":         task.Title,
+		"input":         task.Input,
+		"status":        string(task.Status),
+		"kind":          string(task.Kind),
+		"requiredRole":  string(task.RequiredRole),
+		"assigneeAgent": task.AssigneeAgentID,
+		"failurePolicy": string(task.FailurePolicy),
+		"dependsOn":     task.DependsOn,
+		"reads":         task.Reads,
+		"writes":        task.Writes,
+		"publish":       outputVisibilities(task.Publish),
+		"budget": map[string]any{
+			"tokens":    task.Budget.Tokens,
+			"toolCalls": task.Budget.ToolCalls,
+		},
+	}
+}
+
+func sourcePayload(items []blackboard.Source) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":       item.ID,
+			"taskId":   item.TaskID,
+			"title":    item.Title,
+			"metadata": cloneStringMap(item.Metadata),
+		})
+	}
+	return payload
+}
+
+func artifactPayload(items []blackboard.Artifact) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":       item.ID,
+			"taskId":   item.TaskID,
+			"name":     item.Name,
+			"content":  item.Content,
+			"metadata": cloneStringMap(item.Metadata),
+		})
+	}
+	return payload
+}
+
+func evidencePayload(items []blackboard.Evidence) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":         item.ID,
+			"taskId":     item.TaskID,
+			"sourceId":   item.SourceID,
+			"artifactId": item.ArtifactID,
+			"summary":    item.Summary,
+			"snippet":    item.Snippet,
+			"score":      item.Score,
+		})
+	}
+	return payload
+}
+
+func claimPayload(items []blackboard.Claim) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":          item.ID,
+			"taskId":      item.TaskID,
+			"summary":     item.Summary,
+			"evidenceIds": item.EvidenceIDs,
+			"confidence":  item.Confidence,
+		})
+	}
+	return payload
+}
+
+func findingPayload(items []blackboard.Finding) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		payload = append(payload, map[string]any{
+			"id":          item.ID,
+			"taskId":      item.TaskID,
+			"summary":     item.Summary,
+			"claimIds":    item.ClaimIDs,
+			"evidenceIds": item.EvidenceIDs,
+			"confidence":  item.Confidence,
+		})
+	}
+	return payload
+}
+
 func exchangesPayload(items []blackboard.Exchange) []map[string]any {
 	payload := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		payload = append(payload, map[string]any{
 			"id":          item.ID,
 			"key":         item.Key,
+			"namespace":   item.Namespace,
 			"taskId":      item.TaskID,
+			"version":     item.Version,
+			"etag":        item.ETag,
 			"valueType":   string(item.ValueType),
 			"text":        item.Text,
 			"structured":  item.Structured,
 			"artifactIds": item.ArtifactIDs,
 			"claimIds":    item.ClaimIDs,
 			"findingIds":  item.FindingIDs,
+			"metadata":    cloneStringMap(item.Metadata),
 		})
 	}
 	return payload
@@ -624,6 +744,58 @@ func verificationsForTask(board *blackboard.State, task team.Task) []blackboard.
 	for _, verification := range board.Verifications {
 		if _, ok := claimIDs[verification.ClaimID]; ok {
 			items = append(items, verification)
+		}
+	}
+	return items
+}
+
+func sourcesForTask(board *blackboard.State, taskID string) []blackboard.Source {
+	if board == nil {
+		return nil
+	}
+	items := make([]blackboard.Source, 0, len(board.Sources))
+	for _, item := range board.Sources {
+		if item.TaskID == taskID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func artifactsForTask(board *blackboard.State, taskID string) []blackboard.Artifact {
+	if board == nil {
+		return nil
+	}
+	items := make([]blackboard.Artifact, 0, len(board.Artifacts))
+	for _, item := range board.Artifacts {
+		if item.TaskID == taskID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func evidenceForTask(board *blackboard.State, taskID string) []blackboard.Evidence {
+	if board == nil {
+		return nil
+	}
+	items := make([]blackboard.Evidence, 0, len(board.Evidence))
+	for _, item := range board.Evidence {
+		if item.TaskID == taskID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func findingsForTask(board *blackboard.State, taskID string) []blackboard.Finding {
+	if board == nil {
+		return nil
+	}
+	items := make([]blackboard.Finding, 0, len(board.Findings))
+	for _, item := range board.Findings {
+		if item.TaskID == taskID {
+			items = append(items, item)
 		}
 	}
 	return items

@@ -897,7 +897,7 @@ func (r *Runtime) driveTeamStep(ctx context.Context, pattern team.Pattern, curre
 	if err != nil {
 		return team.RunState{}, false, err
 	}
-	terminal, err := r.persistTeamProgress(ctx, next)
+	terminal, err := r.persistTeamProgress(ctx, current, next)
 	if err != nil {
 		return team.RunState{}, false, err
 	}
@@ -906,7 +906,7 @@ func (r *Runtime) driveTeamStep(ctx context.Context, pattern team.Pattern, curre
 
 func (r *Runtime) resolveBlockedOrRunnable(ctx context.Context, current team.RunState) (team.RunState, bool, bool, error) {
 	if next, changed := current.ResolveBlockedTasks(); changed {
-		terminal, err := r.persistTeamProgress(ctx, next)
+		terminal, err := r.persistTeamProgress(ctx, current, next)
 		return terminal, true, terminal.IsTerminal(), err
 	}
 	if len(current.RunnableTasks()) == 0 {
@@ -916,7 +916,7 @@ func (r *Runtime) resolveBlockedOrRunnable(ctx context.Context, current team.Run
 	if err != nil {
 		return team.RunState{}, false, false, err
 	}
-	terminal, err := r.persistTeamProgress(ctx, next)
+	terminal, err := r.persistTeamProgress(ctx, current, next)
 	return terminal, true, terminal.IsTerminal(), err
 }
 
@@ -955,7 +955,11 @@ func (r *Runtime) advancePatternState(ctx context.Context, pattern team.Pattern,
 	return next, nil
 }
 
-func (r *Runtime) persistTeamProgress(ctx context.Context, current team.RunState) (team.RunState, error) {
+func (r *Runtime) persistTeamProgress(ctx context.Context, previous, current team.RunState) (team.RunState, error) {
+	current.Normalize()
+	if err := r.recordNewTaskScheduledEvents(ctx, previous, current); err != nil {
+		return team.RunState{}, err
+	}
 	terminal, err := r.saveIfFailed(ctx, current)
 	if err != nil {
 		return team.RunState{}, err

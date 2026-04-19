@@ -134,6 +134,9 @@ func TestRecordsEventsAndCanReplayTeamState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTeam() error = %v", err)
 	}
+	if state.Phase != team.PhaseComplete {
+		t.Fatalf("expected completed team phase, got %#v", state)
+	}
 	events, err := runner.storage.Events().List(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -142,8 +145,12 @@ func TestRecordsEventsAndCanReplayTeamState(t *testing.T) {
 		t.Fatalf("expected runtime events")
 	}
 	has := map[storage.EventType]bool{}
+	scheduledTasks := map[string]bool{}
 	for _, event := range events {
 		has[event.Type] = true
+		if event.Type == storage.EventTaskScheduled {
+			scheduledTasks[event.TaskID] = true
+		}
 	}
 	for _, eventType := range []storage.EventType{
 		storage.EventTeamStarted,
@@ -154,6 +161,11 @@ func TestRecordsEventsAndCanReplayTeamState(t *testing.T) {
 	} {
 		if !has[eventType] {
 			t.Fatalf("expected event %s in %#v", eventType, events)
+		}
+	}
+	for _, taskID := range []string{"task-1", "task-synthesize"} {
+		if !scheduledTasks[taskID] {
+			t.Fatalf("expected scheduled event for task %s in %#v", taskID, events)
 		}
 	}
 	replayed, err := runner.ReplayTeamState(context.Background(), state.ID)

@@ -53,7 +53,7 @@ func TestDeterministicEvalRunner(t *testing.T) {
 		t.Fatalf("status = %s, want completed", run.Status)
 	}
 	outputDir := filepath.Join(workspace, "out", "runs", "deterministic-case", run.ID, fixedNow().Format(timestampLayout))
-	for _, name := range []string{"events.json", "replay.json", "answer.txt", "score.json", "summary.md", "manifest.json", "run.json"} {
+	for _, name := range []string{"events.json", "replay.json", "state.final.json", "state.replayed.json", "answer.txt", "score.json", "quality.score.json", "evaluation.report.json", "tool_calls.jsonl", "model_events.jsonl", "summary.md", "manifest.json", "run.json"} {
 		if _, err := os.Stat(filepath.Join(outputDir, name)); err != nil {
 			t.Fatalf("missing artifact %s: %v", name, err)
 		}
@@ -64,6 +64,13 @@ func TestDeterministicEvalRunner(t *testing.T) {
 	}
 	if string(answer) != "retention summary from scripted provider" {
 		t.Fatalf("answer = %q", string(answer))
+	}
+	scoreJSON, err := os.ReadFile(filepath.Join(outputDir, "score.json"))
+	if err != nil {
+		t.Fatalf("read score: %v", err)
+	}
+	if !strings.Contains(string(scoreJSON), `"caseId": "deterministic-case"`) {
+		t.Fatalf("expected score.json to include case id, got %s", string(scoreJSON))
 	}
 }
 
@@ -133,6 +140,49 @@ func TestMalformedCaseRejection(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(workspace, "out", "runs", "bad-case")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no partial output, stat err = %v", statErr)
+	}
+}
+
+func TestDeterministicEvalRunnerSupportsCollabAndMultiWorkerProfiles(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	casePath := writeDeterministicCase(t, workspace, `{
+  "schemaVersion": "1.0",
+  "id": "collab-case",
+  "suite": "collab",
+  "pattern": "collab",
+  "provider": {
+    "scriptPath": "scripts/provider.json"
+  },
+  "input": {
+    "query": "Design a collaboration workflow.",
+    "branches": [
+      {"id":"impl-api","title":"Implement API","input":"Draft the API contract."},
+      {"id":"impl-ui","title":"Review UI","input":"Draft the UI interaction flow."}
+    ]
+  },
+  "profiles": {
+    "supervisor": "eval-supervisor",
+    "workers": ["eval-worker-a", "eval-worker-b"]
+  }
+}`)
+	writeScript(t, filepath.Join(workspace, "scripts", "provider.json"), `[
+  {"kind":"text_delta","text":"branch output"},
+  {"kind":"done","stopReason":"complete"}
+]`)
+
+	runner := NewRunner(RunnerOptions{Workspace: workspace, OutputRoot: filepath.Join(workspace, "out"), Now: fixedNow})
+	run, err := runner.Run(context.Background(), casePath)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	outputDir := filepath.Join(workspace, "out", "runs", "collab-case", run.ID, fixedNow().Format(timestampLayout))
+	modelEvents, err := os.ReadFile(filepath.Join(outputDir, "model_events.jsonl"))
+	if err != nil {
+		t.Fatalf("read model_events.jsonl: %v", err)
+	}
+	if !strings.Contains(string(modelEvents), `"taskId":"impl-api"`) || !strings.Contains(string(modelEvents), `"taskId":"impl-ui"`) {
+		t.Fatalf("expected model events for both collab branches, got %s", string(modelEvents))
 	}
 }
 

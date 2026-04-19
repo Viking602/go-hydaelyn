@@ -18,8 +18,9 @@ type EvalCase struct {
 }
 
 type EvalCaseProfiles struct {
-	Supervisor string `json:"supervisor,omitempty"`
-	Worker     string `json:"worker,omitempty"`
+	Supervisor string   `json:"supervisor,omitempty"`
+	Worker     string   `json:"worker,omitempty"`
+	Workers    []string `json:"workers,omitempty"`
 }
 
 type EvalCaseProvider struct {
@@ -39,10 +40,17 @@ type EvalCaseExpected struct {
 }
 
 type EvalCaseThresholds struct {
-	TaskCompletionRate  float64 `json:"taskCompletionRate,omitempty"`
-	Groundedness        float64 `json:"groundedness,omitempty"`
-	SupportedClaimRatio float64 `json:"supportedClaimRatio,omitempty"`
-	RetrySuccessRate    float64 `json:"retrySuccessRate,omitempty"`
+	TaskCompletionRate     float64 `json:"taskCompletionRate,omitempty"`
+	AnswerCorrectness      float64 `json:"answerCorrectness,omitempty"`
+	Groundedness           float64 `json:"groundedness,omitempty"`
+	SupportedClaimRatio    float64 `json:"supportedClaimRatio,omitempty"`
+	CitationPrecision      float64 `json:"citationPrecision,omitempty"`
+	CitationRecall         float64 `json:"citationRecall,omitempty"`
+	ToolPrecision          float64 `json:"toolPrecision,omitempty"`
+	ToolRecall             float64 `json:"toolRecall,omitempty"`
+	ToolArgAccuracy        float64 `json:"toolArgAccuracy,omitempty"`
+	SynthesisInputCoverage float64 `json:"synthesisInputCoverage,omitempty"`
+	RetrySuccessRate       float64 `json:"retrySuccessRate,omitempty"`
 }
 
 type EvalCaseLimits struct {

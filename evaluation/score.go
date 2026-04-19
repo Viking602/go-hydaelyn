@@ -15,6 +15,9 @@ const (
 type ScorePayload struct {
 	SchemaVersion    string                `json:"schemaVersion"`
 	RunID            string                `json:"runId"`
+	CaseID           string                `json:"caseId,omitempty"`
+	Suite            string                `json:"suite,omitempty"`
+	Pass             bool                  `json:"pass,omitempty"`
 	OverallScore     float64               `json:"overallScore,omitempty"`
 	Level            ScoreLevel            `json:"level,omitempty"`
 	ReplayConsistent bool                  `json:"replayConsistent,omitempty"`
@@ -31,6 +34,7 @@ type ScoreRuntimeMetrics struct {
 	RetrySuccessRate    float64 `json:"retrySuccessRate,omitempty"`
 	EndToEndLatencyMs   int64   `json:"endToEndLatencyMs,omitempty"`
 	ToolCallCount       int     `json:"toolCallCount,omitempty"`
+	TotalTokens         int     `json:"totalTokens,omitempty"`
 	TokenBudgetHitRate  float64 `json:"tokenBudgetHitRate,omitempty"`
 }
 

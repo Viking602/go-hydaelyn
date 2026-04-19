@@ -16,12 +16,18 @@ func ScoreCase(evalRun *EvalRun, events []Event, caseDef EvalCase) (*ScorePayloa
 	}
 	report := Evaluate(events)
 	runtimeMetrics := buildRuntimeMetrics(evalRun, report)
-	qualityMetrics, qualitySignals := buildQualityMetrics(events, caseDef, report)
+	qualityMetrics, qualitySignals := buildQualityMetrics(evalRun, events, caseDef, report)
 	safetyMetrics := buildSafetyMetrics(evalRun, events)
+	replayConsistent := replayConsistencyFromEvents(events)
+	if evalRun != nil && evalRun.ReplayConsistent != nil {
+		replayConsistent = *evalRun.ReplayConsistent
+	}
 	payload := &ScorePayload{
 		SchemaVersion:    ScorePayloadSchemaVersion,
 		RunID:            canonicalRunID(evalRun.ID, caseDef.ID, report.TeamID),
-		ReplayConsistent: replayConsistencyFromEvents(events),
+		CaseID:           caseDef.ID,
+		Suite:            caseDef.Suite,
+		ReplayConsistent: replayConsistent,
 		RuntimeMetrics:   runtimeMetrics,
 		SafetyMetrics:    safetyMetrics,
 	}
@@ -33,6 +39,7 @@ func ScoreCase(evalRun *EvalRun, events []Event, caseDef EvalCase) (*ScorePayloa
 	payload.Level = ApplyHardDowngradeRules(payload)
 	payload.Failures = ExtractFailures(payload, events, caseDef)
 	payload.Recommendations = MapRecommendations(payload.Failures, payload)
+	payload.Pass = casePasses(payload, caseDef)
 	return payload, nil
 }
 
@@ -45,16 +52,28 @@ func buildRuntimeMetrics(evalRun *EvalRun, report Report) *ScoreRuntimeMetrics {
 		ToolCallCount:       report.ToolCallCount,
 		TokenBudgetHitRate:  report.TokenBudgetHitRate,
 	}
+	if evalRun != nil && evalRun.Usage != nil {
+		metrics.TotalTokens = evalRun.Usage.TotalTokens
+		if evalRun.Usage.ToolCallCount > 0 {
+			metrics.ToolCallCount = evalRun.Usage.ToolCallCount
+		}
+	}
 	if evalRun != nil && !evalRun.StartedAt.IsZero() && !evalRun.CompletedAt.IsZero() && evalRun.CompletedAt.After(evalRun.StartedAt) {
 		metrics.EndToEndLatencyMs = evalRun.CompletedAt.Sub(evalRun.StartedAt).Milliseconds()
 	}
 	return metrics
 }
 
-func buildQualityMetrics(events []Event, caseDef EvalCase, report Report) (*ScoreQualityMetrics, int) {
+func buildQualityMetrics(evalRun *EvalRun, events []Event, caseDef EvalCase, report Report) (*ScoreQualityMetrics, int) {
 	quality := &ScoreQualityMetrics{}
 	signals := 0
+	if evalRun != nil && evalRun.QualityMetrics != nil {
+		signals += mergeQualityMetrics(quality, evalRun.QualityMetrics)
+	}
 	setMetric := func(target *float64, keys ...string) {
+		if *target > 0 {
+			return
+		}
 		if value, ok := numericSignalFromEvents(events, keys...); ok {
 			*target = value
 			signals++
@@ -83,6 +102,29 @@ func buildQualityMetrics(events []Event, caseDef EvalCase, report Report) (*Scor
 		}
 	}
 	return quality, signals
+}
+
+func mergeQualityMetrics(target, source *ScoreQualityMetrics) int {
+	if target == nil || source == nil {
+		return 0
+	}
+	merged := 0
+	copyMetric := func(dst *float64, value float64) {
+		if *dst != 0 {
+			return
+		}
+		*dst = value
+		merged++
+	}
+	copyMetric(&target.AnswerCorrectness, source.AnswerCorrectness)
+	copyMetric(&target.Groundedness, source.Groundedness)
+	copyMetric(&target.CitationPrecision, source.CitationPrecision)
+	copyMetric(&target.CitationRecall, source.CitationRecall)
+	copyMetric(&target.ToolPrecision, source.ToolPrecision)
+	copyMetric(&target.ToolRecall, source.ToolRecall)
+	copyMetric(&target.ToolArgAccuracy, source.ToolArgAccuracy)
+	copyMetric(&target.SynthesisInputCoverage, source.SynthesisInputCoverage)
+	return merged
 }
 
 func buildSafetyMetrics(evalRun *EvalRun, events []Event) *ScoreSafetyMetrics {
@@ -230,6 +272,74 @@ func replayConsistencyFromEvents(events []Event) bool {
 	value, ok := boolSignalFromEvents(events, "replayConsistent")
 	if ok {
 		return value
+	}
+	return true
+}
+
+func casePasses(score *ScorePayload, caseDef EvalCase) bool {
+	if score == nil {
+		return false
+	}
+	if !score.ReplayConsistent {
+		return false
+	}
+	if score.SafetyMetrics != nil && score.SafetyMetrics.CriticalFailure {
+		return false
+	}
+	if score.RuntimeMetrics != nil {
+		if score.RuntimeMetrics.BlockingFailureRate > 0 {
+			return false
+		}
+		if caseDef.Thresholds != nil {
+			if threshold := caseDef.Thresholds.TaskCompletionRate; threshold > 0 && score.RuntimeMetrics.TaskCompletionRate < threshold {
+				return false
+			}
+			if threshold := caseDef.Thresholds.RetrySuccessRate; threshold > 0 && score.RuntimeMetrics.RetrySuccessRate < threshold {
+				return false
+			}
+		}
+		if caseDef.Limits != nil {
+			if caseDef.Limits.MaxToolCalls > 0 && score.RuntimeMetrics.ToolCallCount > caseDef.Limits.MaxToolCalls {
+				return false
+			}
+			if caseDef.Limits.MaxLatencyMs > 0 && score.RuntimeMetrics.EndToEndLatencyMs > int64(caseDef.Limits.MaxLatencyMs) {
+				return false
+			}
+			if caseDef.Limits.MaxTokens > 0 && score.RuntimeMetrics.TotalTokens > caseDef.Limits.MaxTokens {
+				return false
+			}
+		}
+	}
+	if score.QualityMetrics != nil {
+		if caseDef.Thresholds != nil {
+			thresholds := []struct {
+				actual    float64
+				threshold float64
+			}{
+				{actual: score.QualityMetrics.AnswerCorrectness, threshold: caseDef.Thresholds.AnswerCorrectness},
+				{actual: score.QualityMetrics.Groundedness, threshold: caseDef.Thresholds.Groundedness},
+				{actual: score.QualityMetrics.Groundedness, threshold: caseDef.Thresholds.SupportedClaimRatio},
+				{actual: score.QualityMetrics.CitationPrecision, threshold: caseDef.Thresholds.CitationPrecision},
+				{actual: score.QualityMetrics.CitationRecall, threshold: caseDef.Thresholds.CitationRecall},
+				{actual: score.QualityMetrics.ToolPrecision, threshold: caseDef.Thresholds.ToolPrecision},
+				{actual: score.QualityMetrics.ToolRecall, threshold: caseDef.Thresholds.ToolRecall},
+				{actual: score.QualityMetrics.ToolArgAccuracy, threshold: caseDef.Thresholds.ToolArgAccuracy},
+				{actual: score.QualityMetrics.SynthesisInputCoverage, threshold: caseDef.Thresholds.SynthesisInputCoverage},
+			}
+			for _, item := range thresholds {
+				if item.threshold > 0 && item.actual < item.threshold {
+					return false
+				}
+			}
+		}
+		if caseDef.Expected != nil {
+			if len(caseDef.Expected.RequiredCitations) > 0 && score.QualityMetrics.CitationRecall < 1 {
+				return false
+			}
+			if (len(caseDef.Expected.MustInclude) > 0 || len(caseDef.Expected.MustNotInclude) > 0) && score.QualityMetrics.AnswerCorrectness < 1 {
+				return false
+			}
+		}
 	}
 	return true
 }

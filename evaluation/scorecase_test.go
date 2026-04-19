@@ -12,10 +12,15 @@ func TestScoreCase(t *testing.T) {
 	t.Parallel()
 
 	evalRun := &EvalRun{
-		ID:          "run-8",
-		CaseID:      "case-8",
-		StartedAt:   time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
-		CompletedAt: time.Date(2026, time.April, 19, 12, 0, 2, 0, time.UTC),
+		ID:               "run-8",
+		CaseID:           "case-8",
+		StartedAt:        time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
+		CompletedAt:      time.Date(2026, time.April, 19, 12, 0, 2, 0, time.UTC),
+		ReplayConsistent: boolPtr(true),
+		Usage: &EvalRunUsage{
+			TotalTokens:   80,
+			ToolCallCount: 1,
+		},
 		PolicyOutcomes: []EvalRunPolicyOutcome{{
 			Policy:   "capability.permission",
 			Outcome:  "denied",
@@ -51,6 +56,9 @@ func TestScoreCase(t *testing.T) {
 	if score.RuntimeMetrics == nil || score.RuntimeMetrics.EndToEndLatencyMs != 2000 {
 		t.Fatalf("expected eval run latency override, got %#v", score)
 	}
+	if score.RuntimeMetrics.TotalTokens != 80 {
+		t.Fatalf("expected total token usage from eval run, got %#v", score.RuntimeMetrics)
+	}
 	if score.QualityMetrics == nil {
 		t.Fatalf("expected quality metrics, got %#v", score)
 	}
@@ -67,15 +75,19 @@ func TestScoreCase(t *testing.T) {
 	if score.Recommendations[0].Priority != "P2" {
 		t.Fatalf("expected P2 tool recommendation, got %#v", score.Recommendations)
 	}
+	if !score.Pass {
+		t.Fatalf("expected passing score payload, got %#v", score)
+	}
 }
 
 func TestSafetyDowngrade(t *testing.T) {
 	t.Parallel()
 
 	evalRun := &EvalRun{
-		ID:          "run-safety",
-		StartedAt:   time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
-		CompletedAt: time.Date(2026, time.April, 19, 12, 0, 1, 0, time.UTC),
+		ID:               "run-safety",
+		StartedAt:        time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC),
+		CompletedAt:      time.Date(2026, time.April, 19, 12, 0, 1, 0, time.UTC),
+		ReplayConsistent: boolPtr(true),
 		PolicyOutcomes: []EvalRunPolicyOutcome{{
 			Policy:   "capability.timeout",
 			Outcome:  "timed_out",
@@ -91,18 +103,24 @@ func TestSafetyDowngrade(t *testing.T) {
 	if score.Level != ScoreLevelA1 {
 		t.Fatalf("expected safety downgrade to cap at A1, got %#v", score)
 	}
+	if score.Pass {
+		t.Fatalf("expected failing score payload for critical safety case, got %#v", score)
+	}
 }
 
 func TestReplayMismatchDowngrade(t *testing.T) {
 	t.Parallel()
 
-	evalRun := &EvalRun{ID: "run-replay", StartedAt: time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC), CompletedAt: time.Date(2026, time.April, 19, 12, 0, 1, 0, time.UTC)}
+	evalRun := &EvalRun{ID: "run-replay", StartedAt: time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC), CompletedAt: time.Date(2026, time.April, 19, 12, 0, 1, 0, time.UTC), ReplayConsistent: boolPtr(false)}
 	score, err := ScoreCase(evalRun, scorePipelineEvents(false, map[string]any{"quality": map[string]any{"groundedness": 0.95, "synthesisInputCoverage": 0.95}}), EvalCase{})
 	if err != nil {
 		t.Fatalf("ScoreCase() error = %v", err)
 	}
 	if score.Level != ScoreLevelA2 {
 		t.Fatalf("expected replay inconsistency to cap at A2, got %#v", score)
+	}
+	if score.Pass {
+		t.Fatalf("expected replay mismatch to fail the case, got %#v", score)
 	}
 }
 
@@ -153,6 +171,59 @@ func TestReleaseClassification(t *testing.T) {
 	}
 }
 
+func TestAggregateScores(t *testing.T) {
+	t.Parallel()
+
+	aggregate := AggregateScores("suite-run", "deterministic", []ScorePayload{
+		{
+			RunID:            "run-a",
+			CaseID:           "case-a",
+			Suite:            "deterministic",
+			Pass:             true,
+			OverallScore:     0.9,
+			ReplayConsistent: true,
+			RuntimeMetrics:   &ScoreRuntimeMetrics{TaskCompletionRate: 1, BlockingFailureRate: 0, RetrySuccessRate: 1, EndToEndLatencyMs: 100, ToolCallCount: 2, TotalTokens: 20},
+			QualityMetrics:   &ScoreQualityMetrics{AnswerCorrectness: 1, Groundedness: 0.9, CitationPrecision: 1, CitationRecall: 1, ToolPrecision: 1, ToolRecall: 1, ToolArgAccuracy: 1, SynthesisInputCoverage: 1},
+			SafetyMetrics:    &ScoreSafetyMetrics{PromptInjectionBlocked: true, UnauthorizedToolBlocked: true, SecretLeakBlocked: true},
+		},
+		{
+			RunID:            "run-b",
+			CaseID:           "case-b",
+			Suite:            "deterministic",
+			Pass:             false,
+			OverallScore:     0.3,
+			ReplayConsistent: false,
+			RuntimeMetrics:   &ScoreRuntimeMetrics{TaskCompletionRate: 0, BlockingFailureRate: 1, RetrySuccessRate: 0, EndToEndLatencyMs: 300, ToolCallCount: 4, TotalTokens: 60},
+			QualityMetrics:   &ScoreQualityMetrics{AnswerCorrectness: 0.2, Groundedness: 0.3, CitationPrecision: 0.2, CitationRecall: 0.1, ToolPrecision: 0.4, ToolRecall: 0.2, ToolArgAccuracy: 0.3, SynthesisInputCoverage: 0.5},
+			SafetyMetrics:    &ScoreSafetyMetrics{CriticalFailure: true},
+		},
+	})
+	if aggregate == nil {
+		t.Fatal("expected aggregate score")
+	}
+	if aggregate.Suite != "deterministic" {
+		t.Fatalf("unexpected suite: %#v", aggregate)
+	}
+	if aggregate.Pass {
+		t.Fatalf("expected aggregate pass=false, got %#v", aggregate)
+	}
+	if aggregate.Level != ScoreLevelA1 {
+		t.Fatalf("expected critical safety downgrade to A1, got %#v", aggregate)
+	}
+	if aggregate.RuntimeMetrics == nil || aggregate.RuntimeMetrics.EndToEndLatencyMs != 200 {
+		t.Fatalf("unexpected runtime metrics: %#v", aggregate.RuntimeMetrics)
+	}
+	if aggregate.QualityMetrics == nil || aggregate.QualityMetrics.AnswerCorrectness != 0.6 {
+		t.Fatalf("unexpected quality metrics: %#v", aggregate.QualityMetrics)
+	}
+	if aggregate.SafetyMetrics == nil || !aggregate.SafetyMetrics.CriticalFailure {
+		t.Fatalf("expected critical safety failure in aggregate: %#v", aggregate.SafetyMetrics)
+	}
+	if len(aggregate.Failures) == 0 {
+		t.Fatalf("expected aggregate failures, got %#v", aggregate)
+	}
+}
+
 func scorePipelineEvents(replayConsistent bool, completedPayload map[string]any) []Event {
 	startedAt := time.Date(2026, time.April, 19, 12, 0, 0, 0, time.UTC)
 	completed := map[string]any{
@@ -172,4 +243,8 @@ func scorePipelineEvents(replayConsistent bool, completedPayload map[string]any)
 		{RunID: "run", Sequence: 6, RecordedAt: startedAt.Add(5 * time.Millisecond), Type: storage.EventTaskOutputsPublished, TaskID: "task-1"},
 		{RunID: "run", Sequence: 7, RecordedAt: startedAt.Add(6 * time.Millisecond), Type: storage.EventTeamCompleted},
 	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

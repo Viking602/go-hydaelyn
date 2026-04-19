@@ -294,7 +294,7 @@ func (r *Runtime) reviewPlannedTeam(ctx context.Context, current team.RunState) 
 		if err != nil {
 			return team.RunState{}, false, false, err
 		}
-		persisted, err := r.persistTeamProgress(ctx, updated)
+		persisted, err := r.persistTeamProgress(ctx, current, updated)
 		if err != nil {
 			return team.RunState{}, false, false, err
 		}

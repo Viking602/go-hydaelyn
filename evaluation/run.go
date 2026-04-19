@@ -32,8 +32,10 @@ type EvalRun struct {
 	Seed              int64                  `json:"seed,omitempty"`
 	StartedAt         time.Time              `json:"startedAt"`
 	CompletedAt       time.Time              `json:"completedAt"`
+	ReplayConsistent  *bool                  `json:"replayConsistent,omitempty"`
 	TraceRefs         *EvalRunTraceRefs      `json:"traceRefs,omitempty"`
 	ArtifactRefs      *EvalRunArtifactRefs   `json:"artifactRefs,omitempty"`
+	QualityMetrics    *ScoreQualityMetrics   `json:"qualityMetrics,omitempty"`
 	ScoreRef          *EvalRunRef            `json:"scoreRef,omitempty"`
 	PolicyOutcomes    []EvalRunPolicyOutcome `json:"policyOutcomes,omitempty"`
 	Status            EvalRunStatus          `json:"status"`
@@ -73,9 +75,16 @@ type EvalRunTraceRefs struct {
 }
 
 type EvalRunArtifactRefs struct {
-	Events *EvalRunRef `json:"events,omitempty"`
-	Replay *EvalRunRef `json:"replay,omitempty"`
-	Answer *EvalRunRef `json:"answer,omitempty"`
+	Events           *EvalRunRef `json:"events,omitempty"`
+	Replay           *EvalRunRef `json:"replay,omitempty"`
+	Answer           *EvalRunRef `json:"answer,omitempty"`
+	FinalState       *EvalRunRef `json:"finalState,omitempty"`
+	ReplayedState    *EvalRunRef `json:"replayedState,omitempty"`
+	ToolCalls        *EvalRunRef `json:"toolCalls,omitempty"`
+	ModelEvents      *EvalRunRef `json:"modelEvents,omitempty"`
+	EvaluationReport *EvalRunRef `json:"evaluationReport,omitempty"`
+	QualityScore     *EvalRunRef `json:"qualityScore,omitempty"`
+	Summary          *EvalRunRef `json:"summary,omitempty"`
 }
 
 type EvalRunRef struct {

@@ -232,7 +232,7 @@ func (r *Runtime) resolveQueuedState(ctx context.Context, current team.RunState)
 		return current, true, true, nil
 	}
 	if next, changed := current.ResolveBlockedTasks(); changed {
-		terminal, err := r.persistTeamProgress(ctx, next)
+		terminal, err := r.persistTeamProgress(ctx, current, next)
 		if err != nil {
 			return team.RunState{}, false, false, err
 		}
@@ -262,7 +262,7 @@ func (r *Runtime) continueQueuedStep(ctx context.Context, pattern team.Pattern, 
 	if err != nil {
 		return team.RunState{}, false, err
 	}
-	next, err = r.persistTeamProgress(ctx, advanced)
+	next, err = r.persistTeamProgress(ctx, current, advanced)
 	if err != nil {
 		return team.RunState{}, false, err
 	}

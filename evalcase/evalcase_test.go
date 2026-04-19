@@ -1,6 +1,7 @@
 package evalcase
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,10 +15,10 @@ func TestValidateCase(t *testing.T) {
 			ID:            "case-1",
 			Suite:         "fixture",
 			Pattern:       "deepsearch",
-			Profiles:      &evaluation.EvalCaseProfiles{Supervisor: "supervisor", Worker: "worker"},
+			Profiles:      &evaluation.EvalCaseProfiles{Supervisor: "supervisor", Worker: "worker", Workers: []string{"worker-2", "worker-3"}},
 			Tools:         []string{"fixture_search", "calculator"},
 			Fixtures:      &evaluation.EvalCaseFixtures{CorpusIDs: []string{"policy-001"}, Paths: []string{"fixtures/corpus"}},
-			Thresholds:    &evaluation.EvalCaseThresholds{Groundedness: 0.8, RetrySuccessRate: 1},
+			Thresholds:    &evaluation.EvalCaseThresholds{AnswerCorrectness: 0.9, Groundedness: 0.8, CitationPrecision: 0.9, CitationRecall: 0.8, ToolPrecision: 0.8, ToolRecall: 0.8, ToolArgAccuracy: 0.8, SynthesisInputCoverage: 0.9, RetrySuccessRate: 1},
 			Limits:        &evaluation.EvalCaseLimits{MaxToolCalls: 3, MaxLatencyMs: 1000, MaxTokens: 500},
 		})
 		if err != nil {
@@ -35,6 +36,19 @@ func TestValidateCase(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected validation error")
+		}
+	})
+
+	t.Run("worker profiles cannot be empty", func(t *testing.T) {
+		err := ValidateCase(evaluation.EvalCase{
+			SchemaVersion: evaluation.EvalCaseSchemaVersion,
+			ID:            "case-1",
+			Suite:         "fixture",
+			Pattern:       "deepsearch",
+			Profiles:      &evaluation.EvalCaseProfiles{Supervisor: "supervisor", Workers: []string{"worker-a", ""}},
+		})
+		if err == nil {
+			t.Fatal("expected worker profile validation error")
 		}
 	})
 }
@@ -67,5 +81,39 @@ func TestLoadCorpus(t *testing.T) {
 	}
 	if _, ok := docs["evidence-001"]; !ok {
 		t.Fatalf("expected evidence-001 document")
+	}
+}
+
+func TestDiscoverCasePaths(t *testing.T) {
+	root := t.TempDir()
+	caseDir := filepath.Join(root, "deepsearch")
+	if err := os.MkdirAll(filepath.Join(caseDir, "fixtures"), 0o755); err != nil {
+		t.Fatalf("mkdir case dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(caseDir, "runs", "old"), 0o755); err != nil {
+		t.Fatalf("mkdir runs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "b.json"), []byte(`{"schemaVersion":"1.0","id":"b","suite":"deepsearch","pattern":"deepsearch","provider":{"scriptPath":"scripts/provider.json"}}`), 0o644); err != nil {
+		t.Fatalf("write b case: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "a.json"), []byte(`{"schemaVersion":"1.0","id":"a","suite":"deepsearch","pattern":"deepsearch","provider":{"scriptPath":"scripts/provider.json"}}`), 0o644); err != nil {
+		t.Fatalf("write a case: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "fixtures", "provider.json"), []byte(`[{"kind":"done"}]`), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "runs", "old", "score.json"), []byte(`{"overallScore":1}`), 0o644); err != nil {
+		t.Fatalf("write old score: %v", err)
+	}
+
+	paths, err := DiscoverCasePaths(root)
+	if err != nil {
+		t.Fatalf("DiscoverCasePaths() error = %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("len(paths) = %d, want 2", len(paths))
+	}
+	if filepath.Base(paths[0]) != "a.json" || filepath.Base(paths[1]) != "b.json" {
+		t.Fatalf("unexpected path order: %#v", paths)
 	}
 }

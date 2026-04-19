@@ -38,6 +38,9 @@ func ExtractFailures(score *ScorePayload, events []Event, caseDef EvalCase) []Sc
 		if score.RuntimeMetrics.TaskCompletionRate < 0.80 {
 			failures = append(failures, metricFailure("low-task-completion", "taskCompletionRate", score.RuntimeMetrics.TaskCompletionRate, 0.80, true))
 		}
+		if caseDef.Thresholds != nil && caseDef.Thresholds.TaskCompletionRate > 0 && score.RuntimeMetrics.TaskCompletionRate < caseDef.Thresholds.TaskCompletionRate {
+			failures = append(failures, thresholdFailure("task-completion-threshold-miss", "taskCompletionRate", score.RuntimeMetrics.TaskCompletionRate, caseDef.Thresholds.TaskCompletionRate))
+		}
 		if score.RuntimeMetrics.BlockingFailureRate > 0 {
 			failures = append(failures, ScoreFailure{
 				Code:     "blocking-failures",
@@ -51,6 +54,36 @@ func ExtractFailures(score *ScorePayload, events []Event, caseDef EvalCase) []Sc
 		if threshold := caseDefRetryThreshold(caseDef); threshold > 0 && score.RuntimeMetrics.RetrySuccessRate < threshold {
 			failures = append(failures, thresholdFailure("retry-success-threshold-miss", "retrySuccessRate", score.RuntimeMetrics.RetrySuccessRate, threshold))
 		}
+		if caseDef.Limits != nil && caseDef.Limits.MaxToolCalls > 0 && score.RuntimeMetrics.ToolCallCount > caseDef.Limits.MaxToolCalls {
+			failures = append(failures, ScoreFailure{
+				Code:     "tool-call-limit-exceeded",
+				Message:  fmt.Sprintf("toolCallCount %d exceeded case limit %d", score.RuntimeMetrics.ToolCallCount, caseDef.Limits.MaxToolCalls),
+				Metric:   "toolCallCount",
+				Layer:    classifyRootCauseLayer("toolCallCount", "tool call budget exceeded"),
+				Severity: "medium",
+				Blocking: true,
+			})
+		}
+		if caseDef.Limits != nil && caseDef.Limits.MaxLatencyMs > 0 && score.RuntimeMetrics.EndToEndLatencyMs > int64(caseDef.Limits.MaxLatencyMs) {
+			failures = append(failures, ScoreFailure{
+				Code:     "latency-limit-exceeded",
+				Message:  fmt.Sprintf("endToEndLatencyMs %d exceeded case limit %d", score.RuntimeMetrics.EndToEndLatencyMs, caseDef.Limits.MaxLatencyMs),
+				Metric:   "endToEndLatencyMs",
+				Layer:    classifyRootCauseLayer("endToEndLatencyMs", "latency budget exceeded"),
+				Severity: "medium",
+				Blocking: true,
+			})
+		}
+		if caseDef.Limits != nil && caseDef.Limits.MaxTokens > 0 && score.RuntimeMetrics.TotalTokens > caseDef.Limits.MaxTokens {
+			failures = append(failures, ScoreFailure{
+				Code:     "token-limit-exceeded",
+				Message:  fmt.Sprintf("totalTokens %d exceeded case limit %d", score.RuntimeMetrics.TotalTokens, caseDef.Limits.MaxTokens),
+				Metric:   "totalTokens",
+				Layer:    classifyRootCauseLayer("totalTokens", "token budget exceeded"),
+				Severity: "medium",
+				Blocking: true,
+			})
+		}
 	}
 	if score.QualityMetrics != nil {
 		if score.QualityMetrics.Groundedness < 0.70 {
@@ -62,20 +95,41 @@ func ExtractFailures(score *ScorePayload, events []Event, caseDef EvalCase) []Sc
 		if threshold := caseDefGroundednessThreshold(caseDef); threshold > 0 && score.QualityMetrics.Groundedness < threshold {
 			failures = append(failures, thresholdFailure("groundedness-threshold-miss", "groundedness", score.QualityMetrics.Groundedness, threshold))
 		}
+		if threshold := caseDefAnswerCorrectnessThreshold(caseDef); threshold > 0 && score.QualityMetrics.AnswerCorrectness < threshold {
+			failures = append(failures, thresholdFailure("answer-correctness-threshold-miss", "answerCorrectness", score.QualityMetrics.AnswerCorrectness, threshold))
+		}
 		if score.QualityMetrics.CitationPrecision > 0 && score.QualityMetrics.CitationPrecision < 0.80 {
 			failures = append(failures, metricFailure("low-citation-precision", "citationPrecision", score.QualityMetrics.CitationPrecision, 0.80, false))
+		}
+		if threshold := caseDefCitationPrecisionThreshold(caseDef); threshold > 0 && score.QualityMetrics.CitationPrecision < threshold {
+			failures = append(failures, thresholdFailure("citation-precision-threshold-miss", "citationPrecision", score.QualityMetrics.CitationPrecision, threshold))
 		}
 		if score.QualityMetrics.CitationRecall > 0 && score.QualityMetrics.CitationRecall < 0.80 {
 			failures = append(failures, metricFailure("low-citation-recall", "citationRecall", score.QualityMetrics.CitationRecall, 0.80, false))
 		}
+		if threshold := caseDefCitationRecallThreshold(caseDef); threshold > 0 && score.QualityMetrics.CitationRecall < threshold {
+			failures = append(failures, thresholdFailure("citation-recall-threshold-miss", "citationRecall", score.QualityMetrics.CitationRecall, threshold))
+		}
 		if score.QualityMetrics.ToolPrecision > 0 && score.QualityMetrics.ToolPrecision < 0.75 {
 			failures = append(failures, metricFailure("low-tool-precision", "toolPrecision", score.QualityMetrics.ToolPrecision, 0.75, false))
+		}
+		if threshold := caseDefToolPrecisionThreshold(caseDef); threshold > 0 && score.QualityMetrics.ToolPrecision < threshold {
+			failures = append(failures, thresholdFailure("tool-precision-threshold-miss", "toolPrecision", score.QualityMetrics.ToolPrecision, threshold))
 		}
 		if score.QualityMetrics.ToolRecall > 0 && score.QualityMetrics.ToolRecall < 0.75 {
 			failures = append(failures, metricFailure("low-tool-recall", "toolRecall", score.QualityMetrics.ToolRecall, 0.75, false))
 		}
+		if threshold := caseDefToolRecallThreshold(caseDef); threshold > 0 && score.QualityMetrics.ToolRecall < threshold {
+			failures = append(failures, thresholdFailure("tool-recall-threshold-miss", "toolRecall", score.QualityMetrics.ToolRecall, threshold))
+		}
 		if score.QualityMetrics.ToolArgAccuracy > 0 && score.QualityMetrics.ToolArgAccuracy < 0.80 {
 			failures = append(failures, metricFailure("low-tool-arg-accuracy", "toolArgAccuracy", score.QualityMetrics.ToolArgAccuracy, 0.80, false))
+		}
+		if threshold := caseDefToolArgAccuracyThreshold(caseDef); threshold > 0 && score.QualityMetrics.ToolArgAccuracy < threshold {
+			failures = append(failures, thresholdFailure("tool-arg-accuracy-threshold-miss", "toolArgAccuracy", score.QualityMetrics.ToolArgAccuracy, threshold))
+		}
+		if threshold := caseDefSynthesisCoverageThreshold(caseDef); threshold > 0 && score.QualityMetrics.SynthesisInputCoverage < threshold {
+			failures = append(failures, thresholdFailure("synthesis-coverage-threshold-miss", "synthesisInputCoverage", score.QualityMetrics.SynthesisInputCoverage, threshold))
 		}
 	}
 
@@ -251,4 +305,53 @@ func caseDefRetryThreshold(caseDef EvalCase) float64 {
 		return 0
 	}
 	return caseDef.Thresholds.RetrySuccessRate
+}
+
+func caseDefAnswerCorrectnessThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.AnswerCorrectness
+}
+
+func caseDefCitationPrecisionThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.CitationPrecision
+}
+
+func caseDefCitationRecallThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.CitationRecall
+}
+
+func caseDefToolPrecisionThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.ToolPrecision
+}
+
+func caseDefToolRecallThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.ToolRecall
+}
+
+func caseDefToolArgAccuracyThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.ToolArgAccuracy
+}
+
+func caseDefSynthesisCoverageThreshold(caseDef EvalCase) float64 {
+	if caseDef.Thresholds == nil {
+		return 0
+	}
+	return caseDef.Thresholds.SynthesisInputCoverage
 }

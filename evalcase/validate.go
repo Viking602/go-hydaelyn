@@ -39,7 +39,17 @@ func ValidateCase(c evaluation.EvalCase) error {
 		if strings.TrimSpace(c.Profiles.Supervisor) == "" {
 			return fmt.Errorf("eval case supervisor profile is required when profiles are set")
 		}
-		if strings.TrimSpace(c.Profiles.Worker) == "" {
+		workerNames := make([]string, 0, 1+len(c.Profiles.Workers))
+		if strings.TrimSpace(c.Profiles.Worker) != "" {
+			workerNames = append(workerNames, c.Profiles.Worker)
+		}
+		for _, name := range c.Profiles.Workers {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("eval case worker profiles cannot contain empty values")
+			}
+			workerNames = append(workerNames, name)
+		}
+		if len(workerNames) == 0 {
 			return fmt.Errorf("eval case worker profile is required when profiles are set")
 		}
 	}
@@ -66,10 +76,31 @@ func ValidateCase(c evaluation.EvalCase) error {
 		if err := validateUnitInterval("taskCompletionRate", c.Thresholds.TaskCompletionRate); err != nil {
 			return err
 		}
+		if err := validateUnitInterval("answerCorrectness", c.Thresholds.AnswerCorrectness); err != nil {
+			return err
+		}
 		if err := validateUnitInterval("groundedness", c.Thresholds.Groundedness); err != nil {
 			return err
 		}
 		if err := validateUnitInterval("supportedClaimRatio", c.Thresholds.SupportedClaimRatio); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("citationPrecision", c.Thresholds.CitationPrecision); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("citationRecall", c.Thresholds.CitationRecall); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolPrecision", c.Thresholds.ToolPrecision); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolRecall", c.Thresholds.ToolRecall); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolArgAccuracy", c.Thresholds.ToolArgAccuracy); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("synthesisInputCoverage", c.Thresholds.SynthesisInputCoverage); err != nil {
 			return err
 		}
 		if err := validateUnitInterval("retrySuccessRate", c.Thresholds.RetrySuccessRate); err != nil {
