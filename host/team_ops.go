@@ -64,7 +64,7 @@ func (r *Runtime) resumeTeam(ctx context.Context, teamID string) (team.RunState,
 	if state.Status == team.StatusPaused {
 		state.Status = team.StatusRunning
 		state.UpdatedAt = time.Now().UTC()
-		if state.Result != nil && state.Result.Summary == "" {
+		if isEmptyResult(state.Result) {
 			state.Result = nil
 		}
 	}
@@ -106,13 +106,15 @@ func (r *Runtime) abortTeam(ctx context.Context, teamID string) error {
 		if task.HasAuthoritativeCompletion() {
 			continue
 		}
-		r.recordTaskCancelledEvent(ctx, state, task, eventReasonTeamAborted)
+		next := task
 		if task.Status == team.TaskStatusPending || task.Status == team.TaskStatusRunning {
-			state.Tasks[i].Status = team.TaskStatusAborted
-			state.Tasks[i].Error = "team aborted"
-			state.Tasks[i].Result = &team.Result{Error: "team aborted"}
-			state.Tasks[i].FinishedAt = now
+			next.Status = team.TaskStatusAborted
+			next.Error = "team aborted"
+			next.Result = &team.Result{Error: "team aborted"}
+			next.FinishedAt = now
+			state.Tasks[i] = next
 		}
+		r.recordTaskCancelledEvent(ctx, state, next, eventReasonTeamAborted)
 	}
 	state.Status = team.StatusAborted
 	state.UpdatedAt = now
@@ -121,4 +123,21 @@ func (r *Runtime) abortTeam(ctx context.Context, teamID string) error {
 	}
 	state.Result.Error = "team aborted"
 	return r.saveTeam(ctx, &state)
+}
+
+func isEmptyResult(result *team.Result) bool {
+	if result == nil {
+		return false
+	}
+	return result.Summary == "" &&
+		result.Error == "" &&
+		len(result.Structured) == 0 &&
+		len(result.ArtifactIDs) == 0 &&
+		len(result.Findings) == 0 &&
+		len(result.Evidence) == 0 &&
+		result.Confidence == 0 &&
+		result.Usage.InputTokens == 0 &&
+		result.Usage.OutputTokens == 0 &&
+		result.Usage.TotalTokens == 0 &&
+		result.ToolCallCount == 0
 }

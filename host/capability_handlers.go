@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/provider"
@@ -58,6 +59,8 @@ func (d capabilityToolDriver) Execute(ctx context.Context, call tool.Call, sink 
 			Call: call,
 			Sink: sink,
 		},
+		Permissions: capabilityPermissionsForDefinition(d.definition),
+		Metadata:    cloneStringMap(d.definition.Metadata),
 	})
 	if err != nil {
 		return tool.Result{}, err
@@ -72,6 +75,23 @@ func (d capabilityToolDriver) Execute(ctx context.Context, call tool.Call, sink 
 type toolCapabilityInput struct {
 	Call tool.Call
 	Sink tool.UpdateSink
+}
+
+func capabilityPermissionsForDefinition(definition tool.Definition) []capability.Permission {
+	raw := strings.TrimSpace(definition.Metadata["permission"])
+	if raw == "" {
+		return nil
+	}
+	items := strings.Split(raw, ",")
+	permissions := make([]capability.Permission, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			continue
+		}
+		permissions = append(permissions, capability.Permission{Name: name})
+	}
+	return permissions
 }
 
 func providerCapabilityHandler(driver provider.Driver) capability.Handler {

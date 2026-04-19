@@ -349,3 +349,68 @@ func TestMultiAgentCollaboration_VerifierBlocksSynthesisOnMissingEvidence(t *tes
 		t.Fatalf("expected contradicted verifier evidence to block synthesis, got reason=%q blocked=%v", reason, blocked)
 	}
 }
+
+func TestVerifierStructuredClaimsOverrideSummaryHeuristics(t *testing.T) {
+	runner := New(Config{})
+	state := team.RunState{
+		Blackboard: &blackboard.State{
+			Claims: []blackboard.Claim{
+				{ID: "claim-1", TaskID: "impl-1", EvidenceIDs: []string{"evidence-1"}},
+				{ID: "claim-2", TaskID: "impl-1", EvidenceIDs: []string{"evidence-2"}},
+			},
+			Findings: []blackboard.Finding{
+				{ID: "finding-1", TaskID: "impl-1", Summary: "supported claim", ClaimIDs: []string{"claim-1"}},
+				{ID: "finding-2", TaskID: "impl-1", Summary: "unsupported claim", ClaimIDs: []string{"claim-2"}},
+			},
+		},
+	}
+
+	verifyTask := team.Task{
+		ID:        "verify-1",
+		Kind:      team.TaskKindVerify,
+		Namespace: "verify.impl-1",
+		Version:   1,
+		DependsOn: []string{"impl-1"},
+		Writes:    []string{"verify.impl-1"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		Result: &team.Result{
+			Summary: "supported",
+			Structured: map[string]any{
+				"claims": []any{
+					map[string]any{
+						"claimId":     "claim-1",
+						"decision":    "supported",
+						"confidence":  0.92,
+						"evidenceIds": []any{"evidence-1"},
+					},
+					map[string]any{
+						"claimId":    "claim-2",
+						"decision":   "unsupported",
+						"confidence": 0.88,
+					},
+				},
+			},
+		},
+	}
+
+	state = runner.applyBlackboardUpdate(state, verifyTask)
+
+	if got := len(state.Blackboard.Verifications); got != 2 {
+		t.Fatalf("expected two claim-level verifications, got %#v", state.Blackboard.Verifications)
+	}
+	if state.Blackboard.Verifications[0].ClaimID != "claim-1" || state.Blackboard.Verifications[0].Status != blackboard.VerificationStatusSupported {
+		t.Fatalf("expected structured support result for claim-1, got %#v", state.Blackboard.Verifications[0])
+	}
+	if state.Blackboard.Verifications[1].ClaimID != "claim-2" || state.Blackboard.Verifications[1].Status != blackboard.VerificationStatusContradicted {
+		t.Fatalf("expected structured contradiction result for claim-2, got %#v", state.Blackboard.Verifications[1])
+	}
+
+	supported := state.Blackboard.ExchangesForKey("supported_findings")
+	if len(supported) != 1 || len(supported[0].ClaimIDs) != 1 || supported[0].ClaimIDs[0] != "claim-1" {
+		t.Fatalf("expected only supported evidence-backed claim to publish supported finding, got %#v", supported)
+	}
+
+	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGatePassDecision || status != string(blackboard.VerificationStatusSupported) {
+		t.Fatalf("expected mixed claim-level results to keep supported gate for supported subset, got decision=%q status=%q ok=%v", decision, status, ok)
+	}
+}

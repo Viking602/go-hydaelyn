@@ -54,6 +54,23 @@ type collaborationEvent struct {
 	Payload       map[string]any
 }
 
+type taskEventContext struct {
+	LeaseID  string
+	WorkerID string
+	Reason   string
+}
+
+type taskEventContextKey struct{}
+
+func withTaskEventContext(ctx context.Context, metadata taskEventContext) context.Context {
+	return context.WithValue(ctx, taskEventContextKey{}, metadata)
+}
+
+func readTaskEventContext(ctx context.Context) taskEventContext {
+	metadata, _ := ctx.Value(taskEventContextKey{}).(taskEventContext)
+	return metadata
+}
+
 func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 	if event.Sequence == 0 && event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
@@ -161,16 +178,13 @@ func (r *Runtime) recordNewTaskScheduledEvents(ctx context.Context, previous, cu
 	return nil
 }
 
-func (r *Runtime) recordTaskLifecycleEvent(ctx context.Context, state team.RunState, task team.Task, eventType storage.EventType) {
-	payload := map[string]any{
-		"status":   string(task.Status),
-		"attempts": task.Attempts,
-	}
-	mergeResultPayload(payload, task.Result)
+func (r *Runtime) recordTaskLifecycleEvent(ctx context.Context, state team.RunState, before, after team.Task, eventType storage.EventType) {
+	payload := taskLifecyclePayload(ctx, before, after, r.workerID)
+	mergeResultPayload(payload, after.Result)
 	_ = r.appendEvent(ctx, storage.Event{
 		RunID:   state.ID,
 		TeamID:  state.ID,
-		TaskID:  task.ID,
+		TaskID:  after.ID,
 		Type:    eventType,
 		Payload: payload,
 	})
@@ -205,7 +219,7 @@ func (r *Runtime) recordTaskOutputsPublishedEvent(ctx context.Context, state tea
 	if task.Result == nil {
 		return
 	}
-	payload := map[string]any{}
+	payload := taskLifecyclePayload(ctx, task, task, r.workerID)
 	mergeResultPayload(payload, task.Result)
 	if state.Blackboard != nil {
 		sources := sourcesForTask(state.Blackboard, task.ID)
@@ -565,22 +579,62 @@ func outputVisibilities(items []team.OutputVisibility) []string {
 
 func taskScheduledPayload(task team.Task) map[string]any {
 	return map[string]any{
-		"title":         task.Title,
-		"input":         task.Input,
-		"status":        string(task.Status),
-		"kind":          string(task.Kind),
-		"requiredRole":  string(task.RequiredRole),
-		"assigneeAgent": task.AssigneeAgentID,
-		"failurePolicy": string(task.FailurePolicy),
-		"dependsOn":     task.DependsOn,
-		"reads":         task.Reads,
-		"writes":        task.Writes,
-		"publish":       outputVisibilities(task.Publish),
+		"title":            task.Title,
+		"input":            task.Input,
+		"status":           string(task.Status),
+		"kind":             string(task.Kind),
+		"requiredRole":     string(task.RequiredRole),
+		"assigneeAgent":    task.AssigneeAgentID,
+		"failurePolicy":    string(task.FailurePolicy),
+		"dependsOn":        task.DependsOn,
+		"reads":            task.Reads,
+		"writes":           task.Writes,
+		"publish":          outputVisibilities(task.Publish),
+		"taskVersion":      task.Version,
+		"idempotencyKey":   task.IdempotencyKey,
+		"namespace":        task.Namespace,
+		"verifierRequired": task.VerifierRequired,
 		"budget": map[string]any{
 			"tokens":    task.Budget.Tokens,
 			"toolCalls": task.Budget.ToolCalls,
 		},
 	}
+}
+
+func taskLifecyclePayload(ctx context.Context, before, after team.Task, defaultWorkerID string) map[string]any {
+	metadata := readTaskEventContext(ctx)
+	workerID := metadata.WorkerID
+	if workerID == "" {
+		workerID = after.CompletedBy
+	}
+	if workerID == "" {
+		workerID = defaultWorkerID
+	}
+	beforeVersion := before.Version
+	if beforeVersion <= 0 {
+		beforeVersion = after.Version
+	}
+	afterVersion := after.Version
+	if afterVersion <= 0 {
+		afterVersion = beforeVersion
+	}
+	payload := map[string]any{
+		"status":            string(after.Status),
+		"statusBefore":      string(before.Status),
+		"statusAfter":       string(after.Status),
+		"taskVersionBefore": beforeVersion,
+		"taskVersionAfter":  afterVersion,
+		"attempts":          after.Attempts,
+		"idempotencyKey":    after.IdempotencyKey,
+		"workerId":          workerID,
+	}
+	if metadata.LeaseID != "" {
+		payload["leaseId"] = metadata.LeaseID
+	}
+	if metadata.Reason != "" {
+		payload["reason"] = metadata.Reason
+	}
+	return payload
 }
 
 func sourcePayload(items []blackboard.Source) []map[string]any {

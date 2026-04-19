@@ -347,7 +347,7 @@ func TestQueuedLeaseRejectsForeignTeamLease(t *testing.T) {
 		return runner.processQueuedLease(context.Background(), current, mapTaskIndexes(current.Tasks), nil)
 	}
 
-	t.Run("foreign team same task id is ignored", func(t *testing.T) {
+	t.Run("foreign team same task id is skipped in favor of local lease", func(t *testing.T) {
 		queue := scheduler.NewMemoryQueue()
 		worker := newQueueRuntime(t, "worker-a", queue)
 		current := newSingleTaskState(t, "team-a", "team-a")
@@ -361,24 +361,23 @@ func TestQueuedLeaseRejectsForeignTeamLease(t *testing.T) {
 		}
 
 		outcome, handled := runLease(t, worker, current)
-		if handled && outcome.task.ID != "" {
-			t.Fatalf("expected foreign lease to avoid applying local task, got %#v", outcome)
+		if !handled {
+			t.Fatal("expected local lease to be processed")
+		}
+		if outcome.task.ID != current.Tasks[0].ID {
+			t.Fatalf("expected local task outcome, got %#v", outcome)
 		}
 
 		remaining := drainLeases(t, queue)
-		if len(remaining) != 2 {
-			t.Fatalf("expected both leases to remain available, got %#v", remaining)
+		if len(remaining) != 1 {
+			t.Fatalf("expected only foreign lease to remain available, got %#v", remaining)
 		}
-		teams := map[string]bool{}
-		for _, lease := range remaining {
-			teams[lease.TeamID] = true
-		}
-		if !teams[current.ID] || !teams[foreign.ID] {
-			t.Fatalf("expected remaining leases for %q and %q, got %#v", current.ID, foreign.ID, remaining)
+		if remaining[0].TeamID != foreign.ID || remaining[0].TaskID != foreign.Tasks[0].ID {
+			t.Fatalf("expected foreign lease to remain queued, got %#v", remaining)
 		}
 	})
 
-	t.Run("missing index with empty team id does not panic", func(t *testing.T) {
+	t.Run("missing index with empty team id stays untouched while local lease proceeds", func(t *testing.T) {
 		queue := scheduler.NewMemoryQueue()
 		worker := newQueueRuntime(t, "worker-a", queue)
 		current := newSingleTaskState(t, "team-a", "team-a")
@@ -391,23 +390,19 @@ func TestQueuedLeaseRejectsForeignTeamLease(t *testing.T) {
 		}
 
 		outcome, handled := runLease(t, worker, current)
-		if handled && outcome.task.ID != "" {
-			t.Fatalf("expected invalid lease to avoid applying local task, got %#v", outcome)
+		if !handled {
+			t.Fatal("expected local lease to be processed")
+		}
+		if outcome.task.ID != current.Tasks[0].ID {
+			t.Fatalf("expected local task outcome, got %#v", outcome)
 		}
 
 		remaining := drainLeases(t, queue)
-		if len(remaining) == 0 {
-			t.Fatalf("expected valid lease to remain queued")
+		if len(remaining) != 1 {
+			t.Fatalf("expected ghost lease to remain queued, got %#v", remaining)
 		}
-		foundCurrent := false
-		for _, lease := range remaining {
-			if lease.TeamID == current.ID && lease.TaskID == current.Tasks[0].ID {
-				foundCurrent = true
-				break
-			}
-		}
-		if !foundCurrent {
-			t.Fatalf("expected current team lease to remain queued, got %#v", remaining)
+		if remaining[0].TaskID != "ghost" || remaining[0].TeamID != "" {
+			t.Fatalf("expected ghost lease to remain queued, got %#v", remaining)
 		}
 	})
 }
@@ -460,6 +455,10 @@ func (q *queuedLeaseSpy) Enqueue(ctx context.Context, lease scheduler.TaskLease)
 
 func (q *queuedLeaseSpy) Acquire(ctx context.Context, ownerID string, ttl time.Duration) (scheduler.TaskLease, bool, error) {
 	return q.inner.Acquire(ctx, ownerID, ttl)
+}
+
+func (q *queuedLeaseSpy) AcquireForTeam(ctx context.Context, ownerID, teamID string, ttl time.Duration) (scheduler.TaskLease, bool, error) {
+	return q.inner.AcquireForTeam(ctx, ownerID, teamID, ttl)
 }
 
 func (q *queuedLeaseSpy) Heartbeat(ctx context.Context, lease scheduler.TaskLease, ttl time.Duration) error {

@@ -218,6 +218,78 @@ func TestReplayTeamParsesJSONEncodedLifecyclePayloads(t *testing.T) {
 	}
 }
 
+func TestReplayInvariantRejectsCompletedToRunningTransition(t *testing.T) {
+	t.Parallel()
+
+	events := []Event{
+		{RunID: "team-1", TeamID: "team-1", Type: EventTeamStarted, Payload: map[string]any{"pattern": "deepsearch"}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskScheduled, Payload: map[string]any{"status": string(team.TaskStatusPending), "taskVersion": 1}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskCompleted, Payload: map[string]any{"statusAfter": string(team.TaskStatusCompleted), "taskVersionAfter": 1}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskStarted, Payload: map[string]any{"statusBefore": string(team.TaskStatusCompleted), "statusAfter": string(team.TaskStatusRunning), "taskVersionBefore": 1, "taskVersionAfter": 1}},
+	}
+
+	result := ValidateReplay(events, ReplayTeam(events))
+	if result.Valid {
+		t.Fatalf("expected replay validation failure, got %#v", result)
+	}
+	if !containsMismatch(result.Mismatches, ReplayMismatchSemanticInconsistency, "completed -> running") {
+		t.Fatalf("expected completed->running invariant failure, got %#v", result.Mismatches)
+	}
+}
+
+func TestReplayInvariantRejectsTaskVersionRegressionAndDuplicateCompletion(t *testing.T) {
+	t.Parallel()
+
+	events := []Event{
+		{RunID: "team-1", TeamID: "team-1", Type: EventTeamStarted, Payload: map[string]any{"pattern": "deepsearch"}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskScheduled, Payload: map[string]any{"status": string(team.TaskStatusPending), "taskVersion": 2}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskCompleted, Payload: map[string]any{"statusAfter": string(team.TaskStatusCompleted), "taskVersionAfter": 2}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskCompleted, Payload: map[string]any{"statusAfter": string(team.TaskStatusCompleted), "taskVersionAfter": 2}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: EventTaskFailed, Payload: map[string]any{"statusAfter": string(team.TaskStatusFailed), "taskVersionAfter": 1}},
+	}
+
+	result := ValidateReplay(events, ReplayTeam(events))
+	if result.Valid {
+		t.Fatalf("expected replay validation failure, got %#v", result)
+	}
+	if !containsMismatch(result.Mismatches, ReplayMismatchSemanticInconsistency, "multiple authoritative completion") {
+		t.Fatalf("expected duplicate completion invariant failure, got %#v", result.Mismatches)
+	}
+	if !containsMismatch(result.Mismatches, ReplayMismatchSemanticInconsistency, "monotonically increase") {
+		t.Fatalf("expected version monotonicity invariant failure, got %#v", result.Mismatches)
+	}
+}
+
+func TestReplayInvariantRejectsBlackboardExchangeFromIncompleteTask(t *testing.T) {
+	t.Parallel()
+
+	state := team.RunState{
+		ID:      "team-1",
+		Pattern: "deepsearch",
+		Status:  team.StatusRunning,
+		Phase:   team.PhaseResearch,
+		Tasks: []team.Task{{
+			ID:     "task-1",
+			Status: team.TaskStatusPending,
+		}},
+		Blackboard: &blackboard.State{
+			Exchanges: []blackboard.Exchange{{
+				ID:     "exchange-1",
+				TaskID: "task-1",
+				Key:    "branch.result",
+			}},
+		},
+	}
+
+	result := ValidateReplay(nil, state)
+	if result.Valid {
+		t.Fatalf("expected blackboard provenance failure, got %#v", result)
+	}
+	if !containsMismatch(result.Mismatches, ReplayMismatchSemanticInconsistency, "trace back to a completed task") {
+		t.Fatalf("expected blackboard provenance mismatch, got %#v", result.Mismatches)
+	}
+}
+
 func replayInvariantFixtureEvents() []Event {
 	return []Event{
 		{RunID: "team-1", TeamID: "team-1", Type: EventTeamStarted, Payload: map[string]any{"pattern": "deepsearch", "phase": string(team.PhaseResearch)}},

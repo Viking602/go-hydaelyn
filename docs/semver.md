@@ -1,16 +1,18 @@
 # SemVer And Compatibility
 
-## 版本策略
+## Version Policy
 
-从 `v1.0.0` 开始，Hydaelyn 遵循 SemVer：
+Hydaelyn follows SemVer from `v1.0.0` onward:
 
-- `MAJOR`: 破坏性 API 变更
-- `MINOR`: 向后兼容的新能力
-- `PATCH`: 向后兼容的修复
+- `MAJOR`: breaking public API or contract changes
+- `MINOR`: backward-compatible features and additive fields
+- `PATCH`: backward-compatible fixes
 
-## Public API 边界
+Runtime correctness has higher priority than benchmark breadth. When a change tightens correctness contracts for queue execution, replay, verifier evidence, or provider normalization, it must ship with tests and release-gate coverage in the same change.
 
-当前默认视为 public 的包：
+## Public API Boundary
+
+Stable packages:
 
 - `agent`
 - `blackboard`
@@ -20,32 +22,41 @@
 - `observe`
 - `planner`
 - `plugin`
+- `recipe`
 - `scheduler`
 - `team`
 - `tool`
 - `toolkit`
+- `evaluation`
 
-以下包默认视为内部实现面，不承诺稳定：
+Implementation-detail packages:
 
 - `providers/*`
 - `transport/*`
 - `tooltest`
 
-## 兼容原则
+## Compatibility Rules
 
-- 对 public struct 新增字段：允许
-- 删除或重命名 public 字段/方法：需要 MAJOR
-- public enum/const 语义变化：需要 MAJOR
-- CLI 新增命令/flag：允许
-- CLI 删除命令/flag：需要 MAJOR
-- 事件类型新增字段：允许
-- 事件类型重命名或删除：需要 MAJOR
+- Adding optional fields to public structs is allowed.
+- Removing public fields, renaming them, or changing their meaning requires a major version.
+- Event payloads may add fields.
+- Event type renames or removals require a major version.
+- CLI may add flags such as `validate --strict-dataflow`.
+- Removing CLI flags or changing their behavior incompatibly requires a major version.
 
 ## Release Gate
 
-发布前至少满足：
+Every PR to `main` must pass:
 
 - `go test ./...`
-- `go test ./... -race`
-- `check_rules()` 通过
-- README、Quickstart、Migration、Plugin Dev 文档同步
+- `go test -race ./...`
+- `go vet ./...`
+- `staticcheck ./...`
+- `govulncheck ./...`
+
+Main-branch soak:
+
+- `go test ./... -count=20`
+- `go test -race ./... -count=5`
+
+These gates exist because the runtime contract is only as strong as the branch that carries it.

@@ -119,3 +119,80 @@ func TestMemoryQueueDistinguishesSameTaskIDAcrossTeams(t *testing.T) {
 		t.Fatalf("expected distinct teams, got %#v and %#v", leaseA, leaseB)
 	}
 }
+
+func TestMemoryQueueAcquireForTeamSkipsForeignLeases(t *testing.T) {
+	queue := NewMemoryQueue()
+	if err := queue.Enqueue(context.Background(), TaskLease{TaskID: "task-1", TeamID: "team-a"}); err != nil {
+		t.Fatalf("Enqueue(team-a) error = %v", err)
+	}
+	if err := queue.Enqueue(context.Background(), TaskLease{TaskID: "task-2", TeamID: "team-b"}); err != nil {
+		t.Fatalf("Enqueue(team-b) error = %v", err)
+	}
+
+	lease, ok, err := queue.AcquireForTeam(context.Background(), "worker-1", "team-b", time.Minute)
+	if err != nil {
+		t.Fatalf("AcquireForTeam() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected team-specific lease")
+	}
+	if lease.TeamID != "team-b" || lease.TaskID != "task-2" {
+		t.Fatalf("expected team-b lease, got %#v", lease)
+	}
+}
+
+func TestMemoryQueueLeaseCarriesExecutionMetadata(t *testing.T) {
+	queue := NewMemoryQueue()
+	if err := queue.Enqueue(context.Background(), TaskLease{
+		TaskID:         "task-1",
+		TeamID:         "team-1",
+		TaskVersion:    3,
+		Attempt:        2,
+		IdempotencyKey: "task-1:v3",
+	}); err != nil {
+		t.Fatalf("Enqueue() error = %v", err)
+	}
+
+	lease, ok, err := queue.Acquire(context.Background(), "worker-1", time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected acquired lease")
+	}
+	if lease.LeaseID == "" || lease.State != TaskLeaseStateLeased {
+		t.Fatalf("expected leased metadata, got %#v", lease)
+	}
+	if lease.TaskVersion != 3 || lease.Attempt != 2 {
+		t.Fatalf("expected task version and attempt to survive queue round-trip, got %#v", lease)
+	}
+	if lease.WorkerID != "worker-1" || lease.OwnerID != "worker-1" {
+		t.Fatalf("expected owner/worker metadata on acquire, got %#v", lease)
+	}
+	if lease.IdempotencyKey != "task-1:v3" {
+		t.Fatalf("expected idempotency key to survive, got %#v", lease)
+	}
+}
+
+func TestMemoryQueueTreatsTaskVersionsAsDistinctLeases(t *testing.T) {
+	queue := NewMemoryQueue()
+	first := TaskLease{TaskID: "task-1", TeamID: "team-a", TaskVersion: 1}
+	second := TaskLease{TaskID: "task-1", TeamID: "team-a", TaskVersion: 2}
+	if err := queue.Enqueue(context.Background(), first); err != nil {
+		t.Fatalf("Enqueue(first) error = %v", err)
+	}
+	if err := queue.Enqueue(context.Background(), second); err != nil {
+		t.Fatalf("Enqueue(second) error = %v", err)
+	}
+	leaseA, ok, err := queue.Acquire(context.Background(), "worker-1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Acquire(first) error = %v ok=%v", err, ok)
+	}
+	leaseB, ok, err := queue.Acquire(context.Background(), "worker-2", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("Acquire(second) error = %v ok=%v", err, ok)
+	}
+	if leaseA.TaskVersion == leaseB.TaskVersion {
+		t.Fatalf("expected distinct task versions, got %#v and %#v", leaseA, leaseB)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/session"
 	"github.com/Viking602/go-hydaelyn/storage"
+	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/toolkit"
 )
 
@@ -144,5 +145,39 @@ func TestPolicyOutcomeEmission(t *testing.T) {
 	}
 	if evidence, ok := event.Payload["evidence"].(map[string]any); !ok || evidence == nil {
 		t.Fatalf("expected evidence payload, got %#v", event.Payload)
+	}
+}
+
+func TestCapabilityToolDriverUsesTrustedSecurityContextPermissions(t *testing.T) {
+	t.Parallel()
+
+	runner := New(Config{})
+	runner.UseCapabilityMiddleware(capability.RequirePermissions())
+	driver, err := toolkit.Tool(
+		"guarded-write",
+		func(_ context.Context, _ struct{}) (string, error) { return "ok", nil },
+		toolkit.Metadata(map[string]string{"permission": "tool:guarded-write"}),
+	)
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	runner.RegisterTool(driver)
+
+	_, err = runner.tools.Execute(context.Background(), tool.Call{ID: "call-1", Name: "guarded-write", Arguments: []byte(`{}`)}, nil)
+	if err == nil {
+		t.Fatal("expected permission denial without trusted grant")
+	}
+	var capErr *capability.Error
+	if !errors.As(err, &capErr) || capErr.Kind != capability.ErrorKindPermission {
+		t.Fatalf("expected permission error, got %v", err)
+	}
+
+	ctx := capability.WithPermissionGrant(context.Background(), capability.PermissionGrant{Name: "tool:guarded-write", GrantedBy: "policy"})
+	result, err := runner.tools.Execute(ctx, tool.Call{ID: "call-2", Name: "guarded-write", Arguments: []byte(`{}`)}, nil)
+	if err != nil {
+		t.Fatalf("expected trusted grant to pass, got %v", err)
+	}
+	if result.Name != "guarded-write" || result.Content != "ok" {
+		t.Fatalf("unexpected tool result %#v", result)
 	}
 }

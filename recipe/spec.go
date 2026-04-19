@@ -35,6 +35,8 @@ type Task struct {
 	Reads                []string                `json:"reads,omitempty" yaml:"reads,omitempty"`
 	Writes               []string                `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty" yaml:"publish,omitempty"`
+	VerifyClaims         []string                `json:"verifyClaims,omitempty" yaml:"verify_claims,omitempty"`
+	ExchangeSchema       string                  `json:"exchangeSchema,omitempty" yaml:"exchange_schema,omitempty"`
 	FailurePolicy        team.FailurePolicy      `json:"failurePolicy,omitempty" yaml:"failure_policy,omitempty"`
 }
 
@@ -57,6 +59,8 @@ type Step struct {
 	Reads                []string                `json:"reads,omitempty" yaml:"reads,omitempty"`
 	Writes               []string                `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty" yaml:"publish,omitempty"`
+	VerifyClaims         []string                `json:"verifyClaims,omitempty" yaml:"verify_claims,omitempty"`
+	ExchangeSchema       string                  `json:"exchangeSchema,omitempty" yaml:"exchange_schema,omitempty"`
 	FailurePolicy        team.FailurePolicy      `json:"failurePolicy,omitempty" yaml:"failure_policy,omitempty"`
 }
 

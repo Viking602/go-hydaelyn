@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
@@ -121,4 +122,65 @@ func TestRecipeValidationRejectsMissingFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateStrictDataflowReportsContractViolations(t *testing.T) {
+	t.Parallel()
+
+	report := ValidateStrictDataflow(planner.Plan{
+		Tasks: []planner.TaskSpec{
+			{
+				ID:             "research-a",
+				Kind:           string(team.TaskKindResearch),
+				Writes:         []string{"shared.branch"},
+				Publish:        []team.OutputVisibility{team.OutputVisibilityBlackboard},
+				ExchangeSchema: "",
+			},
+			{
+				ID:             "research-b",
+				Kind:           string(team.TaskKindResearch),
+				Writes:         []string{"shared.branch"},
+				Publish:        []team.OutputVisibility{team.OutputVisibilityBlackboard},
+				ExchangeSchema: "branch.schema",
+			},
+			{
+				ID:    "verify-branch",
+				Kind:  string(team.TaskKindVerify),
+				Reads: []string{"shared.branch"},
+			},
+			{
+				ID:    "synth-final",
+				Kind:  string(team.TaskKindSynthesize),
+				Reads: []string{"missing.key"},
+			},
+			{
+				ID:     "unused-writer",
+				Kind:   string(team.TaskKindResearch),
+				Writes: []string{"unused.key"},
+			},
+		},
+	})
+
+	if report.OK {
+		t.Fatalf("expected strict-dataflow violations, got %#v", report)
+	}
+	assertStrictDataflowIssue(t, report.Issues, IssueAmbiguousProducer, "verify-branch", "shared.branch")
+	assertStrictDataflowIssue(t, report.Issues, IssueBlackboardNoSchema, "research-a", "")
+	assertStrictDataflowIssue(t, report.Issues, IssueVerifyTaskNoClaimSource, "verify-branch", "")
+	assertStrictDataflowIssue(t, report.Issues, IssueSynthesisReadsUnknownKey, "synth-final", "missing.key")
+	assertStrictDataflowIssue(t, report.Issues, IssueUnusedWrite, "unused-writer", "unused.key")
+}
+
+func assertStrictDataflowIssue(t *testing.T, issues []StrictDataflowIssue, code StrictDataflowIssueCode, taskID, key string) {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.Code != code || issue.TaskID != taskID {
+			continue
+		}
+		if key != "" && issue.Key != key {
+			continue
+		}
+		return
+	}
+	t.Fatalf("expected issue %s for task=%s key=%s, got %#v", code, taskID, key, issues)
 }

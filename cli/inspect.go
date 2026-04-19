@@ -30,6 +30,7 @@ func runValidate(args []string, stdout io.Writer) error {
 	recipePath := flags.String("recipe", "", "path to recipe yaml/json")
 	requestPath := flags.String("request", "", "path to team request json")
 	eventsPath := flags.String("events", "", "path to event log json")
+	strictDataflow := flags.Bool("strict-dataflow", false, "enable strict recipe dataflow checks")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -42,6 +43,16 @@ func runValidate(args []string, stdout io.Writer) error {
 		compiled, err := recipe.Compile(spec)
 		if err != nil {
 			return err
+		}
+		if *strictDataflow {
+			report := recipe.ValidateStrictDataflow(compiled.Plan)
+			return encodeJSON(stdout, map[string]any{
+				"kind":      "recipe",
+				"ok":        report.OK,
+				"pattern":   compiled.Request.Pattern,
+				"taskCount": len(compiled.Plan.Tasks),
+				"issues":    report.Issues,
+			})
 		}
 		return encodeJSON(stdout, map[string]any{
 			"kind":      "recipe",

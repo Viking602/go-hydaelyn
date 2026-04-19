@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  core-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,19 +29,8 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Run go vet
-        run: go vet ./...
-
       - name: Run race tests
         run: go test -race -timeout=10m ./...
-
-      - name: Install staticcheck
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Run staticcheck
-        run: staticcheck ./...
 
       - name: Run coverage tests
         run: go test ./... -coverprofile=coverage.out
@@ -53,6 +42,45 @@ jobs:
           path: coverage.out
           if-no-files-found: error
           retention-days: 30
+
+  static-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install analysis tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  eval-gates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
 
       - name: Run deterministic eval suite
         run: go test ./evaluation/... -run 'TestDeterministicEval' -count=1 -v
@@ -77,3 +105,22 @@ jobs:
             **/policy_outcomes.json
           if-no-files-found: ignore
           retention-days: 90
+
+  release-soak:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run repeatability soak
+        run: go test ./... -count=20
+
+      - name: Run race soak
+        run: go test -race -timeout=10m ./... -count=5

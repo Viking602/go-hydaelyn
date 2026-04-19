@@ -2,7 +2,7 @@
 
 ## Stable Packages
 
-The v1 public surface still includes:
+The v1 public surface includes:
 
 - `agent`
 - `blackboard`
@@ -21,37 +21,55 @@ The v1 public surface still includes:
 
 These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
 
-## Additive v1.1 Dataflow Surface
+## Additive Runtime Contracts
 
-The following additive fields are now part of the public model:
+The following additive fields and behaviors are now part of the public contract:
 
 ### `planner.TaskSpec`
 
 - `Reads []string`
 - `Writes []string`
 - `Publish []team.OutputVisibility`
+- `VerifyClaims []string`
+- `ExchangeSchema string`
 
-### `team.Task`
+### `blackboard.VerificationResult`
 
-- `Reads []string`
-- `Writes []string`
-- `Publish []team.OutputVisibility`
+- `ClaimID string`
+- `Status blackboard.VerificationStatus`
+- `Confidence float64`
+- `EvidenceIDs []string`
 
-### `team.Result`
+Supported claim semantics are now claim-level, not summary-level. A claim only counts as supported when:
 
-- `Structured map[string]any`
-- `ArtifactIDs []string`
+- `status == supported`
+- `confidence >= 0.7`
+- `evidenceIds` is not empty
 
-### `blackboard.State`
+### Runtime / Replay Event Payloads
 
-- `Exchanges []blackboard.Exchange`
+Task lifecycle events now carry additive execution metadata:
 
-## Compatibility Rules
+- `statusBefore`
+- `statusAfter`
+- `taskVersionBefore`
+- `taskVersionAfter`
+- `idempotencyKey`
+- `workerId`
+- `leaseId` when queue-backed execution is active
 
-- Adding optional fields to frozen structs is allowed.
-- Removing fields or changing field meaning requires a major version.
-- Adding commands to the CLI is allowed.
-- Removing commands from the CLI requires a major version.
+Consumers must tolerate these additive fields and may rely on them for replay validation.
+
+## CLI Surface
+
+`cli validate --recipe ... --strict-dataflow` is a supported additive validation mode. It reports:
+
+- `unused_write`
+- `missing_read`
+- `ambiguous_producer`
+- `synthesis_reads_unknown_key`
+- `verify_task_has_no_claim_source`
+- `blackboard_publish_has_no_schema`
 
 ## Internal Surface
 
@@ -60,3 +78,8 @@ These packages remain implementation detail:
 - `providers/*`
 - `transport/*`
 - `tooltest`
+
+`transport/http/control` remains internal and only exposes callable runtime
+control capabilities. Hydaelyn does not ship endpoint catalogs, a
+standard-library router, or a canonical `net/http` route tree for these
+operations.

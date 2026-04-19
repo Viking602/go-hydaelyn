@@ -70,6 +70,8 @@ func ValidateReplay(events []Event, authoritativeState TeamState) ReplayValidati
 
 	result.Mismatches = append(result.Mismatches, validateRequiredEventSubset(events, authoritativeState)...)
 	result.Mismatches = append(result.Mismatches, validateEventOrdering(events)...)
+	result.Mismatches = append(result.Mismatches, validateLifecycleContracts(events)...)
+	result.Mismatches = append(result.Mismatches, validateBlackboardProvenance(authoritativeState)...)
 	result.Mismatches = append(result.Mismatches, validateStateEquivalence(result.ReplayedState, authoritativeState)...)
 	result.MismatchCount = len(result.Mismatches)
 	result.Valid = result.MismatchCount == 0
@@ -215,6 +217,137 @@ func validateStateEquivalence(replayedState, authoritativeState TeamState) []Rep
 		Actual:   actual,
 		Message:  "replayed state does not match authoritative state after replay normalization",
 	}}
+}
+
+func validateLifecycleContracts(events []Event) []ReplayMismatch {
+	type taskProgress struct {
+		Status  team.TaskStatus
+		Version int
+	}
+
+	progressByTask := map[string]taskProgress{}
+	completions := map[string]int{}
+	mismatches := make([]ReplayMismatch, 0)
+
+	for _, event := range events {
+		if strings.TrimSpace(event.TaskID) == "" {
+			continue
+		}
+		current := event
+		progress := progressByTask[event.TaskID]
+		switch event.Type {
+		case EventTaskScheduled:
+			version := intValue(event.Payload["taskVersion"])
+			if version <= 0 {
+				version = 1
+			}
+			if progress.Version > 0 && version < progress.Version {
+				mismatches = append(mismatches, ReplayMismatch{
+					Type:     ReplayMismatchSemanticInconsistency,
+					Event:    &current,
+					Actual:   version,
+					Expected: progress.Version,
+					Message:  fmt.Sprintf("task %s version regressed from %d to %d", event.TaskID, progress.Version, version),
+				})
+			}
+			progressByTask[event.TaskID] = taskProgress{
+				Status:  team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+				Version: version,
+			}
+		case EventTaskStarted, EventTaskCompleted, EventTaskFailed:
+			beforeStatus := team.TaskStatus(statusValue(event.Payload["statusBefore"], string(progress.Status)))
+			afterStatus := team.TaskStatus(statusValue(event.Payload["statusAfter"], statusValue(event.Payload["status"], string(progress.Status))))
+			beforeVersion := intValue(event.Payload["taskVersionBefore"])
+			if beforeVersion <= 0 {
+				beforeVersion = progress.Version
+			}
+			afterVersion := intValue(event.Payload["taskVersionAfter"])
+			if afterVersion <= 0 {
+				afterVersion = beforeVersion
+			}
+			if progress.Version > 0 && afterVersion < progress.Version {
+				mismatches = append(mismatches, ReplayMismatch{
+					Type:     ReplayMismatchSemanticInconsistency,
+					Event:    &current,
+					Expected: progress.Version,
+					Actual:   afterVersion,
+					Message:  fmt.Sprintf("task %s version must monotonically increase", event.TaskID),
+				})
+			}
+			if progress.Status == team.TaskStatusCompleted && afterStatus == team.TaskStatusRunning {
+				mismatches = append(mismatches, ReplayMismatch{
+					Type:    ReplayMismatchSemanticInconsistency,
+					Event:   &current,
+					Actual:  string(afterStatus),
+					Message: fmt.Sprintf("task %s cannot transition completed -> running", event.TaskID),
+				})
+			}
+			if beforeStatus == team.TaskStatusCompleted && afterStatus == team.TaskStatusRunning {
+				mismatches = append(mismatches, ReplayMismatch{
+					Type:    ReplayMismatchSemanticInconsistency,
+					Event:   &current,
+					Actual:  string(afterStatus),
+					Message: fmt.Sprintf("task %s lifecycle payload cannot describe completed -> running", event.TaskID),
+				})
+			}
+			if afterStatus == team.TaskStatusCompleted {
+				key := fmt.Sprintf("%s@%d", event.TaskID, afterVersion)
+				completions[key]++
+				if completions[key] > 1 {
+					mismatches = append(mismatches, ReplayMismatch{
+						Type:    ReplayMismatchSemanticInconsistency,
+						Event:   &current,
+						Actual:  completions[key],
+						Message: fmt.Sprintf("task %s version %d has multiple authoritative completion events", event.TaskID, afterVersion),
+					})
+				}
+			}
+			progressByTask[event.TaskID] = taskProgress{Status: afterStatus, Version: afterVersion}
+		case EventTaskOutputsPublished:
+			version := intValue(event.Payload["taskVersionAfter"])
+			if version <= 0 {
+				version = progress.Version
+			}
+			key := fmt.Sprintf("%s@%d", event.TaskID, version)
+			if completions[key] == 0 {
+				mismatches = append(mismatches, ReplayMismatch{
+					Type:    ReplayMismatchSemanticInconsistency,
+					Event:   &current,
+					Actual:  "published without completion",
+					Message: fmt.Sprintf("task %s outputs published without authoritative completion", event.TaskID),
+				})
+			}
+		}
+	}
+	return mismatches
+}
+
+func validateBlackboardProvenance(state TeamState) []ReplayMismatch {
+	if state.Blackboard == nil {
+		return nil
+	}
+	completed := map[string]struct{}{}
+	for _, task := range state.Tasks {
+		if task.Status == team.TaskStatusCompleted {
+			completed[task.ID] = struct{}{}
+		}
+	}
+	mismatches := make([]ReplayMismatch, 0)
+	for _, exchange := range state.Blackboard.Exchanges {
+		if exchange.TaskID == "" {
+			continue
+		}
+		if _, ok := completed[exchange.TaskID]; ok {
+			continue
+		}
+		exchangeCopy := exchange
+		mismatches = append(mismatches, ReplayMismatch{
+			Type:    ReplayMismatchSemanticInconsistency,
+			Actual:  exchangeCopy,
+			Message: fmt.Sprintf("blackboard exchange %s must trace back to a completed task", exchange.ID),
+		})
+	}
+	return mismatches
 }
 
 func normalizeReplayComparableState(state TeamState) TeamState {

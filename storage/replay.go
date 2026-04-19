@@ -28,25 +28,35 @@ func ReplayTeam(events []Event) team.RunState {
 			}
 		case EventTaskScheduled:
 			task := team.Task{
-				ID:              event.TaskID,
-				Title:           stringValue(event.Payload["title"]),
-				Input:           stringValue(event.Payload["input"]),
-				Status:          team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
-				Kind:            team.TaskKind(stringValue(event.Payload["kind"])),
-				RequiredRole:    team.Role(stringValue(event.Payload["requiredRole"])),
-				AssigneeAgentID: stringValue(event.Payload["assigneeAgent"]),
-				FailurePolicy:   team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
-				DependsOn:       stringSlice(event.Payload["dependsOn"]),
-				Reads:           stringSlice(event.Payload["reads"]),
-				Writes:          stringSlice(event.Payload["writes"]),
-				Publish:         outputVisibilitySlice(event.Payload["publish"]),
-				Budget:          budgetValue(event.Payload["budget"]),
+				ID:               event.TaskID,
+				Title:            stringValue(event.Payload["title"]),
+				Input:            stringValue(event.Payload["input"]),
+				Status:           team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+				Kind:             team.TaskKind(stringValue(event.Payload["kind"])),
+				RequiredRole:     team.Role(stringValue(event.Payload["requiredRole"])),
+				AssigneeAgentID:  stringValue(event.Payload["assigneeAgent"]),
+				FailurePolicy:    team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
+				DependsOn:        stringSlice(event.Payload["dependsOn"]),
+				Reads:            stringSlice(event.Payload["reads"]),
+				Writes:           stringSlice(event.Payload["writes"]),
+				Publish:          outputVisibilitySlice(event.Payload["publish"]),
+				Namespace:        stringValue(event.Payload["namespace"]),
+				VerifierRequired: boolValue(event.Payload["verifierRequired"]),
+				IdempotencyKey:   stringValue(event.Payload["idempotencyKey"]),
+				Version:          intValue(event.Payload["taskVersion"]),
+				Budget:           budgetValue(event.Payload["budget"]),
 			}
 			tasks[event.TaskID] = len(state.Tasks)
 			state.Tasks = append(state.Tasks, task)
 		case EventTaskStarted:
 			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatusRunning
+				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusRunning)))
+				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
+					state.Tasks[idx].Version = version
+				}
+				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
+					state.Tasks[idx].IdempotencyKey = key
+				}
 				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
 			}
 		case EventTaskInputsMaterialized:
@@ -55,7 +65,14 @@ func ReplayTeam(events []Event) team.RunState {
 			}
 		case EventTaskCompleted:
 			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusCompleted)))
+				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], statusValue(event.Payload["status"], string(team.TaskStatusCompleted))))
+				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
+					state.Tasks[idx].Version = version
+				}
+				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
+					state.Tasks[idx].IdempotencyKey = key
+				}
+				state.Tasks[idx].CompletedBy = stringValue(event.Payload["workerId"])
 				state.Tasks[idx].Result = &team.Result{
 					Summary:       stringValue(event.Payload["summary"]),
 					Structured:    structuredMap(event.Payload["structured"]),
@@ -92,7 +109,18 @@ func ReplayTeam(events []Event) team.RunState {
 			}
 		case EventTaskFailed:
 			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatusFailed
+				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusFailed)))
+				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
+					state.Tasks[idx].Version = version
+				}
+				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
+					state.Tasks[idx].IdempotencyKey = key
+				}
+				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
+				if errorText := stringValue(event.Payload["error"]); errorText != "" {
+					state.Tasks[idx].Error = errorText
+					state.Tasks[idx].Result = &team.Result{Error: errorText}
+				}
 			}
 		case EventApprovalRequested:
 			state.Status = team.StatusPaused
@@ -399,6 +427,11 @@ func intValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+func boolValue(value any) bool {
+	current, _ := value.(bool)
+	return current
 }
 
 func budgetValue(value any) team.Budget {

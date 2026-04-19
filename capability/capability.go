@@ -84,8 +84,6 @@ type PolicyOutcomeRecorder interface {
 
 type policyOutcomeRecorderKey struct{}
 
-type approvalContextKey struct{}
-
 func WithPolicyOutcomeRecorder(ctx context.Context, recorder PolicyOutcomeRecorder) context.Context {
 	if recorder == nil {
 		return ctx
@@ -94,22 +92,15 @@ func WithPolicyOutcomeRecorder(ctx context.Context, recorder PolicyOutcomeRecord
 }
 
 func WithApproval(ctx context.Context, callType Type, name string) context.Context {
-	grantKey := key(callType, name)
-	grants, _ := ctx.Value(approvalContextKey{}).(map[string]struct{})
-	cloned := make(map[string]struct{}, len(grants)+1)
-	for current := range grants {
-		cloned[current] = struct{}{}
-	}
-	cloned[grantKey] = struct{}{}
-	return context.WithValue(ctx, approvalContextKey{}, cloned)
+	return WithApprovalGrant(ctx, ApprovalGrant{Type: callType, Name: name})
 }
 
 func hasApproval(ctx context.Context, call Call) bool {
-	grants, _ := ctx.Value(approvalContextKey{}).(map[string]struct{})
-	if len(grants) == 0 {
+	security, ok := SecurityContextFromContext(ctx)
+	if !ok || len(security.ApprovalGrants) == 0 {
 		return false
 	}
-	_, ok := grants[key(call.Type, call.Name)]
+	_, ok = security.ApprovalGrants[key(call.Type, call.Name)]
 	return ok
 }
 
@@ -262,7 +253,7 @@ func Retry(defaultRetries int) Middleware {
 func RequirePermissions() Middleware {
 	return Func(func(ctx context.Context, call Call, next Next) (Result, error) {
 		for _, permission := range call.Permissions {
-			if !permission.Granted {
+			if !hasPermissionGrant(ctx, permission.Name) {
 				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityPermission, "denied", "error", fmt.Sprintf("permission denied: %s", permission.Name), true, 0, map[string]string{"permission": permission.Name, "errorKind": string(ErrorKindPermission)}))
 				return Result{}, &Error{
 					Kind:    ErrorKindPermission,

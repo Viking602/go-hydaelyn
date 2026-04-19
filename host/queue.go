@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/scheduler"
@@ -52,7 +53,7 @@ func (r *Runtime) syncLeaseReleaser() {
 }
 
 func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, runnableSet map[string]struct{}, semByProfile map[string]chan struct{}) (<-chan taskOutcome, error) {
-	if err := r.enqueueTaskSet(ctx, current.ID, runnableSet); err != nil {
+	if err := r.enqueueTaskSet(ctx, current, runnableSet); err != nil {
 		return nil, err
 	}
 	results := make(chan taskOutcome, len(runnableSet))
@@ -70,14 +71,20 @@ func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, ru
 
 func (r *Runtime) enqueueRunnableTasks(ctx context.Context, state team.RunState) error {
 	_, runnableSet := runnableTaskSet(state)
-	return r.enqueueTaskSet(ctx, state.ID, runnableSet)
+	return r.enqueueTaskSet(ctx, state, runnableSet)
 }
 
-func (r *Runtime) enqueueTaskSet(ctx context.Context, teamID string, runnableSet map[string]struct{}) error {
-	for taskID := range runnableSet {
+func (r *Runtime) enqueueTaskSet(ctx context.Context, state team.RunState, runnableSet map[string]struct{}) error {
+	for _, task := range state.Tasks {
+		if _, ok := runnableSet[task.ID]; !ok {
+			continue
+		}
 		if err := r.queue.Enqueue(ctx, scheduler.TaskLease{
-			TaskID: taskID,
-			TeamID: teamID,
+			TaskID:         task.ID,
+			TeamID:         state.ID,
+			TaskVersion:    task.Version,
+			Attempt:        task.Attempts + 1,
+			IdempotencyKey: task.IdempotencyKey,
 		}); err != nil {
 			return err
 		}
@@ -149,7 +156,7 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 }
 
 func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
-	for range 24 {
+	for range r.maxDriveSteps() {
 		next, terminal, err := r.continueQueuedStep(ctx, pattern, current)
 		if err != nil {
 			return team.RunState{}, false, err
@@ -167,7 +174,7 @@ func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, 
 
 func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState, indexByTask map[string]int, semByProfile map[string]chan struct{}) (taskOutcome, bool) {
 	r.syncLeaseReleaser()
-	lease, ok, err := r.queue.Acquire(ctx, r.workerID, localQueueLeaseTTL)
+	lease, ok, err := r.queue.AcquireForTeam(ctx, r.workerID, current.ID, localQueueLeaseTTL)
 	if err != nil {
 		return taskOutcome{err: err}, true
 	}
@@ -195,11 +202,16 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 		return taskOutcome{}, true
 	}
 	original := current.Tasks[index]
+	if lease.TaskVersion > 0 && original.Version != lease.TaskVersion {
+		r.recordLeaseExpiredEvent(ctx, current.ID, original.ID, r.workerID, eventReasonStateVersionConflict)
+		_ = r.leaseReleaser.Release(ctx, lease)
+		return taskOutcome{}, true
+	}
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
 		_ = r.leaseReleaser.Release(ctx, lease)
 		failed, _ := finalizeTaskFailure(original, err)
-		return taskOutcome{index: index, task: failed, err: err}, true
+		return taskOutcome{index: index, task: failed, err: err, leaseID: lease.LeaseID, workerID: lease.WorkerID}, true
 	}
 	releaseSemaphore := func() {}
 	if sem, ok := semByProfile[profile.Name]; ok {
@@ -207,11 +219,12 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 		releaseSemaphore = func() { <-sem }
 	}
 	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
-	item, err := r.executeTask(ctx, current, original, agentInstance, profile)
+	leaseCtx := withTaskEventContext(ctx, taskEventContext{LeaseID: lease.LeaseID, WorkerID: lease.WorkerID})
+	item, err := r.executeTask(leaseCtx, current, original, agentInstance, profile)
 	stopHeartbeat()
 	releaseSemaphore()
 	_ = r.leaseReleaser.Release(ctx, lease)
-	return taskOutcome{index: index, task: item, err: err}, true
+	return taskOutcome{index: index, task: item, err: err, leaseID: lease.LeaseID, workerID: lease.WorkerID}, true
 }
 
 func (r *Runtime) nackQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
@@ -281,6 +294,10 @@ func (r *Runtime) loadQueuedExecutionState(ctx context.Context, lease scheduler.
 		_ = r.leaseReleaser.Release(ctx, lease)
 		return team.RunState{}, 0, team.Task{}, errQueuedTaskMissing
 	}
+	if lease.TaskVersion > 0 && state.Tasks[index].Version != lease.TaskVersion {
+		_ = r.leaseReleaser.Release(ctx, lease)
+		return team.RunState{}, 0, team.Task{}, errQueuedTaskMissing
+	}
 	return state, index, state.Tasks[index], nil
 }
 
@@ -290,7 +307,8 @@ func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, or
 		return team.Task{}, func() {}, err
 	}
 	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
-	item, err := r.executeTask(ctx, state, original, agentInstance, profile)
+	leaseCtx := withTaskEventContext(ctx, taskEventContext{LeaseID: lease.LeaseID, WorkerID: lease.WorkerID})
+	item, err := r.executeTask(leaseCtx, state, original, agentInstance, profile)
 	return item, stopHeartbeat, err
 }
 
@@ -349,6 +367,7 @@ func (r *Runtime) resolveQueuedCommitConflict(ctx context.Context, teamID string
 
 func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, lease scheduler.TaskLease, ttl time.Duration) func() {
 	done := make(chan struct{})
+	var once sync.Once
 	interval := ttl / 2
 	if interval <= 0 {
 		interval = ttl
@@ -368,6 +387,8 @@ func startLeaseHeartbeat(ctx context.Context, queue scheduler.TaskQueue, lease s
 		}
 	}()
 	return func() {
-		close(done)
+		once.Do(func() {
+			close(done)
+		})
 	}
 }

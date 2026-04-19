@@ -30,12 +30,7 @@ func TestUsage_Add(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Note: Usage struct doesn't have an Add method, just testing struct fields
-			u := Usage{
-				InputTokens:  tt.u1.InputTokens + tt.u2.InputTokens,
-				OutputTokens: tt.u1.OutputTokens + tt.u2.OutputTokens,
-				TotalTokens:  tt.u1.TotalTokens + tt.u2.TotalTokens,
-			}
+			u := tt.u1.Add(tt.u2)
 
 			if u.InputTokens != tt.wantInput {
 				t.Errorf("InputTokens = %v, want %v", u.InputTokens, tt.wantInput)

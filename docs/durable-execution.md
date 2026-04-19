@@ -2,21 +2,37 @@
 
 ## Current Capabilities
 
-Hydaelyn now persists enough runtime detail to replay task dataflow, not only final summaries.
+Hydaelyn persists enough runtime detail to replay task execution, blackboard exchange flow, and verifier evidence, not only final summaries.
 
-Current durable surfaces:
+Durable surfaces:
 
 - `EventStore`
 - `ReplayTeamState`
 - `recipe.Compile(...)`
+- `recipe.ValidateStrictDataflow(...)`
 - `evaluation.Evaluate(...)`
 - `pause / resume / abort`
 - queue-backed `QueueTeam / RunQueueWorker / RecoverQueueLeases`
 - task input/output dataflow events
 
-## Event Types
+## Queue Contract
 
-Important team events now include:
+Queue leases now model a concrete execution attempt:
+
+- `leaseId`
+- `teamId`
+- `taskId`
+- `taskVersion`
+- `attempt`
+- `idempotencyKey`
+- `workerId`
+- `state`
+
+The in-tree memory queue is still a local implementation, but the contract is version-aware: the same `taskId` on different task versions no longer aliases the same lease.
+
+## Event Contract
+
+Important team events include:
 
 - `TaskScheduled`
 - `TaskStarted`
@@ -26,35 +42,44 @@ Important team events now include:
 - `ApprovalRequested`
 - `TeamCompleted`
 
-`TaskOutputsPublished` carries named exchanges, artifact refs, and verification deltas needed for replay.
+Task lifecycle payloads now record:
 
-## Replay Scope
+- `statusBefore`
+- `statusAfter`
+- `taskVersionBefore`
+- `taskVersionAfter`
+- `idempotencyKey`
+- `workerId`
+- `leaseId` when available
 
-`ReplayTeamState` restores:
+`TaskOutputsPublished` carries exchanges, artifact refs, and claim-level verification deltas needed for replay.
 
-- task status
-- task results
-- structured outputs
-- artifact ids
-- blackboard exchanges
-- verification state
-- final team result
+## Replay Invariants
 
-## Admin Surface
+Replay validation now checks more than shape equivalence:
 
-Current admin endpoints:
+- required event subset exists for completed tasks
+- ordering constraints remain valid
+- task version is monotonic
+- `completed -> running` is illegal
+- each task version has at most one authoritative completion event
+- blackboard exchanges trace back to completed tasks
+- replayed final state still matches the stored authoritative state after normalization
 
-- `/teams`
-- `/teams/{id}`
-- `/teams/{id}/events`
-- `/teams/{id}/resume`
-- `/teams/{id}/replay`
-- `/teams/{id}/abort`
-- `/scheduler/drain`
-- `/scheduler/recover`
+## Dataflow And Verifier Contract
+
+Strict recipe validation is available through:
+
+- `hydaelyn validate --recipe recipe.yaml --strict-dataflow`
+
+Claim-level verifier evidence drives synthesis input eligibility. A finding is only reusable when its backing claims are:
+
+- `supported`
+- confidence-qualified
+- linked to evidence IDs
 
 ## Current Limits
 
 - The default queue is still in-memory.
 - There is still no external production durable backend in-tree.
-- Replay is deterministic over recorded events, but richer evaluation tooling remains an ecosystem-layer follow-up.
+- Trace enrichment exists in event payloads, but full OpenTelemetry export remains a follow-up layer.

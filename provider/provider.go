@@ -42,6 +42,14 @@ type Usage struct {
 	TotalTokens  int `json:"totalTokens,omitempty"`
 }
 
+func (u Usage) Add(v Usage) Usage {
+	return Usage{
+		InputTokens:  u.InputTokens + v.InputTokens,
+		OutputTokens: u.OutputTokens + v.OutputTokens,
+		TotalTokens:  u.TotalTokens + v.TotalTokens,
+	}
+}
+
 type ToolCallDelta struct {
 	ID             string `json:"id,omitempty"`
 	Name           string `json:"name,omitempty"`

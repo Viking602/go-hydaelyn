@@ -135,7 +135,7 @@ func TestDeepsearchSynthesisCoverageTracking(t *testing.T) {
 				{ID: "finding-2", TaskID: "task-2", Summary: "verification", ClaimIDs: []string{"claim-2"}, Confidence: 0.7},
 			},
 			Verifications: []blackboard.VerificationResult{
-				{ClaimID: "claim-1", Status: blackboard.VerificationStatusSupported, Confidence: 0.9},
+				{ClaimID: "claim-1", Status: blackboard.VerificationStatusSupported, Confidence: 0.9, EvidenceIDs: []string{"evidence-1"}},
 			},
 		},
 	}

@@ -25,6 +25,8 @@ type TaskSpec struct {
 	Reads                []string                `json:"reads,omitempty"`
 	Writes               []string                `json:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty"`
+	VerifyClaims         []string                `json:"verifyClaims,omitempty"`
+	ExchangeSchema       string                  `json:"exchangeSchema,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty"`
 	VerifierRequired     bool                    `json:"verifierRequired,omitempty"`
 	FailurePolicy        team.FailurePolicy      `json:"failurePolicy,omitempty"`

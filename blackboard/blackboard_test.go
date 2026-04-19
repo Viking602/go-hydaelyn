@@ -189,3 +189,37 @@ func TestCollaborationBlackboard_RejectsStaleExchangeWrite(t *testing.T) {
 		t.Fatalf("expected namespaced CAS metadata to remain intact, got %#v", items[0])
 	}
 }
+
+func TestSupportedFindingsRequireEvidenceAndConfidence(t *testing.T) {
+	state := State{
+		Findings: []Finding{
+			{ID: "finding-supported", ClaimIDs: []string{"claim-supported"}, Summary: "supported"},
+			{ID: "finding-low-confidence", ClaimIDs: []string{"claim-low"}, Summary: "low confidence"},
+			{ID: "finding-missing-evidence", ClaimIDs: []string{"claim-no-evidence"}, Summary: "missing evidence"},
+		},
+		Verifications: []VerificationResult{
+			{
+				ClaimID:     "claim-supported",
+				Status:      VerificationStatusSupported,
+				Confidence:  0.91,
+				EvidenceIDs: []string{"evidence-1"},
+			},
+			{
+				ClaimID:     "claim-low",
+				Status:      VerificationStatusSupported,
+				Confidence:  0.4,
+				EvidenceIDs: []string{"evidence-2"},
+			},
+			{
+				ClaimID:    "claim-no-evidence",
+				Status:     VerificationStatusSupported,
+				Confidence: 0.95,
+			},
+		},
+	}
+
+	supported := state.SupportedFindings()
+	if len(supported) != 1 || supported[0].ID != "finding-supported" {
+		t.Fatalf("expected only evidence-backed confident finding to survive, got %#v", supported)
+	}
+}

@@ -172,6 +172,7 @@ func substituteTask(task Task, item string, index int) Task {
 	task.DependsOn = replaceAll(task.DependsOn, replacer)
 	task.Reads = replaceAll(task.Reads, replacer)
 	task.Writes = replaceAll(task.Writes, replacer)
+	task.VerifyClaims = replaceAll(task.VerifyClaims, replacer)
 	task.RequiredCapabilities = replaceAll(task.RequiredCapabilities, replacer)
 	return task
 }
@@ -192,6 +193,8 @@ func (s Step) inlineTask() *Task {
 		Reads:                append([]string{}, s.Reads...),
 		Writes:               append([]string{}, s.Writes...),
 		Publish:              append([]team.OutputVisibility{}, s.Publish...),
+		VerifyClaims:         append([]string{}, s.VerifyClaims...),
+		ExchangeSchema:       s.ExchangeSchema,
 		FailurePolicy:        s.FailurePolicy,
 	}
 }
@@ -209,6 +212,8 @@ func (s Step) toolTask() Task {
 		Reads:                append([]string{}, s.Reads...),
 		Writes:               append([]string{}, s.Writes...),
 		Publish:              append([]team.OutputVisibility{}, s.Publish...),
+		VerifyClaims:         append([]string{}, s.VerifyClaims...),
+		ExchangeSchema:       s.ExchangeSchema,
 		FailurePolicy:        s.FailurePolicy,
 	}
 	if task.ID == "" {
@@ -250,6 +255,8 @@ func (t Task) toPlannerTask(incoming []string) planner.TaskSpec {
 		Reads:                append([]string{}, t.Reads...),
 		Writes:               append([]string{}, t.Writes...),
 		Publish:              append([]team.OutputVisibility{}, t.Publish...),
+		VerifyClaims:         append([]string{}, t.VerifyClaims...),
+		ExchangeSchema:       t.ExchangeSchema,
 		FailurePolicy:        t.FailurePolicy,
 	}
 }

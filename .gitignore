@@ -1,3 +1,5 @@
 .claude/
 .sisyphus/
 .sentrux/
+benchmarks/_external/
+benchmarks/results/

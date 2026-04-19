@@ -81,7 +81,7 @@ The following candidates were explicitly kept as-is in this pass:
 
 - `transport/mcp/client/client.go`
 - `transport/mcp/jsonrpc/jsonrpc.go`
-- `transport/http/admin/admin.go`
+- `transport/http/control/control.go`
 
 These remained unchanged because repetition was judged intentional, not accidental. Each file acts as a package entrypoint or protocol/admin facade, so renaming would have been cosmetic without improving discoverability.
 

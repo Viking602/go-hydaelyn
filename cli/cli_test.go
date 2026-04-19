@@ -205,6 +205,53 @@ flow:
 	}
 }
 
+func TestValidateRecipeStrictDataflowReportsIssues(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	recipePath := filepath.Join(dir, "strict-recipe.yaml")
+	recipeContent := `
+pattern: deepsearch
+supervisor_profile: supervisor
+worker_profiles: [researcher]
+input:
+  query: strict dataflow
+tasks:
+  - id: branch-a
+    kind: research
+    writes: [shared.branch]
+    publish: [blackboard]
+  - id: branch-b
+    kind: research
+    writes: [shared.branch]
+    publish: [blackboard]
+    exchange_schema: branch.schema
+  - id: verify-branch
+    kind: verify
+    reads: [shared.branch]
+  - id: synth-final
+    kind: synthesize
+    reads: [missing.key]
+`
+	if err := os.WriteFile(recipePath, []byte(recipeContent), 0o644); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{"validate", "--recipe", recipePath, "--strict-dataflow"}, &stdout, &stderr); err != nil {
+		t.Fatalf("validate strict-dataflow error = %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "\"ok\": false") {
+		t.Fatalf("expected strict-dataflow validation to fail, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\"code\": \"ambiguous_producer\"") {
+		t.Fatalf("expected ambiguous producer issue, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\"code\": \"verify_task_has_no_claim_source\"") {
+		t.Fatalf("expected verify claim-source issue, got %s", stdout.String())
+	}
+}
+
 func TestCLIUsesCanonicalEvalOutput(t *testing.T) {
 	t.Parallel()
 

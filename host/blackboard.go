@@ -33,6 +33,7 @@ func (r *Runtime) applyBlackboardUpdate(state team.RunState, task team.Task) tea
 	}
 	claimIDs := []string{}
 	findingIDs := []string{}
+	var verificationStatus blackboard.VerificationStatus
 	switch task.Kind {
 	case team.TaskKindResearch:
 		request := blackboard.PublishRequest{
@@ -50,46 +51,37 @@ func (r *Runtime) applyBlackboardUpdate(state team.RunState, task team.Task) tea
 			findingIDs = append(findingIDs, published.FindingID)
 		}
 	case team.TaskKindVerify:
-		status := blackboard.InferVerificationStatus(task.Result.Summary)
-		confidence := task.Result.Confidence
-		if confidence <= 0 {
-			confidence = 0.75
-		}
 		readExchanges := verifierPublishedInputs(state.Blackboard, task)
-		for _, dependencyID := range task.DependsOn {
-			for _, claim := range state.Blackboard.ClaimsForTask(dependencyID) {
-				state.Blackboard.UpsertVerification(blackboard.VerificationResult{
-					ClaimID:    claim.ID,
-					Status:     status,
-					Confidence: confidence,
-					Rationale:  strings.TrimSpace(task.Result.Summary),
-				})
-				claimIDs = appendUnique(claimIDs, claim.ID)
-				for _, finding := range state.Blackboard.FindingsForClaim(claim.ID) {
-					findingIDs = appendUnique(findingIDs, finding.ID)
-					if status == blackboard.VerificationStatusSupported {
-						_, _ = state.Blackboard.UpsertExchangeCAS(blackboard.Exchange{
-							Key:        "supported_findings",
-							Namespace:  task.Namespace,
-							TaskID:     task.ID,
-							Version:    task.Version,
-							ValueType:  blackboard.ExchangeValueTypeFindingRef,
-							Text:       finding.Summary,
-							ClaimIDs:   []string{claim.ID},
-							FindingIDs: []string{finding.ID},
-							Metadata: map[string]string{
-								"status": string(status),
-							},
-						})
-					}
+		verificationResults := verificationResultsForTask(state.Blackboard, task)
+		verificationStatus = verificationGateStatus(task, verificationResults)
+		for _, result := range verificationResults {
+			state.Blackboard.UpsertVerification(result)
+			claimIDs = appendUnique(claimIDs, result.ClaimID)
+			for _, finding := range state.Blackboard.FindingsForClaim(result.ClaimID) {
+				findingIDs = appendUnique(findingIDs, finding.ID)
+				if !result.SupportsClaim(blackboard.DefaultVerificationConfidence) {
+					continue
 				}
+				_, _ = state.Blackboard.UpsertExchangeCAS(blackboard.Exchange{
+					Key:        "supported_findings",
+					Namespace:  task.Namespace,
+					TaskID:     task.ID,
+					Version:    task.Version,
+					ValueType:  blackboard.ExchangeValueTypeFindingRef,
+					Text:       finding.Summary,
+					ClaimIDs:   []string{result.ClaimID},
+					FindingIDs: []string{finding.ID},
+					Metadata: map[string]string{
+						"status": string(result.Status),
+					},
+				})
 			}
 		}
-		_, _ = state.Blackboard.UpsertExchangeCAS(verifierGateExchange(task, status, readExchanges, claimIDs, findingIDs))
+		_, _ = state.Blackboard.UpsertExchangeCAS(verifierGateExchange(task, verificationStatus, readExchanges, claimIDs, findingIDs))
 	}
 	if task.PublishesTo(team.OutputVisibilityBlackboard) {
 		for _, key := range task.Writes {
-			_, _ = state.Blackboard.UpsertExchangeCAS(exchangeForTaskOutput(task, key, claimIDs, findingIDs))
+			_, _ = state.Blackboard.UpsertExchangeCAS(exchangeForTaskOutput(task, key, claimIDs, findingIDs, verificationStatus))
 		}
 	}
 	return state
@@ -110,7 +102,7 @@ func needsBlackboard(task team.Task) bool {
 	return task.Kind == team.TaskKindResearch || task.Kind == team.TaskKindVerify || task.PublishesTo(team.OutputVisibilityBlackboard)
 }
 
-func exchangeForTaskOutput(task team.Task, key string, claimIDs, findingIDs []string) blackboard.Exchange {
+func exchangeForTaskOutput(task team.Task, key string, claimIDs, findingIDs []string, verificationStatus blackboard.VerificationStatus) blackboard.Exchange {
 	exchange := blackboard.Exchange{
 		Key:         key,
 		Namespace:   task.Namespace,
@@ -126,7 +118,10 @@ func exchangeForTaskOutput(task team.Task, key string, claimIDs, findingIDs []st
 		},
 	}
 	if task.Kind == team.TaskKindVerify {
-		status := blackboard.InferVerificationStatus(task.Result.Summary)
+		status := verificationStatus
+		if status == "" {
+			status = blackboard.InferVerificationStatus(task.Result.Summary)
+		}
 		decision := verifierGateDecision(status)
 		exchange.Metadata[verifierGateStatusField] = string(status)
 		exchange.Metadata[verifierGateDecisionField] = decision
@@ -242,4 +237,215 @@ func appendUnique(items []string, value string) []string {
 		}
 	}
 	return append(items, value)
+}
+
+func verificationResultsForTask(board *blackboard.State, task team.Task) []blackboard.VerificationResult {
+	if board == nil || task.Result == nil {
+		return nil
+	}
+	claims := claimsForVerifierTask(board, task)
+	fallbackEvidenceIDs := verifierFallbackEvidenceIDs(board, task)
+	claimsByID := make(map[string]blackboard.Claim, len(claims))
+	for _, claim := range claims {
+		claimsByID[claim.ID] = claim
+	}
+	if structured := structuredVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); len(structured) > 0 {
+		return structured
+	}
+	status := blackboard.InferVerificationStatus(task.Result.Summary)
+	confidence := task.Result.Confidence
+	if confidence <= 0 {
+		confidence = 0.75
+	}
+	results := make([]blackboard.VerificationResult, 0, len(claims))
+	for _, claim := range claims {
+		evidenceIDs := []string(nil)
+		if status == blackboard.VerificationStatusSupported {
+			evidenceIDs = append([]string{}, claim.EvidenceIDs...)
+			if len(evidenceIDs) == 0 {
+				evidenceIDs = append([]string{}, fallbackEvidenceIDs...)
+			}
+		}
+		results = append(results, blackboard.VerificationResult{
+			ClaimID:     claim.ID,
+			Status:      status,
+			Confidence:  confidence,
+			EvidenceIDs: evidenceIDs,
+			Rationale:   strings.TrimSpace(task.Result.Summary),
+		})
+	}
+	return results
+}
+
+func claimsForVerifierTask(board *blackboard.State, task team.Task) []blackboard.Claim {
+	if board == nil {
+		return nil
+	}
+	claims := make([]blackboard.Claim, 0)
+	seen := map[string]struct{}{}
+	for _, dependencyID := range task.DependsOn {
+		for _, claim := range board.ClaimsForTask(dependencyID) {
+			if _, ok := seen[claim.ID]; ok {
+				continue
+			}
+			seen[claim.ID] = struct{}{}
+			claims = append(claims, claim)
+		}
+	}
+	return claims
+}
+
+func structuredVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {
+	rawClaims, ok := payload["claims"]
+	if !ok {
+		return nil
+	}
+	items, ok := rawClaims.([]any)
+	if !ok {
+		return nil
+	}
+	results := make([]blackboard.VerificationResult, 0, len(items))
+	for _, raw := range items {
+		current, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		claimID := firstString(current, "claimId", "claim_id")
+		if claimID == "" && len(claimsByID) == 1 {
+			for onlyID := range claimsByID {
+				claimID = onlyID
+			}
+		}
+		if claimID == "" {
+			continue
+		}
+		status := structuredVerificationStatus(current, task.Result.Summary)
+		confidence := firstFloat(current, "confidence")
+		if confidence <= 0 {
+			confidence = task.Result.Confidence
+		}
+		if confidence <= 0 {
+			confidence = 0.75
+		}
+		evidenceIDs := firstStringSlice(current, "evidenceIds", "evidence_ids", "evidenceRefs", "evidence_refs")
+		if len(evidenceIDs) == 0 && status == blackboard.VerificationStatusSupported {
+			if claim, ok := claimsByID[claimID]; ok {
+				evidenceIDs = append([]string{}, claim.EvidenceIDs...)
+			}
+			if len(evidenceIDs) == 0 {
+				evidenceIDs = append([]string{}, fallbackEvidenceIDs...)
+			}
+		}
+		rationale := firstString(current, "rationale", "claim")
+		if strings.TrimSpace(rationale) == "" {
+			rationale = strings.TrimSpace(task.Result.Summary)
+		}
+		results = append(results, blackboard.VerificationResult{
+			ClaimID:     claimID,
+			Status:      status,
+			Confidence:  confidence,
+			EvidenceIDs: evidenceIDs,
+			Rationale:   strings.TrimSpace(rationale),
+		})
+	}
+	return results
+}
+
+func verifierFallbackEvidenceIDs(board *blackboard.State, task team.Task) []string {
+	if board == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(task.Reads))
+	for _, exchange := range verifierPublishedInputs(board, task) {
+		if strings.TrimSpace(exchange.ID) == "" {
+			continue
+		}
+		ids = appendUnique(ids, exchange.ID)
+	}
+	return ids
+}
+
+func verificationGateStatus(task team.Task, results []blackboard.VerificationResult) blackboard.VerificationStatus {
+	if len(results) == 0 {
+		return blackboard.InferVerificationStatus(task.Result.Summary)
+	}
+	anySupported := false
+	anyContradicted := false
+	for _, result := range results {
+		if result.Status == blackboard.VerificationStatusContradicted {
+			anyContradicted = true
+		}
+		if result.SupportsClaim(blackboard.DefaultVerificationConfidence) {
+			anySupported = true
+		}
+	}
+	if anySupported {
+		return blackboard.VerificationStatusSupported
+	}
+	if anyContradicted {
+		return blackboard.VerificationStatusContradicted
+	}
+	return blackboard.VerificationStatusInsufficient
+}
+
+func structuredVerificationStatus(payload map[string]any, fallback string) blackboard.VerificationStatus {
+	value := strings.ToLower(strings.TrimSpace(firstString(payload, "decision", "status")))
+	switch value {
+	case "", "supported", "pass", "passed", "approved":
+		if value == "" {
+			return blackboard.InferVerificationStatus(fallback)
+		}
+		return blackboard.VerificationStatusSupported
+	case "contradicted", "unsupported", "blocked", "rejected", "false":
+		return blackboard.VerificationStatusContradicted
+	case "insufficient", "unknown", "unclear":
+		return blackboard.VerificationStatusInsufficient
+	default:
+		return blackboard.InferVerificationStatus(value)
+	}
+}
+
+func firstString(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, _ := payload[key].(string)
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstFloat(payload map[string]any, keys ...string) float64 {
+	for _, key := range keys {
+		switch value := payload[key].(type) {
+		case float64:
+			return value
+		case float32:
+			return float64(value)
+		case int:
+			return float64(value)
+		}
+	}
+	return 0
+}
+
+func firstStringSlice(payload map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		switch value := payload[key].(type) {
+		case []string:
+			return append([]string{}, value...)
+		case []any:
+			items := make([]string, 0, len(value))
+			for _, item := range value {
+				text, _ := item.(string)
+				if strings.TrimSpace(text) != "" {
+					items = append(items, text)
+				}
+			}
+			if len(items) > 0 {
+				return items
+			}
+		}
+	}
+	return nil
 }

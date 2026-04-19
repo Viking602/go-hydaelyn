@@ -64,6 +64,7 @@ const (
 	VerificationStatusSupported    VerificationStatus = "supported"
 	VerificationStatusContradicted VerificationStatus = "contradicted"
 	VerificationStatusInsufficient VerificationStatus = "insufficient"
+	DefaultVerificationConfidence  float64            = 0.7
 )
 
 type VerificationResult struct {
@@ -72,6 +73,15 @@ type VerificationResult struct {
 	Confidence  float64            `json:"confidence,omitempty"`
 	EvidenceIDs []string           `json:"evidenceIds,omitempty"`
 	Rationale   string             `json:"rationale,omitempty"`
+}
+
+func (r VerificationResult) SupportsClaim(confidenceThreshold float64) bool {
+	if confidenceThreshold <= 0 {
+		confidenceThreshold = DefaultVerificationConfidence
+	}
+	return r.Status == VerificationStatusSupported &&
+		r.Confidence >= confidenceThreshold &&
+		len(r.EvidenceIDs) > 0
 }
 
 type ExchangeValueType string
@@ -279,7 +289,7 @@ func (s State) FindingsForClaim(claimID string) []Finding {
 func (s State) SupportedFindings() []Finding {
 	supported := map[string]struct{}{}
 	for _, verification := range s.Verifications {
-		if verification.Status == VerificationStatusSupported {
+		if verification.SupportsClaim(DefaultVerificationConfidence) {
 			supported[verification.ClaimID] = struct{}{}
 		}
 	}

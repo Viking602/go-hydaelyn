@@ -3,6 +3,7 @@ package evaluation
 import (
 	"time"
 
+	"github.com/Viking602/go-hydaelyn/blackboard"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -70,7 +71,7 @@ func supportedClaimRatio(state team.RunState) float64 {
 	}
 	supported := 0
 	for _, verification := range state.Blackboard.Verifications {
-		if verification.Status == "supported" {
+		if verification.SupportsClaim(blackboard.DefaultVerificationConfidence) {
 			supported++
 		}
 	}

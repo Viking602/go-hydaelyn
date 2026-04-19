@@ -34,7 +34,7 @@ func TestEvaluateComputesRuntimeMetricsFromEvents(t *testing.T) {
 				{"id": "exchange-1", "key": "branch.alpha", "taskId": "task-1", "valueType": "text", "text": "alpha"},
 			},
 			"verifications": []map[string]any{
-				{"claimId": "claim-1", "status": "supported", "confidence": 0.9},
+				{"claimId": "claim-1", "status": "supported", "confidence": 0.9, "evidenceIds": []string{"exchange-1"}},
 			},
 		}},
 		{RunID: "team-1", TeamID: "team-1", TaskID: "task-2", Type: storage.EventTaskScheduled, RecordedAt: start.Add(4 * time.Second), Payload: map[string]any{

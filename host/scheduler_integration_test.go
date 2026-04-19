@@ -37,6 +37,14 @@ func (q *queueSpy) Acquire(ctx context.Context, ownerID string, ttl time.Duratio
 	return q.inner.Acquire(ctx, ownerID, ttl)
 }
 
+func (q *queueSpy) AcquireForTeam(ctx context.Context, ownerID, teamID string, ttl time.Duration) (scheduler.TaskLease, bool, error) {
+	q.mu.Lock()
+	q.acquires++
+	q.owners = append(q.owners, ownerID)
+	q.mu.Unlock()
+	return q.inner.AcquireForTeam(ctx, ownerID, teamID, ttl)
+}
+
 func (q *queueSpy) Heartbeat(ctx context.Context, lease scheduler.TaskLease, ttl time.Duration) error {
 	q.mu.Lock()
 	q.heartbeats++

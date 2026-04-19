@@ -84,6 +84,10 @@ func (q *heartbeatDroppingQueue) Acquire(ctx context.Context, ownerID string, tt
 	return q.inner.Acquire(ctx, ownerID, ttl)
 }
 
+func (q *heartbeatDroppingQueue) AcquireForTeam(ctx context.Context, ownerID, teamID string, ttl time.Duration) (scheduler.TaskLease, bool, error) {
+	return q.inner.AcquireForTeam(ctx, ownerID, teamID, ttl)
+}
+
 func (q *heartbeatDroppingQueue) Heartbeat(_ context.Context, _ scheduler.TaskLease, _ time.Duration) error {
 	return nil
 }
