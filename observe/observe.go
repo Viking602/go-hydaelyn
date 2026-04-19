@@ -226,6 +226,11 @@ func redact(value string) string {
 	return secretPattern.ReplaceAllString(value, "[REDACTED]")
 }
 
+func RedactSecrets(value string) (string, bool) {
+	redacted := redact(value)
+	return redacted, redacted != value
+}
+
 func redactAttrs(attrs map[string]string) map[string]string {
 	items := cloneAttrs(attrs)
 	for key, value := range items {
