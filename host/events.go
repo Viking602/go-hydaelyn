@@ -64,6 +64,30 @@ func (r *Runtime) appendEvent(ctx context.Context, event storage.Event) error {
 	return (&runtimeEventSink{store: r.storage.Events()}).AppendEvent(ctx, event)
 }
 
+func (r *Runtime) RecordPolicyOutcome(ctx context.Context, outcome storage.PolicyOutcomeEvent) {
+	metadata := policyOutcomeMetadata(outcome)
+	runID := strings.TrimSpace(metadata["runId"])
+	teamID := strings.TrimSpace(metadata["teamId"])
+	taskID := strings.TrimSpace(metadata["taskId"])
+	if runID == "" {
+		runID = teamID
+	}
+	if runID == "" {
+		return
+	}
+	payload := policyOutcomePayload(outcome)
+	if traceID := observe.TraceID(ctx); traceID != "" {
+		payload["traceId"] = traceID
+	}
+	_ = r.appendEvent(ctx, storage.Event{
+		RunID:   runID,
+		TeamID:  teamID,
+		TaskID:  taskID,
+		Type:    storage.EventPolicyOutcome,
+		Payload: payload,
+	})
+}
+
 func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) error {
 	workers := make([]map[string]string, 0, len(state.Workers))
 	for _, worker := range state.Workers {
@@ -331,6 +355,22 @@ func (r *Runtime) recordStaleWriteRejectedEvent(ctx context.Context, teamID, tas
 			"reason":   reason,
 		},
 	})
+	r.RecordPolicyOutcome(ctx, storage.PolicyOutcomeEvent{
+		SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+		Policy:        "capability.stale_write",
+		Outcome:       "rejected",
+		Severity:      "error",
+		Message:       fmt.Sprintf("stale write rejected for %s", taskID),
+		Blocking:      true,
+		Reference:     collaborationCorrelationID(teamID, taskID),
+		Timestamp:     time.Now().UTC(),
+		Evidence: &storage.PolicyOutcomeEvidence{Metadata: map[string]string{
+			"teamId":   teamID,
+			"taskId":   taskID,
+			"workerId": workerID,
+			"reason":   reason,
+		}},
+	})
 }
 
 func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.RunState, task team.Task) {
@@ -338,10 +378,31 @@ func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.Ru
 	eventType := storage.EventVerifierPassed
 	counter := "collaboration_verifier_passed"
 	decision := "passed"
+	severity := "info"
+	blocking := false
 	if status != blackboard.VerificationStatusSupported {
 		eventType = storage.EventVerifierBlocked
 		counter = "collaboration_verifier_blocked"
 		decision = "blocked"
+		severity = "warning"
+		blocking = true
+	}
+	outcome := storage.PolicyOutcomeEvent{
+		SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+		Policy:        "verifier.decision",
+		Outcome:       decision,
+		Severity:      severity,
+		Message:       task.Result.Summary,
+		Blocking:      blocking,
+		Reference:     collaborationCorrelationID(state.ID, task.ID),
+		Timestamp:     time.Now().UTC(),
+		Evidence: &storage.PolicyOutcomeEvidence{Metadata: map[string]string{
+			"runId":              state.ID,
+			"teamId":             state.ID,
+			"taskId":             task.ID,
+			"taskStage":          string(task.Stage),
+			"verificationStatus": string(status),
+		}},
 	}
 	r.recordCollaborationEvent(ctx, collaborationEvent{
 		Stage:         middleware.StageVerify,
@@ -355,11 +416,14 @@ func (r *Runtime) recordVerifierDecisionEvent(ctx context.Context, state team.Ru
 			metadataLifecycleStatus: decision,
 		},
 		Payload: map[string]any{
+			"decisionOutcome":    decision,
+			"policyOutcome":      policyOutcomePayload(outcome),
 			"taskStage":          string(task.Stage),
 			"verificationStatus": string(status),
 			"summary":            task.Result.Summary,
 		},
 	})
+	r.RecordPolicyOutcome(ctx, outcome)
 }
 
 func (r *Runtime) recordTaskCancelledEvent(ctx context.Context, state team.RunState, task team.Task, reason string) {
@@ -505,6 +569,45 @@ func verificationPayload(items []blackboard.VerificationResult) []map[string]any
 		})
 	}
 	return payload
+}
+
+func policyOutcomePayload(outcome storage.PolicyOutcomeEvent) map[string]any {
+	payload := map[string]any{
+		"schemaVersion": outcome.SchemaVersion,
+		"policy":        outcome.Policy,
+		"outcome":       outcome.Outcome,
+		"severity":      outcome.Severity,
+		"message":       outcome.Message,
+		"blocking":      outcome.Blocking,
+		"reference":     outcome.Reference,
+		"timestamp":     outcome.Timestamp,
+	}
+	if outcome.Attempt > 0 {
+		payload["attempt"] = outcome.Attempt
+	}
+	if outcome.Evidence != nil {
+		evidence := map[string]any{}
+		if len(outcome.Evidence.EventSequences) > 0 {
+			evidence["eventSequences"] = append([]int{}, outcome.Evidence.EventSequences...)
+		}
+		if outcome.Evidence.Excerpt != "" {
+			evidence["excerpt"] = outcome.Evidence.Excerpt
+		}
+		if len(outcome.Evidence.Metadata) > 0 {
+			evidence["metadata"] = cloneStringMap(outcome.Evidence.Metadata)
+		}
+		if len(evidence) > 0 {
+			payload["evidence"] = evidence
+		}
+	}
+	return payload
+}
+
+func policyOutcomeMetadata(outcome storage.PolicyOutcomeEvent) map[string]string {
+	if outcome.Evidence == nil || len(outcome.Evidence.Metadata) == 0 {
+		return nil
+	}
+	return cloneStringMap(outcome.Evidence.Metadata)
 }
 
 func verificationsForTask(board *blackboard.State, task team.Task) []blackboard.VerificationResult {

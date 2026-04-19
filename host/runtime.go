@@ -116,6 +116,7 @@ func (r *Runtime) RegisterProvider(name string, driver provider.Driver) {
 		name:     name,
 		metadata: driver.Metadata(),
 		invoker:  r.capability,
+		recorder: r,
 	}
 	if _, exists := r.plugins.Lookup(plugin.TypeProvider, name); !exists {
 		_ = r.plugins.Register(plugin.Spec{Type: plugin.TypeProvider, Name: name, Component: driver})
@@ -128,6 +129,7 @@ func (r *Runtime) RegisterTool(driver tool.Driver) {
 	r.tools.Register(capabilityToolDriver{
 		definition: driver.Definition(),
 		invoker:    r.capability,
+		recorder:   r,
 	})
 	if _, exists := r.plugins.Lookup(plugin.TypeTool, name); !exists {
 		_ = r.plugins.Register(plugin.Spec{Type: plugin.TypeTool, Name: name, Component: driver})
@@ -170,7 +172,7 @@ func (r *Runtime) RegisterCapability(callType capability.Type, name string, hand
 }
 
 func (r *Runtime) InvokeCapability(ctx context.Context, call capability.Call) (capability.Result, error) {
-	return r.capability.Invoke(ctx, call)
+	return r.capability.Invoke(capability.WithPolicyOutcomeRecorder(ctx, r), call)
 }
 
 func (r *Runtime) UseObserver(observer observe.Observer) {

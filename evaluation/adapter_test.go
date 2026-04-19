@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/storage"
 )
 
 func TestAdaptReportToScorePayload(t *testing.T) {
@@ -77,5 +79,79 @@ func TestScoreLevelForOverallScoreWithReplayConsistency(t *testing.T) {
 
 	if got := ScoreLevelForOverallScoreWithReplayConsistency(0.95, false); got != ScoreLevelA2 {
 		t.Fatalf("expected replay inconsistency to cap score level at A2, got %s", got)
+	}
+}
+
+func TestCapabilityOutcomeScoring(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	report := Report{TeamID: "team-456", TaskCompletionRate: 1, RetrySuccessRate: 1}
+	events := []storage.Event{
+		{
+			RunID: "team-456",
+			Type:  storage.EventPolicyOutcome,
+			Payload: map[string]any{
+				"schemaVersion": storage.PolicyOutcomeEventSchemaVersion,
+				"policy":        "capability.timeout",
+				"outcome":       "timed_out",
+				"severity":      "critical",
+				"blocking":      true,
+				"timestamp":     now,
+			},
+		},
+		{
+			RunID: "team-456",
+			Type:  storage.EventPolicyOutcome,
+			Payload: map[string]any{
+				"schemaVersion": storage.PolicyOutcomeEventSchemaVersion,
+				"policy":        "capability.permission",
+				"outcome":       "denied",
+				"severity":      "error",
+				"blocking":      true,
+				"timestamp":     now,
+			},
+		},
+		{
+			RunID: "team-456",
+			Type:  storage.EventPolicyOutcome,
+			Payload: map[string]any{
+				"schemaVersion": storage.PolicyOutcomeEventSchemaVersion,
+				"policy":        "secret.leak",
+				"outcome":       "blocked",
+				"severity":      "warning",
+				"blocking":      true,
+				"timestamp":     now,
+			},
+		},
+		{
+			RunID:  "team-456",
+			Type:   storage.EventVerifierBlocked,
+			TaskID: "verify-1",
+			Payload: map[string]any{
+				"policyOutcome": map[string]any{
+					"schemaVersion": storage.PolicyOutcomeEventSchemaVersion,
+					"policy":        "verifier.decision",
+					"outcome":       "blocked",
+					"severity":      "warning",
+					"blocking":      true,
+					"timestamp":     now,
+				},
+			},
+		},
+	}
+
+	got := AdaptReportToScorePayloadWithEvents(report, events, report.TeamID, true)
+	if got.SafetyMetrics == nil {
+		t.Fatalf("expected safety metrics, got %#v", got)
+	}
+	want := &ScoreSafetyMetrics{
+		CriticalFailure:         true,
+		PromptInjectionBlocked:  true,
+		UnauthorizedToolBlocked: true,
+		SecretLeakBlocked:       true,
+	}
+	if !reflect.DeepEqual(got.SafetyMetrics, want) {
+		t.Fatalf("unexpected safety metrics\nwant: %#v\ngot:  %#v", want, got.SafetyMetrics)
 	}
 }

@@ -3,12 +3,14 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/toolkit"
 )
 
@@ -82,5 +84,65 @@ func TestCapabilityMiddlewareObservesLLMAndToolCalls(t *testing.T) {
 	}
 	if !foundTool {
 		t.Fatalf("expected tool capability call, got %#v", trace)
+	}
+}
+
+func TestPolicyOutcomeEmission(t *testing.T) {
+	t.Parallel()
+
+	runner := New(Config{})
+	runner.UseCapabilityMiddleware(capability.RequirePermissions())
+	runner.RegisterCapability(capability.TypeTool, "dangerous", func(context.Context, capability.Call) (capability.Result, error) {
+		return capability.Result{Output: "should-not-run"}, nil
+	})
+
+	_, err := runner.InvokeCapability(context.Background(), capability.Call{
+		Type: capability.TypeTool,
+		Name: "dangerous",
+		Permissions: []capability.Permission{{
+			Name:    "tool:dangerous",
+			Granted: false,
+		}},
+		Metadata: map[string]string{
+			"teamId": "team-policy-outcome",
+			"taskId": "task-1",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected permission denial")
+	}
+	var capErr *capability.Error
+	if !errors.As(err, &capErr) || capErr.Kind != capability.ErrorKindPermission {
+		t.Fatalf("expected permission error, got %v", err)
+	}
+
+	events, err := runner.storage.Events().List(context.Background(), "team-policy-outcome")
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 policy outcome event, got %#v", events)
+	}
+	event := events[0]
+	if event.Type != storage.EventPolicyOutcome {
+		t.Fatalf("expected policy outcome event, got %#v", event)
+	}
+	if event.TeamID != "team-policy-outcome" || event.TaskID != "task-1" {
+		t.Fatalf("expected event correlation, got %#v", event)
+	}
+	if got := event.Payload["policy"]; got != "capability.permission" {
+		t.Fatalf("expected permission policy, got %#v", event.Payload)
+	}
+	if got := event.Payload["outcome"]; got != "denied" {
+		t.Fatalf("expected denied outcome, got %#v", event.Payload)
+	}
+	if got := event.Payload["severity"]; got != "error" {
+		t.Fatalf("expected error severity, got %#v", event.Payload)
+	}
+	if blocked, _ := event.Payload["blocking"].(bool); !blocked {
+		t.Fatalf("expected blocking policy outcome, got %#v", event.Payload)
+	}
+	if evidence, ok := event.Payload["evidence"].(map[string]any); !ok || evidence == nil {
+		t.Fatalf("expected evidence payload, got %#v", event.Payload)
 	}
 }

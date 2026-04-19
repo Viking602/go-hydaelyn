@@ -2,6 +2,8 @@ package storage
 
 import "time"
 
+const PolicyOutcomeEventSchemaVersion = "1.0"
+
 type RunStatus string
 
 const (
@@ -55,8 +57,28 @@ const (
 	EventSynthesisCommitted     EventType = "SynthesisCommitted"
 	EventCheckpointSaved        EventType = "CheckpointSaved"
 	EventApprovalRequested      EventType = "ApprovalRequested"
+	EventPolicyOutcome          EventType = "PolicyOutcome"
 	EventTeamCompleted          EventType = "TeamCompleted"
 )
+
+type PolicyOutcomeEvent struct {
+	SchemaVersion string                 `json:"schemaVersion"`
+	Policy        string                 `json:"policy"`
+	Outcome       string                 `json:"outcome,omitempty"`
+	Severity      string                 `json:"severity,omitempty"`
+	Message       string                 `json:"message,omitempty"`
+	Blocking      bool                   `json:"blocking,omitempty"`
+	Reference     string                 `json:"reference,omitempty"`
+	Attempt       int                    `json:"attempt,omitempty"`
+	Timestamp     time.Time              `json:"timestamp"`
+	Evidence      *PolicyOutcomeEvidence `json:"evidence,omitempty"`
+}
+
+type PolicyOutcomeEvidence struct {
+	EventSequences []int             `json:"eventSequences,omitempty"`
+	Excerpt        string            `json:"excerpt,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
 
 type Event struct {
 	RunID      string         `json:"runId"`

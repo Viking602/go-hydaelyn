@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/storage"
 )
 
 type Type string
@@ -62,9 +64,46 @@ const (
 	ErrorKindPermission ErrorKind = "permission"
 	ErrorKindApproval   ErrorKind = "approval"
 	ErrorKindRateLimit  ErrorKind = "rate_limit"
+	ErrorKindStaleWrite ErrorKind = "stale_write"
 	ErrorKindNotFound   ErrorKind = "not_found"
 	ErrorKindUpstream   ErrorKind = "upstream"
 )
+
+const (
+	policyCapabilityPermission = "capability.permission"
+	policyCapabilityApproval   = "capability.approval"
+	policyCapabilityRetry      = "capability.retry"
+	policyCapabilityTimeout    = "capability.timeout"
+	policyCapabilityRateLimit  = "capability.rate_limit"
+	policyCapabilityStaleWrite = "capability.stale_write"
+)
+
+type PolicyOutcomeRecorder interface {
+	RecordPolicyOutcome(ctx context.Context, event storage.PolicyOutcomeEvent)
+}
+
+type policyOutcomeRecorderKey struct{}
+
+func WithPolicyOutcomeRecorder(ctx context.Context, recorder PolicyOutcomeRecorder) context.Context {
+	if recorder == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, policyOutcomeRecorderKey{}, recorder)
+}
+
+func emitPolicyOutcome(ctx context.Context, event storage.PolicyOutcomeEvent) {
+	recorder, _ := ctx.Value(policyOutcomeRecorderKey{}).(PolicyOutcomeRecorder)
+	if recorder == nil {
+		return
+	}
+	if event.SchemaVersion == "" {
+		event.SchemaVersion = storage.PolicyOutcomeEventSchemaVersion
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
+	recorder.RecordPolicyOutcome(ctx, event)
+}
 
 type Error struct {
 	Kind      ErrorKind `json:"kind"`
@@ -134,10 +173,14 @@ func (i *Invoker) Invoke(ctx context.Context, call Call) (Result, error) {
 	result, err := i.wrap(handler)(ctx, call)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityTimeout, "timed_out", "critical", "capability call timed out", true, 0, map[string]string{"errorKind": string(ErrorKindTimeout)}))
 			return Result{}, &Error{Kind: ErrorKindTimeout, Message: "capability call timed out", Cause: err, Temporary: true}
 		}
 		var capErr *Error
 		if errors.As(err, &capErr) {
+			if capErr.Kind == ErrorKindStaleWrite {
+				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityStaleWrite, "rejected", "error", capErr.Message, true, 0, map[string]string{"errorKind": string(capErr.Kind)}))
+			}
 			return Result{}, capErr
 		}
 		return Result{}, &Error{Kind: ErrorKindUpstream, Message: err.Error(), Cause: err, Temporary: true}
@@ -178,6 +221,7 @@ func Retry(defaultRetries int) Middleware {
 				return Result{}, lastErr
 			}
 			if attempt < limit {
+				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRetry, "retrying", "info", fmt.Sprintf("retry attempt %d for %s after %v", attempt+1, key(call.Type, call.Name), err), false, attempt+1, nil))
 				backoff := time.Duration(1<<uint(attempt)) * 50 * time.Millisecond
 				if backoff > 2*time.Second {
 					backoff = 2 * time.Second
@@ -197,6 +241,7 @@ func RequirePermissions() Middleware {
 	return Func(func(ctx context.Context, call Call, next Next) (Result, error) {
 		for _, permission := range call.Permissions {
 			if !permission.Granted {
+				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityPermission, "denied", "error", fmt.Sprintf("permission denied: %s", permission.Name), true, 0, map[string]string{"permission": permission.Name, "errorKind": string(ErrorKindPermission)}))
 				return Result{}, &Error{
 					Kind:    ErrorKindPermission,
 					Message: fmt.Sprintf("permission denied: %s", permission.Name),
@@ -212,6 +257,7 @@ func RequireApproval() Middleware {
 		if call.Metadata != nil && call.Metadata["approved"] == "true" {
 			return next(ctx, call)
 		}
+		emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityApproval, "paused", "warning", fmt.Sprintf("approval required for %s/%s", call.Type, call.Name), true, 0, map[string]string{"errorKind": string(ErrorKindApproval)}))
 		return Result{}, &Error{
 			Kind:    ErrorKindApproval,
 			Message: fmt.Sprintf("approval required for %s/%s", call.Type, call.Name),
@@ -253,6 +299,7 @@ func RateLimitPerWindow(limit int, window time.Duration) Middleware {
 			e.timestamps = valid
 			if len(e.timestamps) >= limit {
 				mu.Unlock()
+				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRateLimit, "rate_limited", "warning", fmt.Sprintf("rate limit exceeded for %s", k), true, 0, map[string]string{"errorKind": string(ErrorKindRateLimit)}))
 				return Result{}, &Error{
 					Kind:      ErrorKindRateLimit,
 					Message:   fmt.Sprintf("rate limit exceeded for %s", k),
@@ -263,6 +310,7 @@ func RateLimitPerWindow(limit int, window time.Duration) Middleware {
 		} else {
 			if e.total >= limit {
 				mu.Unlock()
+				emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRateLimit, "rate_limited", "warning", fmt.Sprintf("rate limit exceeded for %s", k), true, 0, map[string]string{"errorKind": string(ErrorKindRateLimit)}))
 				return Result{}, &Error{
 					Kind:    ErrorKindRateLimit,
 					Message: fmt.Sprintf("rate limit exceeded for %s", k),
@@ -288,14 +336,17 @@ func BudgetEnforcer() Middleware {
 		}
 		if call.Budget.Tokens > 0 && u.Tokens >= call.Budget.Tokens {
 			mu.Unlock()
+			emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRateLimit, "rate_limited", "warning", fmt.Sprintf("token budget exhausted for %s", k), true, 0, map[string]string{"budget": "tokens", "errorKind": string(ErrorKindRateLimit)}))
 			return Result{}, &Error{Kind: ErrorKindRateLimit, Message: fmt.Sprintf("token budget exhausted for %s", k)}
 		}
 		if call.Budget.ToolCalls > 0 && u.ToolCalls >= call.Budget.ToolCalls {
 			mu.Unlock()
+			emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRateLimit, "rate_limited", "warning", fmt.Sprintf("tool call budget exhausted for %s", k), true, 0, map[string]string{"budget": "tool_calls", "errorKind": string(ErrorKindRateLimit)}))
 			return Result{}, &Error{Kind: ErrorKindRateLimit, Message: fmt.Sprintf("tool call budget exhausted for %s", k)}
 		}
 		if call.Budget.Cost > 0 && u.Cost >= call.Budget.Cost {
 			mu.Unlock()
+			emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityRateLimit, "rate_limited", "warning", fmt.Sprintf("cost budget exhausted for %s", k), true, 0, map[string]string{"budget": "cost", "errorKind": string(ErrorKindRateLimit)}))
 			return Result{}, &Error{Kind: ErrorKindRateLimit, Message: fmt.Sprintf("cost budget exhausted for %s", k)}
 		}
 		mu.Unlock()
@@ -314,4 +365,42 @@ func BudgetEnforcer() Middleware {
 
 func key(callType Type, name string) string {
 	return string(callType) + "/" + name
+}
+
+func newPolicyOutcomeEvent(call Call, policy, outcome, severity, message string, blocking bool, attempt int, metadata map[string]string) storage.PolicyOutcomeEvent {
+	evidenceMetadata := cloneMetadata(call.Metadata)
+	if evidenceMetadata == nil {
+		evidenceMetadata = map[string]string{}
+	}
+	evidenceMetadata["capabilityType"] = string(call.Type)
+	evidenceMetadata["capabilityName"] = call.Name
+	for key, value := range metadata {
+		evidenceMetadata[key] = value
+	}
+	event := storage.PolicyOutcomeEvent{
+		SchemaVersion: storage.PolicyOutcomeEventSchemaVersion,
+		Policy:        policy,
+		Outcome:       outcome,
+		Severity:      severity,
+		Message:       message,
+		Blocking:      blocking,
+		Reference:     key(call.Type, call.Name),
+		Attempt:       attempt,
+		Timestamp:     time.Now().UTC(),
+	}
+	if len(evidenceMetadata) > 0 {
+		event.Evidence = &storage.PolicyOutcomeEvidence{Metadata: evidenceMetadata}
+	}
+	return event
+}
+
+func cloneMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }

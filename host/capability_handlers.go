@@ -14,6 +14,7 @@ type capabilityProviderDriver struct {
 	name     string
 	metadata provider.Metadata
 	invoker  *capability.Invoker
+	recorder capability.PolicyOutcomeRecorder
 }
 
 func (d capabilityProviderDriver) Metadata() provider.Metadata {
@@ -21,6 +22,7 @@ func (d capabilityProviderDriver) Metadata() provider.Metadata {
 }
 
 func (d capabilityProviderDriver) Stream(ctx context.Context, request provider.Request) (provider.Stream, error) {
+	ctx = capability.WithPolicyOutcomeRecorder(ctx, d.recorder)
 	result, err := d.invoker.Invoke(ctx, capability.Call{
 		Type:     capability.TypeLLM,
 		Name:     d.name,
@@ -40,6 +42,7 @@ func (d capabilityProviderDriver) Stream(ctx context.Context, request provider.R
 type capabilityToolDriver struct {
 	definition tool.Definition
 	invoker    *capability.Invoker
+	recorder   capability.PolicyOutcomeRecorder
 }
 
 func (d capabilityToolDriver) Definition() tool.Definition {
@@ -47,6 +50,7 @@ func (d capabilityToolDriver) Definition() tool.Definition {
 }
 
 func (d capabilityToolDriver) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
+	ctx = capability.WithPolicyOutcomeRecorder(ctx, d.recorder)
 	result, err := d.invoker.Invoke(ctx, capability.Call{
 		Type: capability.TypeTool,
 		Name: d.definition.Name,
