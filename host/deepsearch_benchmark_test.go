@@ -23,15 +23,15 @@ func (benchmarkProvider) Stream(_ context.Context, request provider.Request) (pr
 	}), nil
 }
 
-func BenchmarkDeepsearchRuntime(b *testing.B) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("bench", benchmarkProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "bench", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "bench", Model: "test"})
+func BenchmarkDeepsearch(b *testing.B) {
+	runner := New(Config{})
+	runner.RegisterProvider("bench", benchmarkProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "bench", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "bench", Model: "test"})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+		_, err := runner.StartTeam(context.Background(), StartTeamRequest{
 			Pattern:           "deepsearch",
 			SupervisorProfile: "supervisor",
 			WorkerProfiles:    []string{"researcher", "researcher"},

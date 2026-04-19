@@ -8,14 +8,14 @@ import (
 )
 
 func TestSelectAgentForPlanTaskHonorsBudget(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProfile(team.Profile{
+	runner := New(Config{})
+	runner.RegisterProfile(team.Profile{
 		Name:          "small",
 		Role:          team.RoleResearcher,
 		DefaultBudget: team.Budget{Tokens: 20},
 		ToolNames:     []string{"search"},
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:          "large",
 		Role:          team.RoleResearcher,
 		DefaultBudget: team.Budget{Tokens: 100},
@@ -25,7 +25,7 @@ func TestSelectAgentForPlanTaskHonorsBudget(t *testing.T) {
 		{ID: "worker-1", Role: team.RoleResearcher, ProfileName: "small"},
 		{ID: "worker-2", Role: team.RoleResearcher, ProfileName: "large"},
 	}
-	assignee, err := runtime.selectAgentForPlanTask(planner.TaskSpec{
+	assignee, err := runner.selectAgentForPlanTask(planner.TaskSpec{
 		ID:                   "task-1",
 		RequiredRole:         team.RoleResearcher,
 		RequiredCapabilities: []string{"search"},
@@ -40,15 +40,15 @@ func TestSelectAgentForPlanTaskHonorsBudget(t *testing.T) {
 }
 
 func TestSelectAgentForPlanTaskAvoidsConcurrencySaturation(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProfile(team.Profile{
+	runner := New(Config{})
+	runner.RegisterProfile(team.Profile{
 		Name:           "tight",
 		Role:           team.RoleResearcher,
 		DefaultBudget:  team.Budget{Tokens: 100},
 		ToolNames:      []string{"search"},
 		MaxConcurrency: 1,
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:           "wide",
 		Role:           team.RoleResearcher,
 		DefaultBudget:  team.Budget{Tokens: 100},
@@ -63,7 +63,7 @@ func TestSelectAgentForPlanTaskAvoidsConcurrencySaturation(t *testing.T) {
 		"worker-1": 1,
 		"worker-2": 1,
 	}
-	assignee, err := runtime.selectAgentForPlanTask(planner.TaskSpec{
+	assignee, err := runner.selectAgentForPlanTask(planner.TaskSpec{
 		ID:                   "task-2",
 		RequiredRole:         team.RoleResearcher,
 		RequiredCapabilities: []string{"search"},

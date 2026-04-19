@@ -25,12 +25,12 @@ func (fakeProvider) Stream(_ context.Context, request provider.Request) (provide
 }
 
 func main() {
-	runtime := host.New(host.Config{})
-	runtime.RegisterProvider("fake", fakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
-	state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
+	runner := host.New(host.Config{})
+	runner.RegisterProvider("fake", fakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher", "researcher"},

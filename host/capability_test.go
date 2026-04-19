@@ -38,14 +38,14 @@ func (capabilityProvider) Stream(_ context.Context, request provider.Request) (p
 	}), nil
 }
 
-func TestRuntimeCapabilityMiddlewareObservesLLMAndToolCalls(t *testing.T) {
-	runtime := New(Config{})
+func TestCapabilityMiddlewareObservesLLMAndToolCalls(t *testing.T) {
+	runner := New(Config{})
 	trace := make([]string, 0, 4)
-	runtime.UseCapabilityMiddleware(capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
+	runner.UseCapabilityMiddleware(capability.Func(func(ctx context.Context, call capability.Call, next capability.Next) (capability.Result, error) {
 		trace = append(trace, string(call.Type)+":"+call.Name)
 		return next(ctx, call)
 	}))
-	runtime.RegisterProvider("cap-provider", capabilityProvider{})
+	runner.RegisterProvider("cap-provider", capabilityProvider{})
 	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
@@ -54,12 +54,12 @@ func TestRuntimeCapabilityMiddlewareObservesLLMAndToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	runtime.RegisterTool(driver)
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	runner.RegisterTool(driver)
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	_, err = runtime.Prompt(context.Background(), PromptRequest{
+	_, err = runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "cap-provider",
 		Model:     "test",

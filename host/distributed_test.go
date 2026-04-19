@@ -16,20 +16,20 @@ import (
 )
 
 func newDistributedRuntime(workerID string, driver storage.Driver, queue scheduler.TaskQueue) *Runtime {
-	runtime := New(Config{
+	runner := New(Config{
 		Storage:  driver,
 		WorkerID: workerID,
 	})
-	_ = runtime.RegisterPlugin(plugin.Spec{
+	_ = runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeScheduler,
 		Name:      "memory-queue",
 		Component: queue,
 	})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
-	return runtime
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	return runner
 }
 
 func TestDistributedRuntimesCanShareQueueAndStorage(t *testing.T) {
@@ -189,15 +189,15 @@ func TestMultiAgentCollaboration_LeaseExpiryDoesNotDuplicateCommit(t *testing.T)
 	queue := &heartbeatDroppingQueue{inner: scheduler.NewMemoryQueue()}
 	provider := newLeaseRaceProvider()
 	newRuntime := func(workerID string) *Runtime {
-		runtime := New(Config{Storage: driver, WorkerID: workerID})
-		if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
+		runner := New(Config{Storage: driver, WorkerID: workerID})
+		if err := runner.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
 			t.Fatalf("RegisterPlugin() error = %v", err)
 		}
-		runtime.RegisterProvider("lease-race", provider)
-		runtime.RegisterPattern(singleTaskPattern{})
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "lease-race", Model: "test"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "lease-race", Model: "test"})
-		return runtime
+		runner.RegisterProvider("lease-race", provider)
+		runner.RegisterPattern(singleTaskPattern{})
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "lease-race", Model: "test"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "lease-race", Model: "test"})
+		return runner
 	}
 	coordinator := newRuntime("coordinator")
 	workerA := newRuntime("worker-a")

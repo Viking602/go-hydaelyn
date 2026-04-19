@@ -46,13 +46,13 @@ func (askHumanPlanner) Replan(_ context.Context, _ planner.ReplanInput) (planner
 }
 
 func main() {
-	runtime := host.New(host.Config{})
-	runtime.RegisterProvider("fake", fakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	_ = runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "ask-human", Component: askHumanPlanner{}})
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
-	state, err := runtime.StartTeam(context.Background(), host.StartTeamRequest{
+	runner := host.New(host.Config{})
+	runner.RegisterProvider("fake", fakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	_ = runner.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "ask-human", Component: askHumanPlanner{}})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "ask-human",
 		SupervisorProfile: "supervisor",

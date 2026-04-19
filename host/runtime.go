@@ -78,7 +78,7 @@ func New(config Config) *Runtime {
 	if driver == nil {
 		driver = storage.NewMemoryDriver()
 	}
-	runtime := &Runtime{
+	runner := &Runtime{
 		storage:          driver,
 		eventSink:        &runtimeEventSink{store: driver.Events()},
 		auth:             config.Auth,
@@ -98,14 +98,14 @@ func New(config Config) *Runtime {
 		activeRuns:       map[string]context.CancelFunc{},
 		activeTeams:      map[string]context.CancelFunc{},
 	}
-	runtime.leaseReleaser = &defaultLeaseReleaser{queue: runtime.queue}
-	if runtime.workerID == "" {
-		runtime.workerID = runtime.nextWorkerID()
+	runner.leaseReleaser = &defaultLeaseReleaser{queue: runner.queue}
+	if runner.workerID == "" {
+		runner.workerID = runner.nextWorkerID()
 	}
 	for _, spec := range config.Plugins {
-		_ = runtime.RegisterPlugin(spec)
+		_ = runner.RegisterPlugin(spec)
 	}
-	return runtime
+	return runner
 }
 
 func (r *Runtime) RegisterProvider(name string, driver provider.Driver) {

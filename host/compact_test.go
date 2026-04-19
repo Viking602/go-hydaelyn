@@ -27,23 +27,23 @@ func (c *countingProvider) Stream(_ context.Context, request provider.Request) (
 	}), nil
 }
 
-func TestRuntimePromptWithoutCompactionPassesFullHistory(t *testing.T) {
+func TestPromptWithoutCompactionPassesFullHistory(t *testing.T) {
 	prov := &countingProvider{}
-	runtime := New(Config{})
-	runtime.RegisterProvider("counting", prov)
+	runner := New(Config{})
+	runner.RegisterProvider("counting", prov)
 
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 
 	// Seed the session with 5 messages
 	for i := 0; i < 5; i++ {
-		_, _ = runtime.appendSessionMessages(context.Background(), sess.ID,
+		_, _ = runner.appendSessionMessages(context.Background(), sess.ID,
 			message.NewText(message.RoleUser, "msg"))
 	}
 
-	_, err = runtime.Prompt(context.Background(), PromptRequest{
+	_, err = runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "counting",
 		Model:     "test",
@@ -58,26 +58,26 @@ func TestRuntimePromptWithoutCompactionPassesFullHistory(t *testing.T) {
 	}
 }
 
-func TestRuntimePromptWithCompactionReducesMessages(t *testing.T) {
+func TestPromptWithCompactionReducesMessages(t *testing.T) {
 	prov := &countingProvider{}
-	runtime := New(Config{
+	runner := New(Config{
 		Compactor:        &compact.SimpleCompactor{MaxMessages: 4},
 		CompactThreshold: 4,
 	})
-	runtime.RegisterProvider("counting", prov)
+	runner.RegisterProvider("counting", prov)
 
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 
 	// Seed the session with 5 messages
 	for i := 0; i < 5; i++ {
-		_, _ = runtime.appendSessionMessages(context.Background(), sess.ID,
+		_, _ = runner.appendSessionMessages(context.Background(), sess.ID,
 			message.NewText(message.RoleUser, "msg"))
 	}
 
-	_, err = runtime.Prompt(context.Background(), PromptRequest{
+	_, err = runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "counting",
 		Model:     "test",
@@ -93,8 +93,8 @@ func TestRuntimePromptWithCompactionReducesMessages(t *testing.T) {
 	}
 }
 
-func TestRuntimeCompactMessagesFailOpen(t *testing.T) {
-	runtime := New(Config{
+func TestCompactMessagesFailOpen(t *testing.T) {
+	runner := New(Config{
 		Compactor:        &failingCompactor{},
 		CompactThreshold: 2,
 	})
@@ -106,7 +106,7 @@ func TestRuntimeCompactMessagesFailOpen(t *testing.T) {
 		message.NewText(message.RoleUser, "c"),
 	}
 
-	result := runtime.compactMessages(context.Background(), messages)
+	result := runner.compactMessages(context.Background(), messages)
 	if len(result) != 4 {
 		t.Errorf("expected 4 messages when compactor fails, got %d", len(result))
 	}

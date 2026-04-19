@@ -115,14 +115,14 @@ func (collaborationObservabilityPattern) Advance(_ context.Context, state team.R
 	return state, nil
 }
 
-func TestRuntimeRecordsEventsAndCanReplayTeamState(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+func TestRecordsEventsAndCanReplayTeamState(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
@@ -134,7 +134,7 @@ func TestRuntimeRecordsEventsAndCanReplayTeamState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTeam() error = %v", err)
 	}
-	events, err := runtime.storage.Events().List(context.Background(), state.ID)
+	events, err := runner.storage.Events().List(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRuntimeRecordsEventsAndCanReplayTeamState(t *testing.T) {
 			t.Fatalf("expected event %s in %#v", eventType, events)
 		}
 	}
-	replayed, err := runtime.ReplayTeamState(context.Background(), state.ID)
+	replayed, err := runner.ReplayTeamState(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("ReplayTeamState() error = %v", err)
 	}
@@ -167,17 +167,17 @@ func TestRuntimeRecordsEventsAndCanReplayTeamState(t *testing.T) {
 
 func TestMultiAgentCollaboration_EmitsLifecycleObservability(t *testing.T) {
 	observer := observe.NewMemoryObserver()
-	runtime := New(Config{WorkerID: "worker-observe"})
-	runtime.UseObserver(observer)
-	if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: scheduler.NewMemoryQueue()}); err != nil {
+	runner := New(Config{WorkerID: "worker-observe"})
+	runner.UseObserver(observer)
+	if err := runner.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: scheduler.NewMemoryQueue()}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	runtime.RegisterProvider("collaboration-observe", collaborationObservabilityProvider{})
-	runtime.RegisterPattern(collaborationObservabilityPattern{})
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "collaboration-observe", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "collaboration-observe", Model: "test"})
+	runner.RegisterProvider("collaboration-observe", collaborationObservabilityProvider{})
+	runner.RegisterPattern(collaborationObservabilityPattern{})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "collaboration-observe", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "collaboration-observe", Model: "test"})
 
-	state, err := runtime.QueueTeam(context.Background(), StartTeamRequest{
+	state, err := runner.QueueTeam(context.Background(), StartTeamRequest{
 		Pattern:           "collaboration-observability",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
@@ -185,20 +185,20 @@ func TestMultiAgentCollaboration_EmitsLifecycleObservability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueTeam() error = %v", err)
 	}
-	if _, err := runtime.RunQueueWorker(context.Background(), 4); err != nil {
+	if _, err := runner.RunQueueWorker(context.Background(), 4); err != nil {
 		t.Fatalf("RunQueueWorker() error = %v", err)
 	}
-	current, err := runtime.GetTeam(context.Background(), state.ID)
+	current, err := runner.GetTeam(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("GetTeam() error = %v", err)
 	}
 	if current.Status != team.StatusCompleted {
 		t.Fatalf("expected completed team, got %#v", current)
 	}
-	runtime.recordLeaseExpiredEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonHeartbeatExpired)
-	runtime.recordStaleWriteRejectedEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonStateVersionConflict)
+	runner.recordLeaseExpiredEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonHeartbeatExpired)
+	runner.recordStaleWriteRejectedEvent(context.Background(), current.ID, "verify-1", "worker-observe", eventReasonStateVersionConflict)
 
-	events, err := runtime.TeamEvents(context.Background(), current.ID)
+	events, err := runner.TeamEvents(context.Background(), current.ID)
 	if err != nil {
 		t.Fatalf("TeamEvents() error = %v", err)
 	}
@@ -250,7 +250,7 @@ func TestAppendEventConcurrentSequenceUniqueness(t *testing.T) {
 	)
 
 	driver := storage.NewMemoryDriver()
-	runtime := New(Config{Storage: &sequenceBarrierDriver{
+	runner := New(Config{Storage: &sequenceBarrierDriver{
 		MemoryDriver: driver,
 		events:       newSequenceBarrierEventStore(driver.Events(), workers),
 	}})
@@ -267,7 +267,7 @@ func TestAppendEventConcurrentSequenceUniqueness(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for index := range perWorker {
-				if err := runtime.appendEvent(ctx, storage.Event{
+				if err := runner.appendEvent(ctx, storage.Event{
 					RunID: runID,
 					Type:  storage.EventTaskStarted,
 					Payload: map[string]any{
@@ -292,7 +292,7 @@ func TestAppendEventConcurrentSequenceUniqueness(t *testing.T) {
 		}
 	}
 
-	events, err := runtime.storage.Events().List(ctx, runID)
+	events, err := runner.storage.Events().List(ctx, runID)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}

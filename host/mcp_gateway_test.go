@@ -50,9 +50,9 @@ func (gatewayProvider) Stream(_ context.Context, request provider.Request) (prov
 
 var _ mcp.Gateway = fakeGateway{}
 
-func TestRuntimeMCPGatewayPluginImportsTools(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("gateway-provider", gatewayProvider{})
+func TestMCPGatewayPluginImportsTools(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("gateway-provider", gatewayProvider{})
 	driver, err := toolkit.Tool("mcp_lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
@@ -61,18 +61,18 @@ func TestRuntimeMCPGatewayPluginImportsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type:      plugin.TypeMCPGateway,
 		Name:      "fake-gateway",
 		Component: fakeGateway{drivers: []tool.Driver{driver}},
 	}); err != nil {
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	response, err := runtime.Prompt(context.Background(), PromptRequest{
+	response, err := runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "gateway-provider",
 		Model:     "test",

@@ -36,24 +36,24 @@ func (verificationProvider) Stream(_ context.Context, request provider.Request) 
 	}), nil
 }
 
-func TestRuntimePublishesBlackboardAndSynthesizesOnlyVerifiedClaims(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("verification", verificationProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{
+func TestPublishesBlackboardAndSynthesizesOnlyVerifiedClaims(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("verification", verificationProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{
 		Name:     "supervisor",
 		Role:     team.RoleSupervisor,
 		Provider: "verification",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "researcher",
 		Role:     team.RoleResearcher,
 		Provider: "verification",
 		Model:    "test",
 	})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher", "researcher"},
@@ -104,7 +104,7 @@ func TestVerificationProviderUsesTaskMetadata(t *testing.T) {
 }
 
 func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
-	runtime := New(Config{})
+	runner := New(Config{})
 	board := &blackboard.State{
 		Claims: []blackboard.Claim{{
 			ID:     "claim-1",
@@ -159,7 +159,7 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 		VerifierRequired: true,
 	}
 
-	materialized, text := runtime.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
+	materialized, text := runner.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
 	if len(materialized) != 1 {
 		t.Fatalf("expected guarded synthesis to ignore non-verifier namespaces and unsupported fallback, got %#v", materialized)
 	}
@@ -183,7 +183,7 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 		t.Fatalf("UpsertExchangeCAS() verifier finding error = %v", err)
 	}
 
-	materialized, text = runtime.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
+	materialized, text = runner.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
 	if len(materialized) != 2 {
 		t.Fatalf("expected guarded synthesis to consume verifier namespaces only, got %#v", materialized)
 	}
@@ -201,7 +201,7 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 }
 
 func TestMultiAgentCollaboration_VerifierPublishesSynthesisGate(t *testing.T) {
-	runtime := New(Config{})
+	runner := New(Config{})
 	state := team.RunState{Blackboard: &blackboard.State{}}
 	if _, err := state.Blackboard.UpsertExchangeCAS(blackboard.Exchange{
 		Key:       "review.impl-api",
@@ -237,7 +237,7 @@ func TestMultiAgentCollaboration_VerifierPublishesSynthesisGate(t *testing.T) {
 		},
 	}
 
-	state = runtime.applyBlackboardUpdate(state, verifyTask)
+	state = runner.applyBlackboardUpdate(state, verifyTask)
 	exchanges := state.Blackboard.ExchangesForTask(verifyTask.ID)
 	if len(exchanges) == 0 {
 		t.Fatalf("expected verifier exchanges, got %#v", state.Blackboard)
@@ -290,7 +290,7 @@ func TestMultiAgentCollaboration_VerifierPublishesSynthesisGate(t *testing.T) {
 }
 
 func TestMultiAgentCollaboration_VerifierBlocksSynthesisOnMissingEvidence(t *testing.T) {
-	runtime := New(Config{})
+	runner := New(Config{})
 	state := team.RunState{
 		ID:     "team-1",
 		Status: team.StatusRunning,
@@ -315,7 +315,7 @@ func TestMultiAgentCollaboration_VerifierBlocksSynthesisOnMissingEvidence(t *tes
 		},
 	}
 
-	next, err := runtime.executeTasks(context.Background(), state)
+	next, err := runner.executeTasks(context.Background(), state)
 	if err != nil {
 		t.Fatalf("executeTasks() error = %v", err)
 	}

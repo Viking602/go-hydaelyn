@@ -43,11 +43,11 @@ func (observeProvider) Stream(_ context.Context, request provider.Request) (prov
 	}), nil
 }
 
-func TestRuntimeObserverCapturesTeamTaskLLMToolSignals(t *testing.T) {
+func TestObserverCapturesTeamTaskLLMToolSignals(t *testing.T) {
 	observer := observe.NewMemoryObserver()
-	runtime := New(Config{})
-	runtime.UseObserver(observer)
-	runtime.RegisterProvider("observe-provider", observeProvider{})
+	runner := New(Config{})
+	runner.UseObserver(observer)
+	runner.RegisterProvider("observe-provider", observeProvider{})
 	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
@@ -56,13 +56,13 @@ func TestRuntimeObserverCapturesTeamTaskLLMToolSignals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	runtime.RegisterTool(driver)
+	runner.RegisterTool(driver)
 
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	_, err = runtime.Prompt(context.Background(), PromptRequest{
+	_, err = runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "observe-provider",
 		Model:     "test",
@@ -81,12 +81,12 @@ func TestRuntimeObserverCapturesTeamTaskLLMToolSignals(t *testing.T) {
 	}
 }
 
-func TestRuntimeObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
+func TestObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
 	observer := observe.NewMemoryObserver()
-	runtime := New(Config{})
-	runtime.UseObserver(observer)
-	runtime.UseCapabilityMiddleware(capability.RequireApproval())
-	runtime.RegisterProvider("observe-provider", observeProvider{})
+	runner := New(Config{})
+	runner.UseObserver(observer)
+	runner.UseCapabilityMiddleware(capability.RequireApproval())
+	runner.RegisterProvider("observe-provider", observeProvider{})
 	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
@@ -95,13 +95,13 @@ func TestRuntimeObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	runtime.RegisterTool(driver)
+	runner.RegisterTool(driver)
 
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	_, err = runtime.Prompt(context.Background(), PromptRequest{
+	_, err = runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "observe-provider",
 		Model:     "test",
@@ -125,19 +125,19 @@ func TestRuntimeObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
 
 func TestMultiAgentCollaboration_LogsConflictTraceContext(t *testing.T) {
 	observer := observe.NewMemoryObserver()
-	runtime := New(Config{})
-	runtime.UseObserver(observer)
+	runner := New(Config{})
+	runner.UseObserver(observer)
 	state := team.RunState{
 		ID:     "team-observe-collab",
 		Status: team.StatusRunning,
 		Tasks:  []team.Task{{ID: "verify-1", Kind: team.TaskKindVerify, Stage: team.TaskStageVerify, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "unsupported by verifier"}}, {ID: "task-2", Kind: team.TaskKindResearch, Stage: team.TaskStageImplement, Status: team.TaskStatusRunning}},
 	}
 	var rootTrace string
-	err := runtime.runStage(context.Background(), &middleware.Envelope{Stage: middleware.StageTeam, Operation: "observe_collaboration", TeamID: state.ID}, func(ctx context.Context, _ *middleware.Envelope) error {
+	err := runner.runStage(context.Background(), &middleware.Envelope{Stage: middleware.StageTeam, Operation: "observe_collaboration", TeamID: state.ID}, func(ctx context.Context, _ *middleware.Envelope) error {
 		rootTrace = observe.TraceID(ctx)
-		runtime.recordStaleWriteRejectedEvent(ctx, state.ID, "verify-1", "worker-a", eventReasonStateVersionConflict)
-		runtime.recordVerifierDecisionEvent(ctx, state, state.Tasks[0])
-		runtime.recordTaskCancelledEvent(ctx, state, state.Tasks[1], eventReasonTeamAborted)
+		runner.recordStaleWriteRejectedEvent(ctx, state.ID, "verify-1", "worker-a", eventReasonStateVersionConflict)
+		runner.recordVerifierDecisionEvent(ctx, state, state.Tasks[0])
+		runner.recordTaskCancelledEvent(ctx, state, state.Tasks[1], eventReasonTeamAborted)
 		return nil
 	})
 	if err != nil {

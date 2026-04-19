@@ -37,9 +37,9 @@ func (fakeProvider) Stream(_ context.Context, request provider.Request) (provide
 	}), nil
 }
 
-func TestRuntimePrompt(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("fake", fakeProvider{})
+func TestPrompt(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("fake", fakeProvider{})
 	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
@@ -48,12 +48,12 @@ func TestRuntimePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	runtime.RegisterTool(driver)
-	sess, err := runtime.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	runner.RegisterTool(driver)
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	response, err := runtime.Prompt(context.Background(), PromptRequest{
+	response, err := runner.Prompt(context.Background(), PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "fake",
 		Model:     "test",

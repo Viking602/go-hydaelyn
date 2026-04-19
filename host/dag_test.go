@@ -147,7 +147,7 @@ func (linearPattern) Advance(_ context.Context, state team.RunState) (team.RunSt
 	return state, nil
 }
 
-func TestRuntimeExecutesOnlyRunnableTasks(t *testing.T) {
+func TestExecutesOnlyRunnableTasks(t *testing.T) {
 	prov := newOrderedProvider()
 	go func() {
 		<-prov.rootStarted
@@ -155,23 +155,23 @@ func TestRuntimeExecutesOnlyRunnableTasks(t *testing.T) {
 		close(prov.allowRootCompletion)
 	}()
 
-	runtime := New(Config{})
-	runtime.RegisterProvider("ordered", prov)
-	runtime.RegisterPattern(linearPattern{})
-	runtime.RegisterProfile(team.Profile{
+	runner := New(Config{})
+	runner.RegisterProvider("ordered", prov)
+	runner.RegisterPattern(linearPattern{})
+	runner.RegisterProfile(team.Profile{
 		Name:     "supervisor",
 		Role:     team.RoleSupervisor,
 		Provider: "ordered",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "worker",
 		Role:     team.RoleResearcher,
 		Provider: "ordered",
 		Model:    "test",
 	})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "linear",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"worker"},
@@ -193,25 +193,25 @@ func TestRuntimeExecutesOnlyRunnableTasks(t *testing.T) {
 	}
 }
 
-func TestRuntimeDoesNotExecuteFailedDependenciesDownstreamTasks(t *testing.T) {
+func TestDoesNotExecuteFailedDependenciesDownstreamTasks(t *testing.T) {
 	prov := &failingProvider{}
-	runtime := New(Config{})
-	runtime.RegisterProvider("failing", prov)
-	runtime.RegisterPattern(linearPattern{})
-	runtime.RegisterProfile(team.Profile{
+	runner := New(Config{})
+	runner.RegisterProvider("failing", prov)
+	runner.RegisterPattern(linearPattern{})
+	runner.RegisterProfile(team.Profile{
 		Name:     "supervisor",
 		Role:     team.RoleSupervisor,
 		Provider: "failing",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "worker",
 		Role:     team.RoleResearcher,
 		Provider: "failing",
 		Model:    "test",
 	})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "linear",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"worker"},

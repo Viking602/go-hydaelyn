@@ -17,7 +17,8 @@ The applied decisions follow the existing repository rules captured in the renam
 - avoid package-name stutter when the package already provides the missing context
 - prefer filenames that describe the dominant responsibility in the file
 - keep `runtime` in filenames only when it still disambiguates or marks the package composition root
-- treat repeated package/file names as acceptable when the file is the natural package entrypoint or protocol façade
+- in `host` package tests, prefer `subsystem_test.go` and drop the redundant `runtime_` prefix
+- treat repeated package/file names as acceptable when the file is the natural package entrypoint or protocol facade
 
 ## Applied rename outcomes
 
@@ -70,13 +71,11 @@ The following candidates were explicitly kept as-is in this pass:
 - kept as the main composition root for `host.Config`, `host.Runtime`, `host.New`, registration, and top-level runtime wiring
 - protected by the repository's explicit runtime exception
 
-### `host/runtime_test.go`
+### `host` test files
 
-- kept as the obvious companion test file for the composition root
-
-### `host/runtime_queue_test.go`
-
-- kept because the current name still helps disambiguate queue-focused integration coverage inside `host`
+- host package tests now follow package-context naming such as `prompt_test.go`, `queue_test.go`, and `scheduler_test.go`
+- the earlier exceptions for `host/runtime_test.go` and `host/runtime_queue_test.go` are retired
+- keep `runtime` only on the production composition-root file `host/runtime.go`
 
 ### transport entrypoint files
 
@@ -84,7 +83,7 @@ The following candidates were explicitly kept as-is in this pass:
 - `transport/mcp/jsonrpc/jsonrpc.go`
 - `transport/http/admin/admin.go`
 
-These remained unchanged because repetition was judged intentional, not accidental. Each file acts as a package entrypoint or protocol/admin façade, so renaming would have been cosmetic without improving discoverability.
+These remained unchanged because repetition was judged intentional, not accidental. Each file acts as a package entrypoint or protocol/admin facade, so renaming would have been cosmetic without improving discoverability.
 
 ## Deferred decision: `host/runtime.go`
 
@@ -110,7 +109,7 @@ This outcome is consistent with common Go OSS naming practice:
 - **Temporal SDK**: accepts package-entrypoint naming like `client/client.go`; repetition is fine when the file is the public package face.
 - **Traefik**: uses responsibility-first filenames like `pkg/server/server.go` when a package has a dominant surface and no extra layer move is required.
 - **Kubernetes client-go**: separates large systems by responsibility and generated surface area, but keeps stable package contracts and typed clients rather than treating filename cleanup as permission to redesign package structure.
-- **chi**: keeps compact package-level entry files such as `chi.go`, `chain.go`, and `mux.go`, showing that discoverable façades and responsibility naming can coexist.
+- **chi**: keeps compact package-level entry files such as `chi.go`, `chain.go`, and `mux.go`, showing that discoverable facades and responsibility naming can coexist.
 - **tRPC-Agent-Go**: documents architecture in terms of package responsibilities (`agent`, `runner`, `session`, `tool`, etc.), which reinforces the same principle used here: clarify responsibilities first, but do not infer a new layering model unless the architecture evidence is stronger.
 
 The comparison point is not that Hydaelyn should copy any one project. The shared lesson is narrower: Go OSS usually treats filename cleanup and intra-package splits as local clarity work, not automatic authorization for package churn.

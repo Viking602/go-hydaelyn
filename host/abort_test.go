@@ -40,13 +40,13 @@ func (p *abortCountingProvider) Calls() int {
 }
 
 func TestAbortTeamPersistsAbortedStateAndEvent(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-fake", Model: "test"})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
@@ -58,17 +58,17 @@ func TestAbortTeamPersistsAbortedStateAndEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTeam() error = %v", err)
 	}
-	if err := runtime.AbortTeam(context.Background(), state.ID); err != nil {
+	if err := runner.AbortTeam(context.Background(), state.ID); err != nil {
 		t.Fatalf("AbortTeam() error = %v", err)
 	}
-	current, err := runtime.GetTeam(context.Background(), state.ID)
+	current, err := runner.GetTeam(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("GetTeam() error = %v", err)
 	}
 	if current.Status != team.StatusAborted {
 		t.Fatalf("expected aborted team state, got %#v", current)
 	}
-	events, err := runtime.TeamEvents(context.Background(), state.ID)
+	events, err := runner.TeamEvents(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("TeamEvents() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestAbortTeamPersistsAbortedStateAndEvent(t *testing.T) {
 
 func TestAbortTeamMarksActiveTasksAborted(t *testing.T) {
 	driver := storage.NewMemoryDriver()
-	runtime := New(Config{Storage: driver})
+	runner := New(Config{Storage: driver})
 
 	state := team.RunState{
 		ID:      "team-abort-active-tasks",
@@ -105,11 +105,11 @@ func TestAbortTeamMarksActiveTasksAborted(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	if err := runtime.AbortTeam(context.Background(), state.ID); err != nil {
+	if err := runner.AbortTeam(context.Background(), state.ID); err != nil {
 		t.Fatalf("AbortTeam() error = %v", err)
 	}
 
-	current, err := runtime.GetTeam(context.Background(), state.ID)
+	current, err := runner.GetTeam(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("GetTeam() error = %v", err)
 	}
@@ -143,15 +143,15 @@ func TestAbortTeamPreventsQueuedTaskExecution(t *testing.T) {
 	queue := scheduler.NewMemoryQueue()
 	provider := &abortCountingProvider{}
 	newRuntime := func(workerID string) *Runtime {
-		runtime := New(Config{Storage: driver, WorkerID: workerID})
-		if err := runtime.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
+		runner := New(Config{Storage: driver, WorkerID: workerID})
+		if err := runner.RegisterPlugin(plugin.Spec{Type: plugin.TypeScheduler, Name: "memory-queue", Component: queue}); err != nil {
 			t.Fatalf("RegisterPlugin() error = %v", err)
 		}
-		runtime.RegisterProvider("abort-counting", provider)
-		runtime.RegisterPattern(singleTaskPattern{})
-		runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "abort-counting", Model: "test"})
-		runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "abort-counting", Model: "test"})
-		return runtime
+		runner.RegisterProvider("abort-counting", provider)
+		runner.RegisterPattern(singleTaskPattern{})
+		runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "abort-counting", Model: "test"})
+		runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "abort-counting", Model: "test"})
+		return runner
 	}
 
 	coordinator := newRuntime("coordinator")
@@ -201,7 +201,7 @@ func TestAbortTeamPreventsQueuedTaskExecution(t *testing.T) {
 }
 
 func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
-	runtime := New(Config{})
+	runner := New(Config{})
 	state := team.RunState{
 		ID:      "team-failure-policy",
 		Pattern: "collab",
@@ -227,7 +227,7 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	fastFailure.Status = team.TaskStatusFailed
 	fastFailure.Error = "fast failure"
 	fastFailure.Result = &team.Result{Error: fastFailure.Error}
-	updated, applied, published := runtime.applyTaskOutcome(state, 0, fastFailure)
+	updated, applied, published := runner.applyTaskOutcome(state, 0, fastFailure)
 	if !applied || published {
 		t.Fatalf("expected fail-fast outcome to apply without publish, applied=%v published=%v", applied, published)
 	}
@@ -242,7 +242,7 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	retryFailure.Attempts = 1
 	retryFailure.Status = team.TaskStatusPending
 	retryFailure.Error = "retry later"
-	updated, applied, published = runtime.applyTaskOutcome(updated, 3, retryFailure)
+	updated, applied, published = runner.applyTaskOutcome(updated, 3, retryFailure)
 	if !applied || published {
 		t.Fatalf("expected retry outcome to requeue without publish, applied=%v published=%v", applied, published)
 	}
@@ -255,7 +255,7 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	degradeFailure.Status = team.TaskStatusFailed
 	degradeFailure.Error = "degraded failure"
 	degradeFailure.Result = &team.Result{Error: degradeFailure.Error}
-	updated, applied, published = runtime.applyTaskOutcome(updated, 5, degradeFailure)
+	updated, applied, published = runner.applyTaskOutcome(updated, 5, degradeFailure)
 	if !applied || published {
 		t.Fatalf("expected degrade outcome to apply without publish, applied=%v published=%v", applied, published)
 	}
@@ -268,7 +268,7 @@ func TestMultiAgentCollaboration_CancelsChildrenByFailurePolicy(t *testing.T) {
 	optionalFailure.Status = team.TaskStatusSkipped
 	optionalFailure.Error = "optional branch skipped"
 	optionalFailure.Result = &team.Result{Error: optionalFailure.Error}
-	updated, applied, published = runtime.applyTaskOutcome(updated, 7, optionalFailure)
+	updated, applied, published = runner.applyTaskOutcome(updated, 7, optionalFailure)
 	if !applied || published {
 		t.Fatalf("expected optional outcome to skip without publish, applied=%v published=%v", applied, published)
 	}

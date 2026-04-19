@@ -33,30 +33,30 @@ func (teamFakeProvider) Stream(_ context.Context, request provider.Request) (pro
 	}), nil
 }
 
-func TestRuntimeStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{
+func TestStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{
 		Name:     "supervisor",
 		Role:     team.RoleSupervisor,
 		Provider: "team-fake",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "research-a",
 		Role:     team.RoleResearcher,
 		Provider: "team-fake",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "research-b",
 		Role:     team.RoleResearcher,
 		Provider: "team-fake",
 		Model:    "test",
 	})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"research-a", "research-b"},
@@ -90,7 +90,7 @@ func TestRuntimeStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.
 		if task.SessionID == state.SessionID {
 			t.Fatalf("worker session must be isolated from team session: %#v", task)
 		}
-		snapshot, err := runtime.GetSession(context.Background(), task.SessionID)
+		snapshot, err := runner.GetSession(context.Background(), task.SessionID)
 		if err != nil {
 			t.Fatalf("GetSession(%q) error = %v", task.SessionID, err)
 		}
@@ -103,24 +103,24 @@ func TestRuntimeStartTeamRunsParallelWorkersAndAggregatesInTaskOrder(t *testing.
 	}
 }
 
-func TestRuntimeStartTeamKeepsDistinctAgentInstancesForSameProfileWorkers(t *testing.T) {
-	runtime := New(Config{})
-	runtime.RegisterProvider("team-fake", teamFakeProvider{})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{
+func TestStartTeamKeepsDistinctAgentInstancesForSameProfileWorkers(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("team-fake", teamFakeProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{
 		Name:     "supervisor",
 		Role:     team.RoleSupervisor,
 		Provider: "team-fake",
 		Model:    "test",
 	})
-	runtime.RegisterProfile(team.Profile{
+	runner.RegisterProfile(team.Profile{
 		Name:     "researcher",
 		Role:     team.RoleResearcher,
 		Provider: "team-fake",
 		Model:    "test",
 	})
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher", "researcher"},

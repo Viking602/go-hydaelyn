@@ -116,16 +116,16 @@ func (t artifactTool) Execute(ctx context.Context, call tool.Call, _ tool.Update
 	}, nil
 }
 
-func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testing.T) {
+func TestPublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testing.T) {
 	driver := storage.NewMemoryDriver()
-	runtime := New(Config{Storage: driver})
-	runtime.RegisterProvider("dataflow", dataflowProvider{})
-	runtime.RegisterTool(artifactTool{artifacts: driver.Artifacts()})
-	runtime.RegisterPattern(deepsearch.New())
-	runtime.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "dataflow", Model: "test"})
-	runtime.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "dataflow", Model: "test", ToolNames: []string{"artifact_tool"}})
+	runner := New(Config{Storage: driver})
+	runner.RegisterProvider("dataflow", dataflowProvider{})
+	runner.RegisterTool(artifactTool{artifacts: driver.Artifacts()})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "dataflow", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "dataflow", Model: "test", ToolNames: []string{"artifact_tool"}})
 
-	if err := runtime.RegisterPlugin(plugin.Spec{
+	if err := runner.RegisterPlugin(plugin.Spec{
 		Type: plugin.TypePlanner,
 		Name: "dataflow-planner",
 		Component: fakePlanner{
@@ -162,7 +162,7 @@ func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testi
 		t.Fatalf("RegisterPlugin() error = %v", err)
 	}
 
-	state, err := runtime.StartTeam(context.Background(), StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "dataflow-planner",
 		SupervisorProfile: "supervisor",
@@ -194,7 +194,7 @@ func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testi
 		t.Fatalf("expected synth task to consume explicit read inputs, got %#v", synth.Result)
 	}
 
-	teamSnapshot, err := runtime.GetSession(context.Background(), state.SessionID)
+	teamSnapshot, err := runner.GetSession(context.Background(), state.SessionID)
 	if err != nil {
 		t.Fatalf("GetSession(team) error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testi
 		t.Fatalf("expected shared task output message, got %#v", teamSnapshot.Messages)
 	}
 
-	workerSnapshot, err := runtime.GetSession(context.Background(), research.SessionID)
+	workerSnapshot, err := runner.GetSession(context.Background(), research.SessionID)
 	if err != nil {
 		t.Fatalf("GetSession(worker) error = %v", err)
 	}
@@ -224,7 +224,7 @@ func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testi
 		t.Fatalf("expected private task output publication, got %#v", workerSnapshot.Messages)
 	}
 
-	events, err := runtime.TeamEvents(context.Background(), state.ID)
+	events, err := runner.TeamEvents(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("TeamEvents() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRuntimePublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testi
 		t.Fatalf("expected task dataflow events, got %#v", events)
 	}
 
-	replayed, err := runtime.ReplayTeamState(context.Background(), state.ID)
+	replayed, err := runner.ReplayTeamState(context.Background(), state.ID)
 	if err != nil {
 		t.Fatalf("ReplayTeamState() error = %v", err)
 	}
