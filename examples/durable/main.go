@@ -11,13 +11,13 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-type fakeProvider struct{}
+type echoProvider struct{}
 
-func (fakeProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "fake"}
+func (echoProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "echo"}
 }
 
-func (fakeProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1]
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: last.Text},
@@ -27,15 +27,15 @@ func (fakeProvider) Stream(_ context.Context, request provider.Request) (provide
 
 func main() {
 	runner := host.New(host.Config{})
-	runner.RegisterProvider("fake", fakeProvider{})
+	runner.RegisterProvider("echo", echoProvider{})
 	runner.RegisterPattern(deepsearch.New())
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
 	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
-		Input:             map[string]any{"query": "durable example"},
+		Input:             map[string]any{"query": "replay a previous research run"},
 	})
 	if err != nil {
 		panic(err)

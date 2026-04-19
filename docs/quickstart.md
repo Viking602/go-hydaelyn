@@ -4,19 +4,19 @@
 
 ```go
 runner := host.New(host.Config{})
-runner.RegisterProvider("fake", myProvider)
+runner.RegisterProvider("echo", myProvider)
 runner.RegisterPattern(deepsearch.New())
 
-runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
+runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
 
 state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 	Pattern:           "deepsearch",
 	SupervisorProfile: "supervisor",
 	WorkerProfiles:    []string{"researcher", "researcher"},
 	Input: map[string]any{
-		"query":      "parallel research",
-		"subqueries": []string{"architecture", "tooling"},
+		"query":      "compare options for a Go research assistant",
+		"subqueries": []string{"runtime design", "tool integration"},
 	},
 })
 ```

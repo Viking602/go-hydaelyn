@@ -12,13 +12,13 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-type fakeProvider struct{}
+type echoProvider struct{}
 
-func (fakeProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "fake"}
+func (echoProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "echo"}
 }
 
-func (fakeProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1]
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: last.Text},
@@ -47,17 +47,17 @@ func (askHumanPlanner) Replan(_ context.Context, _ planner.ReplanInput) (planner
 
 func main() {
 	runner := host.New(host.Config{})
-	runner.RegisterProvider("fake", fakeProvider{})
+	runner.RegisterProvider("echo", echoProvider{})
 	runner.RegisterPattern(deepsearch.New())
 	_ = runner.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "ask-human", Component: askHumanPlanner{}})
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "fake", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "fake", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
 	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 		Pattern:           "deepsearch",
 		Planner:           "ask-human",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher"},
-		Input:             map[string]any{"query": "approval example"},
+		Input:             map[string]any{"query": "review a rollout plan that needs approval"},
 	})
 	if err != nil {
 		panic(err)
