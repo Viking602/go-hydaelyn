@@ -7,6 +7,7 @@ type EvalCase struct {
 	ID            string              `json:"id"`
 	Suite         string              `json:"suite"`
 	Pattern       string              `json:"pattern"`
+	Provider      *EvalCaseProvider   `json:"provider,omitempty"`
 	Input         map[string]any      `json:"input,omitempty"`
 	Profiles      *EvalCaseProfiles   `json:"profiles,omitempty"`
 	Tools         []string            `json:"tools,omitempty"`
@@ -19,6 +20,11 @@ type EvalCase struct {
 type EvalCaseProfiles struct {
 	Supervisor string `json:"supervisor,omitempty"`
 	Worker     string `json:"worker,omitempty"`
+}
+
+type EvalCaseProvider struct {
+	ScriptPath string `json:"scriptPath,omitempty"`
+	ErrorKind  string `json:"errorKind,omitempty"`
 }
 
 type EvalCaseFixtures struct {

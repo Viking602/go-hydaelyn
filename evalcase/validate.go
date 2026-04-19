@@ -20,6 +20,16 @@ func ValidateCase(c evaluation.EvalCase) error {
 	if strings.TrimSpace(c.Pattern) == "" {
 		return fmt.Errorf("eval case pattern is required")
 	}
+	if c.Provider != nil {
+		scriptPath := strings.TrimSpace(c.Provider.ScriptPath)
+		errorKind := strings.TrimSpace(c.Provider.ErrorKind)
+		if scriptPath == "" && errorKind == "" {
+			return fmt.Errorf("eval case provider requires scriptPath or errorKind")
+		}
+		if scriptPath != "" && errorKind != "" {
+			return fmt.Errorf("eval case provider cannot specify both scriptPath and errorKind")
+		}
+	}
 	for _, name := range c.Tools {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("eval case tools cannot contain empty names")
