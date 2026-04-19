@@ -2,20 +2,83 @@ package deepsearch
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/blackboard"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-func TestDeepsearchCompatibility_ResearchVerifySynthesize(t *testing.T) {
+func TestDeepsearchSingleBranchExecution(t *testing.T) {
 	pattern := New()
 	state, err := pattern.Start(context.Background(), team.StartRequest{
-		Pattern:           "deepsearch",
+		Pattern:           pattern.Name(),
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"query": "single branch"},
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if len(state.Tasks) != 1 || state.Tasks[0].Input != "single branch" {
+		t.Fatalf("expected fallback query branch, got %#v", state.Tasks)
+	}
+	state.Tasks[0].Status = team.TaskStatusCompleted
+	state.Tasks[0].Result = &team.Result{Summary: "single branch result", Confidence: 0.7}
+
+	next, err := pattern.Advance(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Advance() error = %v", err)
+	}
+	if next.Phase != team.PhaseSynthesize {
+		t.Fatalf("expected synthesize phase without verification, got %#v", next.Phase)
+	}
+	synth := next.Tasks[len(next.Tasks)-1]
+	if synth.Kind != team.TaskKindSynthesize || !slices.Equal(synth.Reads, []string{"research.task-1"}) {
+		t.Fatalf("expected synth task to consume research output, got %#v", synth)
+	}
+	if !slices.Equal(synth.DependsOn, []string{"task-1"}) {
+		t.Fatalf("expected synth task to depend on research task, got %#v", synth.DependsOn)
+	}
+}
+
+func TestDeepsearchMultiBranchParallelResearch(t *testing.T) {
+	pattern := New()
+	state, err := pattern.Start(context.Background(), team.StartRequest{
+		Pattern:           pattern.Name(),
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"research-a", "research-b"},
 		Input: map[string]any{
-			"query":               "agent frameworks",
+			"query":      "parallel research",
+			"subqueries": []string{"architecture", "verification", "tooling"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if len(state.Tasks) != 3 {
+		t.Fatalf("expected 3 research tasks, got %#v", state.Tasks)
+	}
+	gotAssignees := []string{state.Tasks[0].AssigneeAgentID, state.Tasks[1].AssigneeAgentID, state.Tasks[2].AssigneeAgentID}
+	if !slices.Equal(gotAssignees, []string{"worker-1", "worker-2", "worker-1"}) {
+		t.Fatalf("expected round-robin worker assignment, got %#v", gotAssignees)
+	}
+	for _, task := range state.Tasks {
+		if task.Kind != team.TaskKindResearch || len(task.Writes) != 1 || task.Writes[0] != researchWriteKey(task.ID) {
+			t.Fatalf("expected explicit research branch writes, got %#v", task)
+		}
+	}
+}
+
+func TestVerifierGateDeepsearchRequiresVerifiedInputs(t *testing.T) {
+	pattern := New()
+	state, err := pattern.Start(context.Background(), team.StartRequest{
+		Pattern:           pattern.Name(),
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"research-a", "research-b"},
+		Input: map[string]any{
+			"query":               "verified research",
 			"subqueries":          []string{"architecture", "verification"},
 			"requireVerification": true,
 		},
@@ -23,95 +86,74 @@ func TestDeepsearchCompatibility_ResearchVerifySynthesize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if state.Phase != team.PhaseResearch {
-		t.Fatalf("expected research phase, got %s", state.Phase)
-	}
-	if len(state.Tasks) != 2 {
-		t.Fatalf("expected 2 research tasks, got %d", len(state.Tasks))
-	}
-	for _, task := range state.Tasks {
-		if task.Kind != team.TaskKindResearch || len(task.Writes) != 1 || task.Writes[0] != researchWriteKey(task.ID) {
-			t.Fatalf("expected deepsearch to start with research-only tasks, got %#v", state.Tasks)
-		}
-	}
 	for idx := range state.Tasks {
 		state.Tasks[idx].Status = team.TaskStatusCompleted
-		state.Tasks[idx].Result = &team.Result{
-			Summary: state.Tasks[idx].Input,
-		}
+		state.Tasks[idx].Result = &team.Result{Summary: state.Tasks[idx].Input}
 	}
-	next, err := pattern.Advance(context.Background(), state)
+
+	verified, err := pattern.Advance(context.Background(), state)
 	if err != nil {
-		t.Fatalf("Advance() error = %v", err)
+		t.Fatalf("Advance() verify error = %v", err)
 	}
-	if next.Phase != team.PhaseVerify {
-		t.Fatalf("expected verification phase, got %s", next.Phase)
+	if verified.Phase != team.PhaseVerify {
+		t.Fatalf("expected verify phase, got %#v", verified.Phase)
 	}
-	if len(next.Tasks) != 4 {
-		t.Fatalf("expected research + verifier tasks to be present, got %d", len(next.Tasks))
-	}
-	for _, task := range next.Tasks[:2] {
-		if task.Kind != team.TaskKindResearch {
-			t.Fatalf("expected research tasks to remain intact before verification, got %#v", next.Tasks)
+	for _, task := range verified.Tasks[2:] {
+		if task.Kind != team.TaskKindVerify || !slices.Equal(task.Reads, []string{researchWriteKey(baseTaskID(task.ID))}) {
+			t.Fatalf("expected verify tasks to read research outputs, got %#v", task)
 		}
 	}
-	for _, task := range next.Tasks[2:] {
-		if task.Kind != team.TaskKindVerify {
-			t.Fatalf("expected verify tasks, got %#v", next.Tasks)
-		}
-		if len(task.Reads) != 1 || len(task.Writes) != 1 {
-			t.Fatalf("expected verify task reads/writes to be explicit, got %#v", task)
-		}
+	for idx := 2; idx < len(verified.Tasks); idx++ {
+		verified.Tasks[idx].Status = team.TaskStatusCompleted
+		verified.Tasks[idx].Result = &team.Result{Summary: "supported"}
 	}
-	for idx := 2; idx < len(next.Tasks); idx++ {
-		next.Tasks[idx].Status = team.TaskStatusCompleted
-		next.Tasks[idx].Result = &team.Result{
-			Summary: "supported",
-		}
-	}
-	synthState := next
-	synthState.Blackboard = &blackboard.State{
-		Findings: []blackboard.Finding{
-			{ID: "finding-1", TaskID: "task-1", Summary: "architecture", ClaimIDs: []string{"claim-1"}, Confidence: 0.9},
-		},
-		Verifications: []blackboard.VerificationResult{
-			{ClaimID: "claim-1", Status: blackboard.VerificationStatusSupported, Confidence: 0.9},
-		},
-	}
-	synth, err := pattern.Advance(context.Background(), synthState)
+
+	synthState, err := pattern.Advance(context.Background(), verified)
 	if err != nil {
 		t.Fatalf("Advance() synth error = %v", err)
 	}
-	if synth.Phase != team.PhaseSynthesize || synth.Status != team.StatusRunning {
-		t.Fatalf("expected explicit synthesize phase, got %#v", synth)
+	synth := synthState.Tasks[len(synthState.Tasks)-1]
+	if !slices.Equal(synth.Reads, []string{"supported_findings"}) {
+		t.Fatalf("expected synth to read verifier gate output, got %#v", synth.Reads)
 	}
-	if len(synth.Tasks) != 5 {
-		t.Fatalf("expected synth task to be appended, got %#v", synth.Tasks)
+	if !slices.Equal(synth.DependsOn, []string{"task-1-verify", "task-2-verify"}) {
+		t.Fatalf("expected synth to depend on verifier tasks, got %#v", synth.DependsOn)
 	}
-	last := synth.Tasks[len(synth.Tasks)-1]
-	if last.Kind != team.TaskKindSynthesize {
-		t.Fatalf("expected synth task, got %#v", last)
+}
+
+func TestDeepsearchSynthesisCoverageTracking(t *testing.T) {
+	state := team.RunState{
+		RequireVerification: true,
+		Tasks: []team.Task{
+			{ID: "task-1", Kind: team.TaskKindResearch, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "architecture", Confidence: 0.6}},
+			{ID: "task-2", Kind: team.TaskKindResearch, Status: team.TaskStatusCompleted, Result: &team.Result{Summary: "verification", Confidence: 0.5}},
+			{ID: "task-synthesize", Kind: team.TaskKindSynthesize, Status: team.TaskStatusCompleted, Result: &team.Result{}},
+		},
+		Blackboard: &blackboard.State{
+			Findings: []blackboard.Finding{
+				{ID: "finding-1", TaskID: "task-1", Summary: "architecture", ClaimIDs: []string{"claim-1"}, Confidence: 0.9},
+				{ID: "finding-2", TaskID: "task-2", Summary: "verification", ClaimIDs: []string{"claim-2"}, Confidence: 0.7},
+			},
+			Verifications: []blackboard.VerificationResult{
+				{ClaimID: "claim-1", Status: blackboard.VerificationStatusSupported, Confidence: 0.9},
+			},
+		},
 	}
-	if len(last.Reads) != 1 || last.Reads[0] != "supported_findings" {
-		t.Fatalf("expected synth task to read supported_findings, got %#v", last)
+
+	result := synthesizedResult(state)
+	if len(result.Findings) != 1 {
+		t.Fatalf("expected synthesis to include only supported findings, got %#v", result.Findings)
 	}
-	if len(last.DependsOn) != 2 || last.DependsOn[0] != "task-1-verify" || last.DependsOn[1] != "task-2-verify" {
-		t.Fatalf("expected synth task to depend on verifier tasks, got %#v", last.DependsOn)
+	if result.Findings[0].Summary != "architecture" || result.Confidence != 0.9 {
+		t.Fatalf("expected supported finding coverage to drive result, got %#v", result)
 	}
-	last.Status = team.TaskStatusCompleted
-	last.Result = &team.Result{Summary: "architecture", Findings: []team.Finding{{Summary: "architecture", Confidence: 0.9}}}
-	synth.Tasks[len(synth.Tasks)-1] = last
-	completed, err := pattern.Advance(context.Background(), synth)
-	if err != nil {
-		t.Fatalf("Advance() completion error = %v", err)
+}
+
+func baseTaskID(taskID string) string {
+	for _, suffix := range []string{"-verify"} {
+		if trimmed, ok := strings.CutSuffix(taskID, suffix); ok {
+			return trimmed
+		}
 	}
-	if completed.Status != team.StatusCompleted || completed.Result == nil {
-		t.Fatalf("expected completed synthesized result, got %#v", completed)
-	}
-	if completed.Result.Summary != "architecture" {
-		t.Fatalf("expected synth result to become team result, got %#v", completed.Result)
-	}
-	if len(completed.Result.Findings) != 1 || completed.Result.Findings[0].Summary != "architecture" {
-		t.Fatalf("expected supported findings to flow into final result, got %#v", completed.Result)
-	}
+	return taskID
 }
