@@ -47,7 +47,7 @@ func commandHandlers(ctx context.Context, stdout io.Writer) map[string]func([]st
 	}
 }
 
-func runInit(args []string, stdout io.Writer) error {
+func runInit(args []string, _ io.Writer) error {
 	dir := "."
 	if len(args) > 0 {
 		dir = args[0]
@@ -64,7 +64,7 @@ func runInit(args []string, stdout io.Writer) error {
 	return writeJSONFile(filepath.Join(target, "config.json"), config)
 }
 
-func runNew(args []string, stdout io.Writer) error {
+func runNew(args []string, _ io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("new requires output path")
 	}
@@ -331,7 +331,8 @@ func runEvaluate(args []string, stdout io.Writer) error {
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
-	return encodeJSON(stdout, evaluation.Evaluate(events))
+	report := evaluation.Evaluate(events)
+	return encodeJSON(stdout, evaluation.AdaptReportToScorePayload(report, report.TeamID))
 }
 
 func newCLIRuntime(providerName string) (*host.Runtime, error) {

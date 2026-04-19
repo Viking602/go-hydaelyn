@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/host"
 )
 
@@ -151,7 +152,52 @@ flow:
 	if err := Execute(context.Background(), []string{"evaluate", "--events", eventsPath}, &stdout, &stderr); err != nil {
 		t.Fatalf("evaluate error = %v stderr=%s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "\"taskCompletionRate\"") {
-		t.Fatalf("expected evaluate output to include metrics, got %s", stdout.String())
+	if !strings.Contains(stdout.String(), "\"runtimeMetrics\"") {
+		t.Fatalf("expected evaluate output to include canonical runtime metrics, got %s", stdout.String())
+	}
+}
+
+func TestCLIUsesCanonicalEvalOutput(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	requestPath := filepath.Join(dir, "team.json")
+	eventsPath := filepath.Join(dir, "events.json")
+	request := host.StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input: map[string]any{
+			"query":      "canonical evaluate",
+			"subqueries": []string{"branch"},
+		},
+	}
+	data, _ := json.MarshalIndent(request, "", "  ")
+	if err := os.WriteFile(requestPath, data, 0o644); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{"run", "--request", requestPath, "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("run error = %v stderr=%s", err, stderr.String())
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), []string{"evaluate", "--events", eventsPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("evaluate error = %v stderr=%s", err, stderr.String())
+	}
+
+	var payload evaluation.ScorePayload
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode score payload: %v output=%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != evaluation.ScorePayloadSchemaVersion {
+		t.Fatalf("unexpected schema version: %#v", payload)
+	}
+	if payload.RuntimeMetrics == nil {
+		t.Fatalf("expected runtime metrics in canonical payload: %#v", payload)
+	}
+	if payload.RunID == "" {
+		t.Fatalf("expected canonical payload run id: %#v", payload)
 	}
 }
