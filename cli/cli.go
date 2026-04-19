@@ -304,6 +304,7 @@ func runInspectEvents(args []string, stdout io.Writer) error {
 func runReplay(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("replay", flag.ContinueOnError)
 	eventsPath := flags.String("events", "", "path to event log json")
+	statePath := flags.String("state", "", "path to authoritative team state json")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -314,8 +315,20 @@ func runReplay(args []string, stdout io.Writer) error {
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
-	state := storage.ReplayTeam(events)
-	return encodeJSON(stdout, state)
+	authoritativeState := storage.ReplayTeam(events)
+	if *statePath != "" {
+		if err := readJSONFile(*statePath, &authoritativeState); err != nil {
+			return err
+		}
+	}
+	result := storage.ValidateReplay(events, authoritativeState)
+	if err := encodeJSON(stdout, result); err != nil {
+		return err
+	}
+	if !result.Valid {
+		return errors.New("replay validation failed")
+	}
+	return nil
 }
 
 func runEvaluate(args []string, stdout io.Writer) error {
@@ -332,7 +345,9 @@ func runEvaluate(args []string, stdout io.Writer) error {
 		return err
 	}
 	report := evaluation.Evaluate(events)
-	return encodeJSON(stdout, evaluation.AdaptReportToScorePayload(report, report.TeamID))
+	validation := storage.ValidateReplay(events, storage.ReplayTeam(events))
+	payload := evaluation.AdaptReportToScorePayloadWithReplayConsistency(report, report.TeamID, validation.Valid)
+	return encodeJSON(stdout, payload)
 }
 
 func newCLIRuntime(providerName string) (*host.Runtime, error) {

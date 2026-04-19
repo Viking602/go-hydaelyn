@@ -103,6 +103,7 @@ func ReplayTeam(events []Event) team.RunState {
 			state.Result.ArtifactIDs = stringSlice(event.Payload["artifactIds"])
 		case EventTeamCompleted:
 			state.Status = team.StatusCompleted
+			state.Phase = team.PhaseComplete
 			state.Result = &team.Result{
 				Summary:       stringValue(event.Payload["summary"]),
 				Structured:    structuredMap(event.Payload["structured"]),

@@ -11,6 +11,8 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/storage"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 func TestInitAndNewCommandsCreateFiles(t *testing.T) {
@@ -94,8 +96,54 @@ func TestRunInspectReplayCommandsWorkOnEventFile(t *testing.T) {
 	if err := Execute(context.Background(), []string{"replay", "--events", eventsPath}, &stdout, &stderr); err != nil {
 		t.Fatalf("replay error = %v", err)
 	}
-	if !strings.Contains(stdout.String(), "\"status\": \"completed\"") {
-		t.Fatalf("expected replay output to include completed status, got %s", stdout.String())
+	if !strings.Contains(stdout.String(), "\"valid\": true") {
+		t.Fatalf("expected replay output to include successful validation, got %s", stdout.String())
+	}
+}
+
+func TestCLIReplayValidation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	eventsPath := filepath.Join(dir, "events.json")
+	statePath := filepath.Join(dir, "state.json")
+	events := []storage.Event{
+		{RunID: "team-1", TeamID: "team-1", Type: storage.EventTeamStarted, Payload: map[string]any{"pattern": "deepsearch"}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: storage.EventTaskScheduled, Payload: map[string]any{"title": "branch", "status": "pending"}},
+		{RunID: "team-1", TeamID: "team-1", TaskID: "task-1", Type: storage.EventTaskCompleted, Payload: map[string]any{"status": "completed", "summary": "done"}},
+		{RunID: "team-1", TeamID: "team-1", Type: storage.EventTeamCompleted, Payload: map[string]any{"summary": "done"}},
+	}
+	authoritativeState := storage.TeamState{
+		ID:      "team-1",
+		Pattern: "deepsearch",
+		Status:  team.StatusCompleted,
+		Phase:   team.PhaseComplete,
+		Tasks: []team.Task{{
+			ID:     "task-1",
+			Status: team.TaskStatusCompleted,
+			Result: &team.Result{Summary: "done"},
+		}},
+		Result: &team.Result{Summary: "done"},
+	}
+	eventsData, _ := json.MarshalIndent(events, "", "  ")
+	if err := os.WriteFile(eventsPath, eventsData, 0o644); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+	stateData, _ := json.MarshalIndent(authoritativeState, "", "  ")
+	if err := os.WriteFile(statePath, stateData, 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := Execute(context.Background(), []string{"replay", "--events", eventsPath, "--state", statePath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("expected replay validation failure")
+	}
+	if !strings.Contains(err.Error(), "replay validation failed") {
+		t.Fatalf("unexpected replay error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"valid\": false") || !strings.Contains(stdout.String(), "MissingEvent") {
+		t.Fatalf("expected replay validation JSON with mismatch details, got %s", stdout.String())
 	}
 }
 
@@ -196,6 +244,9 @@ func TestCLIUsesCanonicalEvalOutput(t *testing.T) {
 	}
 	if payload.RuntimeMetrics == nil {
 		t.Fatalf("expected runtime metrics in canonical payload: %#v", payload)
+	}
+	if !payload.ReplayConsistent {
+		t.Fatalf("expected replay consistency in canonical payload: %#v", payload)
 	}
 	if payload.RunID == "" {
 		t.Fatalf("expected canonical payload run id: %#v", payload)

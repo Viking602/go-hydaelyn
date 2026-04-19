@@ -6,9 +6,14 @@ import (
 )
 
 func AdaptReportToScorePayload(report Report, runID string) ScorePayload {
+	return AdaptReportToScorePayloadWithReplayConsistency(report, runID, true)
+}
+
+func AdaptReportToScorePayloadWithReplayConsistency(report Report, runID string, replayConsistent bool) ScorePayload {
 	payload := ScorePayload{
-		SchemaVersion: ScorePayloadSchemaVersion,
-		RunID:         canonicalRunID(runID, report.TeamID, "evaluation"),
+		SchemaVersion:    ScorePayloadSchemaVersion,
+		RunID:            canonicalRunID(runID, report.TeamID, "evaluation"),
+		ReplayConsistent: replayConsistent,
 		RuntimeMetrics: &ScoreRuntimeMetrics{
 			TaskCompletionRate:  report.TaskCompletionRate,
 			BlockingFailureRate: report.BlockingFailureRate,
@@ -34,12 +39,19 @@ func AdaptReportToScorePayload(report Report, runID string) ScorePayload {
 		report.SynthesisInputCoverage,
 		1 - report.TokenBudgetHitRate,
 	})
-	payload.Level = ScoreLevelForOverallScore(payload.OverallScore)
+	payload.Level = ScoreLevelForOverallScoreWithReplayConsistency(payload.OverallScore, payload.ReplayConsistent)
 	return payload
 }
 
 func ScoreLevelForOverallScore(score float64) ScoreLevel {
+	return ScoreLevelForOverallScoreWithReplayConsistency(score, true)
+}
+
+func ScoreLevelForOverallScoreWithReplayConsistency(score float64, replayConsistent bool) ScoreLevel {
 	percentage := score * 100
+	if !replayConsistent && percentage >= 80 {
+		return ScoreLevelA2
+	}
 	switch {
 	case percentage >= 90:
 		return ScoreLevelA4

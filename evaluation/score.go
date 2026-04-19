@@ -13,15 +13,16 @@ const (
 )
 
 type ScorePayload struct {
-	SchemaVersion   string                `json:"schemaVersion"`
-	RunID           string                `json:"runId"`
-	OverallScore    float64               `json:"overallScore,omitempty"`
-	Level           ScoreLevel            `json:"level,omitempty"`
-	RuntimeMetrics  *ScoreRuntimeMetrics  `json:"runtimeMetrics,omitempty"`
-	QualityMetrics  *ScoreQualityMetrics  `json:"qualityMetrics,omitempty"`
-	SafetyMetrics   *ScoreSafetyMetrics   `json:"safetyMetrics,omitempty"`
-	Failures        []ScoreFailure        `json:"failures,omitempty"`
-	Recommendations []ScoreRecommendation `json:"recommendations,omitempty"`
+	SchemaVersion    string                `json:"schemaVersion"`
+	RunID            string                `json:"runId"`
+	OverallScore     float64               `json:"overallScore,omitempty"`
+	Level            ScoreLevel            `json:"level,omitempty"`
+	ReplayConsistent bool                  `json:"replayConsistent,omitempty"`
+	RuntimeMetrics   *ScoreRuntimeMetrics  `json:"runtimeMetrics,omitempty"`
+	QualityMetrics   *ScoreQualityMetrics  `json:"qualityMetrics,omitempty"`
+	SafetyMetrics    *ScoreSafetyMetrics   `json:"safetyMetrics,omitempty"`
+	Failures         []ScoreFailure        `json:"failures,omitempty"`
+	Recommendations  []ScoreRecommendation `json:"recommendations,omitempty"`
 }
 
 type ScoreRuntimeMetrics struct {

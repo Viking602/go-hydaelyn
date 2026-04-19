@@ -23,10 +23,11 @@ func TestAdaptReportToScorePayload(t *testing.T) {
 
 	got := AdaptReportToScorePayload(report, "")
 	want := ScorePayload{
-		SchemaVersion: ScorePayloadSchemaVersion,
-		RunID:         "team-123",
-		OverallScore:  0.7833333333333333,
-		Level:         ScoreLevelA2,
+		SchemaVersion:    ScorePayloadSchemaVersion,
+		RunID:            "team-123",
+		OverallScore:     0.7833333333333333,
+		Level:            ScoreLevelA2,
+		ReplayConsistent: true,
 		RuntimeMetrics: &ScoreRuntimeMetrics{
 			TaskCompletionRate:  0.9,
 			BlockingFailureRate: 0.1,
@@ -68,5 +69,13 @@ func TestScoreLevelForOverallScore(t *testing.T) {
 				t.Fatalf("ScoreLevelForOverallScore(%v) = %s, want %s", tc.score, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScoreLevelForOverallScoreWithReplayConsistency(t *testing.T) {
+	t.Parallel()
+
+	if got := ScoreLevelForOverallScoreWithReplayConsistency(0.95, false); got != ScoreLevelA2 {
+		t.Fatalf("expected replay inconsistency to cap score level at A2, got %s", got)
 	}
 }

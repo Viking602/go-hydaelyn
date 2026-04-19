@@ -14,10 +14,11 @@ func TestScorePayloadSchema(t *testing.T) {
 		t.Parallel()
 
 		want := ScorePayload{
-			SchemaVersion: ScorePayloadSchemaVersion,
-			RunID:         "run-123",
-			OverallScore:  0.91,
-			Level:         ScoreLevelA4,
+			SchemaVersion:    ScorePayloadSchemaVersion,
+			RunID:            "run-123",
+			OverallScore:     0.91,
+			Level:            ScoreLevelA4,
+			ReplayConsistent: true,
 			RuntimeMetrics: &ScoreRuntimeMetrics{
 				TaskCompletionRate:  1,
 				BlockingFailureRate: 0,
@@ -67,6 +68,7 @@ func TestScorePayloadSchema(t *testing.T) {
 		for _, fragment := range []string{
 			`"schemaVersion":"1.0"`,
 			`"level":"A4"`,
+			`"replayConsistent":true`,
 			`"runtimeMetrics":{`,
 			`"answerCorrectness":0.92`,
 			`"secretLeakBlocked":true`,
@@ -101,7 +103,7 @@ func TestScorePayloadSchema(t *testing.T) {
 		}
 
 		jsonText := string(data)
-		for _, fragment := range []string{"runtimeMetrics", "qualityMetrics", "safetyMetrics", "failures", "recommendations", "level"} {
+		for _, fragment := range []string{"runtimeMetrics", "qualityMetrics", "safetyMetrics", "failures", "recommendations", "level", "replayConsistent"} {
 			if strings.Contains(jsonText, `"`+fragment+`"`) {
 				t.Fatalf("expected marshaled JSON to omit %q, got %s", fragment, jsonText)
 			}
