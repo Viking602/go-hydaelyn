@@ -56,6 +56,7 @@ type ScoreFailure struct {
 	Code     string `json:"code,omitempty"`
 	Message  string `json:"message,omitempty"`
 	Metric   string `json:"metric,omitempty"`
+	Layer    string `json:"layer,omitempty"`
 	Severity string `json:"severity,omitempty"`
 	Blocking bool   `json:"blocking,omitempty"`
 }
