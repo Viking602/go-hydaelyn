@@ -57,7 +57,7 @@ func NewMemoryObserver() *memoryObserver {
 }
 
 func (m *memoryObserver) StartSpan(name string, attrs map[string]string) (context.Context, Span) {
-	attrs = cloneAttrs(attrs)
+	attrs = redactAttrs(attrs)
 	traceID := ""
 	if attrs != nil {
 		traceID = attrs["trace_id"]

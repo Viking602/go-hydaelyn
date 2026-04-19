@@ -49,20 +49,20 @@ func NewOTelAdapter(cfg OTelConfig) Observer {
 
 func (a *otelAdapter) StartSpan(name string, attrs map[string]string) (context.Context, Span) {
 	if a.cfg.StartSpanFunc != nil {
-		return a.cfg.StartSpanFunc(name, attrs)
+		return a.cfg.StartSpanFunc(name, redactAttrs(attrs))
 	}
 	return context.Background(), noopSpan{}
 }
 
 func (a *otelAdapter) IncCounter(name string, delta int64, attrs map[string]string) {
 	if a.cfg.IncCounterFunc != nil {
-		a.cfg.IncCounterFunc(name, delta, attrs)
+		a.cfg.IncCounterFunc(name, delta, redactAttrs(attrs))
 	}
 }
 
 func (a *otelAdapter) ObserveHistogram(name string, value float64, attrs map[string]string) {
 	if a.cfg.ObserveHistogramFunc != nil {
-		a.cfg.ObserveHistogramFunc(name, value, attrs)
+		a.cfg.ObserveHistogramFunc(name, value, redactAttrs(attrs))
 	}
 }
 

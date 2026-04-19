@@ -92,12 +92,9 @@ func TestInvokerAppliesApprovalMiddleware(t *testing.T) {
 		t.Fatalf("expected approval error kind, got %v", err)
 	}
 
-	result, err := invoker.Invoke(context.Background(), Call{
+	result, err := invoker.Invoke(WithApproval(context.Background(), TypeTool, "deploy"), Call{
 		Type: TypeTool,
 		Name: "deploy",
-		Metadata: map[string]string{
-			"approved": "true",
-		},
 	})
 	if err != nil {
 		t.Fatalf("expected approved call to pass, got %v", err)

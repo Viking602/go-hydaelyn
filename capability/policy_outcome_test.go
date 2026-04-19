@@ -89,7 +89,7 @@ func TestApprovalRequiredPausesFlow(t *testing.T) {
 	if got := recorder.events[0].Evidence.Metadata["capabilityName"]; got != "deploy" {
 		t.Fatalf("expected capability metadata, got %#v", recorder.events[0].Evidence)
 	}
-	approved, err := invoker.Invoke(context.Background(), Call{Type: TypeTool, Name: "deploy", Metadata: map[string]string{"approved": "true"}})
+	approved, err := invoker.Invoke(WithApproval(context.Background(), TypeTool, "deploy"), Call{Type: TypeTool, Name: "deploy"})
 	if err != nil {
 		t.Fatalf("approved invoke error = %v", err)
 	}

@@ -84,11 +84,33 @@ type PolicyOutcomeRecorder interface {
 
 type policyOutcomeRecorderKey struct{}
 
+type approvalContextKey struct{}
+
 func WithPolicyOutcomeRecorder(ctx context.Context, recorder PolicyOutcomeRecorder) context.Context {
 	if recorder == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, policyOutcomeRecorderKey{}, recorder)
+}
+
+func WithApproval(ctx context.Context, callType Type, name string) context.Context {
+	grantKey := key(callType, name)
+	grants, _ := ctx.Value(approvalContextKey{}).(map[string]struct{})
+	cloned := make(map[string]struct{}, len(grants)+1)
+	for current := range grants {
+		cloned[current] = struct{}{}
+	}
+	cloned[grantKey] = struct{}{}
+	return context.WithValue(ctx, approvalContextKey{}, cloned)
+}
+
+func hasApproval(ctx context.Context, call Call) bool {
+	grants, _ := ctx.Value(approvalContextKey{}).(map[string]struct{})
+	if len(grants) == 0 {
+		return false
+	}
+	_, ok := grants[key(call.Type, call.Name)]
+	return ok
 }
 
 func emitPolicyOutcome(ctx context.Context, event storage.PolicyOutcomeEvent) {
@@ -254,7 +276,7 @@ func RequirePermissions() Middleware {
 
 func RequireApproval() Middleware {
 	return Func(func(ctx context.Context, call Call, next Next) (Result, error) {
-		if call.Metadata != nil && call.Metadata["approved"] == "true" {
+		if hasApproval(ctx, call) {
 			return next(ctx, call)
 		}
 		emitPolicyOutcome(ctx, newPolicyOutcomeEvent(call, policyCapabilityApproval, "paused", "warning", fmt.Sprintf("approval required for %s/%s", call.Type, call.Name), true, 0, map[string]string{"errorKind": string(ErrorKindApproval)}))
