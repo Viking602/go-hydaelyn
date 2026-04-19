@@ -1,0 +1,5 @@
+package evaluation
+
+type ReplayInvariantLevel string
+
+const ReplayInvariantLevelStateEquivalentWithRequiredSubsetV1 ReplayInvariantLevel = "StateEquivalentWithRequiredSubsetV1"
