@@ -48,23 +48,34 @@ type BaselineSnapshot struct {
 }
 
 type LaneSpec struct {
-	ID                  string            `json:"id"`
-	Provider            string            `json:"provider"`
-	Model               string            `json:"model"`
-	APIKeyEnv           string            `json:"apiKeyEnv,omitempty"`
-	BaseURL             string            `json:"baseUrl,omitempty"`
-	BaseURLEnv          string            `json:"baseUrlEnv,omitempty"`
-	JudgeProvider       string            `json:"judgeProvider,omitempty"`
-	JudgeModel          string            `json:"judgeModel,omitempty"`
-	JudgeAPIKeyEnv      string            `json:"judgeApiKeyEnv,omitempty"`
-	JudgeBaseURL        string            `json:"judgeBaseUrl,omitempty"`
-	JudgeBaseURLEnv     string            `json:"judgeBaseUrlEnv,omitempty"`
-	UserModelProvider   string            `json:"userModelProvider,omitempty"`
-	UserModel           string            `json:"userModel,omitempty"`
-	UserModelAPIKeyEnv  string            `json:"userModelApiKeyEnv,omitempty"`
-	UserModelBaseURL    string            `json:"userModelBaseUrl,omitempty"`
-	UserModelBaseURLEnv string            `json:"userModelBaseUrlEnv,omitempty"`
-	ExtraEnv            map[string]string `json:"extraEnv,omitempty"`
+	ID                     string             `json:"id"`
+	Provider               string             `json:"provider"`
+	Model                  string             `json:"model"`
+	ProviderProvenance     string             `json:"providerProvenance,omitempty"`
+	ModelProvenance        string             `json:"modelProvenance,omitempty"`
+	APIKeyEnv              string             `json:"apiKeyEnv,omitempty"`
+	BaseURL                string             `json:"baseUrl,omitempty"`
+	BaseURLEnv             string             `json:"baseUrlEnv,omitempty"`
+	PromptCostPer1KUSD     float64            `json:"promptCostPer1kUsd,omitempty"`
+	CompletionCostPer1KUSD float64            `json:"completionCostPer1kUsd,omitempty"`
+	MaxTokens              int                `json:"maxTokens,omitempty"`
+	MaxToolCalls           int                `json:"maxToolCalls,omitempty"`
+	MaxCostUSD             float64            `json:"maxCostUsd,omitempty"`
+	MetricTolerances       map[string]float64 `json:"metricTolerances,omitempty"`
+	LatencyToleranceMs     int64              `json:"latencyToleranceMs,omitempty"`
+	CostToleranceUSD       float64            `json:"costToleranceUsd,omitempty"`
+	RequiredSecrets        []string           `json:"requiredSecrets,omitempty"`
+	JudgeProvider          string             `json:"judgeProvider,omitempty"`
+	JudgeModel             string             `json:"judgeModel,omitempty"`
+	JudgeAPIKeyEnv         string             `json:"judgeApiKeyEnv,omitempty"`
+	JudgeBaseURL           string             `json:"judgeBaseUrl,omitempty"`
+	JudgeBaseURLEnv        string             `json:"judgeBaseUrlEnv,omitempty"`
+	UserModelProvider      string             `json:"userModelProvider,omitempty"`
+	UserModel              string             `json:"userModel,omitempty"`
+	UserModelAPIKeyEnv     string             `json:"userModelApiKeyEnv,omitempty"`
+	UserModelBaseURL       string             `json:"userModelBaseUrl,omitempty"`
+	UserModelBaseURLEnv    string             `json:"userModelBaseUrlEnv,omitempty"`
+	ExtraEnv               map[string]string  `json:"extraEnv,omitempty"`
 }
 
 type TemplateData struct {
@@ -163,6 +174,22 @@ func ValidateCatalog(catalog Catalog) error {
 		}
 		if strings.TrimSpace(lane.Model) == "" {
 			return fmt.Errorf("lane %s is missing model", lane.ID)
+		}
+		if lane.PromptCostPer1KUSD < 0 || lane.CompletionCostPer1KUSD < 0 || lane.MaxTokens < 0 || lane.MaxToolCalls < 0 || lane.MaxCostUSD < 0 || lane.LatencyToleranceMs < 0 || lane.CostToleranceUSD < 0 {
+			return fmt.Errorf("lane %s has negative live-lane controls", lane.ID)
+		}
+		for metric, tolerance := range lane.MetricTolerances {
+			if strings.TrimSpace(metric) == "" {
+				return fmt.Errorf("lane %s has empty metric tolerance key", lane.ID)
+			}
+			if tolerance < 0 {
+				return fmt.Errorf("lane %s has negative tolerance for %s", lane.ID, metric)
+			}
+		}
+		for _, secret := range lane.RequiredSecrets {
+			if strings.TrimSpace(secret) == "" {
+				return fmt.Errorf("lane %s has empty required secret", lane.ID)
+			}
 		}
 	}
 	return nil

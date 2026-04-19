@@ -22,6 +22,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runCatalog(args[1:], stdout)
 	case "validate":
 		return runValidate(args[1:], stdout)
+	case "run-live":
+		return runLive(ctx, args[1:], stdout)
 	case "run":
 		return runRun(ctx, args[1:], stdout)
 	case "report":
@@ -137,6 +139,45 @@ func runRun(ctx context.Context, args []string, stdout io.Writer) error {
 		Cost:              result.Cost,
 	}
 	return encodeJSON(stdout, benchmark.AdaptScoreBundleToScorePayload(bundle, runID))
+}
+
+func runLive(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("run-live", flag.ContinueOnError)
+	catalogPath := flags.String("catalog", benchmark.DefaultCatalogPath, "path to benchmark catalog json")
+	casePath := flags.String("case", "", "path to an eval case json file")
+	laneID := flags.String("lane", "", "model lane id from the catalog")
+	modelOverride := flags.String("model", "", "override the selected lane model for this run")
+	baseURLOverride := flags.String("base-url", "", "override the selected lane base URL for this run")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *casePath == "" {
+		return errors.New("run-live requires --case")
+	}
+	if *laneID == "" {
+		return errors.New("run-live requires --lane")
+	}
+	catalog, err := benchmark.LoadCatalog(*catalogPath)
+	if err != nil {
+		return err
+	}
+	lane, ok := catalog.Lane(*laneID)
+	if !ok {
+		return fmt.Errorf("unknown lane: %s", *laneID)
+	}
+	if *modelOverride != "" {
+		lane.Model = *modelOverride
+	}
+	if *baseURLOverride != "" {
+		lane.BaseURL = *baseURLOverride
+	}
+	run, err := benchmark.RunLiveLane(ctx, *casePath, lane)
+	if run != nil {
+		if encodeErr := encodeJSON(stdout, run); encodeErr != nil {
+			return encodeErr
+		}
+	}
+	return err
 }
 
 func runReport(args []string, stdout io.Writer) error {

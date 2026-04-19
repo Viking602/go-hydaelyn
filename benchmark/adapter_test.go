@@ -27,10 +27,11 @@ func TestAdaptScoreBundleToScorePayload(t *testing.T) {
 
 	got := AdaptScoreBundleToScorePayload(bundle, "bench-123")
 	want := evaluation.ScorePayload{
-		SchemaVersion: evaluation.ScorePayloadSchemaVersion,
-		RunID:         "bench-123",
-		OverallScore:  0.7833333333333333,
-		Level:         evaluation.ScoreLevelA2,
+		SchemaVersion:    evaluation.ScorePayloadSchemaVersion,
+		RunID:            "bench-123",
+		OverallScore:     0.7833333333333333,
+		Level:            evaluation.ScoreLevelA2,
+		ReplayConsistent: true,
 		RuntimeMetrics: &evaluation.ScoreRuntimeMetrics{
 			TaskCompletionRate:  0.9,
 			BlockingFailureRate: 0.1,

@@ -8,8 +8,9 @@ import (
 
 func AdaptScoreBundleToScorePayload(bundle ScoreBundle, runID string) evaluation.ScorePayload {
 	payload := evaluation.ScorePayload{
-		SchemaVersion: evaluation.ScorePayloadSchemaVersion,
-		RunID:         runID,
+		SchemaVersion:    evaluation.ScorePayloadSchemaVersion,
+		RunID:            runID,
+		ReplayConsistent: true,
 	}
 
 	runtimeMetrics := &evaluation.ScoreRuntimeMetrics{}
@@ -77,7 +78,7 @@ func AdaptScoreBundleToScorePayload(bundle ScoreBundle, runID string) evaluation
 	if payload.OverallScore == 0 {
 		payload.OverallScore = evaluationScoreAverage(normalized)
 	}
-	payload.Level = evaluation.ScoreLevelForOverallScore(payload.OverallScore)
+	payload.Level = evaluation.ScoreLevelForOverallScoreWithReplayConsistency(payload.OverallScore, payload.ReplayConsistent)
 
 	if runtimeSet {
 		payload.RuntimeMetrics = runtimeMetrics

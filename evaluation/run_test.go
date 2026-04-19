@@ -23,9 +23,32 @@ func TestEvalRunSchema(t *testing.T) {
 			CaseID:            "deepsearch-basic",
 			Mode:              EvalRunModeDeterministic,
 			RuntimeConfigHash: "sha256:abc123",
-			Seed:              42,
-			StartedAt:         startedAt,
-			CompletedAt:       completedAt,
+			Provenance: &EvalRunProvenance{
+				LaneID:             "nightly-live",
+				Provider:           "openai",
+				ProviderVersion:    "v1",
+				ProviderProvenance: "openai-public-api",
+				Model:              "gpt-5.4",
+				ModelProvenance:    "snapshot-2026-01-01",
+				ResolvedBaseURL:    "https://api.openai.com/v1",
+			},
+			Usage: &EvalRunUsage{
+				PromptTokens:     120,
+				CompletionTokens: 45,
+				TotalTokens:      165,
+				TotalCostUSD:     0.0125,
+				LatencyMs:        2000,
+				ToolCallCount:    2,
+			},
+			Variance: &EvalRunVariance{
+				ComparedRunID:   "run-122",
+				Window:          1,
+				MetricDeltas:    map[string]float64{"overallScore": -0.02, "groundedness": 0.01},
+				ExceededMetrics: []string{"overallScore"},
+			},
+			Seed:        42,
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
 			TraceRefs: &EvalRunTraceRefs{
 				Events: &EvalRunRef{
 					ID:   "trace-events",
@@ -91,6 +114,9 @@ func TestEvalRunSchema(t *testing.T) {
 			`"mode":"deterministic"`,
 			`"caseId":"deepsearch-basic"`,
 			`"runtimeConfigHash":"sha256:abc123"`,
+			`"provenance":{`,
+			`"usage":{`,
+			`"variance":{`,
 			`"scoreRef":{`,
 			`"policyOutcomes":[`,
 			`"status":"completed"`,
@@ -129,7 +155,7 @@ func TestEvalRunSchema(t *testing.T) {
 		}
 
 		jsonText := string(data)
-		for _, fragment := range []string{"traceRefs", "artifactRefs", "scoreRef", "policyOutcomes", "error"} {
+		for _, fragment := range []string{"provenance", "usage", "variance", "traceRefs", "artifactRefs", "scoreRef", "policyOutcomes", "error"} {
 			if strings.Contains(jsonText, `"`+fragment+`"`) {
 				t.Fatalf("expected marshaled JSON to omit %q, got %s", fragment, jsonText)
 			}
