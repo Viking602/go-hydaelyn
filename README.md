@@ -1,5 +1,13 @@
 # Hydaelyn
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/Viking602/go-hydaelyn.svg)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Viking602/go-hydaelyn)](https://goreportcard.com/report/github.com/Viking602/go-hydaelyn)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Viking602/go-hydaelyn)](https://github.com/Viking602/go-hydaelyn/blob/main/go.mod)
+[![CI](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml/badge.svg)](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Viking602/go-hydaelyn?sort=semver)](https://github.com/Viking602/go-hydaelyn/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Viking602/go-hydaelyn/blob/main/LICENSE)
+[![Module](https://img.shields.io/badge/module-github.com%2FViking602%2Fgo--hydaelyn-007d9c?logo=go)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
+
 Hydaelyn is a multi-agent parallel runtime for Go.
 
 Embed it into your application with `hydaelyn` (or the lower-level `host` package) to run supervisor-controlled teams, deepsearch-style research flows, and other parallel agent workflows inside a normal Go program.
