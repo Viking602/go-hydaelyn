@@ -72,6 +72,7 @@ type Runtime struct {
 	mu                         sync.RWMutex
 	runSeq                     uint64
 	teamSeq                    uint64
+	workerSeq                  uint64
 	activeRuns                 map[string]context.CancelFunc
 	activeTeams                map[string]context.CancelFunc
 	inlineTeamOutputGuardrails map[string][]agent.OutputGuardrail
@@ -115,7 +116,6 @@ func NewWithError(config Config) (*Runtime, error) {
 		activeTeams:                map[string]context.CancelFunc{},
 		inlineTeamOutputGuardrails: map[string][]agent.OutputGuardrail{},
 	}
-	runner.leaseReleaser = &defaultLeaseReleaser{queue: runner.queue}
 	if runner.workerID == "" {
 		runner.workerID = runner.nextWorkerID()
 	}
@@ -338,8 +338,12 @@ func (r *Runtime) applyPlugin(spec plugin.Spec) error {
 		if !ok {
 			return fmt.Errorf("plugin %s/%s does not implement scheduler.TaskQueue", spec.Type, spec.Name)
 		}
+		// Swap queue + releaser pointer atomically so concurrent lease
+		// goroutines don't observe a half-updated runtime.
+		r.mu.Lock()
 		r.queue = queue
 		r.leaseReleaser = &defaultLeaseReleaser{queue: queue}
+		r.mu.Unlock()
 	case plugin.TypeMCPGateway:
 		gateway, ok := spec.Component.(mcp.Gateway)
 		if !ok {
@@ -389,5 +393,5 @@ func (r *Runtime) nextTeamID() string {
 }
 
 func (r *Runtime) nextWorkerID() string {
-	return fmt.Sprintf("runtime-worker-%d", atomic.AddUint64(&r.teamSeq, 1))
+	return fmt.Sprintf("runtime-worker-%d", atomic.AddUint64(&r.workerSeq, 1))
 }

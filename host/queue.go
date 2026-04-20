@@ -42,14 +42,25 @@ func (r *defaultLeaseReleaser) Release(ctx context.Context, lease scheduler.Task
 	return r.queue.Release(ctx, lease)
 }
 
+// syncLeaseReleaser lazy-initializes the releaser on first use. The pointer
+// is replaced — never mutated in place — so a concurrent goroutine that has
+// captured the previous releaser keeps using a stable struct.
 func (r *Runtime) syncLeaseReleaser() {
-	if r.leaseReleaser == nil {
-		r.leaseReleaser = &defaultLeaseReleaser{queue: r.queue}
+	r.mu.RLock()
+	releaser := r.leaseReleaser
+	queue := r.queue
+	r.mu.RUnlock()
+	if releaser != nil {
+		if existing, ok := releaser.(*defaultLeaseReleaser); !ok || existing.queue == queue {
+			return
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.leaseReleaser.(*defaultLeaseReleaser); ok && existing.queue == r.queue {
 		return
 	}
-	if releaser, ok := r.leaseReleaser.(*defaultLeaseReleaser); ok && releaser.queue != r.queue {
-		releaser.queue = r.queue
-	}
+	r.leaseReleaser = &defaultLeaseReleaser{queue: r.queue}
 }
 
 func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, runnableSet map[string]struct{}, semByProfile map[string]chan struct{}) (<-chan taskOutcome, error) {
@@ -58,13 +69,23 @@ func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, ru
 	}
 	results := make(chan taskOutcome, len(runnableSet))
 	indexByTask := mapTaskIndexes(current.Tasks)
+	var wg sync.WaitGroup
 	for {
-		outcome, ok := r.processQueuedLease(ctx, current, indexByTask, semByProfile)
+		prepared, immediate, ok := r.acquireQueuedLease(ctx, current, indexByTask)
 		if !ok {
 			break
 		}
-		results <- outcome
+		if immediate != nil {
+			results <- *immediate
+			continue
+		}
+		wg.Add(1)
+		go func(p preparedLease) {
+			defer wg.Done()
+			results <- r.runPreparedLease(ctx, current, p, semByProfile)
+		}(prepared)
 	}
+	wg.Wait()
 	close(results)
 	return results, nil
 }
@@ -104,8 +125,18 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 	r.syncLeaseReleaser()
 	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
 	released := false
+	stopHeartbeat := func() {}
+	releaseLease := func() error {
+		// Always stop heartbeats before releasing so we don't extend a
+		// lease that's about to be removed from the queue.
+		stopHeartbeat()
+		stopHeartbeat = func() {}
+		released = true
+		return r.leaseReleaser.Release(ctx, lease)
+	}
 	defer func() {
 		if !released {
+			stopHeartbeat()
 			_ = r.leaseReleaser.Release(ctx, lease)
 		}
 	}()
@@ -114,22 +145,19 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 		if errors.Is(err, errQueuedTaskMissing) {
 			return nil
 		}
-		released = true
-		_ = r.leaseReleaser.Release(ctx, lease)
+		_ = releaseLease()
 		return err
 	}
 	if !r.teamGuard.IsRunnable(state, original) {
-		released = true
-		return r.leaseReleaser.Release(ctx, lease)
+		return releaseLease()
 	}
-	item, stopHeartbeat, err := r.executeQueuedTask(ctx, state, original, lease)
-	defer stopHeartbeat()
+	item, stop, err := r.executeQueuedTask(ctx, state, original, lease)
+	stopHeartbeat = stop
 	if err != nil && item.ID == "" {
-		released = true
-		_ = r.leaseReleaser.Release(ctx, lease)
+		_ = releaseLease()
 		return err
 	}
-	state = r.applyQueuedTaskResult(state, index, item)
+	state = r.applyQueuedTaskResult(ctx, state, index, item)
 	applied := state.Tasks[index]
 	if errors.Is(err, context.Canceled) {
 		r.recordTaskCancelledEvent(ctx, state, applied, "cancellation_propagated")
@@ -144,15 +172,12 @@ func (r *Runtime) runQueuedLease(ctx context.Context, lease scheduler.TaskLease)
 	}
 	if err := r.persistQueuedTaskState(ctx, state, item); err != nil {
 		if errors.Is(err, errQueuedTaskAlreadyCommitted) {
-			released = true
-			return r.leaseReleaser.Release(ctx, lease)
+			return releaseLease()
 		}
-		released = true
-		_ = r.leaseReleaser.Release(ctx, lease)
+		_ = releaseLease()
 		return err
 	}
-	released = true
-	return r.leaseReleaser.Release(ctx, lease)
+	return releaseLease()
 }
 
 func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
@@ -172,59 +197,110 @@ func (r *Runtime) continueQueuedTeam(ctx context.Context, pattern team.Pattern, 
 	return current, false, nil
 }
 
-func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState, indexByTask map[string]int, semByProfile map[string]chan struct{}) (taskOutcome, bool) {
+// preparedLease carries the lease + execution targets resolved during the
+// fast (serialized) acquisition phase, so the slow execution phase can run
+// concurrently across workers.
+type preparedLease struct {
+	lease         scheduler.TaskLease
+	index         int
+	original      team.Task
+	agentInstance team.AgentInstance
+	profile       team.Profile
+}
+
+// acquireQueuedLease performs the synchronous acquire/validate steps. It
+// returns one of:
+//   - (_, _, false)            queue empty for this team — caller stops looping
+//   - (_, &outcome, true)      non-execution outcome to forward (validation
+//     failure, version conflict, queue error)
+//   - (prepared, nil, true)    a lease ready for parallel execution
+func (r *Runtime) acquireQueuedLease(ctx context.Context, current team.RunState, indexByTask map[string]int) (preparedLease, *taskOutcome, bool) {
 	r.syncLeaseReleaser()
 	lease, ok, err := r.queue.AcquireForTeam(ctx, r.workerID, current.ID, localQueueLeaseTTL)
 	if err != nil {
-		return taskOutcome{err: err}, true
+		return preparedLease{}, &taskOutcome{err: err}, true
 	}
 	if !ok {
-		return taskOutcome{}, false
+		return preparedLease{}, nil, false
 	}
 	r.recordLeaseAcquiredEvent(ctx, lease.TeamID, lease.TaskID, lease.OwnerID, localQueueLeaseTTL)
 	if lease.TeamID != "" && lease.TeamID != current.ID {
 		r.recordLeaseExpiredEvent(ctx, lease.TeamID, lease.TaskID, r.workerID, eventReasonTaskAlreadyTerminal)
 		if err := r.nackQueuedLease(ctx, lease); err != nil {
-			return taskOutcome{err: err}, true
+			return preparedLease{}, &taskOutcome{err: err}, true
 		}
-		return taskOutcome{}, true
+		return preparedLease{}, &taskOutcome{}, true
 	}
 	index, ok := indexByTask[lease.TaskID]
 	if !ok {
 		if lease.TeamID != "" {
 			r.recordLeaseExpiredEvent(ctx, lease.TeamID, lease.TaskID, r.workerID, eventReasonTaskAlreadyTerminal)
 			if err := r.nackQueuedLease(ctx, lease); err != nil {
-				return taskOutcome{err: err}, true
+				return preparedLease{}, &taskOutcome{err: err}, true
 			}
 		} else if err := r.leaseReleaser.Release(ctx, lease); err != nil {
-			return taskOutcome{err: err}, true
+			return preparedLease{}, &taskOutcome{err: err}, true
 		}
-		return taskOutcome{}, true
+		return preparedLease{}, &taskOutcome{}, true
 	}
 	original := current.Tasks[index]
 	if lease.TaskVersion > 0 && original.Version != lease.TaskVersion {
 		r.recordLeaseExpiredEvent(ctx, current.ID, original.ID, r.workerID, eventReasonStateVersionConflict)
 		_ = r.leaseReleaser.Release(ctx, lease)
-		return taskOutcome{}, true
+		return preparedLease{}, &taskOutcome{}, true
 	}
 	agentInstance, profile, err := r.resolveTaskExecution(current, original)
 	if err != nil {
 		_ = r.leaseReleaser.Release(ctx, lease)
 		failed, _ := finalizeTaskFailure(original, err)
-		return taskOutcome{index: index, task: failed, err: err, leaseID: lease.LeaseID, workerID: lease.WorkerID}, true
+		return preparedLease{}, &taskOutcome{index: index, task: failed, err: err, leaseID: lease.LeaseID, workerID: lease.WorkerID}, true
 	}
+	return preparedLease{
+		lease:         lease,
+		index:         index,
+		original:      original,
+		agentInstance: agentInstance,
+		profile:       profile,
+	}, nil, true
+}
+
+// processQueuedLease performs acquire + execute serially. Kept as a small
+// helper for callers and tests that don't care about parallel dispatch.
+func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState, indexByTask map[string]int, semByProfile map[string]chan struct{}) (taskOutcome, bool) {
+	prepared, immediate, ok := r.acquireQueuedLease(ctx, current, indexByTask)
+	if !ok {
+		return taskOutcome{}, false
+	}
+	if immediate != nil {
+		return *immediate, true
+	}
+	return r.runPreparedLease(ctx, current, prepared, semByProfile), true
+}
+
+// runPreparedLease executes a prepared lease. Safe to call concurrently from
+// multiple goroutines; per-profile semaphores throttle real parallelism.
+func (r *Runtime) runPreparedLease(ctx context.Context, current team.RunState, prepared preparedLease, semByProfile map[string]chan struct{}) taskOutcome {
 	releaseSemaphore := func() {}
-	if sem, ok := semByProfile[profile.Name]; ok {
+	if sem, ok := semByProfile[prepared.profile.Name]; ok {
 		sem <- struct{}{}
 		releaseSemaphore = func() { <-sem }
 	}
-	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, lease, localQueueLeaseTTL)
-	leaseCtx := withTaskEventContext(ctx, taskEventContext{LeaseID: lease.LeaseID, WorkerID: lease.WorkerID})
-	item, err := r.executeTask(leaseCtx, current, original, agentInstance, profile)
+	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, prepared.lease, localQueueLeaseTTL)
+	leaseCtx := withTaskEventContext(ctx, taskEventContext{LeaseID: prepared.lease.LeaseID, WorkerID: prepared.lease.WorkerID})
+	item, err := r.executeTask(leaseCtx, current, prepared.original, prepared.agentInstance, prepared.profile)
+	// Stop heartbeat BEFORE releasing the lease so we don't issue a
+	// Heartbeat against an already-released lease (the heartbeat goroutine
+	// can otherwise be mid-tick when Release runs).
 	stopHeartbeat()
 	releaseSemaphore()
-	_ = r.leaseReleaser.Release(ctx, lease)
-	return taskOutcome{index: index, task: item, err: err, leaseID: lease.LeaseID, workerID: lease.WorkerID}, true
+	_ = r.leaseReleaser.Release(ctx, prepared.lease)
+	return taskOutcome{
+		index:    prepared.index,
+		task:     item,
+		err:      err,
+		leaseID:  prepared.lease.LeaseID,
+		workerID: prepared.lease.WorkerID,
+	}
 }
 
 func (r *Runtime) nackQueuedLease(ctx context.Context, lease scheduler.TaskLease) error {
@@ -314,16 +390,10 @@ func (r *Runtime) executeQueuedTask(ctx context.Context, state team.RunState, or
 
 var errQueuedTaskAlreadyCommitted = errors.New("queued task already committed")
 
-var _ = (*Runtime).persistQueuedState
-
-func (r *Runtime) applyQueuedTaskResult(state team.RunState, index int, item team.Task) team.RunState {
-	state, _, _, _, _ = r.applyTaskOutcome(context.Background(), state, index, item)
+func (r *Runtime) applyQueuedTaskResult(ctx context.Context, state team.RunState, index int, item team.Task) team.RunState {
+	state, _, _, _, _ = r.applyTaskOutcome(ctx, state, index, item)
 	state.UpdatedAt = time.Now().UTC()
 	return state
-}
-
-func (r *Runtime) persistQueuedState(ctx context.Context, state team.RunState, taskID string) error {
-	return r.persistQueuedTaskState(ctx, state, team.Task{ID: taskID})
 }
 
 func (r *Runtime) persistQueuedTaskState(ctx context.Context, state team.RunState, task team.Task) error {

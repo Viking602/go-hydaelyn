@@ -115,29 +115,21 @@ func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, sink Up
 }
 
 func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink) ([]Result, error) {
-	type item struct {
-		index  int
-		result Result
-		err    error
-	}
 	results := make([]Result, len(calls))
-	ch := make(chan item, len(calls))
+	errs := make([]error, len(calls))
 	var wg sync.WaitGroup
 	for idx, call := range calls {
 		wg.Add(1)
 		go func(index int, current Call) {
 			defer wg.Done()
-			result, err := b.Execute(ctx, current, sink)
-			ch <- item{index: index, result: result, err: err}
+			results[index], errs[index] = b.Execute(ctx, current, sink)
 		}(idx, call)
 	}
 	wg.Wait()
-	close(ch)
-	for item := range ch {
-		if item.err != nil {
-			return nil, item.err
-		}
-		results[item.index] = item.result
+	// errors.Join preserves call order and surfaces every failure rather
+	// than racing on whichever goroutine happened to enqueue first.
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
 	}
 	return results, nil
 }

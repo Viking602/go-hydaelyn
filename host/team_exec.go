@@ -560,7 +560,10 @@ func (r *Runtime) driveTeamStep(ctx context.Context, pattern team.Pattern, curre
 func (r *Runtime) resolveBlockedOrRunnable(ctx context.Context, current team.RunState) (team.RunState, bool, bool, error) {
 	if next, changed := current.ResolveBlockedTasks(); changed {
 		terminal, err := r.persistTeamProgress(ctx, current, next)
-		return terminal, true, terminal.IsTerminal(), err
+		if err != nil {
+			return team.RunState{}, false, false, err
+		}
+		return terminal, true, terminal.IsTerminal(), nil
 	}
 	if len(current.RunnableTasks()) == 0 {
 		return current, false, false, nil
@@ -570,7 +573,10 @@ func (r *Runtime) resolveBlockedOrRunnable(ctx context.Context, current team.Run
 		return team.RunState{}, false, false, err
 	}
 	terminal, err := r.persistTeamProgress(ctx, current, next)
-	return terminal, true, terminal.IsTerminal(), err
+	if err != nil {
+		return team.RunState{}, false, false, err
+	}
+	return terminal, true, terminal.IsTerminal(), nil
 }
 
 func (r *Runtime) advancePatternState(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, error) {
@@ -613,15 +619,8 @@ func (r *Runtime) persistTeamProgress(ctx context.Context, previous, current tea
 	if err := r.recordNewTaskScheduledEvents(ctx, previous, current); err != nil {
 		return team.RunState{}, err
 	}
-	terminal, err := r.saveIfFailed(ctx, current)
-	if err != nil {
-		return team.RunState{}, err
-	}
-	if terminal.IsTerminal() {
-		if err := r.saveTeam(ctx, &terminal); err != nil {
-			return team.RunState{}, err
-		}
-		return terminal, nil
+	if failed := current.FirstBlockingFailure(); failed != nil {
+		current = failTeam(current, *failed)
 	}
 	if err := r.saveTeam(ctx, &current); err != nil {
 		return team.RunState{}, err
@@ -701,7 +700,16 @@ func shouldCancelSiblingBatch(task team.Task, err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	return task.BlocksTeamOnFailure()
+	// Only cancel siblings when this task has reached a terminal failure
+	// that blocks the team. Retryable failures leave the task in Pending,
+	// and skip-optional failures end as Skipped — neither should tear the
+	// batch down before the engine has a chance to retry or proceed.
+	switch task.Status {
+	case team.TaskStatusFailed, team.TaskStatusAborted:
+		return task.BlocksTeamOnFailure()
+	default:
+		return false
+	}
 }
 
 func (r *Runtime) executeTask(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) (team.Task, error) {
@@ -853,17 +861,6 @@ func failTeam(state team.RunState, failed team.Task) team.RunState {
 	return state
 }
 
-func (r *Runtime) saveIfFailed(ctx context.Context, state team.RunState) (team.RunState, error) {
-	if failed := state.FirstBlockingFailure(); failed != nil {
-		next := failTeam(state, *failed)
-		if err := r.saveTeam(ctx, &next); err != nil {
-			return team.RunState{}, err
-		}
-		return next, nil
-	}
-	return state, nil
-}
-
 func (r *Runtime) saveTeam(ctx context.Context, state *team.RunState) error {
 	state.Normalize()
 	if state.IsTerminal() && state.Result != nil {
@@ -882,16 +879,13 @@ func (r *Runtime) saveTeam(ctx context.Context, state *team.RunState) error {
 			state.Result = &team.Result{Error: "team final result blocked by output guardrail"}
 		}
 	}
-	r.recordTeamTerminalEvent(ctx, *state)
 	version, err := r.storage.Teams().SaveCAS(ctx, *state, state.Version)
-	if err == nil {
-		state.Version = version
-		return nil
-	}
-	if errors.Is(err, storage.ErrStaleState) {
+	if err != nil {
 		return err
 	}
-	return err
+	state.Version = version
+	r.recordTeamTerminalEvent(ctx, *state)
+	return nil
 }
 
 func (r *Runtime) ensureTaskSession(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) (team.Task, error) {

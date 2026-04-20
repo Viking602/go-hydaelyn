@@ -69,7 +69,7 @@ func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
 	first := state.Tasks[0]
 	first.Status = team.TaskStatusCompleted
 	first.Result = &team.Result{Summary: "authoritative result"}
-	state = runner.applyQueuedTaskResult(state, 0, first)
+	state = runner.applyQueuedTaskResult(context.Background(), state, 0,first)
 	completedAt := state.Tasks[0].CompletedAt
 	completedBy := state.Tasks[0].CompletedBy
 	if completedAt.IsZero() || completedBy != "worker-a" {
@@ -77,7 +77,7 @@ func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
 	}
 	duplicate := state.Tasks[0]
 	duplicate.Result = &team.Result{Summary: "duplicate result must be ignored"}
-	state = runner.applyQueuedTaskResult(state, 0, duplicate)
+	state = runner.applyQueuedTaskResult(context.Background(), state, 0,duplicate)
 	if state.Tasks[0].CompletedAt != completedAt || state.Tasks[0].CompletedBy != completedBy {
 		t.Fatalf("expected retry to preserve original completion metadata, got %#v", state.Tasks[0])
 	}
