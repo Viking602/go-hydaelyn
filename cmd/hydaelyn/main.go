@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Viking602/go-hydaelyn/cli"
+	"github.com/Viking602/go-hydaelyn/internal/cli"
 )
 
 func main() {
