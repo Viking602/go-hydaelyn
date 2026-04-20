@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/evaluation"
+	"github.com/Viking602/go-hydaelyn/eval"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
@@ -282,11 +282,11 @@ func TestCLIUsesCanonicalEvalOutput(t *testing.T) {
 		t.Fatalf("evaluate error = %v stderr=%s", err, stderr.String())
 	}
 
-	var payload evaluation.ScorePayload
+	var payload eval.ScorePayload
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("decode score payload: %v output=%s", err, stdout.String())
 	}
-	if payload.SchemaVersion != evaluation.ScorePayloadSchemaVersion {
+	if payload.SchemaVersion != eval.ScorePayloadSchemaVersion {
 		t.Fatalf("unexpected schema version: %#v", payload)
 	}
 	if payload.RuntimeMetrics == nil {

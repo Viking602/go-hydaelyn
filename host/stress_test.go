@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/internal/compact"
-	"github.com/Viking602/go-hydaelyn/evaluation"
+	"github.com/Viking602/go-hydaelyn/eval"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/internal/session"
@@ -65,7 +65,7 @@ func TestBudgetPressure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events().List() error = %v", err)
 	}
-	report := evaluation.Evaluate(events)
+	report := eval.Evaluate(events)
 	if report.TokenBudgetHitRate != 1 {
 		t.Fatalf("expected full token budget pressure, got %#v", report)
 	}

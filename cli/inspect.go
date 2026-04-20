@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/internal/blackboard"
-	"github.com/Viking602/go-hydaelyn/evaluation"
+	"github.com/Viking602/go-hydaelyn/eval"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/recipe"
 	"github.com/Viking602/go-hydaelyn/storage"
@@ -255,9 +255,9 @@ func runEvaluate(args []string, stdout io.Writer) error {
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
-	report := evaluation.Evaluate(events)
+	report := eval.Evaluate(events)
 	validation := storage.ValidateReplay(events, storage.ReplayTeam(events))
-	payload := evaluation.AdaptReportToScorePayloadWithReplayConsistency(report, report.TeamID, validation.Valid)
+	payload := eval.AdaptReportToScorePayloadWithReplayConsistency(report, report.TeamID, validation.Valid)
 	return encodeJSON(stdout, payload)
 }
 

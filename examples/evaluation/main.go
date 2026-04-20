@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/evaluation"
+	"github.com/Viking602/go-hydaelyn/eval"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	report := evaluation.Evaluate(events)
+	report := eval.Evaluate(events)
 	payload, _ := json.MarshalIndent(report, "", "  ")
 	fmt.Println(string(payload))
 }

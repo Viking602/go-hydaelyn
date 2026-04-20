@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/evalcase"
+	"github.com/Viking602/go-hydaelyn/eval/cases"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 type SearchTool struct {
-	documents []evalcase.CorpusDocument
+	documents []cases.CorpusDocument
 }
 
 type searchInput struct {
@@ -20,15 +20,15 @@ type searchInput struct {
 }
 
 type searchOutput struct {
-	Matches []evalcase.CorpusDocument `json:"matches"`
+	Matches []cases.CorpusDocument `json:"matches"`
 }
 
 func NewSearchTool(corpusPath string) (*SearchTool, error) {
-	docs, err := evalcase.LoadCorpus(corpusPath)
+	docs, err := cases.LoadCorpus(corpusPath)
 	if err != nil {
 		return nil, err
 	}
-	ordered := make([]evalcase.CorpusDocument, 0, len(docs))
+	ordered := make([]cases.CorpusDocument, 0, len(docs))
 	for _, doc := range docs {
 		ordered = append(ordered, doc)
 	}
@@ -64,7 +64,7 @@ func (t *SearchTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSin
 		limit = 5
 	}
 	query := strings.ToLower(input.Query)
-	matches := make([]evalcase.CorpusDocument, 0, limit)
+	matches := make([]cases.CorpusDocument, 0, limit)
 	for _, doc := range t.documents {
 		if strings.Contains(strings.ToLower(doc.ID), query) || strings.Contains(strings.ToLower(doc.Text), query) {
 			matches = append(matches, doc)

@@ -1,0 +1,123 @@
+package cases
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/Viking602/go-hydaelyn/eval"
+)
+
+func ValidateCase(c eval.EvalCase) error {
+	if c.SchemaVersion != eval.EvalCaseSchemaVersion {
+		return fmt.Errorf("unsupported eval case schema version %q", c.SchemaVersion)
+	}
+	if strings.TrimSpace(c.ID) == "" {
+		return fmt.Errorf("eval case id is required")
+	}
+	if strings.TrimSpace(c.Suite) == "" {
+		return fmt.Errorf("eval case suite is required")
+	}
+	if strings.TrimSpace(c.Pattern) == "" {
+		return fmt.Errorf("eval case pattern is required")
+	}
+	if c.Provider != nil {
+		scriptPath := strings.TrimSpace(c.Provider.ScriptPath)
+		errorKind := strings.TrimSpace(c.Provider.ErrorKind)
+		if scriptPath == "" && errorKind == "" {
+			return fmt.Errorf("eval case provider requires scriptPath or errorKind")
+		}
+		if scriptPath != "" && errorKind != "" {
+			return fmt.Errorf("eval case provider cannot specify both scriptPath and errorKind")
+		}
+	}
+	for _, name := range c.Tools {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("eval case tools cannot contain empty names")
+		}
+	}
+	if c.Profiles != nil {
+		if strings.TrimSpace(c.Profiles.Supervisor) == "" {
+			return fmt.Errorf("eval case supervisor profile is required when profiles are set")
+		}
+		workerNames := make([]string, 0, 1+len(c.Profiles.Workers))
+		if strings.TrimSpace(c.Profiles.Worker) != "" {
+			workerNames = append(workerNames, c.Profiles.Worker)
+		}
+		for _, name := range c.Profiles.Workers {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("eval case worker profiles cannot contain empty values")
+			}
+			workerNames = append(workerNames, name)
+		}
+		if len(workerNames) == 0 {
+			return fmt.Errorf("eval case worker profile is required when profiles are set")
+		}
+	}
+	if c.Fixtures != nil {
+		for _, id := range c.Fixtures.CorpusIDs {
+			if strings.TrimSpace(id) == "" {
+				return fmt.Errorf("eval case fixture corpus ids cannot contain empty values")
+			}
+		}
+		for _, path := range c.Fixtures.Paths {
+			if strings.TrimSpace(path) == "" {
+				return fmt.Errorf("eval case fixture paths cannot contain empty values")
+			}
+		}
+	}
+	if c.Expected != nil {
+		for _, citation := range c.Expected.RequiredCitations {
+			if strings.TrimSpace(citation) == "" {
+				return fmt.Errorf("eval case required citations cannot contain empty values")
+			}
+		}
+	}
+	if c.Thresholds != nil {
+		if err := validateUnitInterval("taskCompletionRate", c.Thresholds.TaskCompletionRate); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("answerCorrectness", c.Thresholds.AnswerCorrectness); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("groundedness", c.Thresholds.Groundedness); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("supportedClaimRatio", c.Thresholds.SupportedClaimRatio); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("citationPrecision", c.Thresholds.CitationPrecision); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("citationRecall", c.Thresholds.CitationRecall); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolPrecision", c.Thresholds.ToolPrecision); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolRecall", c.Thresholds.ToolRecall); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("toolArgAccuracy", c.Thresholds.ToolArgAccuracy); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("synthesisInputCoverage", c.Thresholds.SynthesisInputCoverage); err != nil {
+			return err
+		}
+		if err := validateUnitInterval("retrySuccessRate", c.Thresholds.RetrySuccessRate); err != nil {
+			return err
+		}
+	}
+	if c.Limits != nil {
+		if c.Limits.MaxToolCalls < 0 || c.Limits.MaxLatencyMs < 0 || c.Limits.MaxTokens < 0 {
+			return fmt.Errorf("eval case limits cannot be negative")
+		}
+	}
+	return nil
+}
+
+func validateUnitInterval(name string, value float64) error {
+	if value < 0 || value > 1 {
+		return fmt.Errorf("eval case threshold %s must be between 0 and 1", name)
+	}
+	return nil
+}

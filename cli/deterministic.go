@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/evalcase"
-	"github.com/Viking602/go-hydaelyn/evalrun"
+	"github.com/Viking602/go-hydaelyn/eval/cases"
+	"github.com/Viking602/go-hydaelyn/eval/run"
 )
 
 func runDeterministic(ctx context.Context, args []string, stdout io.Writer) error {
@@ -25,12 +25,12 @@ func runDeterministic(ctx context.Context, args []string, stdout io.Writer) erro
 	if strings.TrimSpace(*caseDir) == "" && strings.TrimSpace(*casePath) == "" {
 		return errors.New("run-deterministic requires --case-dir or --case")
 	}
-	runner := evalrun.NewRunner(evalrun.RunnerOptions{
+	runner := run.NewRunner(run.RunnerOptions{
 		Workspace:  *workspace,
 		OutputRoot: *outputDir,
 	})
 	var (
-		suite *evalrun.SuiteRun
+		suite *run.SuiteRun
 		err   error
 	)
 	if strings.TrimSpace(*casePath) != "" {
@@ -44,7 +44,7 @@ func runDeterministic(ctx context.Context, args []string, stdout io.Writer) erro
 		if strings.TrimSpace(runName) == "" {
 			runName = filepath.Base(*caseDir)
 		}
-		casePaths, discoverErr := evalcase.DiscoverCasePaths(*caseDir)
+		casePaths, discoverErr := cases.DiscoverCasePaths(*caseDir)
 		if discoverErr != nil {
 			return discoverErr
 		}
