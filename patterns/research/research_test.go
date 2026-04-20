@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/program"
+	"github.com/Viking602/go-hydaelyn/internal/program"
 	"github.com/Viking602/go-hydaelyn/internal/workflow"
 )
 

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/team"

@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/recipe"

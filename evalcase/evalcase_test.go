@@ -68,7 +68,7 @@ func TestLoadCase(t *testing.T) {
 }
 
 func TestLoadCorpus(t *testing.T) {
-	path := filepath.Join("..", "fixtures", "corpus")
+	path := filepath.Join("..", "testdata", "corpus")
 	docs, err := LoadCorpus(path)
 	if err != nil {
 		t.Fatalf("LoadCorpus() error = %v", err)

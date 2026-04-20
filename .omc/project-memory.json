@@ -481,16 +481,16 @@
       "type": "file"
     },
     {
+      "path": "",
+      "accessCount": 5,
+      "lastAccessed": 1776664510579,
+      "type": "directory"
+    },
+    {
       "path": "tool/tool.go",
       "accessCount": 4,
       "lastAccessed": 1776663466733,
       "type": "file"
-    },
-    {
-      "path": "",
-      "accessCount": 4,
-      "lastAccessed": 1776664175131,
-      "type": "directory"
     },
     {
       "path": "host/queue_test.go",
@@ -557,6 +557,12 @@
       "accessCount": 2,
       "lastAccessed": 1776664129501,
       "type": "directory"
+    },
+    {
+      "path": "tool/fixture/fixture_test.go",
+      "accessCount": 2,
+      "lastAccessed": 1776664622468,
+      "type": "file"
     },
     {
       "path": "providers/openai/stream.go",
@@ -670,6 +676,24 @@
       "path": "storage",
       "accessCount": 1,
       "lastAccessed": 1776664410167,
+      "type": "directory"
+    },
+    {
+      "path": "patterns/research/aliases.go",
+      "accessCount": 1,
+      "lastAccessed": 1776664546168,
+      "type": "file"
+    },
+    {
+      "path": "team/aliases.go",
+      "accessCount": 1,
+      "lastAccessed": 1776664583451,
+      "type": "file"
+    },
+    {
+      "path": "tool",
+      "accessCount": 1,
+      "lastAccessed": 1776664610367,
       "type": "directory"
     }
   ],

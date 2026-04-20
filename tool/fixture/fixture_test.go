@@ -15,7 +15,7 @@ import (
 )
 
 func TestSearchTool(t *testing.T) {
-	driver, err := NewSearchTool(filepath.Join("..", "..", "fixtures", "corpus"))
+	driver, err := NewSearchTool(filepath.Join("..", "..", "testdata", "corpus"))
 	if err != nil {
 		t.Fatalf("NewSearchTool() error = %v", err)
 	}

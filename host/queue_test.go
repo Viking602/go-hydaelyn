@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/scheduler"
 	"github.com/Viking602/go-hydaelyn/internal/session"
