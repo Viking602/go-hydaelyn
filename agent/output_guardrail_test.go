@@ -8,7 +8,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 func TestEngineOutputGuardrailCanReplaceFinalOutput(t *testing.T) {
@@ -252,7 +252,7 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 			},
 		},
 	}
-	toolDriver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	toolDriver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil

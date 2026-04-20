@@ -35,7 +35,8 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ tool.Mode
 	_ = kit.Profile("researcher")
 
-	runner := host.New(host.Config{})
+	runner := New(Config{})
+	var _ *Runtime = runner
 	runner.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {
 		return capability.Result{Output: "ok"}, nil
 	})

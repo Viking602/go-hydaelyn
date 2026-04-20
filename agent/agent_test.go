@@ -9,7 +9,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type fakeProvider struct{}
@@ -39,7 +39,7 @@ func (f fakeProvider) Stream(_ context.Context, request provider.Request) (provi
 }
 
 func TestEngineRunsToolLoop(t *testing.T) {
-	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil
@@ -195,7 +195,7 @@ func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 			},
 		},
 	}
-	driverTool, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	driverTool, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil
