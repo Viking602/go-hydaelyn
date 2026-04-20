@@ -1,4 +1,5 @@
 .claude/
+.omc/
 .sisyphus/
 .sentrux/
 benchmarks/_external/
