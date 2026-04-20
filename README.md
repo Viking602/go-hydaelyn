@@ -2,7 +2,7 @@
 
 Hydaelyn is a multi-agent parallel runtime for Go.
 
-Embed it into your application with `host` to run supervisor-controlled teams, deepsearch-style research flows, and other parallel agent workflows inside a normal Go program.
+Embed it into your application with `hydaelyn` (or the lower-level `host` package) to run supervisor-controlled teams, deepsearch-style research flows, and other parallel agent workflows inside a normal Go program.
 
 ## Install
 
@@ -21,8 +21,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
+	"github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -42,12 +42,12 @@ func (echoProvider) Stream(_ context.Context, request provider.Request) (provide
 }
 
 func main() {
-	runner := host.New(host.Config{})
+	runner := hydaelyn.New(hydaelyn.Config{})
 	runner.RegisterProvider("echo", echoProvider{})
 	runner.RegisterPattern(deepsearch.New())
 	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
 	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
+	state, err := runner.StartTeam(context.Background(), hydaelyn.StartTeamRequest{
 		Pattern:           "deepsearch",
 		SupervisorProfile: "supervisor",
 		WorkerProfiles:    []string{"researcher", "researcher"},
@@ -71,11 +71,14 @@ Hydaelyn centers on the `deepsearch` pattern: parallel research tasks run simult
 
 ### Examples
 
-- [examples/research](examples/research/main.go) - Local quickstart
-- [examples/collab](examples/collab/main.go) - Collaboration pattern
-- [examples/tooling](examples/tooling/main.go) - Tool integration
-- [examples/approval](examples/approval/main.go) - Approval flows
-- [examples/durable](examples/durable/main.go) - Durable execution
+- [_examples/research](_examples/research/main.go) - Local quickstart
+- [_examples/collab](_examples/collab/main.go) - Collaboration pattern
+- [_examples/tooling](_examples/tooling/main.go) - Tool integration
+- [_examples/approval](_examples/approval/main.go) - Approval flows
+- [_examples/durable](_examples/durable/main.go) - Durable execution
+
+Examples live under `_examples/` (leading underscore) so they are skipped
+by `go build ./...`. Build or run one explicitly with `go run ./_examples/research/`.
 
 ### Read Next
 
