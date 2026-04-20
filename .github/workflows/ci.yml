@@ -83,16 +83,16 @@ jobs:
           go-version-file: go.mod
 
       - name: Run deterministic eval suite
-        run: go test ./evaluation/... -run 'TestDeterministicEval' -count=1 -v
+        run: go test ./eval/... -run 'TestDeterministicEval' -count=1 -v
 
       - name: Run safety critical tests
-        run: go test ./evaluation/... -run 'TestSafetyCritical' -count=1 -v
+        run: go test ./eval/... -run 'TestSafetyCritical' -count=1 -v
 
       - name: Run replay invariant tests
-        run: go test ./evaluation/... -run 'TestReplayInvariant' -count=1 -v
+        run: go test ./eval/... -run 'TestReplayInvariant' -count=1 -v
 
       - name: Run release gate tests
-        run: go test ./evaluation/... -run 'TestReleaseGate' -count=1 -v
+        run: go test ./eval/... -run 'TestReleaseGate' -count=1 -v
 
       - name: Upload eval artifacts
         uses: actions/upload-artifact@v4
