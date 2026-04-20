@@ -8,7 +8,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/planner"
-	"github.com/Viking602/go-hydaelyn/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 

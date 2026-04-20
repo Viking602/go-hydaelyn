@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
-	"github.com/Viking602/go-hydaelyn/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/scheduler"
 	"github.com/Viking602/go-hydaelyn/team"
 )

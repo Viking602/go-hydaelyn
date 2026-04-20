@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/program"
-	"github.com/Viking602/go-hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/internal/workflow"
 )
 
 type Decision string

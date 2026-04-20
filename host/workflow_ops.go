@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/internal/workflow"
 )
 
 func (r *Runtime) StartWorkflow(ctx context.Context, name string, input map[string]any) (workflow.State, error) {

@@ -16,14 +16,14 @@ import (
 	"github.com/Viking602/go-hydaelyn/mcp"
 	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/observe"
-	"github.com/Viking602/go-hydaelyn/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/scheduler"
-	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/workflow"
+	"github.com/Viking602/go-hydaelyn/internal/workflow"
 )
 
 var ErrProviderNotFound = errors.New("provider not found")

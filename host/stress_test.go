@@ -13,7 +13,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/session"
+	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 

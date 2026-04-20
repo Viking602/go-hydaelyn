@@ -11,7 +11,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/mcp"
 	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/planner"
-	"github.com/Viking602/go-hydaelyn/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/scheduler"
 	"github.com/Viking602/go-hydaelyn/security"
 	"github.com/Viking602/go-hydaelyn/team"

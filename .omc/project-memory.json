@@ -505,6 +505,12 @@
       "type": "file"
     },
     {
+      "path": "host/aliases.go",
+      "accessCount": 3,
+      "lastAccessed": 1776664457406,
+      "type": "file"
+    },
+    {
       "path": "agent/agent.go",
       "accessCount": 2,
       "lastAccessed": 1776663465954,
@@ -551,12 +557,6 @@
       "accessCount": 2,
       "lastAccessed": 1776664129501,
       "type": "directory"
-    },
-    {
-      "path": "host/aliases.go",
-      "accessCount": 2,
-      "lastAccessed": 1776664373095,
-      "type": "file"
     },
     {
       "path": "providers/openai/stream.go",
@@ -665,6 +665,12 @@
       "accessCount": 1,
       "lastAccessed": 1776664186193,
       "type": "file"
+    },
+    {
+      "path": "storage",
+      "accessCount": 1,
+      "lastAccessed": 1776664410167,
+      "type": "directory"
     }
   ],
   "userDirectives": []
