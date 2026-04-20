@@ -11,7 +11,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/auth"
 	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/compact"
+	"github.com/Viking602/go-hydaelyn/internal/compact"
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/mcp"
 	"github.com/Viking602/go-hydaelyn/middleware"

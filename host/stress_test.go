@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/compact"
+	"github.com/Viking602/go-hydaelyn/internal/compact"
 	"github.com/Viking602/go-hydaelyn/evaluation"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"rtk find examples -name \\\"*.go\\\" -exec grep \\\"^package\\\" {} \\\\;\"}",
+  "error": "Exit code 1\nError: rtk find does not support compound predicates or actions (e.g. -not, -exec). Use `find` directly.",
+  "timestamp": "2026-04-20T05:38:22.728Z",
+  "retry_count": 5
+}
