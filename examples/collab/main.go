@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/patterns/collab"
-	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
+	"github.com/Viking602/go-hydaelyn/pattern/collab"
+	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/team"
 )

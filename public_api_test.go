@@ -8,7 +8,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/mcp"
+	"github.com/Viking602/go-hydaelyn/transport/mcp"
 	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/internal/plugin"

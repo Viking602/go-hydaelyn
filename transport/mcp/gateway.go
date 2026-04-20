@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
 )
 
@@ -21,5 +21,5 @@ func NewGateway(client *mcpclient.Client) ClientGateway {
 }
 
 func (g ClientGateway) ImportTools(ctx context.Context) ([]tool.Driver, error) {
-	return toolkit.ImportMCPTools(ctx, g.Client)
+	return kit.ImportMCPTools(ctx, g.Client)
 }

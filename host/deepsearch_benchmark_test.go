@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
+	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/team"
 )
