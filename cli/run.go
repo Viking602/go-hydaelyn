@@ -11,8 +11,8 @@ import (
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/patterns/deepsearch"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/providers/anthropic"
-	"github.com/Viking602/go-hydaelyn/providers/openai"
+	"github.com/Viking602/go-hydaelyn/provider/anthropic"
+	"github.com/Viking602/go-hydaelyn/provider/openai"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 

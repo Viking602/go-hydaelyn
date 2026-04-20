@@ -11,7 +11,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/providers/shared"
+	"github.com/Viking602/go-hydaelyn/provider/shared"
 )
 
 type chatCompletionRequest struct {
