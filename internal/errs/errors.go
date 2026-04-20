@@ -1,7 +1,7 @@
 // Package errors provides structured error types used across the framework.
 // These patterns are inspired by real-world agent CLI systems to enable
 // precise error classification, telemetry safety, and user-facing messaging.
-package errors
+package errs
 
 import (
 	"errors"
