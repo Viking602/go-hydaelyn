@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	securityctx "github.com/Viking602/go-hydaelyn/security"
+	securityctx "github.com/Viking602/go-hydaelyn/internal/security"
 )
 
 type ApprovalGrant struct {
