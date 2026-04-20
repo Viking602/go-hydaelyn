@@ -16,7 +16,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/security"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 func TestPublicAPISmoke(t *testing.T) {
@@ -33,7 +33,7 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ scheduler.TaskLease
 	var _ team.RunState
 	var _ tool.Mode
-	_ = toolkit.Profile("researcher")
+	_ = kit.Profile("researcher")
 
 	runner := host.New(host.Config{})
 	runner.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {

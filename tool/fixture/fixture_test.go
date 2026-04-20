@@ -11,7 +11,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tooltest"
+	"github.com/Viking602/go-hydaelyn/tool/tooltest"
 )
 
 func TestSearchTool(t *testing.T) {

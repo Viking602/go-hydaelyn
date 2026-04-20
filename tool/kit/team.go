@@ -1,4 +1,4 @@
-package toolkit
+package kit
 
 import "github.com/Viking602/go-hydaelyn/team"
 

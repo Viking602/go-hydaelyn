@@ -15,7 +15,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type observerSpy struct {
@@ -122,7 +122,7 @@ func TestObserverPluginAndMiddlewareAreInvoked(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(provider) error = %v", err)
 	}
-	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+	driver, err := kit.Tool("answer", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		return "topic:" + input.Topic, nil
@@ -236,7 +236,7 @@ func TestProviderAndToolPluginsFlowThroughCapabilityMiddleware(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(provider) error = %v", err)
 	}
-	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+	driver, err := kit.Tool("answer", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		return "topic:" + input.Topic, nil
@@ -295,7 +295,7 @@ func TestObserverPluginAcceptsObserveObserver(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterPlugin(provider) error = %v", err)
 	}
-	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+	driver, err := kit.Tool("answer", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		return "topic:" + input.Topic, nil

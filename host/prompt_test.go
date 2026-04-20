@@ -13,7 +13,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type fakeProvider struct{}
@@ -45,7 +45,7 @@ func (fakeProvider) Stream(_ context.Context, request provider.Request) (provide
 func TestPrompt(t *testing.T) {
 	runner := New(Config{})
 	runner.RegisterProvider("fake", fakeProvider{})
-	driver, err := toolkit.Tool("answer", func(_ context.Context, input struct {
+	driver, err := kit.Tool("answer", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		return "topic:" + input.Topic, nil

@@ -12,7 +12,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type capabilityProvider struct{}
@@ -49,7 +49,7 @@ func TestCapabilityMiddlewareObservesLLMAndToolCalls(t *testing.T) {
 		return next(ctx, call)
 	}))
 	runner.RegisterProvider("cap-provider", capabilityProvider{})
-	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil
@@ -168,10 +168,10 @@ func TestCapabilityToolDriverUsesTrustedSecurityContextPermissions(t *testing.T)
 
 	runner := New(Config{})
 	runner.UseCapabilityMiddleware(capability.RequirePermissions())
-	driver, err := toolkit.Tool(
+	driver, err := kit.Tool(
 		"guarded-write",
 		func(_ context.Context, _ struct{}) (string, error) { return "ok", nil },
-		toolkit.RequiredPermissions("tool:guarded-write"),
+		kit.RequiredPermissions("tool:guarded-write"),
 	)
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
@@ -202,10 +202,10 @@ func TestCapabilityToolDriverFallsBackToMetadataPermissions(t *testing.T) {
 
 	runner := New(Config{})
 	runner.UseCapabilityMiddleware(capability.RequirePermissions())
-	driver, err := toolkit.Tool(
+	driver, err := kit.Tool(
 		"legacy-guarded-write",
 		func(_ context.Context, _ struct{}) (string, error) { return "ok", nil },
-		toolkit.Metadata(map[string]string{"permission": "tool:legacy-guarded-write"}),
+		kit.Metadata(map[string]string{"permission": "tool:legacy-guarded-write"}),
 	)
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)

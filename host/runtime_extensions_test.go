@@ -15,7 +15,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type orderedExtensionProvider struct {
@@ -82,7 +82,7 @@ func TestUseStageMiddlewareDelegatesToPromptLifecycle(t *testing.T) {
 	runner := New(Config{})
 	providerDriver := &orderedExtensionProvider{}
 	runner.RegisterProvider("ordered-extension", providerDriver)
-	driver, err := toolkit.Tool("trace-tool", func(_ context.Context, input struct {
+	driver, err := kit.Tool("trace-tool", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		return "topic:" + input.Topic, nil
@@ -155,7 +155,7 @@ func TestExtensionExecutionOrder(t *testing.T) {
 	runner.RegisterProvider("ordered-extension", providerDriver)
 	trace := make([]string, 0, 16)
 
-	driver, err := toolkit.Tool("trace-tool", func(_ context.Context, input struct {
+	driver, err := kit.Tool("trace-tool", func(_ context.Context, input struct {
 		Topic string `json:"topic"`
 	}) (string, error) {
 		trace = append(trace, "tool.handler")

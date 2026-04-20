@@ -1,4 +1,4 @@
-package toolkit
+package kit
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tooltest"
+	"github.com/Viking602/go-hydaelyn/tool/tooltest"
 )
 
 func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {

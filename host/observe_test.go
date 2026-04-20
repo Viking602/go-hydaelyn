@@ -14,7 +14,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type observeProvider struct{}
@@ -48,7 +48,7 @@ func TestObserverCapturesTeamTaskLLMToolSignals(t *testing.T) {
 	runner := New(Config{})
 	runner.UseObserver(observer)
 	runner.RegisterProvider("observe-provider", observeProvider{})
-	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil
@@ -87,7 +87,7 @@ func TestObserverLogsCapabilityDenyWithTraceID(t *testing.T) {
 	runner.UseObserver(observer)
 	runner.UseCapabilityMiddleware(capability.RequireApproval())
 	runner.RegisterProvider("observe-provider", observeProvider{})
-	driver, err := toolkit.Tool("lookup", func(_ context.Context, input struct {
+	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil

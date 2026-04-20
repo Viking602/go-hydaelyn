@@ -11,7 +11,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/toolkit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
 
 type fakeGateway struct {
@@ -53,7 +53,7 @@ var _ mcp.Gateway = fakeGateway{}
 func TestMCPGatewayPluginImportsTools(t *testing.T) {
 	runner := New(Config{})
 	runner.RegisterProvider("gateway-provider", gatewayProvider{})
-	driver, err := toolkit.Tool("mcp_lookup", func(_ context.Context, input struct {
+	driver, err := kit.Tool("mcp_lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
 	}) (string, error) {
 		return "result:" + input.Query, nil
