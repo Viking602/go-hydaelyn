@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/middleware"
+	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 

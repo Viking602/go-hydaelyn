@@ -7,7 +7,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/middleware"
+	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/plugin"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/session"
