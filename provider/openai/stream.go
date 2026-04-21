@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -81,7 +82,7 @@ type choiceChunk struct {
 }
 
 type toolCallDeltaItem struct {
-	Index    int    `json:"index"`
+	Index    *int   `json:"index"`
 	ID       string `json:"id"`
 	Function struct {
 		Name      string `json:"name"`
@@ -208,10 +209,15 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		payload, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai api error: %s", strings.TrimSpace(string(payload)))
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("openai api returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	if !isEventStreamContentType(resp.Header.Get("Content-Type")) {
+		defer resp.Body.Close()
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("openai api returned unexpected content type %q: %s", resp.Header.Get("Content-Type"), strings.TrimSpace(string(payload)))
 	}
 	return &openAIStream{
 		body:  resp.Body,
@@ -306,6 +312,7 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 				s.state.pending = append(s.state.pending, provider.Event{
 					Kind: provider.EventToolCallDelta,
 					ToolCallDelta: &provider.ToolCallDelta{
+						Index:          item.Index,
 						ID:             item.ID,
 						Name:           item.Function.Name,
 						ArgumentsDelta: item.Function.Arguments,
@@ -401,4 +408,15 @@ func mapOpenAIStopReason(reason string) provider.StopReason {
 	default:
 		return provider.StopReasonUnknown
 	}
+}
+
+func isEventStreamContentType(contentType string) bool {
+	if strings.TrimSpace(contentType) == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+	return strings.EqualFold(mediaType, "text/event-stream")
 }

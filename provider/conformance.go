@@ -23,6 +23,9 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 	response := NormalizedResponse{}
 	builders := map[string]*toolCallBuilder{}
 	order := make([]string, 0)
+	idKeys := map[string]string{}
+	indexKeys := map[int]string{}
+	syntheticSeq := 0
 
 	for _, event := range events {
 		response.Usage = response.Usage.Add(event.Usage)
@@ -35,13 +38,7 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			if event.ToolCall == nil {
 				continue
 			}
-			key, builder, err := ensureToolCallBuilder(builders, order, event.ToolCall.ID)
-			if err != nil {
-				return NormalizedResponse{}, err
-			}
-			if !contains(order, key) {
-				order = append(order, key)
-			}
+			key, builder := ensureToolCallBuilder(builders, &order, idKeys, indexKeys, event.ToolCall.ID, nil, &syntheticSeq)
 			if builder.fullSeen {
 				return NormalizedResponse{}, fmt.Errorf("%w: %s", ErrDuplicateToolCallID, builder.ID)
 			}
@@ -60,15 +57,13 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			if event.ToolCallDelta == nil {
 				continue
 			}
-			key, builder, err := ensureToolCallBuilder(builders, order, event.ToolCallDelta.ID)
-			if err != nil {
-				return NormalizedResponse{}, err
-			}
-			if !contains(order, key) {
-				order = append(order, key)
-			}
+			key, builder := ensureToolCallBuilder(builders, &order, idKeys, indexKeys, event.ToolCallDelta.ID, event.ToolCallDelta.Index, &syntheticSeq)
 			if event.ToolCallDelta.ID != "" {
 				builder.ID = event.ToolCallDelta.ID
+			}
+			if event.ToolCallDelta.Index != nil {
+				idx := *event.ToolCallDelta.Index
+				builder.Index = &idx
 			}
 			if event.ToolCallDelta.Name != "" {
 				builder.Name = event.ToolCallDelta.Name
@@ -94,7 +89,7 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			continue
 		}
 		if builder.Arguments != "" && !json.Valid([]byte(builder.Arguments)) {
-			return NormalizedResponse{}, fmt.Errorf("%w: %s", ErrInvalidToolCallArguments, builder.ID)
+			return NormalizedResponse{}, fmt.Errorf("%w: %s", ErrInvalidToolCallArguments, toolCallBuilderLabel(key, builder))
 		}
 		response.ToolCalls = append(response.ToolCalls, message.ToolCall{
 			ID:        builder.ID,
@@ -107,29 +102,75 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 
 type toolCallBuilder struct {
 	ID        string
+	Index     *int
 	Name      string
 	Arguments string
 	fullSeen  bool
 }
 
-func ensureToolCallBuilder(builders map[string]*toolCallBuilder, order []string, id string) (string, *toolCallBuilder, error) {
-	key := id
-	if key == "" {
-		key = fmt.Sprintf("tool-call-%d", len(order))
-	}
-	if builder, ok := builders[key]; ok {
-		return key, builder, nil
-	}
-	builder := &toolCallBuilder{ID: id}
-	builders[key] = builder
-	return key, builder, nil
-}
-
-func contains(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
+func ensureToolCallBuilder(builders map[string]*toolCallBuilder, order *[]string, idKeys map[string]string, indexKeys map[int]string, id string, index *int, syntheticSeq *int) (string, *toolCallBuilder) {
+	if id != "" {
+		if key, ok := idKeys[id]; ok {
+			builder := builders[key]
+			if index != nil {
+				indexKeys[*index] = key
+			}
+			return key, builder
 		}
 	}
-	return false
+	if index != nil {
+		if key, ok := indexKeys[*index]; ok {
+			builder := builders[key]
+			if id != "" {
+				idKeys[id] = key
+			}
+			return key, builder
+		}
+	}
+
+	var key string
+	switch {
+	case id != "":
+		key = "id:" + id
+	case index != nil:
+		key = fmt.Sprintf("index:%d", *index)
+	default:
+		key = fmt.Sprintf("tool-call-%d", *syntheticSeq)
+		*syntheticSeq++
+	}
+	if builder, ok := builders[key]; ok {
+		if id != "" {
+			idKeys[id] = key
+		}
+		if index != nil {
+			indexKeys[*index] = key
+		}
+		return key, builder
+	}
+
+	builder := &toolCallBuilder{ID: id}
+	if id != "" {
+		idKeys[id] = key
+	}
+	if index != nil {
+		idx := *index
+		builder.Index = &idx
+		indexKeys[idx] = key
+	}
+	builders[key] = builder
+	*order = append(*order, key)
+	return key, builder
+}
+
+func toolCallBuilderLabel(key string, builder *toolCallBuilder) string {
+	if builder == nil {
+		return key
+	}
+	if builder.ID != "" {
+		return builder.ID
+	}
+	if builder.Index != nil {
+		return fmt.Sprintf("index:%d", *builder.Index)
+	}
+	return key
 }

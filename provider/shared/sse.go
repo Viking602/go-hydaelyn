@@ -16,13 +16,11 @@ type Event struct {
 
 // Reader incrementally parses SSE frames from a text stream.
 type Reader struct {
-	scanner *bufio.Scanner
+	reader *bufio.Reader
 }
 
 func NewReader(body io.Reader) *Reader {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	return &Reader{scanner: scanner}
+	return &Reader{reader: bufio.NewReader(body)}
 }
 
 // Next reads and returns the next SSE frame.
@@ -38,8 +36,14 @@ func (r *Reader) Next() (Event, error) {
 		id      string
 		comment string
 	)
-	for r.scanner.Scan() {
-		line := r.scanner.Text()
+	for {
+		line, err := r.readLine()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return Event{}, err
+		}
 		if strings.TrimSpace(line) == "" {
 			// Empty line terminates a frame. Skip if frame is entirely empty.
 			if len(data) == 0 && name == "" && id == "" && comment == "" {
@@ -68,9 +72,6 @@ func (r *Reader) Next() (Event, error) {
 			// retry: is intentionally ignored
 		}
 	}
-	if err := r.scanner.Err(); err != nil {
-		return Event{}, err
-	}
 	if len(data) > 0 || name != "" || id != "" || comment != "" {
 		return Event{
 			Name:    name,
@@ -80,6 +81,19 @@ func (r *Reader) Next() (Event, error) {
 		}, nil
 	}
 	return Event{}, io.EOF
+}
+
+func (r *Reader) readLine() (string, error) {
+	line, err := r.reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if err == io.EOF && len(line) == 0 {
+		return "", io.EOF
+	}
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	return line, nil
 }
 
 // parseSSELine splits an SSE field line into (field, value).

@@ -280,12 +280,24 @@ func (r *Runtime) processQueuedLease(ctx context.Context, current team.RunState,
 // runPreparedLease executes a prepared lease. Safe to call concurrently from
 // multiple goroutines; per-profile semaphores throttle real parallelism.
 func (r *Runtime) runPreparedLease(ctx context.Context, current team.RunState, prepared preparedLease, semByProfile map[string]chan struct{}) taskOutcome {
+	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, prepared.lease, localQueueLeaseTTL)
 	releaseSemaphore := func() {}
 	if sem, ok := semByProfile[prepared.profile.Name]; ok {
-		sem <- struct{}{}
-		releaseSemaphore = func() { <-sem }
+		var err error
+		releaseSemaphore, err = acquireProfileSemaphore(ctx, sem)
+		if err != nil {
+			stopHeartbeat()
+			_ = r.leaseReleaser.Release(ctx, prepared.lease)
+			failed, _ := finalizeTaskFailure(prepared.original, err)
+			return taskOutcome{
+				index:    prepared.index,
+				task:     failed,
+				err:      err,
+				leaseID:  prepared.lease.LeaseID,
+				workerID: prepared.lease.WorkerID,
+			}
+		}
 	}
-	stopHeartbeat := startLeaseHeartbeat(ctx, r.queue, prepared.lease, localQueueLeaseTTL)
 	leaseCtx := withTaskEventContext(ctx, taskEventContext{LeaseID: prepared.lease.LeaseID, WorkerID: prepared.lease.WorkerID})
 	item, err := r.executeTask(leaseCtx, current, prepared.original, prepared.agentInstance, prepared.profile)
 	// Stop heartbeat BEFORE releasing the lease so we don't issue a

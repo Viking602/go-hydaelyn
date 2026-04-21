@@ -51,6 +51,7 @@ func (u Usage) Add(v Usage) Usage {
 }
 
 type ToolCallDelta struct {
+	Index          *int   `json:"index,omitempty"`
 	ID             string `json:"id,omitempty"`
 	Name           string `json:"name,omitempty"`
 	ArgumentsDelta string `json:"argumentsDelta,omitempty"`

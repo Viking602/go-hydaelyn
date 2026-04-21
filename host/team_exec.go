@@ -10,9 +10,9 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/internal/blackboard"
-	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/internal/session"
+	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -172,7 +172,9 @@ func (r *Runtime) driveTeam(ctx context.Context, pattern team.Pattern, state tea
 	if current.Result == nil {
 		current.Result = &team.Result{Error: "team exceeded execution steps"}
 	}
-	_ = r.saveTeam(ctx, &current)
+	if err := r.saveTeam(ctx, &current); err != nil {
+		return current, err
+	}
 	return current, nil
 }
 
@@ -647,6 +649,18 @@ func (r *Runtime) buildProfileSemaphores(current team.RunState, runnableSet map[
 	return semByProfile, nil
 }
 
+func acquireProfileSemaphore(ctx context.Context, sem chan struct{}) (func(), error) {
+	if sem == nil {
+		return func() {}, nil
+	}
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return func() {}, ctx.Err()
+	}
+}
+
 func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunState, runnableSet map[string]struct{}, semByProfile map[string]chan struct{}) <-chan taskOutcome {
 	runnableCount := len(runnableSet)
 	results := make(chan taskOutcome, runnableCount)
@@ -680,9 +694,18 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 				}
 				return
 			}
+			releaseSemaphore := func() {}
 			if sem, ok := semByProfile[profile.Name]; ok {
-				sem <- struct{}{}
-				defer func() { <-sem }()
+				releaseSemaphore, err = acquireProfileSemaphore(taskCtx, sem)
+				if err != nil {
+					failed, _ := finalizeTaskFailure(original, err)
+					results <- taskOutcome{index: index, task: failed, err: err, workerID: r.workerID}
+					if shouldCancelSiblingBatch(failed, err) {
+						cancelOnce.Do(siblingCancel)
+					}
+					return
+				}
+				defer releaseSemaphore()
 			}
 			item, err := r.executeTask(taskCtx, current, original, agentInstance, profile)
 			if shouldCancelSiblingBatch(item, err) {
@@ -756,9 +779,9 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 		inboxMsg.AgentID = agentInstance.ID
 		inboxMsg.Visibility = message.VisibilityPrivate
 		inboxMsg.Metadata = map[string]string{
-			"taskId":         task.ID,
-			"mailboxInbox":   "true",
-			"envelopeCount":  fmt.Sprintf("%d", len(inbox)),
+			"taskId":        task.ID,
+			"mailboxInbox":  "true",
+			"envelopeCount": fmt.Sprintf("%d", len(inbox)),
 		}
 		initialMessages = append(initialMessages, inboxMsg)
 		if _, perr := r.appendSessionMessages(ctx, task.SessionID, inboxMsg); perr == nil {
