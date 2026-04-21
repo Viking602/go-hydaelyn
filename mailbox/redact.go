@@ -48,16 +48,3 @@ func normalizeLetter(l Letter) Letter {
 func bodyBytes(l Letter) int {
 	return len(l.Subject) + len(l.Body)
 }
-
-// truncateForPrompt returns an inline-safe preview of a letter's body for
-// prompt injection. If the body is oversized, it's truncated with an ellipsis
-// and a size hint.
-func truncateForPrompt(body string, max int) string {
-	if max <= 0 || len(body) <= max {
-		return body
-	}
-	if max < 16 {
-		return body[:max]
-	}
-	return body[:max-3] + "..."
-}
