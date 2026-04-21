@@ -39,12 +39,12 @@ type (
 	PluginRegistry = plugin.Registry
 
 	// Session family (from internal/session).
-	Session              = session.Session
-	SessionEntry         = session.Entry
-	SessionSnapshot      = session.Snapshot
-	SessionCreateParams  = session.CreateParams
-	SessionStore         = session.Store
-	MemorySessionStore   = session.MemoryStore
+	Session             = session.Session
+	SessionEntry        = session.Entry
+	SessionSnapshot     = session.Snapshot
+	SessionCreateParams = session.CreateParams
+	SessionStore        = session.Store
+	MemorySessionStore  = session.MemoryStore
 
 	// Workflow family (from internal/workflow).
 	WorkflowStatus      = workflow.Status
@@ -70,9 +70,9 @@ var (
 	PluginTypeScheduler  = plugin.TypeScheduler
 	PluginTypeMCPGateway = plugin.TypeMCPGateway
 
-	ErrInvalidPluginSpec   = plugin.ErrInvalidSpec
-	ErrDuplicatePlugin     = plugin.ErrDuplicate
-	ErrSessionNotFound     = session.ErrSessionNotFound
+	ErrInvalidPluginSpec = plugin.ErrInvalidSpec
+	ErrDuplicatePlugin   = plugin.ErrDuplicate
+	ErrSessionNotFound   = session.ErrSessionNotFound
 )
 
 // Re-exported constructors for internal types that have no useful external

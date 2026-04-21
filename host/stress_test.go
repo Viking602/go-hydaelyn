@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/compact"
 	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/go-hydaelyn/internal/compact"
+	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 

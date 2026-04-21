@@ -5,18 +5,18 @@ import (
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/capability"
 	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/transport/mcp"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/security"
 	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/planner"
-	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/scheduler"
-	"github.com/Viking602/go-hydaelyn/internal/security"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
 
 func TestPublicAPISmoke(t *testing.T) {

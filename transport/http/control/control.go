@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"

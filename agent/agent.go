@@ -61,16 +61,14 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 	}
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
-	lastStopReason := provider.StopReasonUnknown
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
 		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
 		if err != nil {
 			return Result{}, err
 		}
 		totalUsage = totalUsage.Add(usage)
-		lastStopReason = stopReason
 		if len(assistant.ToolCalls) == 0 {
-			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, lastStopReason)
+			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
 			if err != nil {
 				return Result{}, err
 			}
@@ -90,7 +88,7 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 			return Result{
 				Messages:   current,
 				Usage:      totalUsage,
-				StopReason: lastStopReason,
+				StopReason: stopReason,
 				Iterations: iteration + 1,
 				Thinking:   finalOutput.Thinking,
 			}, nil

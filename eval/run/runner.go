@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/eval/cases"
 	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/go-hydaelyn/eval/cases"
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/pattern/collab"
@@ -295,9 +295,9 @@ func buildTool(name, corpusPath string) (tool.Driver, error) {
 
 func buildRunMetadata(evalCase eval.EvalCase) (string, string, error) {
 	payload, err := json.Marshal(struct {
-		Pattern  string                       `json:"pattern"`
+		Pattern  string                 `json:"pattern"`
 		Provider *eval.EvalCaseProvider `json:"provider,omitempty"`
-		Tools    []string                     `json:"tools,omitempty"`
+		Tools    []string               `json:"tools,omitempty"`
 		Profiles *eval.EvalCaseProfiles `json:"profiles,omitempty"`
 	}{
 		Pattern:  evalCase.Pattern,

@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/Viking602/go-hydaelyn/internal/session"
-	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/internal/workflow"
+	"github.com/Viking602/go-hydaelyn/team"
 )
 
 type RunStore interface {

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/transport/mcp"
-	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/internal/plugin"
-	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/internal/session"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
 
 type fakeGateway struct {

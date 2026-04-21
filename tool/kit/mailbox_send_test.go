@@ -31,7 +31,7 @@ func (s *stubMailbox) Send(_ context.Context, in mailbox.SendInput) ([]string, e
 func (s *stubMailbox) Fetch(context.Context, string, string, int, time.Duration) ([]mailbox.Envelope, error) {
 	return nil, nil
 }
-func (s *stubMailbox) Ack(context.Context, mailbox.Receipt) error  { return nil }
+func (s *stubMailbox) Ack(context.Context, mailbox.Receipt) error { return nil }
 func (s *stubMailbox) Nack(context.Context, string, string) error { return nil }
 func (s *stubMailbox) Peek(context.Context, string, string, int) ([]mailbox.Envelope, error) {
 	return nil, nil

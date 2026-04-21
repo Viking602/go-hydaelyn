@@ -60,7 +60,7 @@ func (t *concurrencyTracker) Start() {
 	}
 }
 
-func (t *concurrencyTracker) Done() { atomic.AddInt64(&t.active, -1) }
+func (t *concurrencyTracker) Done()    { atomic.AddInt64(&t.active, -1) }
 func (t *concurrencyTracker) Max() int { return int(atomic.LoadInt64(&t.max)) }
 
 type teamLoadProvider struct {

@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
 	"github.com/Viking602/go-hydaelyn/planner"
-	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 

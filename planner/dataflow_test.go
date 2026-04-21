@@ -43,7 +43,7 @@ func TestPlannerDataflowReadsHaveCorrespondingWrites(t *testing.T) {
 func TestPlannerPublishCompletenessKeepsIntermediateAndFinalOutputsVisible(t *testing.T) {
 	template, err := BuildEngineeringWorkflowTemplate(team.StartRequest{
 		Input: map[string]any{
-			"query": "ship verified workflow",
+			"query":     "ship verified workflow",
 			"workItems": []any{map[string]any{"id": "api", "title": "implement API", "input": "Build API"}},
 		},
 	})

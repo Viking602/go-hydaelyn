@@ -12,13 +12,13 @@ type ReleaseGateInput struct {
 
 // ReleaseGateOutput is machine-readable output from release gate evaluation
 type ReleaseGateOutput struct {
-	Decision        ReleaseDecision   `json:"decision"`
-	Level           ScoreLevel        `json:"level"`
-	Score           float64           `json:"score"`
-	ReplayConsistent bool             `json:"replayConsistent"`
-	SafetyCritical  bool              `json:"safetyCritical"`
-	Reasons         []string          `json:"reasons"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	Decision         ReleaseDecision   `json:"decision"`
+	Level            ScoreLevel        `json:"level"`
+	Score            float64           `json:"score"`
+	ReplayConsistent bool              `json:"replayConsistent"`
+	SafetyCritical   bool              `json:"safetyCritical"`
+	Reasons          []string          `json:"reasons"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 // EvaluateReleaseGate evaluates a score payload and returns a release decision
@@ -127,10 +127,10 @@ func (output *ReleaseGateOutput) IsBlocking() bool {
 
 // GateCriteria defines configurable criteria for release gating
 type GateCriteria struct {
-	MinLevel              ScoreLevel `json:"minLevel"`
-	RequireReplayConsistent bool      `json:"requireReplayConsistent"`
-	BlockOnSafetyCritical   bool      `json:"blockOnSafetyCritical"`
-	MinScore                float64   `json:"minScore"`
+	MinLevel                ScoreLevel `json:"minLevel"`
+	RequireReplayConsistent bool       `json:"requireReplayConsistent"`
+	BlockOnSafetyCritical   bool       `json:"blockOnSafetyCritical"`
+	MinScore                float64    `json:"minScore"`
 }
 
 // DefaultGateCriteria returns the standard release gate criteria

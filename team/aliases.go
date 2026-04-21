@@ -24,8 +24,8 @@ type (
 )
 
 var (
-	ErrBlackboardExchangeConflict    = blackboard.ErrExchangeConflict
-	DefaultVerificationConfidence    = blackboard.DefaultVerificationConfidence
-	NewBlackboardPipeline            = blackboard.NewPipeline
+	ErrBlackboardExchangeConflict     = blackboard.ErrExchangeConflict
+	DefaultVerificationConfidence     = blackboard.DefaultVerificationConfidence
+	NewBlackboardPipeline             = blackboard.NewPipeline
 	InferBlackboardVerificationStatus = blackboard.InferVerificationStatus
 )

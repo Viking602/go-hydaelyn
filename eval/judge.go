@@ -1,10 +1,10 @@
 package eval
 
 type JudgeConfig struct {
-	Enabled              bool                                                `json:"enabled,omitempty"`
-	MinGroundedness      float64                                             `json:"minGroundedness,omitempty"`
-	RequireValidCitations bool                                               `json:"requireValidCitations,omitempty"`
-	Judge                func(answer string, corpus Corpus) (JudgeVerdict, error) `json:"-"`
+	Enabled               bool                                                     `json:"enabled,omitempty"`
+	MinGroundedness       float64                                                  `json:"minGroundedness,omitempty"`
+	RequireValidCitations bool                                                     `json:"requireValidCitations,omitempty"`
+	Judge                 func(answer string, corpus Corpus) (JudgeVerdict, error) `json:"-"`
 }
 
 type JudgeVerdict struct {
@@ -15,16 +15,16 @@ type JudgeVerdict struct {
 }
 
 type JudgeResult struct {
-	Invoked               bool         `json:"invoked,omitempty"`
-	ManifestRecorded      bool         `json:"manifestRecorded,omitempty"`
-	Passed                bool         `json:"passed,omitempty"`
-	DeterministicPass     bool         `json:"deterministicPass,omitempty"`
-	DeterministicFailures []string     `json:"deterministicFailures,omitempty"`
+	Invoked               bool               `json:"invoked,omitempty"`
+	ManifestRecorded      bool               `json:"manifestRecorded,omitempty"`
+	Passed                bool               `json:"passed,omitempty"`
+	DeterministicPass     bool               `json:"deterministicPass,omitempty"`
+	DeterministicFailures []string           `json:"deterministicFailures,omitempty"`
 	Groundedness          GroundednessResult `json:"groundedness,omitempty"`
 	Citations             CitationResult     `json:"citations,omitempty"`
 	Refusal               RefusalResult      `json:"refusal,omitempty"`
-	Verdict               *JudgeVerdict `json:"verdict,omitempty"`
-	Error                 string       `json:"error,omitempty"`
+	Verdict               *JudgeVerdict      `json:"verdict,omitempty"`
+	Error                 string             `json:"error,omitempty"`
 }
 
 func JudgeWithLLM(answer string, corpus Corpus, judgeConfig JudgeConfig) JudgeResult {
@@ -59,7 +59,7 @@ func JudgeWithLLM(answer string, corpus Corpus, judgeConfig JudgeConfig) JudgeRe
 	}
 
 	result.Invoked = true
-		result.ManifestRecorded = true
+	result.ManifestRecorded = true
 	verdict, err := judgeConfig.Judge(answer, corpus)
 	if err != nil {
 		result.Error = err.Error()

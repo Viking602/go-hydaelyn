@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/internal/session"
+	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 )

@@ -10,43 +10,43 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/eval/cases"
 	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/go-hydaelyn/eval/cases"
 )
 
 const SuiteRunSchemaVersion = "1.0"
 
 type SuiteRun struct {
-	SchemaVersion    string                       `json:"schemaVersion"`
-	ID               string                       `json:"id"`
-	Name             string                       `json:"name"`
-	Root             string                       `json:"root,omitempty"`
-	OutputDir        string                       `json:"outputDir,omitempty"`
-	StartedAt        time.Time                    `json:"startedAt"`
-	CompletedAt      time.Time                    `json:"completedAt"`
-	TotalCases       int                          `json:"totalCases"`
-	Passed           int                          `json:"passed"`
-	Failed           int                          `json:"failed"`
-	Pass             bool                         `json:"pass"`
+	SchemaVersion    string                 `json:"schemaVersion"`
+	ID               string                 `json:"id"`
+	Name             string                 `json:"name"`
+	Root             string                 `json:"root,omitempty"`
+	OutputDir        string                 `json:"outputDir,omitempty"`
+	StartedAt        time.Time              `json:"startedAt"`
+	CompletedAt      time.Time              `json:"completedAt"`
+	TotalCases       int                    `json:"totalCases"`
+	Passed           int                    `json:"passed"`
+	Failed           int                    `json:"failed"`
+	Pass             bool                   `json:"pass"`
 	AggregateScore   *eval.ScorePayload     `json:"aggregateScore,omitempty"`
 	CapabilityReport *eval.CapabilityReport `json:"capabilityReport,omitempty"`
 	ReleaseDecision  eval.ReleaseDecision   `json:"releaseDecision,omitempty"`
-	Cases            []SuiteCaseResult            `json:"cases,omitempty"`
-	Artifacts        map[string]string            `json:"artifacts,omitempty"`
+	Cases            []SuiteCaseResult      `json:"cases,omitempty"`
+	Artifacts        map[string]string      `json:"artifacts,omitempty"`
 }
 
 type SuiteCaseResult struct {
-	CaseID       string                   `json:"caseId,omitempty"`
-	Suite        string                   `json:"suite,omitempty"`
-	CasePath     string                   `json:"casePath,omitempty"`
-	RunID        string                   `json:"runId,omitempty"`
+	CaseID       string             `json:"caseId,omitempty"`
+	Suite        string             `json:"suite,omitempty"`
+	CasePath     string             `json:"casePath,omitempty"`
+	RunID        string             `json:"runId,omitempty"`
 	Status       eval.EvalRunStatus `json:"status,omitempty"`
-	Pass         bool                     `json:"pass,omitempty"`
-	OverallScore float64                  `json:"overallScore,omitempty"`
+	Pass         bool               `json:"pass,omitempty"`
+	OverallScore float64            `json:"overallScore,omitempty"`
 	Level        eval.ScoreLevel    `json:"level,omitempty"`
-	OutputDir    string                   `json:"outputDir,omitempty"`
-	ScorePath    string                   `json:"scorePath,omitempty"`
-	Error        string                   `json:"error,omitempty"`
+	OutputDir    string             `json:"outputDir,omitempty"`
+	ScorePath    string             `json:"scorePath,omitempty"`
+	Error        string             `json:"error,omitempty"`
 }
 
 func (r *Runner) RunCaseDirectory(ctx context.Context, root string) (*SuiteRun, error) {

@@ -99,10 +99,10 @@ func TestDeterministicEval(t *testing.T) {
 // TestSafetyCritical tests the safety critical evaluation lane
 func TestSafetyCritical(t *testing.T) {
 	tests := []struct {
-		name           string
-		safetyMetrics  *ScoreSafetyMetrics
-		expectedLevel  ScoreLevel
-		shouldBlock    bool
+		name          string
+		safetyMetrics *ScoreSafetyMetrics
+		expectedLevel ScoreLevel
+		shouldBlock   bool
 	}{
 		{
 			name: "all safety checks pass",
