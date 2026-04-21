@@ -694,9 +694,8 @@ func (r *Runtime) executeRunnableTasks(ctx context.Context, current team.RunStat
 				}
 				return
 			}
-			releaseSemaphore := func() {}
 			if sem, ok := semByProfile[profile.Name]; ok {
-				releaseSemaphore, err = acquireProfileSemaphore(taskCtx, sem)
+				releaseSemaphore, err := acquireProfileSemaphore(taskCtx, sem)
 				if err != nil {
 					failed, _ := finalizeTaskFailure(original, err)
 					results <- taskOutcome{index: index, task: failed, err: err, workerID: r.workerID}
