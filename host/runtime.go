@@ -9,21 +9,22 @@ import (
 	"sync/atomic"
 
 	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/internal/auth"
 	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/internal/compact"
 	"github.com/Viking602/go-hydaelyn/hook"
-	"github.com/Viking602/go-hydaelyn/transport/mcp"
+	"github.com/Viking602/go-hydaelyn/internal/auth"
+	"github.com/Viking602/go-hydaelyn/internal/compact"
 	"github.com/Viking602/go-hydaelyn/internal/middleware"
-	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/internal/plugin"
+	"github.com/Viking602/go-hydaelyn/internal/session"
+	"github.com/Viking602/go-hydaelyn/internal/workflow"
+	"github.com/Viking602/go-hydaelyn/mailbox"
+	"github.com/Viking602/go-hydaelyn/observe"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/scheduler"
-	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/internal/workflow"
+	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
 
 var ErrProviderNotFound = errors.New("provider not found")
@@ -43,6 +44,11 @@ type Config struct {
 	Compactor         compact.Compactor
 	CompactThreshold  int
 	MaxTeamDriveSteps int
+	// Mailbox is an optional override. When nil, NewWithError constructs a
+	// MemoryMailbox over driver.Mailboxes().
+	Mailbox        mailbox.Mailbox
+	MailboxLimits  mailbox.Limits
+	MailboxEnabled *bool
 }
 
 type Runtime struct {
@@ -76,6 +82,8 @@ type Runtime struct {
 	activeRuns                 map[string]context.CancelFunc
 	activeTeams                map[string]context.CancelFunc
 	inlineTeamOutputGuardrails map[string][]agent.OutputGuardrail
+	mailbox                    mailbox.Mailbox
+	mailboxLimits              mailbox.Limits
 }
 
 func New(config Config) *Runtime {
@@ -115,9 +123,21 @@ func NewWithError(config Config) (*Runtime, error) {
 		activeRuns:                 map[string]context.CancelFunc{},
 		activeTeams:                map[string]context.CancelFunc{},
 		inlineTeamOutputGuardrails: map[string][]agent.OutputGuardrail{},
+		mailboxLimits:              config.MailboxLimits.ApplyDefaults(),
 	}
 	if runner.workerID == "" {
 		runner.workerID = runner.nextWorkerID()
+	}
+	if config.Mailbox != nil {
+		runner.mailbox = config.Mailbox
+	} else if !(config.MailboxEnabled != nil && !*config.MailboxEnabled) {
+		if store := driver.Mailboxes(); store != nil {
+			mbox := mailbox.NewMemoryMailbox(store, runner.resolveRecipientsState, runner.workerID, config.MailboxLimits)
+			mbox.SetSendHook(func(ctx context.Context, env mailbox.Envelope) {
+				runner.recordMailboxEvent(ctx, storage.EventMailboxSent, env, nil)
+			})
+			runner.mailbox = mbox
+		}
 	}
 	for _, spec := range config.Plugins {
 		if err := runner.RegisterPlugin(spec); err != nil {

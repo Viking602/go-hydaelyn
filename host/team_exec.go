@@ -749,11 +749,31 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 	if err != nil {
 		return finalizeTaskFailure(task, err)
 	}
+	inboxText, inbox := r.drainMailboxForAgent(ctx, state.ID, agentInstance.ID, 0, 0)
+	if inboxText != "" {
+		inboxMsg := message.NewText(message.RoleUser, inboxText)
+		inboxMsg.TeamID = state.ID
+		inboxMsg.AgentID = agentInstance.ID
+		inboxMsg.Visibility = message.VisibilityPrivate
+		inboxMsg.Metadata = map[string]string{
+			"taskId":         task.ID,
+			"mailboxInbox":   "true",
+			"envelopeCount":  fmt.Sprintf("%d", len(inbox)),
+		}
+		initialMessages = append(initialMessages, inboxMsg)
+		if _, perr := r.appendSessionMessages(ctx, task.SessionID, inboxMsg); perr == nil {
+			for _, env := range inbox {
+				r.recordMailboxEvent(ctx, storage.EventMailboxDelivered, env, nil)
+			}
+		}
+	}
 	generated, err := r.runTaskEngine(ctx, state, task, agentInstance, profile, initialMessages)
 	if err != nil {
+		r.nackInbox(ctx, inbox, err.Error())
 		return finalizeTaskFailure(task, err)
 	}
 	if err := r.persistTaskMessages(ctx, task, generated.Messages); err != nil {
+		r.nackInbox(ctx, inbox, err.Error())
 		return finalizeTaskFailure(task, err)
 	}
 	task.Status = team.TaskStatusCompleted
@@ -762,6 +782,7 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 	task.Result.ToolCallCount = len(generated.ToolResults)
 	task.FinishedAt = time.Now().UTC()
 	r.recordTaskToolEvents(ctx, state, task, generated.ToolResults)
+	r.ackInbox(ctx, inbox, "handled")
 	return task, nil
 }
 
@@ -975,7 +996,13 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 			"profile": profile.Name,
 			"runId":   state.ID,
 		}
-		runResult, runErr := engine.Run(ctx, agent.Input{
+		runCtx := tool.WithCaller(ctx, tool.CallerInfo{
+			TeamRunID: state.ID,
+			AgentID:   agentInstance.ID,
+			TaskID:    task.ID,
+			SessionID: task.SessionID,
+		})
+		runResult, runErr := engine.Run(runCtx, agent.Input{
 			Model:            profile.Model,
 			Messages:         initialMessages,
 			ToolMode:         tool.ModeParallel,

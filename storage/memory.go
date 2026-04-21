@@ -17,6 +17,7 @@ type MemoryDriver struct {
 	teams     *memoryTeamStore
 	artifacts *memoryArtifactStore
 	events    *memoryEventStore
+	mailboxes *memoryMailboxStore
 }
 
 func NewMemoryDriver() *MemoryDriver {
@@ -27,6 +28,7 @@ func NewMemoryDriver() *MemoryDriver {
 		teams:     &memoryTeamStore{items: map[string]team.RunState{}},
 		artifacts: &memoryArtifactStore{items: map[string]Artifact{}},
 		events:    &memoryEventStore{items: map[string][]Event{}},
+		mailboxes: newMemoryMailboxStore(),
 	}
 }
 
@@ -52,6 +54,10 @@ func (d *MemoryDriver) Artifacts() ArtifactStore {
 
 func (d *MemoryDriver) Events() EventStore {
 	return d.events
+}
+
+func (d *MemoryDriver) Mailboxes() MailboxStore {
+	return d.mailboxes
 }
 
 type memoryRunStore struct {

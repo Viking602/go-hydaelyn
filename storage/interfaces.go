@@ -48,4 +48,5 @@ type Driver interface {
 	Teams() TeamStore
 	Artifacts() ArtifactStore
 	Events() EventStore
+	Mailboxes() MailboxStore
 }

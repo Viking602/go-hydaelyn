@@ -36,6 +36,29 @@ type Driver interface {
 
 var ErrToolNotFound = errors.New("tool not found")
 
+// CallerInfo identifies the agent invoking a tool. It is plumbed via context
+// by the runtime so tools (e.g. send_message) can discover their caller
+// without forcing the LLM to pass teamId/agentId as explicit arguments.
+type CallerInfo struct {
+	TeamRunID string
+	AgentID   string
+	TaskID    string
+	SessionID string
+}
+
+type callerKey struct{}
+
+// WithCaller returns a context carrying the given CallerInfo.
+func WithCaller(ctx context.Context, info CallerInfo) context.Context {
+	return context.WithValue(ctx, callerKey{}, info)
+}
+
+// CallerFromContext retrieves any CallerInfo previously stored via WithCaller.
+func CallerFromContext(ctx context.Context) (CallerInfo, bool) {
+	info, ok := ctx.Value(callerKey{}).(CallerInfo)
+	return info, ok
+}
+
 type Bus struct {
 	mu      sync.RWMutex
 	drivers map[string]Driver

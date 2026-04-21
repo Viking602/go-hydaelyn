@@ -18,6 +18,7 @@
 //   - [transport]  — MCP gateway and HTTP control plane
 //   - [observe]    — tracing and metrics observer interface
 //   - [capability] — capability/security policy and context plumbing
+//   - [mailbox]    — agent-to-agent signal messaging (ask/answer/delegate)
 //   - [planner]    — planner contract and template provider
 //   - [scheduler]  — task queue and lease interfaces
 //   - [storage]    — run/workflow/session persistence drivers

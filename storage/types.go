@@ -59,6 +59,12 @@ const (
 	EventApprovalRequested      EventType = "ApprovalRequested"
 	EventPolicyOutcome          EventType = "PolicyOutcome"
 	EventTeamCompleted          EventType = "TeamCompleted"
+	EventMailboxSent            EventType = "MailboxSent"
+	EventMailboxDelivered       EventType = "MailboxDelivered"
+	EventMailboxAcked           EventType = "MailboxAcked"
+	EventMailboxNacked          EventType = "MailboxNacked"
+	EventMailboxExpired         EventType = "MailboxExpired"
+	EventMailboxDead            EventType = "MailboxDead"
 )
 
 type PolicyOutcomeEvent struct {

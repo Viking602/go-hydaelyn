@@ -506,6 +506,10 @@ func (d *queuedLeaseDriver) Events() storage.EventStore {
 	return d.inner.Events()
 }
 
+func (d *queuedLeaseDriver) Mailboxes() storage.MailboxStore {
+	return d.inner.Mailboxes()
+}
+
 type queuedLeaseTeamStore struct {
 	inner      storage.TeamStore
 	loadErr    error
