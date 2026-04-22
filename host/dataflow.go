@@ -149,6 +149,14 @@ func renderExchange(exchange blackboard.Exchange) (string, bool) {
 	return "", false
 }
 
+// buildTaskResult reconstructs a team.Result from the messages a worker
+// produced. PR 6 removed the old "if the worker wrote any text, confidence
+// jumps to 0.85" heuristic — prose alone is not evidence, and treating it
+// as such let any chatty worker silently upgrade the confidence field. Now
+// confidence only rises when the worker ships a structured report (or at
+// minimum a structured "confidence" field). Bare text keeps the
+// conservative 0.5 floor so downstream gates (SupportsClaim, verifier
+// gate) see honest values.
 func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) *team.Result {
 	summary := strings.TrimSpace(task.Input)
 	confidence := 0.5
@@ -165,7 +173,6 @@ func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) *
 		}
 		if text := strings.TrimSpace(msg.Text); text != "" {
 			summary = text
-			confidence = 0.85
 			mergeStructured(structured, parseStructuredText(text))
 		}
 	}

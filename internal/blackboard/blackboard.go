@@ -312,15 +312,23 @@ func (s State) SupportedFindings() []Finding {
 	return findings
 }
 
+// InferVerificationStatus is the conservative, text-only fallback used
+// when a verifier produced no structured VerificationReport. The default
+// is deliberately Insufficient — prior to PR 6 this returned Supported
+// for any text that lacked a negative keyword, which meant a verifier
+// saying "I took a look" silently passed the gate. Now only explicit
+// positive keywords (supported/approved/pass/verified/confirmed) upgrade
+// the status; everything else defaults to Insufficient and the gate
+// requires a structured report to actually pass.
 func InferVerificationStatus(text string) VerificationStatus {
 	current := strings.ToLower(text)
 	switch {
 	case strings.Contains(current, "contradict"), strings.Contains(current, "unsupported"), strings.Contains(current, "false"):
 		return VerificationStatusContradicted
-	case strings.Contains(current, "insufficient"), strings.Contains(current, "unclear"), strings.Contains(current, "unknown"):
-		return VerificationStatusInsufficient
-	default:
+	case strings.Contains(current, "supported"), strings.Contains(current, "approved"), strings.Contains(current, "verified"), strings.Contains(current, "confirmed"), strings.Contains(current, "pass"):
 		return VerificationStatusSupported
+	default:
+		return VerificationStatusInsufficient
 	}
 }
 

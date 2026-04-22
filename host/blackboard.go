@@ -249,14 +249,19 @@ func verificationResultsForTask(board *blackboard.State, task team.Task) []black
 	for _, claim := range claims {
 		claimsByID[claim.ID] = claim
 	}
+	if typed := typedVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); len(typed) > 0 {
+		return typed
+	}
 	if structured := structuredVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); len(structured) > 0 {
 		return structured
 	}
 	status := blackboard.InferVerificationStatus(task.Result.Summary)
-	confidence := task.Result.Confidence
-	if confidence <= 0 {
-		confidence = 0.75
-	}
+	// We're in the text-inference branch — the worker did not ship a
+	// structured verification report, so task.Result.Confidence is the
+	// generic display floor set by buildTaskResult, NOT a signal about
+	// verification strength. Use the verifier-specific default instead
+	// so a bare-text "supported" still clears DefaultVerificationConfidence.
+	confidence := 0.75
 	results := make([]blackboard.VerificationResult, 0, len(claims))
 	for _, claim := range claims {
 		evidenceIDs := []string(nil)
@@ -293,6 +298,76 @@ func claimsForVerifierTask(board *blackboard.State, task team.Task) []blackboard
 		}
 	}
 	return claims
+}
+
+// typedVerificationResults decodes a team.VerificationReport out of the
+// worker's structured payload and converts it into the internal
+// blackboard verification-result shape. We prefer this path over the
+// legacy untyped "claims": [...] decoder and over text inference: a
+// well-formed typed report is the only place where the worker tells us
+// exactly which claim received which verdict with what confidence, so
+// whenever it is present and valid it wins.
+func typedVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {
+	report, ok := team.ExtractVerificationReport(payload)
+	if !ok {
+		return nil
+	}
+	if err := team.ValidateVerificationReport(report); err != nil {
+		return nil
+	}
+	perClaim := report.PerClaim
+	if len(perClaim) == 0 {
+		// Overall-only verdict: fan it out across every claim the task
+		// is supposed to adjudicate, so downstream SupportsClaim can
+		// still match a supported overall against the pending claims.
+		perClaim = make([]team.VerificationClaim, 0, len(claimsByID))
+		for claimID := range claimsByID {
+			perClaim = append(perClaim, team.VerificationClaim{
+				ClaimID:    claimID,
+				Status:     report.Status,
+				Confidence: report.Confidence,
+			})
+		}
+	}
+	results := make([]blackboard.VerificationResult, 0, len(perClaim))
+	for _, claim := range perClaim {
+		claimID := strings.TrimSpace(claim.ClaimID)
+		if claimID == "" {
+			continue
+		}
+		status := blackboard.VerificationStatus(string(claim.Status))
+		confidence := claim.Confidence
+		if confidence <= 0 {
+			confidence = report.Confidence
+		}
+		if confidence <= 0 {
+			confidence = 0.75
+		}
+		evidenceIDs := append([]string{}, claim.EvidenceIDs...)
+		if len(evidenceIDs) == 0 && status == blackboard.VerificationStatusSupported {
+			if existing, ok := claimsByID[claimID]; ok {
+				evidenceIDs = append([]string{}, existing.EvidenceIDs...)
+			}
+			if len(evidenceIDs) == 0 {
+				evidenceIDs = append([]string{}, fallbackEvidenceIDs...)
+			}
+		}
+		rationale := strings.TrimSpace(claim.Reason)
+		if rationale == "" {
+			rationale = strings.TrimSpace(report.Reason)
+		}
+		if rationale == "" {
+			rationale = strings.TrimSpace(task.Result.Summary)
+		}
+		results = append(results, blackboard.VerificationResult{
+			ClaimID:     claimID,
+			Status:      status,
+			Confidence:  confidence,
+			EvidenceIDs: evidenceIDs,
+			Rationale:   rationale,
+		})
+	}
+	return results
 }
 
 func structuredVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {

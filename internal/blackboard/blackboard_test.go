@@ -223,3 +223,25 @@ func TestSupportedFindingsRequireEvidenceAndConfidence(t *testing.T) {
 		t.Fatalf("expected only evidence-backed confident finding to survive, got %#v", supported)
 	}
 }
+
+func TestInferVerificationStatus_ConservativeDefault(t *testing.T) {
+	cases := []struct {
+		text string
+		want VerificationStatus
+	}{
+		{"supported", VerificationStatusSupported},
+		{"the claim is verified", VerificationStatusSupported},
+		{"pass", VerificationStatusSupported},
+		{"contradicted", VerificationStatusContradicted},
+		{"this is unsupported", VerificationStatusContradicted},
+		{"false", VerificationStatusContradicted},
+		{"", VerificationStatusInsufficient},
+		{"blah blah", VerificationStatusInsufficient},
+		{"worker says the sky is blue", VerificationStatusInsufficient},
+	}
+	for _, tc := range cases {
+		if got := InferVerificationStatus(tc.text); got != tc.want {
+			t.Errorf("InferVerificationStatus(%q) = %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
