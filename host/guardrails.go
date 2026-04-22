@@ -12,12 +12,13 @@ import (
 )
 
 type AgentOptions struct {
-	MaxIterations        int                     `json:"maxIterations,omitempty"`
-	StopSequences        []string                `json:"stopSequences,omitempty"`
-	ThinkingBudget       int                     `json:"thinkingBudget,omitempty"`
-	OutputGuardrails     []agent.OutputGuardrail `json:"-"`
-	OutputGuardrailNames []string                `json:"outputGuardrailNames,omitempty"`
-	TeamOutputGuardrails []string                `json:"teamOutputGuardrails,omitempty"`
+	MaxIterations        int                      `json:"maxIterations,omitempty"`
+	StopSequences        []string                 `json:"stopSequences,omitempty"`
+	ThinkingBudget       int                      `json:"thinkingBudget,omitempty"`
+	OutputGuardrails     []agent.OutputGuardrail  `json:"-"`
+	OutputGuardrailNames []string                 `json:"outputGuardrailNames,omitempty"`
+	TeamOutputGuardrails []string                 `json:"teamOutputGuardrails,omitempty"`
+	AssistantOutputMode  team.AssistantOutputMode `json:"assistantOutputMode,omitempty"`
 }
 
 func (o AgentOptions) maxIterationsOrDefault(fallback int) int {
@@ -55,6 +56,9 @@ func mergeAgentOptions(base, override AgentOptions) AgentOptions {
 	} else if len(merged.TeamOutputGuardrails) > 0 {
 		merged.TeamOutputGuardrails = append([]string{}, merged.TeamOutputGuardrails...)
 	}
+	if override.AssistantOutputMode != "" {
+		merged.AssistantOutputMode = override.AssistantOutputMode
+	}
 	return merged
 }
 
@@ -65,6 +69,7 @@ func toTeamAgentOptions(options AgentOptions) team.AgentOptions {
 		ThinkingBudget:       options.ThinkingBudget,
 		OutputGuardrails:     append([]string{}, options.OutputGuardrailNames...),
 		TeamOutputGuardrails: append([]string{}, options.TeamOutputGuardrails...),
+		AssistantOutputMode:  options.AssistantOutputMode,
 	}
 }
 
@@ -75,6 +80,7 @@ func fromTeamAgentOptions(options team.AgentOptions) AgentOptions {
 		ThinkingBudget:       options.ThinkingBudget,
 		OutputGuardrailNames: append([]string{}, options.OutputGuardrails...),
 		TeamOutputGuardrails: append([]string{}, options.TeamOutputGuardrails...),
+		AssistantOutputMode:  options.AssistantOutputMode,
 	}
 }
 
@@ -189,6 +195,14 @@ func (r *Runtime) resolvedAgentOptionsForTask(state team.RunState, task team.Tas
 		options.MaxIterations = profile.MaxTurns
 	}
 	return options, nil
+}
+
+func (r *Runtime) resolvedAssistantOutputModeForTask(state team.RunState, task team.Task) (team.AssistantOutputMode, error) {
+	options, err := r.resolvedAgentOptionsForTask(state, task)
+	if err != nil {
+		return team.AssistantOutputModeOff, err
+	}
+	return task.EffectiveAssistantOutputMode(options.AssistantOutputMode), nil
 }
 
 func (r *Runtime) applyTeamOutputGuardrails(ctx context.Context, teamID, taskID string, boundary TeamOutputBoundary, result *team.Result, names []string, metadata map[string]string) (*team.Result, bool, error) {

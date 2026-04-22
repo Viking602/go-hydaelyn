@@ -87,17 +87,26 @@ const (
 	OutputVisibilityBlackboard OutputVisibility = "blackboard"
 )
 
+type AssistantOutputMode string
+
+const (
+	AssistantOutputModeOff     AssistantOutputMode = "off"
+	AssistantOutputModePrivate AssistantOutputMode = "private"
+	AssistantOutputModeShared  AssistantOutputMode = "shared"
+)
+
 type Budget struct {
 	Tokens    int `json:"tokens,omitempty"`
 	ToolCalls int `json:"toolCalls,omitempty"`
 }
 
 type AgentOptions struct {
-	MaxIterations        int      `json:"maxIterations,omitempty"`
-	StopSequences        []string `json:"stopSequences,omitempty"`
-	ThinkingBudget       int      `json:"thinkingBudget,omitempty"`
-	OutputGuardrails     []string `json:"outputGuardrails,omitempty"`
-	TeamOutputGuardrails []string `json:"teamOutputGuardrails,omitempty"`
+	MaxIterations        int                 `json:"maxIterations,omitempty"`
+	StopSequences        []string            `json:"stopSequences,omitempty"`
+	ThinkingBudget       int                 `json:"thinkingBudget,omitempty"`
+	OutputGuardrails     []string            `json:"outputGuardrails,omitempty"`
+	TeamOutputGuardrails []string            `json:"teamOutputGuardrails,omitempty"`
+	AssistantOutputMode  AssistantOutputMode `json:"assistantOutputMode,omitempty"`
 }
 
 type AgentProfile struct {
@@ -163,36 +172,37 @@ type PlanningState struct {
 }
 
 type Task struct {
-	ID                   string             `json:"id"`
-	Kind                 TaskKind           `json:"kind"`
-	Stage                TaskStage          `json:"stage,omitempty"`
-	Title                string             `json:"title,omitempty"`
-	Input                string             `json:"input,omitempty"`
-	RequiredRole         Role               `json:"requiredRole,omitempty"`
-	RequiredCapabilities []string           `json:"requiredCapabilities,omitempty"`
-	Budget               Budget             `json:"budget,omitempty"`
-	AssigneeAgentID      string             `json:"assigneeAgentId,omitempty"`
-	Assignee             string             `json:"assignee,omitempty"`
-	DependsOn            []string           `json:"dependsOn,omitempty"`
-	Reads                []string           `json:"reads,omitempty"`
+	ID                   string                        `json:"id"`
+	Kind                 TaskKind                      `json:"kind"`
+	Stage                TaskStage                     `json:"stage,omitempty"`
+	Title                string                        `json:"title,omitempty"`
+	Input                string                        `json:"input,omitempty"`
+	RequiredRole         Role                          `json:"requiredRole,omitempty"`
+	RequiredCapabilities []string                      `json:"requiredCapabilities,omitempty"`
+	Budget               Budget                        `json:"budget,omitempty"`
+	AssigneeAgentID      string                        `json:"assigneeAgentId,omitempty"`
+	Assignee             string                        `json:"assignee,omitempty"`
+	DependsOn            []string                      `json:"dependsOn,omitempty"`
+	Reads                []string                      `json:"reads,omitempty"`
 	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty"`
-	Writes               []string           `json:"writes,omitempty"`
-	Publish              []OutputVisibility `json:"publish,omitempty"`
-	Namespace            string             `json:"namespace,omitempty"`
-	VerifierRequired     bool               `json:"verifierRequired,omitempty"`
-	FailurePolicy        FailurePolicy      `json:"failurePolicy,omitempty"`
-	IdempotencyKey       string             `json:"idempotencyKey,omitempty"`
-	Version              int                `json:"version,omitempty"`
-	MaxAttempts          int                `json:"maxAttempts,omitempty"`
-	Attempts             int                `json:"attempts,omitempty"`
-	Status               TaskStatus         `json:"status"`
-	SessionID            string             `json:"sessionId,omitempty"`
-	Result               *Result            `json:"result,omitempty"`
-	Error                string             `json:"error,omitempty"`
-	StartedAt            time.Time          `json:"startedAt,omitempty"`
-	CompletedAt          time.Time          `json:"completedAt,omitempty"`
-	CompletedBy          string             `json:"completedBy,omitempty"`
-	FinishedAt           time.Time          `json:"finishedAt,omitempty"`
+	Writes               []string                      `json:"writes,omitempty"`
+	Publish              []OutputVisibility            `json:"publish,omitempty"`
+	Namespace            string                        `json:"namespace,omitempty"`
+	VerifierRequired     bool                          `json:"verifierRequired,omitempty"`
+	AssistantOutputMode  AssistantOutputMode           `json:"assistantOutputMode,omitempty"`
+	FailurePolicy        FailurePolicy                 `json:"failurePolicy,omitempty"`
+	IdempotencyKey       string                        `json:"idempotencyKey,omitempty"`
+	Version              int                           `json:"version,omitempty"`
+	MaxAttempts          int                           `json:"maxAttempts,omitempty"`
+	Attempts             int                           `json:"attempts,omitempty"`
+	Status               TaskStatus                    `json:"status"`
+	SessionID            string                        `json:"sessionId,omitempty"`
+	Result               *Result                       `json:"result,omitempty"`
+	Error                string                        `json:"error,omitempty"`
+	StartedAt            time.Time                     `json:"startedAt,omitempty"`
+	CompletedAt          time.Time                     `json:"completedAt,omitempty"`
+	CompletedBy          string                        `json:"completedBy,omitempty"`
+	FinishedAt           time.Time                     `json:"finishedAt,omitempty"`
 }
 
 type RunState struct {
@@ -299,6 +309,13 @@ func (t Task) PublishesTo(target OutputVisibility) bool {
 	return slices.Contains(t.Publish, target)
 }
 
+func (t Task) EffectiveAssistantOutputMode(defaultMode AssistantOutputMode) AssistantOutputMode {
+	if t.AssistantOutputMode != "" {
+		return normalizeAssistantOutputMode(t.AssistantOutputMode)
+	}
+	return normalizeAssistantOutputMode(defaultMode)
+}
+
 func (t *Task) Normalize() {
 	if t.Stage == "" {
 		t.Stage = t.defaultStage()
@@ -323,6 +340,15 @@ func (t *Task) Normalize() {
 	}
 	if t.Status == TaskStatusCompleted && t.CompletedAt.IsZero() && !t.FinishedAt.IsZero() {
 		t.CompletedAt = t.FinishedAt
+	}
+}
+
+func normalizeAssistantOutputMode(mode AssistantOutputMode) AssistantOutputMode {
+	switch mode {
+	case AssistantOutputModePrivate, AssistantOutputModeShared:
+		return mode
+	default:
+		return AssistantOutputModeOff
 	}
 }
 

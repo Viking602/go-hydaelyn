@@ -102,6 +102,9 @@ func TestVerifierGateDeepsearchRequiresVerifiedInputs(t *testing.T) {
 		if task.Kind != team.TaskKindVerify || !slices.Equal(task.Reads, []string{researchWriteKey(baseTaskID(task.ID))}) {
 			t.Fatalf("expected verify tasks to read research outputs, got %#v", task)
 		}
+		if task.Input == state.Tasks[0].Result.Summary || task.Input == state.Tasks[1].Result.Summary {
+			t.Fatalf("expected verify task input to avoid upstream research summary reuse, got %#v", task)
+		}
 	}
 	for idx := 2; idx < len(verified.Tasks); idx++ {
 		verified.Tasks[idx].Status = team.TaskStatusCompleted

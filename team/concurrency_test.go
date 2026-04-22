@@ -2,7 +2,9 @@ package team_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,6 +81,21 @@ func (p *teamLoadProvider) Stream(ctx context.Context, request provider.Request)
 	case <-time.After(p.latency):
 	}
 	last := request.Messages[len(request.Messages)-1]
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		payload, err := json.Marshal(map[string]any{
+			"report": map[string]any{
+				"kind":   string(team.ReportKindSynthesis),
+				"answer": last.Text,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return provider.NewSliceStream([]provider.Event{
+			{Kind: provider.EventTextDelta, Text: string(payload)},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}), nil
+	}
 	return provider.NewSliceStream([]provider.Event{{Kind: provider.EventTextDelta, Text: last.Text}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}}), nil
 }
 

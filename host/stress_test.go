@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,6 +147,11 @@ func (p *stressProvider) Stream(ctx context.Context, request provider.Request) (
 	}
 	last := request.Messages[len(request.Messages)-1]
 	usage := provider.Usage{InputTokens: p.usageTokens / 2, OutputTokens: p.usageTokens / 2, TotalTokens: p.usageTokens}
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		events := synthesisReportEvents(last.Text)
+		events[len(events)-1].Usage = usage
+		return provider.NewSliceStream(events), nil
+	}
 	return provider.NewSliceStream([]provider.Event{{Kind: provider.EventTextDelta, Text: last.Text}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: usage}}), nil
 }
 

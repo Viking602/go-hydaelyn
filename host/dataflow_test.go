@@ -24,6 +24,16 @@ func (dataflowProvider) Metadata() provider.Metadata {
 }
 
 func (dataflowProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		lastText := ""
+		for idx := len(request.Messages) - 1; idx >= 0; idx-- {
+			if text := strings.TrimSpace(request.Messages[idx].Text); text != "" {
+				lastText = text
+				break
+			}
+		}
+		return provider.NewSliceStream(synthesisReportEvents(lastText)), nil
+	}
 	lastText := ""
 	var lastTool *message.ToolResult
 	for idx := len(request.Messages) - 1; idx >= 0; idx-- {
@@ -60,6 +70,20 @@ func (dataflowProvider) Stream(_ context.Context, request provider.Request) (pro
 	}
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: lastText},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}), nil
+}
+
+type plainSynthesizeProvider struct{}
+
+func (plainSynthesizeProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "plain-synthesize"}
+}
+
+func (plainSynthesizeProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+	last := request.Messages[len(request.Messages)-1]
+	return provider.NewSliceStream([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: last.Text},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 	}), nil
 }
@@ -198,30 +222,20 @@ func TestPublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession(team) error = %v", err)
 	}
-	foundSharedOutput := false
 	for _, msg := range teamSnapshot.Messages {
-		if msg.Metadata["taskId"] == "research-1" {
-			foundSharedOutput = true
-			break
+		if msg.Role == message.RoleAssistant {
+			t.Fatalf("expected canonical task outputs to stay out of shared assistant context, got %#v", teamSnapshot.Messages)
 		}
-	}
-	if !foundSharedOutput {
-		t.Fatalf("expected shared task output message, got %#v", teamSnapshot.Messages)
 	}
 
 	workerSnapshot, err := runner.GetSession(context.Background(), research.SessionID)
 	if err != nil {
 		t.Fatalf("GetSession(worker) error = %v", err)
 	}
-	foundPrivateOutput := false
 	for _, msg := range workerSnapshot.Messages {
-		if msg.Metadata["taskOutput"] == "true" {
-			foundPrivateOutput = true
-			break
+		if msg.Role == message.RoleAssistant {
+			t.Fatalf("expected canonical task outputs to stay out of worker assistant context, got %#v", workerSnapshot.Messages)
 		}
-	}
-	if !foundPrivateOutput {
-		t.Fatalf("expected private task output publication, got %#v", workerSnapshot.Messages)
 	}
 
 	events, err := runner.TeamEvents(context.Background(), state.ID)
@@ -251,5 +265,145 @@ func TestPublishesStructuredOutputsToSessionsBlackboardAndReplay(t *testing.T) {
 	}
 	if replayed.Tasks[0].Result == nil || len(replayed.Tasks[0].Result.ArtifactIDs) != 1 {
 		t.Fatalf("expected replay to preserve task artifact refs, got %#v", replayed.Tasks)
+	}
+}
+
+func TestTaskAssistantOutputDefaultsOff(t *testing.T) {
+	driver := storage.NewMemoryDriver()
+	runner := New(Config{Storage: driver})
+	runner.RegisterProvider("dataflow", dataflowProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "dataflow", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "dataflow", Model: "test"})
+
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"query": "assistant output isolation"},
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+
+	teamSnapshot, err := runner.GetSession(context.Background(), state.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(team) error = %v", err)
+	}
+	for _, msg := range teamSnapshot.Messages {
+		if msg.Role == message.RoleAssistant {
+			t.Fatalf("expected no assistant task output in shared session by default, got %#v", teamSnapshot.Messages)
+		}
+	}
+
+	workerSnapshot, err := runner.GetSession(context.Background(), state.Tasks[0].SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(worker) error = %v", err)
+	}
+	for _, msg := range workerSnapshot.Messages {
+		if msg.Role == message.RoleAssistant {
+			t.Fatalf("expected no assistant task output in worker session by default, got %#v", workerSnapshot.Messages)
+		}
+	}
+}
+
+func TestTaskAssistantOutputSharedPublishesDisplayMessages(t *testing.T) {
+	driver := storage.NewMemoryDriver()
+	runner := New(Config{Storage: driver})
+	runner.RegisterProvider("dataflow", dataflowProvider{})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "dataflow", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "dataflow", Model: "test"})
+
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"query": "assistant output shared"},
+		Agent: AgentOptions{
+			AssistantOutputMode: team.AssistantOutputModeShared,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+
+	teamSnapshot, err := runner.GetSession(context.Background(), state.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(team) error = %v", err)
+	}
+	foundShared := false
+	for _, msg := range teamSnapshot.Messages {
+		if msg.Role == message.RoleAssistant && msg.Metadata["taskOutput"] == "true" {
+			foundShared = true
+			break
+		}
+	}
+	if !foundShared {
+		t.Fatalf("expected assistant task output in shared session when enabled, got %#v", teamSnapshot.Messages)
+	}
+}
+
+func TestSynthesizeRequiresCanonicalMachineResult(t *testing.T) {
+	driver := storage.NewMemoryDriver()
+	runner := New(Config{Storage: driver})
+	runner.RegisterProvider("dataflow", plainSynthesizeProvider{})
+	runner.RegisterTool(artifactTool{artifacts: driver.Artifacts()})
+	runner.RegisterPattern(deepsearch.New())
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "dataflow", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "dataflow", Model: "test", ToolNames: []string{"artifact_tool"}})
+
+	if err := runner.RegisterPlugin(plugin.Spec{
+		Type: plugin.TypePlanner,
+		Name: "synth-contract-planner",
+		Component: fakePlanner{
+			planFn: func(_ context.Context, _ planner.PlanRequest) (planner.Plan, error) {
+				return planner.Plan{
+					Goal: "synth-contract",
+					Tasks: []planner.TaskSpec{
+						{
+							ID:            "research-1",
+							Kind:          string(team.TaskKindResearch),
+							Title:         "branch",
+							Input:         "branch payload",
+							RequiredRole:  team.RoleResearcher,
+							Writes:        []string{"branch.report"},
+							Publish:       []team.OutputVisibility{team.OutputVisibilityBlackboard},
+							FailurePolicy: team.FailurePolicyFailFast,
+						},
+						{
+							ID:              "synth-1",
+							Kind:            string(team.TaskKindSynthesize),
+							Title:           "synthesize",
+							Input:           "compose final answer",
+							AssigneeAgentID: "supervisor",
+							Reads:           []string{"branch.report"},
+							Publish:         []team.OutputVisibility{team.OutputVisibilityShared},
+							DependsOn:       []string{"research-1"},
+							FailurePolicy:   team.FailurePolicyFailFast,
+						},
+					},
+				}, nil
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterPlugin() error = %v", err)
+	}
+
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
+		Pattern:           "deepsearch",
+		Planner:           "synth-contract-planner",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"query": "synth contract"},
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+	if state.Status != team.StatusFailed {
+		t.Fatalf("expected team to fail when synth has no canonical result, got %#v", state)
+	}
+	if state.Tasks[1].Status != team.TaskStatusFailed || !strings.Contains(state.Tasks[1].Error, "missing canonical synthesis report") {
+		t.Fatalf("expected synth task contract failure, got %#v", state.Tasks[1])
 	}
 }

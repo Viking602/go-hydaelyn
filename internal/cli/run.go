@@ -7,6 +7,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
@@ -91,6 +92,21 @@ func (cliProvider) Metadata() provider.Metadata {
 
 func (cliProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1]
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		payload, err := json.Marshal(map[string]any{
+			"report": map[string]any{
+				"kind":   string(team.ReportKindSynthesis),
+				"answer": last.Text,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return provider.NewSliceStream([]provider.Event{
+			{Kind: provider.EventTextDelta, Text: string(payload)},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}), nil
+	}
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: last.Text},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},

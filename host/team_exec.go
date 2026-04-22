@@ -837,8 +837,13 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 		r.nackInbox(ctx, inbox, err.Error())
 		return finalizeTaskFailure(task, err)
 	}
+	result, err := r.buildTaskResult(task, generated.Messages)
+	if err != nil {
+		r.nackInbox(ctx, inbox, err.Error())
+		return finalizeTaskFailure(task, err)
+	}
 	task.Status = team.TaskStatusCompleted
-	task.Result = r.buildTaskResult(task, generated.Messages)
+	task.Result = result
 	task.Result.Usage = generated.Usage
 	task.Result.ToolCallCount = len(generated.ToolResults)
 	task.FinishedAt = time.Now().UTC()
@@ -848,9 +853,16 @@ func (r *Runtime) executeTaskCore(ctx context.Context, state team.RunState, task
 }
 
 func (r *Runtime) initialTaskMessages(state team.RunState, task team.Task, agentInstance team.AgentInstance, profile team.Profile) []message.Message {
-	messages := make([]message.Message, 0, 2)
+	messages := make([]message.Message, 0, 3)
 	if strings.TrimSpace(profile.Prompt) != "" {
 		system := message.NewText(message.RoleSystem, profile.Prompt)
+		system.TeamID = state.ID
+		system.AgentID = agentInstance.ID
+		system.Visibility = message.VisibilityPrivate
+		messages = append(messages, system)
+	}
+	if task.Kind == team.TaskKindSynthesize {
+		system := message.NewText(message.RoleSystem, synthesizeReportPrompt)
 		system.TeamID = state.ID
 		system.AgentID = agentInstance.ID
 		system.Visibility = message.VisibilityPrivate
@@ -998,7 +1010,7 @@ func (r *Runtime) loadInitialTaskMessages(ctx context.Context, state team.RunSta
 		return nil, err
 	}
 	if len(snapshot.Messages) > 0 {
-		return r.compactMessages(ctx, snapshot.Messages), nil
+		return r.compactMessages(ctx, filterTaskContextMessages(snapshot.Messages)), nil
 	}
 	initialMessages := r.initialTaskMessages(state, task, agentInstance, profile)
 	if materialized, text := r.materializeTaskInputs(state, task); len(materialized) > 0 && strings.TrimSpace(text) != "" {
@@ -1105,9 +1117,12 @@ func (r *Runtime) compactMessages(ctx context.Context, messages []message.Messag
 }
 
 func (r *Runtime) persistTaskMessages(ctx context.Context, task team.Task, generated []message.Message) error {
-	if len(generated) == 0 {
+	filtered := filterTaskContextMessages(generated)
+	if len(filtered) == 0 {
 		return nil
 	}
-	_, err := r.appendSessionMessages(ctx, task.SessionID, generated...)
+	_, err := r.appendSessionMessages(ctx, task.SessionID, filtered...)
 	return err
 }
+
+const synthesizeReportPrompt = "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"synthesis\" and a non-empty answer field containing the final answer. Do not emit prose, markdown fences, or commentary outside the JSON object."

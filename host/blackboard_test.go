@@ -30,6 +30,9 @@ func (verificationProvider) Stream(_ context.Context, request provider.Request) 
 			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 		}), nil
 	}
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		return provider.NewSliceStream(synthesisReportEvents(last)), nil
+	}
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: last},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -249,9 +250,60 @@ func (echoProvider) Stream(_ context.Context, request provider.Request) (provide
 	}), nil
 }
 
+type synthesisAwareProvider struct {
+	inner provider.Driver
+}
+
+func (p synthesisAwareProvider) Metadata() provider.Metadata {
+	return p.inner.Metadata()
+}
+
+func (p synthesisAwareProvider) Stream(ctx context.Context, request provider.Request) (provider.Stream, error) {
+	if !strings.Contains(request.Metadata["taskId"], "synth") {
+		return p.inner.Stream(ctx, request)
+	}
+	stream, err := p.inner.Stream(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return rewriteSynthesisStream(stream)
+}
+
+func rewriteSynthesisStream(stream provider.Stream) (provider.Stream, error) {
+	defer stream.Close()
+	events := make([]provider.Event, 0, 8)
+	for {
+		event, recvErr := stream.Recv()
+		if recvErr != nil {
+			if recvErr == io.EOF {
+				break
+			}
+			return nil, recvErr
+		}
+		events = append(events, event)
+	}
+	normalized, err := provider.NormalizeEvents(events)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"report": map[string]any{
+			"kind":   string(team.ReportKindSynthesis),
+			"answer": normalized.Text,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return provider.NewSliceStream([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: string(payload)},
+		{Kind: provider.EventDone, StopReason: normalized.StopReason, Usage: normalized.Usage},
+	}), nil
+}
+
 func resolveProvider(workspace string, evalCase eval.EvalCase) (provider.Driver, error) {
 	if evalCase.Provider == nil {
-		return echoProvider{}, nil
+		return synthesisAwareProvider{inner: echoProvider{}}, nil
 	}
 	if evalCase.Provider.ScriptPath != "" {
 		scriptPath := resolvePath(workspace, evalCase.Provider.ScriptPath)
@@ -259,12 +311,12 @@ func resolveProvider(workspace string, evalCase eval.EvalCase) (provider.Driver,
 		if err != nil {
 			return nil, err
 		}
-		return scripted.New(events), nil
+		return synthesisAwareProvider{inner: scripted.New(events)}, nil
 	}
 	if evalCase.Provider.ErrorKind != "" {
-		return errorprovider.New(errorprovider.Kind(evalCase.Provider.ErrorKind)), nil
+		return synthesisAwareProvider{inner: errorprovider.New(errorprovider.Kind(evalCase.Provider.ErrorKind))}, nil
 	}
-	return echoProvider{}, nil
+	return synthesisAwareProvider{inner: echoProvider{}}, nil
 }
 
 func buildTool(name, corpusPath string) (tool.Driver, error) {
@@ -801,72 +853,18 @@ func collectSessionArtifacts(ctx context.Context, runtimeRunner *host.Runtime, s
 		if err != nil {
 			return nil, nil, err
 		}
-		for idx, msg := range snapshot.Messages {
-			modelEvents = append(modelEvents, sessionModelEvent{
-				TaskID:     task.ID,
-				SessionID:  task.SessionID,
-				AgentID:    task.EffectiveAssigneeAgentID(),
-				Index:      idx,
-				Role:       msg.Role,
-				Kind:       msg.Kind,
-				Text:       msg.Text,
-				Thinking:   msg.Thinking,
-				ToolCalls:  append([]message.ToolCall{}, msg.ToolCalls...),
-				ToolResult: msg.ToolResult,
-				Metadata:   cloneStringMap(msg.Metadata),
-			})
-			for _, call := range msg.ToolCalls {
-				toolCalls = append(toolCalls, toolCallLogRecord{
-					TaskID:     task.ID,
-					SessionID:  task.SessionID,
-					AgentID:    task.EffectiveAssigneeAgentID(),
-					Index:      idx,
-					Kind:       "call",
-					ToolCallID: call.ID,
-					Name:       call.Name,
-					Arguments:  call.Arguments,
-				})
-			}
-			if msg.ToolResult != nil {
-				toolCalls = append(toolCalls, toolCallLogRecord{
-					TaskID:     task.ID,
-					SessionID:  task.SessionID,
-					AgentID:    task.EffectiveAssigneeAgentID(),
-					Index:      idx,
-					Kind:       "result",
-					ToolCallID: msg.ToolResult.ToolCallID,
-					Name:       msg.ToolResult.Name,
-					Content:    msg.ToolResult.Content,
-					Structured: msg.ToolResult.Structured,
-					IsError:    msg.ToolResult.IsError,
-				})
-			}
-		}
+		modelEvents = appendTaskSessionModelEvents(modelEvents, task, snapshot.Messages)
+		toolCalls = appendTaskSessionToolCalls(toolCalls, task, snapshot.Messages)
+	}
+	if len(modelEvents) == 0 {
+		modelEvents = appendFallbackTaskInputs(modelEvents, state.Tasks)
 	}
 	if len(modelEvents) == 0 && strings.TrimSpace(state.SessionID) != "" {
 		snapshot, err := runtimeRunner.GetSession(ctx, state.SessionID)
 		if err != nil {
 			return nil, nil, err
 		}
-		for idx, msg := range snapshot.Messages {
-			taskID := ""
-			if msg.Metadata != nil {
-				taskID = msg.Metadata["taskId"]
-			}
-			modelEvents = append(modelEvents, sessionModelEvent{
-				TaskID:     taskID,
-				SessionID:  state.SessionID,
-				AgentID:    msg.AgentID,
-				Index:      idx,
-				Role:       msg.Role,
-				Kind:       msg.Kind,
-				Text:       msg.Text,
-				Thinking:   msg.Thinking,
-				ToolCalls:  append([]message.ToolCall{}, msg.ToolCalls...),
-				ToolResult: msg.ToolResult,
-				Metadata:   cloneStringMap(msg.Metadata),
-			})
-		}
+		modelEvents = appendTeamSessionModelEvents(modelEvents, state.SessionID, snapshot.Messages)
 	}
 	if len(toolCalls) == 0 {
 		for _, event := range events {
@@ -882,6 +880,98 @@ func collectSessionArtifacts(ctx context.Context, runtimeRunner *host.Runtime, s
 		}
 	}
 	return modelEvents, toolCalls, nil
+}
+
+func appendTaskSessionModelEvents(target []sessionModelEvent, task team.Task, messages []message.Message) []sessionModelEvent {
+	for idx, msg := range messages {
+		target = append(target, sessionModelEvent{
+			TaskID:     task.ID,
+			SessionID:  task.SessionID,
+			AgentID:    task.EffectiveAssigneeAgentID(),
+			Index:      idx,
+			Role:       msg.Role,
+			Kind:       msg.Kind,
+			Text:       msg.Text,
+			Thinking:   msg.Thinking,
+			ToolCalls:  append([]message.ToolCall{}, msg.ToolCalls...),
+			ToolResult: msg.ToolResult,
+			Metadata:   cloneStringMap(msg.Metadata),
+		})
+	}
+	return target
+}
+
+func appendTaskSessionToolCalls(target []toolCallLogRecord, task team.Task, messages []message.Message) []toolCallLogRecord {
+	for idx, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			target = append(target, toolCallLogRecord{
+				TaskID:     task.ID,
+				SessionID:  task.SessionID,
+				AgentID:    task.EffectiveAssigneeAgentID(),
+				Index:      idx,
+				Kind:       "call",
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Arguments:  call.Arguments,
+			})
+		}
+		if msg.ToolResult != nil {
+			target = append(target, toolCallLogRecord{
+				TaskID:     task.ID,
+				SessionID:  task.SessionID,
+				AgentID:    task.EffectiveAssigneeAgentID(),
+				Index:      idx,
+				Kind:       "result",
+				ToolCallID: msg.ToolResult.ToolCallID,
+				Name:       msg.ToolResult.Name,
+				Content:    msg.ToolResult.Content,
+				Structured: msg.ToolResult.Structured,
+				IsError:    msg.ToolResult.IsError,
+			})
+		}
+	}
+	return target
+}
+
+func appendFallbackTaskInputs(target []sessionModelEvent, tasks []team.Task) []sessionModelEvent {
+	for _, task := range tasks {
+		if strings.TrimSpace(task.Input) == "" {
+			continue
+		}
+		target = append(target, sessionModelEvent{
+			TaskID:    task.ID,
+			SessionID: task.SessionID,
+			AgentID:   task.EffectiveAssigneeAgentID(),
+			Index:     0,
+			Role:      message.RoleUser,
+			Kind:      message.KindStandard,
+			Text:      task.Input,
+		})
+	}
+	return target
+}
+
+func appendTeamSessionModelEvents(target []sessionModelEvent, sessionID string, messages []message.Message) []sessionModelEvent {
+	for idx, msg := range messages {
+		taskID := ""
+		if msg.Metadata != nil {
+			taskID = msg.Metadata["taskId"]
+		}
+		target = append(target, sessionModelEvent{
+			TaskID:     taskID,
+			SessionID:  sessionID,
+			AgentID:    msg.AgentID,
+			Index:      idx,
+			Role:       msg.Role,
+			Kind:       msg.Kind,
+			Text:       msg.Text,
+			Thinking:   msg.Thinking,
+			ToolCalls:  append([]message.ToolCall{}, msg.ToolCalls...),
+			ToolResult: msg.ToolResult,
+			Metadata:   cloneStringMap(msg.Metadata),
+		})
+	}
+	return target
 }
 
 func buildEvaluationArtifact(evalCase eval.EvalCase, report eval.Report, qualityMetrics *eval.ScoreQualityMetrics, score *eval.ScorePayload) map[string]any {

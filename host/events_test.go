@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -73,12 +74,13 @@ func (collaborationObservabilityProvider) Metadata() provider.Metadata {
 
 func (collaborationObservabilityProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1].Text
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		return provider.NewSliceStream(synthesisReportEvents("synthesis committed")), nil
+	}
 	text := "done"
 	switch last {
 	case "verify-pass":
 		text = "supported"
-	case "synthesize":
-		text = "synthesis committed"
 	}
 	return provider.NewSliceStream([]provider.Event{{Kind: provider.EventTextDelta, Text: text}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}}), nil
 }

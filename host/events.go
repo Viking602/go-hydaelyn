@@ -128,8 +128,9 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 		TeamID: state.ID,
 		Type:   storage.EventTeamStarted,
 		Payload: map[string]any{
-			"pattern": state.Pattern,
-			"phase":   string(state.Phase),
+			"pattern":      state.Pattern,
+			"phase":        string(state.Phase),
+			"agentOptions": agentOptionsPayload(state.AgentOptions),
 			"supervisor": map[string]string{
 				"id":          state.Supervisor.ID,
 				"role":        string(state.Supervisor.Role),
@@ -602,26 +603,53 @@ func outputVisibilities(items []team.OutputVisibility) []string {
 
 func taskScheduledPayload(task team.Task) map[string]any {
 	return map[string]any{
-		"title":            task.Title,
-		"input":            task.Input,
-		"status":           string(task.Status),
-		"kind":             string(task.Kind),
-		"requiredRole":     string(task.RequiredRole),
-		"assigneeAgent":    task.AssigneeAgentID,
-		"failurePolicy":    string(task.FailurePolicy),
-		"dependsOn":        task.DependsOn,
-		"reads":            task.Reads,
-		"writes":           task.Writes,
-		"publish":          outputVisibilities(task.Publish),
-		"taskVersion":      task.Version,
-		"idempotencyKey":   task.IdempotencyKey,
-		"namespace":        task.Namespace,
-		"verifierRequired": task.VerifierRequired,
+		"title":               task.Title,
+		"input":               task.Input,
+		"status":              string(task.Status),
+		"kind":                string(task.Kind),
+		"requiredRole":        string(task.RequiredRole),
+		"assigneeAgent":       task.AssigneeAgentID,
+		"failurePolicy":       string(task.FailurePolicy),
+		"dependsOn":           task.DependsOn,
+		"reads":               task.Reads,
+		"writes":              task.Writes,
+		"publish":             outputVisibilities(task.Publish),
+		"taskVersion":         task.Version,
+		"idempotencyKey":      task.IdempotencyKey,
+		"namespace":           task.Namespace,
+		"verifierRequired":    task.VerifierRequired,
+		"assistantOutputMode": string(task.AssistantOutputMode),
 		"budget": map[string]any{
 			"tokens":    task.Budget.Tokens,
 			"toolCalls": task.Budget.ToolCalls,
 		},
 	}
+}
+
+func agentOptionsPayload(options team.AgentOptions) map[string]any {
+	payload := map[string]any{}
+	if options.MaxIterations > 0 {
+		payload["maxIterations"] = options.MaxIterations
+	}
+	if len(options.StopSequences) > 0 {
+		payload["stopSequences"] = append([]string{}, options.StopSequences...)
+	}
+	if options.ThinkingBudget > 0 {
+		payload["thinkingBudget"] = options.ThinkingBudget
+	}
+	if len(options.OutputGuardrails) > 0 {
+		payload["outputGuardrails"] = append([]string{}, options.OutputGuardrails...)
+	}
+	if len(options.TeamOutputGuardrails) > 0 {
+		payload["teamOutputGuardrails"] = append([]string{}, options.TeamOutputGuardrails...)
+	}
+	if options.AssistantOutputMode != "" {
+		payload["assistantOutputMode"] = string(options.AssistantOutputMode)
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	return payload
 }
 
 func taskLifecyclePayload(ctx context.Context, before, after team.Task, defaultWorkerID string) map[string]any {

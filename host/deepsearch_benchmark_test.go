@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
@@ -17,6 +18,9 @@ func (benchmarkProvider) Metadata() provider.Metadata {
 
 func (benchmarkProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1]
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		return provider.NewSliceStream(synthesisReportEvents(last.Text)), nil
+	}
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: last.Text},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},

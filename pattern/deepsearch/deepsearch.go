@@ -128,7 +128,7 @@ func (Pattern) Advance(_ context.Context, state team.RunState) (team.RunState, e
 					ID:              fmt.Sprintf("%s-verify", task.ID),
 					Kind:            team.TaskKindVerify,
 					Title:           "verify " + task.Title,
-					Input:           task.Result.Summary,
+					Input:           fmt.Sprintf("Verify the published research output for %s.", task.Title),
 					RequiredRole:    team.RoleResearcher,
 					AssigneeAgentID: task.EffectiveAssigneeAgentID(),
 					Reads:           []string{researchWriteKey(task.ID)},

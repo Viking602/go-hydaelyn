@@ -21,6 +21,9 @@ func (teamFakeProvider) Metadata() provider.Metadata {
 func (teamFakeProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
 	last := request.Messages[len(request.Messages)-1]
 	text := last.Text
+	if strings.Contains(request.Metadata["taskId"], "synth") {
+		return provider.NewSliceStream(synthesisReportEvents(text)), nil
+	}
 	if strings.Contains(text, "slow") {
 		time.Sleep(30 * time.Millisecond)
 	}

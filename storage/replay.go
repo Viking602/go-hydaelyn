@@ -17,6 +17,7 @@ func ReplayTeam(events []Event) team.RunState {
 		case EventTeamStarted:
 			state.Pattern, _ = event.Payload["pattern"].(string)
 			state.Status = team.StatusRunning
+			state.AgentOptions = agentOptionsValue(event.Payload["agentOptions"])
 			if phase, ok := event.Payload["phase"].(string); ok && phase != "" {
 				state.Phase = team.Phase(phase)
 			}
@@ -28,23 +29,24 @@ func ReplayTeam(events []Event) team.RunState {
 			}
 		case EventTaskScheduled:
 			task := team.Task{
-				ID:               event.TaskID,
-				Title:            stringValue(event.Payload["title"]),
-				Input:            stringValue(event.Payload["input"]),
-				Status:           team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
-				Kind:             team.TaskKind(stringValue(event.Payload["kind"])),
-				RequiredRole:     team.Role(stringValue(event.Payload["requiredRole"])),
-				AssigneeAgentID:  stringValue(event.Payload["assigneeAgent"]),
-				FailurePolicy:    team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
-				DependsOn:        stringSlice(event.Payload["dependsOn"]),
-				Reads:            stringSlice(event.Payload["reads"]),
-				Writes:           stringSlice(event.Payload["writes"]),
-				Publish:          outputVisibilitySlice(event.Payload["publish"]),
-				Namespace:        stringValue(event.Payload["namespace"]),
-				VerifierRequired: boolValue(event.Payload["verifierRequired"]),
-				IdempotencyKey:   stringValue(event.Payload["idempotencyKey"]),
-				Version:          intValue(event.Payload["taskVersion"]),
-				Budget:           budgetValue(event.Payload["budget"]),
+				ID:                  event.TaskID,
+				Title:               stringValue(event.Payload["title"]),
+				Input:               stringValue(event.Payload["input"]),
+				Status:              team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+				Kind:                team.TaskKind(stringValue(event.Payload["kind"])),
+				RequiredRole:        team.Role(stringValue(event.Payload["requiredRole"])),
+				AssigneeAgentID:     stringValue(event.Payload["assigneeAgent"]),
+				FailurePolicy:       team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
+				DependsOn:           stringSlice(event.Payload["dependsOn"]),
+				Reads:               stringSlice(event.Payload["reads"]),
+				Writes:              stringSlice(event.Payload["writes"]),
+				Publish:             outputVisibilitySlice(event.Payload["publish"]),
+				Namespace:           stringValue(event.Payload["namespace"]),
+				VerifierRequired:    boolValue(event.Payload["verifierRequired"]),
+				AssistantOutputMode: team.AssistantOutputMode(stringValue(event.Payload["assistantOutputMode"])),
+				IdempotencyKey:      stringValue(event.Payload["idempotencyKey"]),
+				Version:             intValue(event.Payload["taskVersion"]),
+				Budget:              budgetValue(event.Payload["budget"]),
 			}
 			tasks[event.TaskID] = len(state.Tasks)
 			state.Tasks = append(state.Tasks, task)
@@ -175,6 +177,22 @@ func stringMapValue(value any) map[string]string {
 		return items
 	default:
 		return nil
+	}
+}
+
+func agentOptionsValue(value any) team.AgentOptions {
+	switch current := value.(type) {
+	case map[string]any:
+		return team.AgentOptions{
+			MaxIterations:        intValue(current["maxIterations"]),
+			StopSequences:        stringSlice(current["stopSequences"]),
+			ThinkingBudget:       intValue(current["thinkingBudget"]),
+			OutputGuardrails:     stringSlice(current["outputGuardrails"]),
+			TeamOutputGuardrails: stringSlice(current["teamOutputGuardrails"]),
+			AssistantOutputMode:  team.AssistantOutputMode(stringValue(current["assistantOutputMode"])),
+		}
+	default:
+		return team.AgentOptions{}
 	}
 }
 
