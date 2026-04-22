@@ -72,6 +72,8 @@ func ValidateReplay(events []Event, authoritativeState TeamState) ReplayValidati
 	result.Mismatches = append(result.Mismatches, validateEventOrdering(events)...)
 	result.Mismatches = append(result.Mismatches, validateLifecycleContracts(events)...)
 	result.Mismatches = append(result.Mismatches, validateBlackboardProvenance(authoritativeState)...)
+	result.Mismatches = append(result.Mismatches, validateControlPlaneChain(events)...)
+	result.Mismatches = append(result.Mismatches, validateSynthesisChain(events, authoritativeState)...)
 	result.Mismatches = append(result.Mismatches, validateStateEquivalence(result.ReplayedState, authoritativeState)...)
 	result.MismatchCount = len(result.Mismatches)
 	result.Valid = result.MismatchCount == 0
