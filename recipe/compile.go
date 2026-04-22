@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -171,6 +172,7 @@ func substituteTask(task Task, item string, index int) Task {
 	task.AssigneeAgentID = replacer.Replace(task.AssigneeAgentID)
 	task.DependsOn = replaceAll(task.DependsOn, replacer)
 	task.Reads = replaceAll(task.Reads, replacer)
+	task.ReadSelectors = substituteSelectors(task.ReadSelectors, replacer)
 	task.Writes = replaceAll(task.Writes, replacer)
 	task.VerifyClaims = replaceAll(task.VerifyClaims, replacer)
 	task.RequiredCapabilities = replaceAll(task.RequiredCapabilities, replacer)
@@ -191,6 +193,7 @@ func (s Step) inlineTask() *Task {
 		AssigneeAgentID:      s.AssigneeAgentID,
 		DependsOn:            append([]string{}, s.DependsOn...),
 		Reads:                append([]string{}, s.Reads...),
+		ReadSelectors:        cloneSelectors(s.ReadSelectors),
 		Writes:               append([]string{}, s.Writes...),
 		Publish:              append([]team.OutputVisibility{}, s.Publish...),
 		VerifyClaims:         append([]string{}, s.VerifyClaims...),
@@ -210,6 +213,7 @@ func (s Step) toolTask() Task {
 		AssigneeAgentID:      s.AssigneeAgentID,
 		DependsOn:            append([]string{}, s.DependsOn...),
 		Reads:                append([]string{}, s.Reads...),
+		ReadSelectors:        cloneSelectors(s.ReadSelectors),
 		Writes:               append([]string{}, s.Writes...),
 		Publish:              append([]team.OutputVisibility{}, s.Publish...),
 		VerifyClaims:         append([]string{}, s.VerifyClaims...),
@@ -253,6 +257,7 @@ func (t Task) toPlannerTask(incoming []string) planner.TaskSpec {
 		AssigneeAgentID:      t.AssigneeAgentID,
 		DependsOn:            dependsOn,
 		Reads:                append([]string{}, t.Reads...),
+		ReadSelectors:        cloneSelectors(t.ReadSelectors),
 		Writes:               append([]string{}, t.Writes...),
 		Publish:              append([]team.OutputVisibility{}, t.Publish...),
 		VerifyClaims:         append([]string{}, t.VerifyClaims...),
@@ -278,6 +283,38 @@ func uniqueStrings(items []string) []string {
 		result = append(result, item)
 	}
 	return result
+}
+
+func cloneSelectors(selectors []blackboard.ExchangeSelector) []blackboard.ExchangeSelector {
+	if len(selectors) == 0 {
+		return nil
+	}
+	out := make([]blackboard.ExchangeSelector, len(selectors))
+	for idx, selector := range selectors {
+		out[idx] = selector
+		out[idx].Keys = append([]string{}, selector.Keys...)
+		out[idx].Namespaces = append([]string{}, selector.Namespaces...)
+		out[idx].TaskIDs = append([]string{}, selector.TaskIDs...)
+		out[idx].ValueTypes = append([]blackboard.ExchangeValueType{}, selector.ValueTypes...)
+		out[idx].ClaimIDs = append([]string{}, selector.ClaimIDs...)
+		out[idx].FindingIDs = append([]string{}, selector.FindingIDs...)
+		out[idx].ArtifactIDs = append([]string{}, selector.ArtifactIDs...)
+	}
+	return out
+}
+
+func substituteSelectors(selectors []blackboard.ExchangeSelector, replacer *strings.Replacer) []blackboard.ExchangeSelector {
+	out := cloneSelectors(selectors)
+	for idx := range out {
+		out[idx].Keys = replaceAll(out[idx].Keys, replacer)
+		out[idx].Namespaces = replaceAll(out[idx].Namespaces, replacer)
+		out[idx].TaskIDs = replaceAll(out[idx].TaskIDs, replacer)
+		out[idx].ClaimIDs = replaceAll(out[idx].ClaimIDs, replacer)
+		out[idx].FindingIDs = replaceAll(out[idx].FindingIDs, replacer)
+		out[idx].ArtifactIDs = replaceAll(out[idx].ArtifactIDs, replacer)
+		out[idx].Label = replacer.Replace(out[idx].Label)
+	}
+	return out
 }
 
 func replaceAll(items []string, replacer *strings.Replacer) []string {

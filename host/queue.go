@@ -90,9 +90,15 @@ func (r *Runtime) executeViaQueue(ctx context.Context, current team.RunState, ru
 	return results, nil
 }
 
-func (r *Runtime) enqueueRunnableTasks(ctx context.Context, state team.RunState) error {
-	_, runnableSet := runnableTaskSet(state)
-	return r.enqueueTaskSet(ctx, state, runnableSet)
+func (r *Runtime) enqueueRunnableTasks(ctx context.Context, state team.RunState) (team.RunState, bool, error) {
+	_, runnableSet := r.dispatchableTaskSet(&state)
+	if len(runnableSet) == 0 {
+		return state, false, nil
+	}
+	if err := r.enqueueTaskSet(ctx, state, runnableSet); err != nil {
+		return state, false, err
+	}
+	return state, true, nil
 }
 
 func (r *Runtime) enqueueTaskSet(ctx context.Context, state team.RunState, runnableSet map[string]struct{}) error {
@@ -339,8 +345,17 @@ func (r *Runtime) resolveQueuedState(ctx context.Context, current team.RunState)
 		}
 		return terminal, true, terminal.IsTerminal(), nil
 	}
+	if next, enqueued, err := r.enqueueRunnableTasks(ctx, current); err != nil {
+		return team.RunState{}, false, false, err
+	} else if enqueued {
+		current = next
+		return current, true, false, nil
+	}
 	if len(current.RunnableTasks()) > 0 {
-		if err := r.enqueueRunnableTasks(ctx, current); err != nil {
+		if r.effectiveControlMode() == ControlModeStrict {
+			return current, false, false, nil
+		}
+		if _, _, err := r.enqueueRunnableTasks(ctx, current); err != nil {
 			return team.RunState{}, false, false, err
 		}
 		return current, true, false, nil
@@ -352,6 +367,13 @@ func (r *Runtime) resolveQueuedState(ctx context.Context, current team.RunState)
 }
 
 func (r *Runtime) continueQueuedStep(ctx context.Context, pattern team.Pattern, current team.RunState) (team.RunState, bool, error) {
+	if r.effectiveControlMode() != ControlModeLegacy {
+		observed, err := r.observeAndDecide(ctx, current)
+		if err != nil {
+			return team.RunState{}, false, err
+		}
+		current = observed
+	}
 	next, progressed, terminal, err := r.resolveQueuedState(ctx, current)
 	if err != nil || terminal {
 		return next, terminal, err

@@ -140,9 +140,18 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 		r.mu.Unlock()
 	}()
 	if !drain && r.queue != nil {
-		if err := r.enqueueRunnableTasks(ctx, state); err != nil {
+		if r.effectiveControlMode() != ControlModeLegacy {
+			observed, err := r.observeAndDecide(ctx, state)
+			if err != nil {
+				return team.RunState{}, err
+			}
+			state = observed
+		}
+		next, _, err := r.enqueueRunnableTasks(ctx, state)
+		if err != nil {
 			return team.RunState{}, err
 		}
+		state = next
 		if err := r.saveTeam(ctx, &state); err != nil {
 			return team.RunState{}, err
 		}
@@ -188,11 +197,10 @@ func (r *Runtime) maxDriveSteps() int {
 func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.RunState, error) {
 	current := state
 	current.Normalize()
-	runnable, runnableSet := runnableTaskSet(current)
+	runnable, runnableSet := r.dispatchableTaskSet(&current)
 	// Strict mode: filter the runnable set down to tasks holding a pending
 	// grant, consuming those grants atomically. Legacy/Hybrid return the
 	// set unchanged.
-	runnable, runnableSet = r.filterRunnableByGrants(&current, runnable, runnableSet)
 	if len(runnable) == 0 {
 		return current, nil
 	}

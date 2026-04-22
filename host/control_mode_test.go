@@ -218,6 +218,30 @@ func TestFilterRunnableByGrants_StrictConsumesMatchingGrants(t *testing.T) {
 	}
 }
 
+func TestFilterRunnableByGrants_StrictKeepsStaleGrantPending(t *testing.T) {
+	r := &Runtime{controlMode: ControlModeStrict}
+	state := &team.RunState{
+		Blackboard: &blackboard.State{Exchanges: []blackboard.Exchange{{ID: "ex-1"}}},
+		Control: &team.ControlState{
+			PendingGrants: []team.TaskRunGrant{{
+				TaskID: "t1",
+				ContextPolicy: team.TaskContextPolicy{
+					MinExchangeIndex: 2,
+				},
+			}},
+		},
+	}
+	runnable := []team.Task{{ID: "t1"}}
+	set := map[string]struct{}{"t1": {}}
+	outTasks, outSet := r.filterRunnableByGrants(state, runnable, set)
+	if len(outTasks) != 0 || len(outSet) != 0 {
+		t.Fatalf("stale-context grant must not dispatch, got %#v / %#v", outTasks, outSet)
+	}
+	if !state.Control.HasPendingGrant("t1") {
+		t.Fatalf("stale-context grant must remain pending for a future retry")
+	}
+}
+
 func TestFilterRunnableByGrants_StrictWithoutControlBlocksEverything(t *testing.T) {
 	r := &Runtime{controlMode: ControlModeStrict}
 	state := &team.RunState{} // no Control

@@ -427,3 +427,52 @@ func TestVerifierStructuredClaimsOverrideSummaryHeuristics(t *testing.T) {
 		t.Fatalf("expected mixed claim-level results to block on the contradicted claim, got decision=%q status=%q ok=%v", decision, status, ok)
 	}
 }
+
+func TestVerifierTypedReportRejectsOutOfScopeClaimIDs(t *testing.T) {
+	runner := New(Config{})
+	state := team.RunState{
+		Blackboard: &blackboard.State{
+			Claims: []blackboard.Claim{
+				{ID: "claim-1", TaskID: "impl-1", EvidenceIDs: []string{"evidence-1"}},
+			},
+		},
+	}
+	verifyTask := team.Task{
+		ID:        "verify-1",
+		Kind:      team.TaskKindVerify,
+		Namespace: "verify.impl-1",
+		Version:   1,
+		DependsOn: []string{"impl-1"},
+		Writes:    []string{"verify.impl-1"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		Result: &team.Result{
+			Summary: "supported",
+			Structured: map[string]any{
+				team.ReportKey: map[string]any{
+					"kind":   string(team.ReportKindVerification),
+					"status": string(team.VerificationStatusSupported),
+					"perClaim": []any{
+						map[string]any{
+							"claimId":     "claim-does-not-exist",
+							"status":      string(team.VerificationStatusSupported),
+							"confidence":  0.95,
+							"evidenceIds": []any{"evidence-1"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	state = runner.applyBlackboardUpdate(state, verifyTask)
+
+	if got := len(state.Blackboard.Verifications); got != 0 {
+		t.Fatalf("expected malformed typed verification report to publish no claim results, got %#v", state.Blackboard.Verifications)
+	}
+	if supported := state.Blackboard.ExchangesForKey("supported_findings"); len(supported) != 0 {
+		t.Fatalf("expected malformed typed verification report to publish no supported findings, got %#v", supported)
+	}
+	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGateBlockDecision || status != string(blackboard.VerificationStatusInsufficient) {
+		t.Fatalf("expected malformed typed verification report to block synthesis, got decision=%q status=%q ok=%v", decision, status, ok)
+	}
+}

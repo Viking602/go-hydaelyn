@@ -9,13 +9,13 @@ import "time"
 // supervisor is allowed to re-read the same state; workers are not allowed
 // to read control-plane progress.
 type ControlState struct {
-	Cursor         SupervisorCursor `json:"cursor,omitempty"`
-	LastObserved   time.Time        `json:"lastObserved,omitempty"`
-	DigestCount    int              `json:"digestCount,omitempty"`
-	DecisionCount  int              `json:"decisionCount,omitempty"`
-	PendingGrants  []TaskRunGrant   `json:"pendingGrants,omitempty"`
-	Packet         *SynthesisPacket `json:"packet,omitempty"`
-	LastDecision   *DecisionRecord  `json:"lastDecision,omitempty"`
+	Cursor        SupervisorCursor `json:"cursor,omitempty"`
+	LastObserved  time.Time        `json:"lastObserved,omitempty"`
+	DigestCount   int              `json:"digestCount,omitempty"`
+	DecisionCount int              `json:"decisionCount,omitempty"`
+	PendingGrants []TaskRunGrant   `json:"pendingGrants,omitempty"`
+	Packet        *SynthesisPacket `json:"packet,omitempty"`
+	LastDecision  *DecisionRecord  `json:"lastDecision,omitempty"`
 }
 
 // ConsumeGrant pops the first grant for the given task id and returns it
@@ -32,6 +32,21 @@ func (c *ControlState) ConsumeGrant(taskID string) (TaskRunGrant, bool) {
 		}
 		c.PendingGrants = append(c.PendingGrants[:idx], c.PendingGrants[idx+1:]...)
 		return grant, true
+	}
+	return TaskRunGrant{}, false
+}
+
+// PendingGrant returns the first outstanding grant for the given task
+// without consuming it. Callers use this to validate context freshness
+// before they turn the grant into an actual dispatch attempt.
+func (c *ControlState) PendingGrant(taskID string) (TaskRunGrant, bool) {
+	if c == nil {
+		return TaskRunGrant{}, false
+	}
+	for _, grant := range c.PendingGrants {
+		if grant.TaskID == taskID {
+			return grant, true
+		}
 	}
 	return TaskRunGrant{}, false
 }

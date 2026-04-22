@@ -249,7 +249,7 @@ func verificationResultsForTask(board *blackboard.State, task team.Task) []black
 	for _, claim := range claims {
 		claimsByID[claim.ID] = claim
 	}
-	if typed := typedVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); len(typed) > 0 {
+	if typed, handled := typedVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); handled {
 		return typed
 	}
 	if structured := structuredVerificationResults(task.Result.Structured, claimsByID, fallbackEvidenceIDs, task); len(structured) > 0 {
@@ -307,13 +307,13 @@ func claimsForVerifierTask(board *blackboard.State, task team.Task) []blackboard
 // well-formed typed report is the only place where the worker tells us
 // exactly which claim received which verdict with what confidence, so
 // whenever it is present and valid it wins.
-func typedVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {
+func typedVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) ([]blackboard.VerificationResult, bool) {
 	report, ok := team.ExtractVerificationReport(payload)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	if err := team.ValidateVerificationReport(report); err != nil {
-		return nil
+		return nil, true
 	}
 	perClaim := report.PerClaim
 	if len(perClaim) == 0 {
@@ -334,6 +334,9 @@ func typedVerificationResults(payload map[string]any, claimsByID map[string]blac
 		claimID := strings.TrimSpace(claim.ClaimID)
 		if claimID == "" {
 			continue
+		}
+		if _, ok := claimsByID[claimID]; !ok {
+			return nil, true
 		}
 		status := blackboard.VerificationStatus(string(claim.Status))
 		confidence := claim.Confidence
@@ -367,7 +370,7 @@ func typedVerificationResults(payload map[string]any, claimsByID map[string]blac
 			Rationale:   rationale,
 		})
 	}
-	return results
+	return results, true
 }
 
 func structuredVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {

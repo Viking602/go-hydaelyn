@@ -49,6 +49,45 @@ func TestQueuedStatePersistRejectsStaleVersion(t *testing.T) {
 	}
 }
 
+func TestStartTeamPrepared_StrictQueueRespectsDeciderGrants(t *testing.T) {
+	ctx := context.Background()
+	queue := scheduler.NewMemoryQueue()
+	runner := New(Config{
+		Storage:     storage.NewMemoryDriver(),
+		WorkerID:    "worker-a",
+		ControlMode: ControlModeStrict,
+		SupervisorDecider: SupervisorDeciderFunc(func(_ context.Context, _ SupervisorDigest, _ *blackboard.State) ([]team.SupervisorDecision, error) {
+			return nil, nil
+		}),
+	})
+	runner.queue = queue
+	runner.RegisterPattern(singleTaskPattern{})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher})
+
+	state, err := runner.startTeamPrepared(ctx, StartTeamRequest{
+		TeamID:            "team-strict-queue",
+		Pattern:           "single-task",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"task": "gated"},
+	}, false)
+	if err != nil {
+		t.Fatalf("startTeamPrepared() error = %v", err)
+	}
+	if state.Control == nil || state.Control.DigestCount != 1 {
+		t.Fatalf("expected control plane observation before queue dispatch, got %#v", state.Control)
+	}
+	if len(state.Control.PendingGrants) != 0 {
+		t.Fatalf("expected decider withholding grants to leave queue idle, got %#v", state.Control.PendingGrants)
+	}
+	if _, ok, err := queue.AcquireForTeam(ctx, "inspector", state.ID, localQueueLeaseTTL); err != nil {
+		t.Fatalf("AcquireForTeam() error = %v", err)
+	} else if ok {
+		t.Fatalf("expected no queued lease without a grant")
+	}
+}
+
 func TestMultiAgentCollaboration_QueuedRetryIsIdempotent(t *testing.T) {
 	runner := New(Config{WorkerID: "worker-a"})
 	state := team.RunState{

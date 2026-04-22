@@ -174,6 +174,11 @@ func autoGrantReadyTasks(digest SupervisorDigest) []team.SupervisorDecision {
 	}}
 }
 
+func (r *Runtime) dispatchableTaskSet(state *team.RunState) ([]team.Task, map[string]struct{}) {
+	runnable, runnableSet := runnableTaskSet(*state)
+	return r.filterRunnableByGrants(state, runnable, runnableSet)
+}
+
 // filterRunnableByGrants is the strict-mode dispatch gate. Given the
 // runnable set the engine would normally execute, we keep only tasks that
 // hold a pending grant. Grants are consumed here (the state mutation
@@ -194,18 +199,18 @@ func (r *Runtime) filterRunnableByGrants(state *team.RunState, runnable []team.T
 		if _, ok := runnableSet[task.ID]; !ok {
 			continue
 		}
-		if !state.Control.HasPendingGrant(task.ID) {
+		grant, ok := state.Control.PendingGrant(task.ID)
+		if !ok {
+			continue
+		}
+		if err := ensureFreshTaskContext(state.Blackboard, grant); err != nil {
+			continue
+		}
+		if _, ok := state.Control.ConsumeGrant(task.ID); !ok {
 			continue
 		}
 		filtered = append(filtered, task)
 		filteredSet[task.ID] = struct{}{}
-	}
-	// Consume the grants we're about to dispatch. Doing it here — before
-	// executeTasks kicks off any goroutines — keeps the invariant simple:
-	// a grant visible to readiness is a grant that will produce exactly
-	// one dispatch attempt.
-	for _, task := range filtered {
-		_, _ = state.Control.ConsumeGrant(task.ID)
 	}
 	return filtered, filteredSet
 }

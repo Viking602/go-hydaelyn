@@ -54,7 +54,7 @@ func validateControlPlaneChain(events []Event) []ReplayMismatch {
 			}
 			kind := controlPlaneString(event.Payload, "kind")
 			if kind == string(team.DecisionGrantRun) {
-				taskIDs, _ := grantedTasks[key]
+				taskIDs := grantedTasks[key]
 				if taskIDs == nil {
 					taskIDs = map[string]struct{}{}
 				}

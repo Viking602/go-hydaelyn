@@ -3,6 +3,7 @@ package recipe
 import (
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
@@ -106,5 +107,49 @@ func TestCompileLoopAndToolSugar(t *testing.T) {
 	}
 	if len(toolTask.DependsOn) != 2 {
 		t.Fatalf("expected tool step to depend on prior loop tasks, got %#v", toolTask)
+	}
+}
+
+func TestCompilePropagatesReadSelectors(t *testing.T) {
+	spec := Spec{
+		Pattern:           "deepsearch",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Flow: []Step{
+			{
+				Mode:    "loop",
+				ForEach: []string{"alpha"},
+				Template: &Task{
+					ID:    "branch-{{item}}",
+					Kind:  "synthesize",
+					Input: "assemble {{item}}",
+					ReadSelectors: []blackboard.ExchangeSelector{{
+						Keys:            []string{"branch.{{item}}"},
+						Namespaces:      []string{"verify.{{item}}"},
+						RequireVerified: true,
+						Required:        true,
+						Label:           "selector-{{item}}",
+					}},
+				},
+			},
+		},
+	}
+
+	compiled, err := Compile(spec)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if len(compiled.Plan.Tasks) != 1 {
+		t.Fatalf("expected one compiled task, got %#v", compiled.Plan.Tasks)
+	}
+	selectors := compiled.Plan.Tasks[0].ReadSelectors
+	if len(selectors) != 1 {
+		t.Fatalf("expected read selector to survive compilation, got %#v", selectors)
+	}
+	if selectors[0].Keys[0] != "branch.alpha" || selectors[0].Namespaces[0] != "verify.alpha" || selectors[0].Label != "selector-alpha" {
+		t.Fatalf("expected placeholder substitution inside read selector, got %#v", selectors[0])
+	}
+	if !selectors[0].RequireVerified || !selectors[0].Required {
+		t.Fatalf("expected selector flags preserved, got %#v", selectors[0])
 	}
 }

@@ -46,6 +46,7 @@ func (s *State) DetectConflicts() []Conflict {
 		return nil
 	}
 	type bucket struct {
+		slot       string
 		key        string
 		namespaces map[string]struct{}
 		tasks      map[string]struct{}
@@ -58,15 +59,17 @@ func (s *State) DetectConflicts() []Conflict {
 		if key == "" {
 			continue
 		}
-		b, ok := buckets[key]
+		slot := conflictSlot(key, strings.TrimSpace(ex.Namespace))
+		b, ok := buckets[slot]
 		if !ok {
 			b = &bucket{
+				slot:       slot,
 				key:        key,
 				namespaces: map[string]struct{}{},
 				tasks:      map[string]struct{}{},
 				texts:      map[string]struct{}{},
 			}
-			buckets[key] = b
+			buckets[slot] = b
 		}
 		if ex.Namespace != "" {
 			b.namespaces[ex.Namespace] = struct{}{}
@@ -117,6 +120,10 @@ func (s *State) DetectConflicts() []Conflict {
 		})
 	}
 	return conflicts
+}
+
+func conflictSlot(key, namespace string) string {
+	return key + "\x00" + namespace
 }
 
 func normalizedConflictText(ex Exchange) string {

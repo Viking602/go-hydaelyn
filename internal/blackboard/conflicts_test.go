@@ -33,8 +33,8 @@ func TestDetectConflicts_MatchingTextAcrossWritersIsNotConflict(t *testing.T) {
 func TestDetectConflicts_DivergentTextAcrossTasksFlags(t *testing.T) {
 	state := &State{
 		Exchanges: []Exchange{
-			{ID: "ex-1", Key: "design.doc", TaskID: "impl-1", Namespace: "impl.impl-1", Version: 1, Text: "alpha"},
-			{ID: "ex-2", Key: "design.doc", TaskID: "impl-2", Namespace: "impl.impl-2", Version: 1, Text: "beta"},
+			{ID: "ex-1", Key: "design.doc", TaskID: "impl-1", Namespace: "shared.design", Version: 1, Text: "alpha"},
+			{ID: "ex-2", Key: "design.doc", TaskID: "impl-2", Namespace: "shared.design", Version: 1, Text: "beta"},
 		},
 	}
 	conflicts := state.DetectConflicts()
@@ -48,11 +48,23 @@ func TestDetectConflicts_DivergentTextAcrossTasksFlags(t *testing.T) {
 	if got := c.TaskIDs; len(got) != 2 || got[0] != "impl-1" || got[1] != "impl-2" {
 		t.Fatalf("expected sorted task ids [impl-1 impl-2], got %#v", got)
 	}
-	if got := c.Namespaces; len(got) != 2 || got[0] != "impl.impl-1" || got[1] != "impl.impl-2" {
+	if got := c.Namespaces; len(got) != 1 || got[0] != "shared.design" {
 		t.Fatalf("expected sorted namespaces, got %#v", got)
 	}
 	if len(c.Exchanges) != 2 {
 		t.Fatalf("expected both exchanges surfaced, got %#v", c.Exchanges)
+	}
+}
+
+func TestDetectConflicts_DifferentNamespacesDoNotConflict(t *testing.T) {
+	state := &State{
+		Exchanges: []Exchange{
+			{ID: "ex-1", Key: "verify.gate", TaskID: "verify-1", Namespace: "verify.impl-1", Text: "alpha"},
+			{ID: "ex-2", Key: "verify.gate", TaskID: "verify-2", Namespace: "verify.impl-2", Text: "beta"},
+		},
+	}
+	if conflicts := state.DetectConflicts(); len(conflicts) != 0 {
+		t.Fatalf("different namespaces should stay isolated, got %#v", conflicts)
 	}
 }
 
