@@ -103,7 +103,14 @@ func TestVerificationProviderUsesTaskMetadata(t *testing.T) {
 	}
 }
 
-func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
+func TestCollaborationBlackboard_GuardedSynthesisRequiresVerifiedClaims(t *testing.T) {
+	// Under the selector-based model, VerifierRequired=true translates to
+	// RequireVerified on every read. Exchanges no longer pass merely because
+	// their namespace starts with "verify."; they must link to a claim that
+	// has a SupportsClaim-qualifying verification (status=Supported,
+	// confidence>=threshold, evidence-linked). This test captures that
+	// stronger contract so the old namespace-prefix heuristic cannot sneak
+	// back in.
 	runner := New(Config{})
 	board := &blackboard.State{
 		Claims: []blackboard.Claim{{
@@ -117,8 +124,10 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 			ClaimIDs: []string{"claim-1"},
 		}},
 		Verifications: []blackboard.VerificationResult{{
-			ClaimID: "claim-1",
-			Status:  blackboard.VerificationStatusSupported,
+			ClaimID:     "claim-1",
+			Status:      blackboard.VerificationStatusSupported,
+			Confidence:  0.95,
+			EvidenceIDs: []string{"ev-1"},
 		}},
 	}
 	for _, exchange := range []blackboard.Exchange{
@@ -145,6 +154,7 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 			Version:   1,
 			ValueType: blackboard.ExchangeValueTypeText,
 			Text:      "verifier-approved output",
+			ClaimIDs:  []string{"claim-1"},
 		},
 	} {
 		if _, err := board.UpsertExchangeCAS(exchange); err != nil {
@@ -161,13 +171,13 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 
 	materialized, text := runner.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
 	if len(materialized) != 1 {
-		t.Fatalf("expected guarded synthesis to ignore non-verifier namespaces and unsupported fallback, got %#v", materialized)
+		t.Fatalf("expected guarded synthesis to accept only the verified-claim-linked exchange, got %#v", materialized)
 	}
-	if materialized[0].Namespace != "verify.verify-1" || materialized[0].Text != "verifier-approved output" {
-		t.Fatalf("expected only verifier namespace exchange to materialize, got %#v", materialized)
+	if materialized[0].Text != "verifier-approved output" || len(materialized[0].ClaimIDs) == 0 || materialized[0].ClaimIDs[0] != "claim-1" {
+		t.Fatalf("expected the claim-1-linked exchange to be the only one materialized, got %#v", materialized)
 	}
-	if strings.Contains(text, "raw implementation output") || strings.Contains(text, "review comments") || strings.Contains(text, "verified finding") {
-		t.Fatalf("expected guarded synthesis text to exclude unapproved namespaces, got %q", text)
+	if strings.Contains(text, "raw implementation output") || strings.Contains(text, "review comments") {
+		t.Fatalf("expected guarded synthesis text to exclude unverified namespaces, got %q", text)
 	}
 
 	if _, err := board.UpsertExchangeCAS(blackboard.Exchange{
@@ -185,18 +195,18 @@ func TestCollaborationBlackboard_RequiresVerifierNamespaces(t *testing.T) {
 
 	materialized, text = runner.materializeTaskInputs(team.RunState{Blackboard: board}, guardedTask)
 	if len(materialized) != 2 {
-		t.Fatalf("expected guarded synthesis to consume verifier namespaces only, got %#v", materialized)
+		t.Fatalf("expected guarded synthesis to consume verified exchanges only, got %#v", materialized)
 	}
 	for _, item := range materialized {
-		if item.Namespace != "verify.verify-1" {
-			t.Fatalf("expected only verifier namespaces, got %#v", materialized)
+		if len(item.ClaimIDs) == 0 || item.ClaimIDs[0] != "claim-1" {
+			t.Fatalf("expected every materialized exchange to be linked to verified claim-1, got %#v", materialized)
 		}
 	}
 	if strings.Contains(text, "raw implementation output") || strings.Contains(text, "review comments") {
-		t.Fatalf("expected guarded synthesis text to exclude implementation/review namespaces, got %q", text)
+		t.Fatalf("expected guarded synthesis text to exclude unverified exchanges, got %q", text)
 	}
 	if !strings.Contains(text, "verifier-approved output") || !strings.Contains(text, "verified finding") {
-		t.Fatalf("expected guarded synthesis text to include verifier-approved exchanges, got %q", text)
+		t.Fatalf("expected guarded synthesis text to include verified exchanges, got %q", text)
 	}
 }
 
@@ -410,7 +420,10 @@ func TestVerifierStructuredClaimsOverrideSummaryHeuristics(t *testing.T) {
 		t.Fatalf("expected only supported evidence-backed claim to publish supported finding, got %#v", supported)
 	}
 
-	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGatePassDecision || status != string(blackboard.VerificationStatusSupported) {
-		t.Fatalf("expected mixed claim-level results to keep supported gate for supported subset, got decision=%q status=%q ok=%v", decision, status, ok)
+	// Under the strict gate rules a single contradicted claim short-circuits
+	// the whole gate — we must not let a supported sibling drown out a
+	// contradiction when deciding whether synthesis may proceed.
+	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGateBlockDecision || status != string(blackboard.VerificationStatusContradicted) {
+		t.Fatalf("expected mixed claim-level results to block on the contradicted claim, got decision=%q status=%q ok=%v", decision, status, ok)
 	}
 }

@@ -175,6 +175,7 @@ type Task struct {
 	Assignee             string             `json:"assignee,omitempty"`
 	DependsOn            []string           `json:"dependsOn,omitempty"`
 	Reads                []string           `json:"reads,omitempty"`
+	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty"`
 	Writes               []string           `json:"writes,omitempty"`
 	Publish              []OutputVisibility `json:"publish,omitempty"`
 	Namespace            string             `json:"namespace,omitempty"`

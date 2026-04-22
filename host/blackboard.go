@@ -365,43 +365,47 @@ func verifierFallbackEvidenceIDs(board *blackboard.State, task team.Task) []stri
 	return ids
 }
 
-func verificationGateStatus(task team.Task, results []blackboard.VerificationResult) blackboard.VerificationStatus {
+// verificationGateStatus derives the overall synthesis gate from claim-level
+// verification results. Any contradicted claim short-circuits the whole gate
+// to contradicted — we never let a supported sibling drown out a contradiction.
+// Missing results degrade to insufficient rather than inferring from worker
+// summary text, so a verifier that produces no structured evidence cannot
+// implicitly approve synthesis.
+func verificationGateStatus(_ team.Task, results []blackboard.VerificationResult) blackboard.VerificationStatus {
 	if len(results) == 0 {
-		return blackboard.InferVerificationStatus(task.Result.Summary)
+		return blackboard.VerificationStatusInsufficient
 	}
-	anySupported := false
-	anyContradicted := false
+	supported := 0
+	required := 0
 	for _, result := range results {
 		if result.Status == blackboard.VerificationStatusContradicted {
-			anyContradicted = true
+			return blackboard.VerificationStatusContradicted
 		}
+		required++
 		if result.SupportsClaim(blackboard.DefaultVerificationConfidence) {
-			anySupported = true
+			supported++
 		}
 	}
-	if anySupported {
+	if required > 0 && supported >= required {
 		return blackboard.VerificationStatusSupported
-	}
-	if anyContradicted {
-		return blackboard.VerificationStatusContradicted
 	}
 	return blackboard.VerificationStatusInsufficient
 }
 
-func structuredVerificationStatus(payload map[string]any, fallback string) blackboard.VerificationStatus {
+// structuredVerificationStatus reads the declared verifier decision from a
+// structured claim payload. An absent or unrecognized decision degrades to
+// insufficient — we never infer support from free-form worker text, because
+// a verifier that cannot emit a machine-readable verdict has not produced
+// evidence strong enough to gate synthesis.
+func structuredVerificationStatus(payload map[string]any, _ string) blackboard.VerificationStatus {
 	value := strings.ToLower(strings.TrimSpace(firstString(payload, "decision", "status")))
 	switch value {
-	case "", "supported", "pass", "passed", "approved":
-		if value == "" {
-			return blackboard.InferVerificationStatus(fallback)
-		}
+	case "supported", "pass", "passed", "approved":
 		return blackboard.VerificationStatusSupported
 	case "contradicted", "unsupported", "blocked", "rejected", "false":
 		return blackboard.VerificationStatusContradicted
-	case "insufficient", "unknown", "unclear":
-		return blackboard.VerificationStatusInsufficient
 	default:
-		return blackboard.InferVerificationStatus(value)
+		return blackboard.VerificationStatusInsufficient
 	}
 }
 

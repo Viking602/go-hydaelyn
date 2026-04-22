@@ -334,13 +334,30 @@ func verifierDependenciesForTask(state team.RunState, task team.Task) []team.Tas
 	return items
 }
 
+// verifierGateEvidence reports the verifier's authoritative decision for a
+// task. We prefer the explicit gate exchange (key=verify.gate) because it
+// represents the overall verdict across every claim the verifier saw. Other
+// per-claim exchanges like supported_findings only describe the positive
+// subset — trusting them would hide contradictions and incorrectly let a
+// mixed-outcome verifier unblock guarded synthesis.
 func verifierGateEvidence(board *blackboard.State, task team.Task) (string, string, bool) {
 	if board == nil {
 		return "", "", false
 	}
-	for _, exchange := range board.ExchangesForTask(task.ID) {
-		decision, status, ok := verifierGateDecisionFromExchange(exchange)
-		if ok {
+	taskExchanges := board.ExchangesForTask(task.ID)
+	for _, exchange := range taskExchanges {
+		if exchange.Key != verifierGateExchangeKey {
+			continue
+		}
+		if decision, status, ok := verifierGateDecisionFromExchange(exchange); ok {
+			return decision, status, true
+		}
+	}
+	for _, exchange := range taskExchanges {
+		if exchange.Key == verifierGateExchangeKey {
+			continue
+		}
+		if decision, status, ok := verifierGateDecisionFromExchange(exchange); ok {
 			return decision, status, true
 		}
 	}

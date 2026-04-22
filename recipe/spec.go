@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -33,6 +34,7 @@ type Task struct {
 	AssigneeAgentID      string                  `json:"assigneeAgentId,omitempty" yaml:"assignee_agent_id,omitempty"`
 	DependsOn            []string                `json:"dependsOn,omitempty" yaml:"depends_on,omitempty"`
 	Reads                []string                `json:"reads,omitempty" yaml:"reads,omitempty"`
+	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty" yaml:"read_selectors,omitempty"`
 	Writes               []string                `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty" yaml:"publish,omitempty"`
 	VerifyClaims         []string                `json:"verifyClaims,omitempty" yaml:"verify_claims,omitempty"`
@@ -57,6 +59,7 @@ type Step struct {
 	AssigneeAgentID      string                  `json:"assigneeAgentId,omitempty" yaml:"assignee_agent_id,omitempty"`
 	DependsOn            []string                `json:"dependsOn,omitempty" yaml:"depends_on,omitempty"`
 	Reads                []string                `json:"reads,omitempty" yaml:"reads,omitempty"`
+	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty" yaml:"read_selectors,omitempty"`
 	Writes               []string                `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty" yaml:"publish,omitempty"`
 	VerifyClaims         []string                `json:"verifyClaims,omitempty" yaml:"verify_claims,omitempty"`

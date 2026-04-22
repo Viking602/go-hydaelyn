@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/internal/middleware"
 	"github.com/Viking602/go-hydaelyn/internal/plugin"
 	"github.com/Viking602/go-hydaelyn/planner"
@@ -153,6 +154,7 @@ func (r *Runtime) planTasksToRuntimeTasks(specs []planner.TaskSpec, workers []te
 			AssigneeAgentID:      assignee,
 			DependsOn:            append([]string{}, spec.DependsOn...),
 			Reads:                append([]string{}, spec.Reads...),
+			ReadSelectors:        append([]blackboard.ExchangeSelector{}, spec.ReadSelectors...),
 			Writes:               append([]string{}, spec.Writes...),
 			Publish:              append([]team.OutputVisibility{}, spec.Publish...),
 			Namespace:            spec.Namespace,
@@ -287,8 +289,14 @@ func (r *Runtime) reviewPlannedTeam(ctx context.Context, current team.RunState) 
 	next.Planning.LastAction = string(decision.Action)
 	next.Planning.LastActionReason = decision.Reason
 	switch decision.Action {
-	case planner.ReviewActionContinue, planner.ReviewActionComplete:
+	case planner.ReviewActionContinue:
 		return next, false, false, nil
+	case planner.ReviewActionComplete:
+		// Complete is an authoritative termination signal from the planner —
+		// fold it through the same finishReviewedTeam path as Abort/Pause so
+		// the run state gets persisted, the driver loop exits, and callers
+		// see Status=Completed instead of another scheduling round.
+		return r.finishReviewedTeam(ctx, next, team.StatusCompleted, decision.Reason)
 	case planner.ReviewActionReplan:
 		updated, err := r.replanTeam(ctx, driver, next)
 		if err != nil {
@@ -397,7 +405,16 @@ func (r *Runtime) finishReviewedTeam(ctx context.Context, state team.RunState, s
 	if state.Result == nil {
 		state.Result = &team.Result{}
 	}
-	state.Result.Error = reason
+	// Completed is not an error — record the planner's reason as Summary so the
+	// result payload stays clean. Aborted/Paused/Failed continue to surface the
+	// reason via Error because callers rely on that for diagnostics.
+	if status == team.StatusCompleted {
+		if strings.TrimSpace(reason) != "" && strings.TrimSpace(state.Result.Summary) == "" {
+			state.Result.Summary = reason
+		}
+	} else {
+		state.Result.Error = reason
+	}
 	state.UpdatedAt = time.Now().UTC()
 	if err := r.saveTeam(ctx, &state); err != nil {
 		return team.RunState{}, false, false, err

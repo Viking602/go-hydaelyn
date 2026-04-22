@@ -19,35 +19,63 @@ type taskExecution struct {
 }
 
 func (r *Runtime) materializeTaskInputs(state team.RunState, task team.Task) ([]blackboard.Exchange, string) {
-	if len(task.Reads) == 0 || state.Blackboard == nil {
+	selectors := selectorsForTask(task)
+	if len(selectors) == 0 || state.Blackboard == nil {
 		return nil, ""
 	}
-	collected := make([]blackboard.Exchange, 0, len(task.Reads))
-	for _, key := range task.Reads {
-		collected = append(collected, materializeReadKey(state.Blackboard, task, key)...)
-	}
-	return collected, formatMaterializedInputs(task, state.Blackboard)
+	items := materializeForTask(state.Blackboard, task, selectors)
+	return items, formatMaterializedInputs(task, items)
 }
 
-func materializeReadKey(board *blackboard.State, task team.Task, key string) []blackboard.Exchange {
+// materializeForTask runs the selector pipeline and, for legacy callers that
+// declared the "supported_findings" pseudo-key on non-verifier-guarded
+// synthesize tasks, falls back to board.SupportedFindings() so existing tests
+// and recipes keep working while new code paths move to RequireVerified
+// selectors.
+//
+// Findings are intentionally *not* synthesized into exchanges here. In the new
+// model a finding becomes a task input only once the verifier gate has
+// published it as a "supported_findings" exchange — that real exchange is what
+// selectors match. Surfacing SelectFindings() results as fake exchanges would
+// let unpublished findings leak into guarded-synthesis prompts.
+func materializeForTask(board *blackboard.State, task team.Task, selectors []blackboard.ExchangeSelector) []blackboard.Exchange {
+	ctx := MaterializeSelectors(board, selectors)
+	items := ctx.Exchanges
+	if shouldApplyLegacySupportedFindings(task, selectors, items) {
+		items = append(items, legacySupportedFindings(board)...)
+	}
+	return items
+}
+
+func shouldApplyLegacySupportedFindings(task team.Task, selectors []blackboard.ExchangeSelector, current []blackboard.Exchange) bool {
+	if len(current) > 0 {
+		return false
+	}
+	if len(task.ReadSelectors) > 0 {
+		return false
+	}
+	if task.Kind == team.TaskKindSynthesize && task.VerifierRequired {
+		return false
+	}
+	for _, sel := range selectors {
+		for _, key := range sel.Keys {
+			if key == supportedFindingsReadKey {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func legacySupportedFindings(board *blackboard.State) []blackboard.Exchange {
 	if board == nil {
 		return nil
 	}
-	items := filterMaterializedExchanges(task, board.ExchangesForKey(key))
-	if len(items) > 0 {
-		return items
-	}
-	if key != "supported_findings" {
-		return nil
-	}
-	if task.Kind == team.TaskKindSynthesize && task.VerifierRequired {
-		return nil
-	}
 	supported := board.SupportedFindings()
-	result := make([]blackboard.Exchange, 0, len(supported))
+	out := make([]blackboard.Exchange, 0, len(supported))
 	for _, finding := range supported {
-		result = append(result, blackboard.Exchange{
-			Key:        key,
+		out = append(out, blackboard.Exchange{
+			Key:        supportedFindingsReadKey,
 			TaskID:     finding.TaskID,
 			ValueType:  blackboard.ExchangeValueTypeFindingRef,
 			Text:       finding.Summary,
@@ -55,23 +83,28 @@ func materializeReadKey(board *blackboard.State, task team.Task, key string) []b
 			ClaimIDs:   append([]string{}, finding.ClaimIDs...),
 		})
 	}
-	return result
+	return out
 }
 
-func formatMaterializedInputs(task team.Task, board *blackboard.State) string {
-	if board == nil || len(task.Reads) == 0 {
+func formatMaterializedInputs(task team.Task, items []blackboard.Exchange) string {
+	if len(items) == 0 {
 		return ""
 	}
-	sections := make([]string, 0, len(task.Reads))
-	plainTexts := make([]string, 0, len(task.Reads))
-	plainOnly := true
-	for _, key := range task.Reads {
-		items := materializeReadKey(board, task, key)
-		if len(items) == 0 {
-			continue
+	byKey := map[string][]blackboard.Exchange{}
+	order := make([]string, 0)
+	for _, item := range items {
+		if _, ok := byKey[item.Key]; !ok {
+			order = append(order, item.Key)
 		}
-		lines := make([]string, 0, len(items))
-		for _, item := range items {
+		byKey[item.Key] = append(byKey[item.Key], item)
+	}
+	sections := make([]string, 0, len(order))
+	plainTexts := make([]string, 0)
+	plainOnly := true
+	for _, key := range order {
+		keyItems := byKey[key]
+		lines := make([]string, 0, len(keyItems))
+		for _, item := range keyItems {
 			line, plain := renderExchange(item)
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -84,7 +117,7 @@ func formatMaterializedInputs(task team.Task, board *blackboard.State) string {
 		if len(lines) == 0 {
 			continue
 		}
-		if len(task.Reads) == 1 && plainOnly {
+		if len(order) == 1 && plainOnly {
 			plainTexts = append(plainTexts, lines...)
 			continue
 		}
@@ -95,22 +128,6 @@ func formatMaterializedInputs(task team.Task, board *blackboard.State) string {
 		return strings.Join(plainTexts, "\n")
 	}
 	return strings.Join(sections, "\n\n")
-}
-
-func filterMaterializedExchanges(task team.Task, items []blackboard.Exchange) []blackboard.Exchange {
-	if len(items) == 0 {
-		return nil
-	}
-	if task.Kind != team.TaskKindSynthesize || !task.VerifierRequired {
-		return items
-	}
-	filtered := make([]blackboard.Exchange, 0, len(items))
-	for _, item := range items {
-		if strings.HasPrefix(item.Namespace, verifierNamespacePrefix) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered
 }
 
 func renderExchange(exchange blackboard.Exchange) (string, bool) {

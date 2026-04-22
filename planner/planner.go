@@ -3,6 +3,7 @@ package planner
 import (
 	"context"
 
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
@@ -23,6 +24,7 @@ type TaskSpec struct {
 	AssigneeAgentID      string                  `json:"assigneeAgentId,omitempty"`
 	DependsOn            []string                `json:"dependsOn,omitempty"`
 	Reads                []string                `json:"reads,omitempty"`
+	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty"`
 	Writes               []string                `json:"writes,omitempty"`
 	Publish              []team.OutputVisibility `json:"publish,omitempty"`
 	VerifyClaims         []string                `json:"verifyClaims,omitempty"`
