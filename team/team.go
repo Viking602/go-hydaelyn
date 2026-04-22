@@ -208,6 +208,7 @@ type RunState struct {
 	Result              *Result           `json:"result,omitempty"`
 	Planning            *PlanningState    `json:"planning,omitempty"`
 	Blackboard          *blackboard.State `json:"blackboard,omitempty"`
+	Control             *ControlState     `json:"control,omitempty"`
 	Input               map[string]any    `json:"input,omitempty"`
 	AgentOptions        AgentOptions      `json:"agentOptions,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`

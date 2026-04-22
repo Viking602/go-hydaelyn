@@ -59,6 +59,8 @@ const (
 	EventApprovalRequested      EventType = "ApprovalRequested"
 	EventPolicyOutcome          EventType = "PolicyOutcome"
 	EventTeamCompleted          EventType = "TeamCompleted"
+	EventSupervisorObserved     EventType = "SupervisorObserved"
+	EventConflictRaised         EventType = "ConflictRaised"
 	EventMailboxSent            EventType = "MailboxSent"
 	EventMailboxDelivered       EventType = "MailboxDelivered"
 	EventMailboxAcked           EventType = "MailboxAcked"
