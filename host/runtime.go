@@ -49,6 +49,12 @@ type Config struct {
 	Mailbox        mailbox.Mailbox
 	MailboxLimits  mailbox.Limits
 	MailboxEnabled *bool
+	// ControlMode selects how much of the supervisor control plane to run.
+	// Zero value is Legacy — no behavior change vs. pre-supervisor builds.
+	ControlMode ControlMode
+	// SupervisorDecider is the optional decision source for Hybrid/Strict
+	// modes. When nil, Strict falls back to auto-granting ready tasks.
+	SupervisorDecider SupervisorDecider
 }
 
 type Runtime struct {
@@ -84,6 +90,8 @@ type Runtime struct {
 	inlineTeamOutputGuardrails map[string][]agent.OutputGuardrail
 	mailbox                    mailbox.Mailbox
 	mailboxLimits              mailbox.Limits
+	controlMode                ControlMode
+	supervisorDecider          SupervisorDecider
 }
 
 func New(config Config) *Runtime {
@@ -124,6 +132,8 @@ func NewWithError(config Config) (*Runtime, error) {
 		activeTeams:                map[string]context.CancelFunc{},
 		inlineTeamOutputGuardrails: map[string][]agent.OutputGuardrail{},
 		mailboxLimits:              config.MailboxLimits.ApplyDefaults(),
+		controlMode:                config.ControlMode,
+		supervisorDecider:          config.SupervisorDecider,
 	}
 	if runner.workerID == "" {
 		runner.workerID = runner.nextWorkerID()

@@ -189,6 +189,10 @@ func (r *Runtime) executeTasks(ctx context.Context, state team.RunState) (team.R
 	current := state
 	current.Normalize()
 	runnable, runnableSet := runnableTaskSet(current)
+	// Strict mode: filter the runnable set down to tasks holding a pending
+	// grant, consuming those grants atomically. Legacy/Hybrid return the
+	// set unchanged.
+	runnable, runnableSet = r.filterRunnableByGrants(&current, runnable, runnableSet)
 	if len(runnable) == 0 {
 		return current, nil
 	}
@@ -558,6 +562,16 @@ func (r *Runtime) driveTeamStep(ctx context.Context, pattern team.Pattern, curre
 			return team.RunState{}, false, err
 		}
 		return current, true, nil
+	}
+	// Control plane runs before dispatch so strict-mode grants are visible
+	// to resolveBlockedOrRunnable. In Legacy mode this is a no-op and the
+	// engine behaves exactly as it did pre-supervisor.
+	if r.effectiveControlMode() != ControlModeLegacy {
+		observed, err := r.observeAndDecide(ctx, current)
+		if err != nil {
+			return team.RunState{}, false, err
+		}
+		current = observed
 	}
 	if next, progressed, terminal, err := r.resolveBlockedOrRunnable(ctx, current); progressed || err != nil || terminal {
 		return next, terminal, err
