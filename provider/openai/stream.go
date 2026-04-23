@@ -16,13 +16,14 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model         string            `json:"model"`
-	Messages      []chatMessage     `json:"messages"`
-	Tools         []chatTool        `json:"tools,omitempty"`
-	Stream        bool              `json:"stream"`
-	StreamOptions streamOptions     `json:"stream_options,omitempty"`
-	Stop          []string          `json:"stop,omitempty"`
-	Reasoning     *reasoningOptions `json:"reasoning,omitempty"`
+	Model          string            `json:"model"`
+	Messages       []chatMessage     `json:"messages"`
+	Tools          []chatTool        `json:"tools,omitempty"`
+	Stream         bool              `json:"stream"`
+	StreamOptions  streamOptions     `json:"stream_options,omitempty"`
+	Stop           []string          `json:"stop,omitempty"`
+	Reasoning      *reasoningOptions `json:"reasoning,omitempty"`
+	ResponseFormat any               `json:"response_format,omitempty"`
 }
 
 type reasoningOptions struct {
@@ -183,13 +184,14 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		return nil, fmt.Errorf("openai api key is required")
 	}
 	body, err := json.Marshal(chatCompletionRequest{
-		Model:         request.Model,
-		Messages:      toChatMessages(request.Messages),
-		Tools:         toChatTools(request.Tools),
-		Stream:        true,
-		StreamOptions: streamOptions{IncludeUsage: true},
-		Stop:          request.StopSequences,
-		Reasoning:     reasoningFromBudget(request.ThinkingBudget),
+		Model:          request.Model,
+		Messages:       toChatMessages(request.Messages),
+		Tools:          toChatTools(request.Tools),
+		Stream:         true,
+		StreamOptions:  streamOptions{IncludeUsage: true},
+		Stop:           request.StopSequences,
+		Reasoning:      reasoningFromBudget(request.ThinkingBudget),
+		ResponseFormat: responseFormatFromRequest(request.ResponseFormat),
 	})
 	if err != nil {
 		return nil, err
@@ -223,6 +225,30 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		body:  resp.Body,
 		state: streamState{reader: shared.NewReader(resp.Body)},
 	}, nil
+}
+
+func responseFormatFromRequest(format *provider.ResponseFormat) any {
+	if format == nil || format.Type == "" {
+		return nil
+	}
+	switch format.Type {
+	case "json_object":
+		return map[string]any{"type": "json_object"}
+	case "json_schema":
+		payload := map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   format.Name,
+				"strict": format.Strict,
+			},
+		}
+		if format.Schema != nil {
+			payload["json_schema"].(map[string]any)["schema"] = format.Schema
+		}
+		return payload
+	default:
+		return nil
+	}
 }
 
 type openAIStream struct {

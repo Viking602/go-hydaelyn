@@ -64,6 +64,14 @@ type Request struct {
 	Metadata       map[string]string        `json:"metadata,omitempty"`
 	StopSequences  []string                 `json:"stopSequences,omitempty"`
 	ThinkingBudget int                      `json:"thinkingBudget,omitempty"`
+	ResponseFormat *ResponseFormat          `json:"responseFormat,omitempty"`
+}
+
+type ResponseFormat struct {
+	Type   string              `json:"type"`
+	Name   string              `json:"name,omitempty"`
+	Strict bool                `json:"strict,omitempty"`
+	Schema *message.JSONSchema `json:"schema,omitempty"`
 }
 
 type Event struct {

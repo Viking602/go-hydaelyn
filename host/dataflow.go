@@ -162,6 +162,9 @@ func (r *Runtime) buildTaskResult(task team.Task, generated []message.Message) (
 	} else if ok {
 		return result, nil
 	}
+	if _, ok := structured[team.ReportKey]; ok {
+		return nil, fmt.Errorf("task %s emitted invalid %s report", task.ID, task.Kind)
+	}
 	if task.Kind == team.TaskKindSynthesize {
 		return nil, fmt.Errorf("task %s missing canonical synthesis report", task.ID)
 	}
@@ -212,7 +215,7 @@ func canonicalResultFromStructured(task team.Task, structured map[string]any, ar
 			return nil, false, nil
 		}
 		if err := team.ValidateResearchReport(report); err != nil {
-			return nil, false, nil
+			return nil, false, err
 		}
 		summary := researchReportSummary(report)
 		confidence := reportConfidence(report.Confidence, structured, 0.5)
@@ -223,7 +226,7 @@ func canonicalResultFromStructured(task team.Task, structured map[string]any, ar
 			return nil, false, nil
 		}
 		if err := team.ValidateVerificationReport(report); err != nil {
-			return nil, false, nil
+			return nil, false, err
 		}
 		summary := verificationReportSummary(report)
 		confidence := reportConfidence(report.Confidence, structured, 0.75)
@@ -364,11 +367,8 @@ func sortKeys(values map[string]struct{}) []string {
 }
 
 func (r *Runtime) publishTaskOutputMessages(ctx context.Context, state team.RunState, task team.Task, agentInstance team.AgentInstance) {
-	if task.Result == nil {
-		return
-	}
-	text := strings.TrimSpace(task.Result.Summary)
-	if text == "" {
+	text, ok := displayTextForTask(task, task.Result)
+	if !ok {
 		return
 	}
 	mode, err := r.resolvedAssistantOutputModeForTask(state, task)
@@ -376,8 +376,9 @@ func (r *Runtime) publishTaskOutputMessages(ctx context.Context, state team.RunS
 		return
 	}
 	metadata := map[string]string{
-		"taskId":     task.ID,
-		"taskOutput": "true",
+		"taskId":        task.ID,
+		"taskOutput":    "true",
+		"displayOutput": "true",
 	}
 	switch mode {
 	case team.AssistantOutputModePrivate:

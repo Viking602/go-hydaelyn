@@ -93,6 +93,14 @@ func (b *Bus) Definitions() []Definition {
 	return defs
 }
 
+func (b *Bus) IsTerminal(name string) bool {
+	driver, ok := b.Driver(name)
+	if !ok {
+		return false
+	}
+	return driver.Definition().Terminal
+}
+
 func (b *Bus) Subset(names []string) *Bus {
 	if len(names) == 0 {
 		return NewBus()

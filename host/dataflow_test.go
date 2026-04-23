@@ -336,11 +336,30 @@ func TestTaskAssistantOutputSharedPublishesDisplayMessages(t *testing.T) {
 	for _, msg := range teamSnapshot.Messages {
 		if msg.Role == message.RoleAssistant && msg.Metadata["taskOutput"] == "true" {
 			foundShared = true
+			if strings.Contains(msg.Text, `{"report"`) {
+				t.Fatalf("expected shared assistant output to contain display text only, got %#v", msg)
+			}
+			if strings.TrimSpace(msg.Text) == "" {
+				t.Fatalf("expected non-empty shared display output, got %#v", msg)
+			}
 			break
 		}
 	}
 	if !foundShared {
 		t.Fatalf("expected assistant task output in shared session when enabled, got %#v", teamSnapshot.Messages)
+	}
+}
+
+func TestBuildTaskResultRejectsInvalidResearchReport(t *testing.T) {
+	runner := New(Config{Storage: storage.NewMemoryDriver()})
+	_, err := runner.buildTaskResult(team.Task{
+		ID:   "research-1",
+		Kind: team.TaskKindResearch,
+	}, []message.Message{
+		message.NewText(message.RoleAssistant, `{"report":{"kind":"research"}}`),
+	})
+	if err == nil {
+		t.Fatal("expected invalid research report to be rejected")
 	}
 }
 
@@ -403,7 +422,7 @@ func TestSynthesizeRequiresCanonicalMachineResult(t *testing.T) {
 	if state.Status != team.StatusFailed {
 		t.Fatalf("expected team to fail when synth has no canonical result, got %#v", state)
 	}
-	if state.Tasks[1].Status != team.TaskStatusFailed || !strings.Contains(state.Tasks[1].Error, "missing canonical synthesis report") {
+	if state.Tasks[1].Status != team.TaskStatusFailed || (!strings.Contains(state.Tasks[1].Error, "typed_report_required") && !strings.Contains(state.Tasks[1].Error, "missing canonical synthesis report")) {
 		t.Fatalf("expected synth task contract failure, got %#v", state.Tasks[1])
 	}
 }

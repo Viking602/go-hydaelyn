@@ -105,7 +105,7 @@ func (s *delayedPromptStream) Recv() (provider.Event, error) {
 
 func (s *delayedPromptStream) Close() error { return nil }
 
-func TestPromptStreamDeliversEventsBeforeProviderCompletes(t *testing.T) {
+func TestPromptStreamDeliversFinalDisplayAfterProviderCompletes(t *testing.T) {
 	runner := New(Config{})
 	providerDriver := &delayedPromptProvider{gate: make(chan struct{})}
 	runner.RegisterProvider("delayed", providerDriver)
@@ -114,7 +114,7 @@ func TestPromptStreamDeliversEventsBeforeProviderCompletes(t *testing.T) {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 
-	events := make(chan provider.Event, 1)
+	events := make(chan DisplayEvent, 1)
 	resultErr := make(chan error, 1)
 	go func() {
 		_, err := runner.PromptStream(context.Background(), PromptRequest{
@@ -122,8 +122,8 @@ func TestPromptStreamDeliversEventsBeforeProviderCompletes(t *testing.T) {
 			Provider:  "delayed",
 			Model:     "test",
 			Messages:  []message.Message{message.NewText(message.RoleUser, "stream now")},
-		}, func(event provider.Event) error {
-			if event.Kind == provider.EventTextDelta {
+		}, func(event DisplayEvent) error {
+			if event.Kind == DisplayEventKindFinal {
 				select {
 				case events <- event:
 				default:
@@ -134,16 +134,16 @@ func TestPromptStreamDeliversEventsBeforeProviderCompletes(t *testing.T) {
 		resultErr <- err
 	}()
 
+	close(providerDriver.gate)
 	select {
 	case event := <-events:
 		if event.Text != "partial" {
-			t.Fatalf("expected first text delta before provider completion, got %#v", event)
+			t.Fatalf("expected canonical final display event, got %#v", event)
 		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("expected PromptStream to surface first event before provider stream finished")
+	case <-time.After(time.Second):
+		t.Fatal("expected PromptStream to surface final display event after provider completion")
 	}
 
-	close(providerDriver.gate)
 	select {
 	case err := <-resultErr:
 		if err != nil {
@@ -194,19 +194,58 @@ func TestPromptStreamCancellationInterruptsUpstreamProvider(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
 	_, err = runner.PromptStream(ctx, PromptRequest{
 		SessionID: sess.ID,
 		Provider:  "cancel-aware",
 		Model:     "test",
 		Messages:  []message.Message{message.NewText(message.RoleUser, "stream now")},
-	}, func(event provider.Event) error {
-		if event.Kind == provider.EventTextDelta {
-			cancel()
-		}
+	}, func(DisplayEvent) error {
 		return nil
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation to interrupt upstream provider, got %v", err)
+	}
+}
+
+func TestPromptStreamReturnsFinalDisplayOnly(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("capture", &capturePromptProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "unsafe "},
+			{Kind: provider.EventTextDelta, Text: "final"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	})
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	events := make([]DisplayEvent, 0, 2)
+	response, err := runner.PromptStream(context.Background(), PromptRequest{
+		SessionID: sess.ID,
+		Provider:  "capture",
+		Model:     "test",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "go")},
+	}, func(event DisplayEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("PromptStream() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one final display event, got %#v", events)
+	}
+	if events[0].Kind != DisplayEventKindFinal || events[0].Text != "unsafe final" {
+		t.Fatalf("unexpected display events %#v", events)
+	}
+	if response.UserFacingAnswer != "unsafe final" {
+		t.Fatalf("expected user-facing answer, got %#v", response)
 	}
 }
 

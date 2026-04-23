@@ -7,7 +7,6 @@ import (
 	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -97,7 +96,7 @@ func (a *API) Continue(ctx context.Context, sessionID string, request ContinueRe
 	})
 }
 
-func (a *API) StreamPrompt(ctx context.Context, sessionID string, request PromptRequest, emit func(provider.Event) error) (host.PromptResponse, error) {
+func (a *API) StreamPrompt(ctx context.Context, sessionID string, request PromptRequest, emit func(host.DisplayEvent) error) (host.PromptResponse, error) {
 	return a.runtime.PromptStream(ctx, host.PromptRequest{
 		SessionID: sessionID,
 		Provider:  request.Provider,

@@ -162,6 +162,47 @@ func TestDriverStreamForwardsStopAndReasoning(t *testing.T) {
 	}
 }
 
+func TestDriverStreamForwardsStructuredResponseFormat(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewDecoder(request.Body).Decode(&captured)
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.4",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+		ResponseFormat: &provider.ResponseFormat{
+			Type:   "json_schema",
+			Name:   "report",
+			Strict: true,
+			Schema: &message.JSONSchema{
+				Type: "object",
+				Properties: map[string]message.JSONSchema{
+					"report": {Type: "object"},
+				},
+				Required: []string{"report"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	_ = collectEvents(t, stream)
+
+	responseFormat, _ := captured["response_format"].(map[string]any)
+	if responseFormat["type"] != "json_schema" {
+		t.Fatalf("expected response_format.type json_schema, got %#v", responseFormat)
+	}
+	schemaEnvelope, _ := responseFormat["json_schema"].(map[string]any)
+	if schemaEnvelope["name"] != "report" || schemaEnvelope["strict"] != true {
+		t.Fatalf("expected json_schema envelope fields, got %#v", schemaEnvelope)
+	}
+}
+
 func collectEvents(t *testing.T, stream provider.Stream) []provider.Event {
 	t.Helper()
 	defer stream.Close()

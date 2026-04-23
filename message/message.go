@@ -53,6 +53,7 @@ type ToolDefinition struct {
 	Name                string            `json:"name"`
 	Description         string            `json:"description,omitempty"`
 	InputSchema         JSONSchema        `json:"inputSchema"`
+	Terminal            bool              `json:"terminal,omitempty"`
 	Tags                []string          `json:"tags,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
 	Origin              string            `json:"origin,omitempty"`

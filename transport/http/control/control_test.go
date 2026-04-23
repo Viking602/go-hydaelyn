@@ -45,25 +45,25 @@ func TestAPIPromptAndStreamPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if len(response.Messages) == 0 || response.Messages[len(response.Messages)-1].Text != "hello" {
+	if response.UserFacingAnswer != "hello" {
 		t.Fatalf("unexpected prompt response %#v", response)
 	}
 
-	events := make([]provider.Event, 0, 2)
+	events := make([]host.DisplayEvent, 0, 2)
 	streamed, err := api.StreamPrompt(context.Background(), sess.ID, PromptRequest{
 		Provider: "fake",
 		Model:    "test",
-	}, func(event provider.Event) error {
+	}, func(event host.DisplayEvent) error {
 		events = append(events, event)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("StreamPrompt() error = %v", err)
 	}
-	if len(events) == 0 {
+	if len(events) != 1 || events[0].Kind != host.DisplayEventKindFinal || events[0].Text != "hello" {
 		t.Fatalf("expected stream events, got %#v", events)
 	}
-	if len(streamed.Messages) == 0 || streamed.Messages[len(streamed.Messages)-1].Text != "hello" {
+	if streamed.UserFacingAnswer != "hello" {
 		t.Fatalf("unexpected streamed response %#v", streamed)
 	}
 }

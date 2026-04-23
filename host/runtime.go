@@ -154,6 +154,7 @@ func NewWithError(config Config) (*Runtime, error) {
 			return nil, err
 		}
 	}
+	runner.RegisterTeamOutputGuardrail("no_json_to_user", noJSONToUserGuardrail())
 	return runner, nil
 }
 

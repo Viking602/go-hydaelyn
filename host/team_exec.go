@@ -1041,13 +1041,16 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 	if err != nil {
 		return taskExecution{}, err
 	}
+	if guardrail := typedReportGuardrailForTask(task); guardrail != nil {
+		options.OutputGuardrails = append(options.OutputGuardrails, guardrail)
+	}
 	outputGuardrails, err := r.resolveOutputGuardrails(options)
 	if err != nil {
 		return taskExecution{}, err
 	}
 	engine := agent.Engine{
 		Provider: currentProvider,
-		Tools:    r.tools.Subset(profile.ToolNames),
+		Tools:    r.taskToolBus(task, profile),
 		Hooks:    r.engineHooks(),
 	}
 	var result agent.Result
@@ -1063,11 +1066,14 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 		Request: initialMessages,
 	}, func(ctx context.Context, envelope *middleware.Envelope) error {
 		metadata := map[string]string{
-			"agentId": agentInstance.ID,
-			"teamId":  state.ID,
-			"taskId":  task.ID,
-			"profile": profile.Name,
-			"runId":   state.ID,
+			"agentId":        agentInstance.ID,
+			"teamId":         state.ID,
+			"taskId":         task.ID,
+			"taskKind":       string(task.Kind),
+			"taskStage":      string(task.Stage),
+			"outputContract": outputContractForTask(task),
+			"profile":        profile.Name,
+			"runId":          state.ID,
 		}
 		runCtx := tool.WithCaller(ctx, tool.CallerInfo{
 			TeamRunID: state.ID,
@@ -1082,6 +1088,7 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 			MaxIterations:    max(1, options.maxIterationsOrDefault(4)),
 			StopSequences:    append([]string{}, options.StopSequences...),
 			ThinkingBudget:   options.ThinkingBudget,
+			ResponseFormat:   responseFormatForTask(task),
 			OutputGuardrails: outputGuardrails,
 			OutputRecorder:   r,
 			Metadata:         metadata,
@@ -1090,7 +1097,7 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 			return runErr
 		}
 		result = runResult
-		envelope.Response = runResult
+		envelope.Response = agentRunSummaryForTask(task, runResult)
 		return nil
 	})
 	if err != nil {
@@ -1126,3 +1133,11 @@ func (r *Runtime) persistTaskMessages(ctx context.Context, task team.Task, gener
 }
 
 const synthesizeReportPrompt = "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"synthesis\" and a non-empty answer field containing the final answer. Do not emit prose, markdown fences, or commentary outside the JSON object."
+
+func (r *Runtime) taskToolBus(task team.Task, profile team.Profile) *tool.Bus {
+	bus := r.tools.Subset(profile.ToolNames)
+	if kind, ok := reportKindForTask(task); ok {
+		bus.Register(submitReportTool{kind: kind})
+	}
+	return bus
+}

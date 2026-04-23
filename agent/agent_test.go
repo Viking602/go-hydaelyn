@@ -326,3 +326,65 @@ func TestCollectRejectsDuplicateToolCallID(t *testing.T) {
 		t.Fatalf("expected duplicate tool call id error, got %v", err)
 	}
 }
+
+type terminalTool struct{}
+
+func (terminalTool) Definition() tool.Definition {
+	return tool.Definition{
+		Name:        "submit_report",
+		Description: "submit report",
+		Terminal:    true,
+		InputSchema: tool.Schema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"answer": {Type: "string"},
+			},
+			Required: []string{"answer"},
+		},
+	}
+}
+
+func (terminalTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	return tool.Result{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Structured: call.Arguments,
+	}, nil
+}
+
+func TestEngineStopsAfterTerminalTool(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{
+				Kind: provider.EventToolCall,
+				ToolCall: &message.ToolCall{
+					ID:        "call-1",
+					Name:      "submit_report",
+					Arguments: json.RawMessage(`{"answer":"done"}`),
+				},
+			},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		}},
+	}
+	engine := Engine{
+		Provider: driver,
+		Tools:    tool.NewBus(terminalTool{}),
+	}
+	result, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "finish")},
+		MaxIterations: 3,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(driver.requests) != 1 {
+		t.Fatalf("expected terminal tool to stop model loop after first turn, got %d requests", len(driver.requests))
+	}
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected assistant and terminal tool result only, got %#v", result.Messages)
+	}
+	if result.Messages[len(result.Messages)-1].ToolResult == nil {
+		t.Fatalf("expected final message to be tool result, got %#v", result.Messages[len(result.Messages)-1])
+	}
+}

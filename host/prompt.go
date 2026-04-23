@@ -26,23 +26,25 @@ type PromptRequest struct {
 }
 
 type PromptResponse struct {
-	Run        storage.Run         `json:"run"`
-	Session    session.Session     `json:"session"`
-	NewEntries []session.Entry     `json:"newEntries"`
-	Messages   []message.Message   `json:"messages"`
-	Usage      provider.Usage      `json:"usage"`
-	StopReason provider.StopReason `json:"stopReason"`
+	Run              storage.Run         `json:"run"`
+	Session          session.Session     `json:"session"`
+	NewEntries       []session.Entry     `json:"newEntries"`
+	Messages         []message.Message   `json:"messages"`
+	UserFacingAnswer string              `json:"userFacingAnswer,omitempty"`
+	Display          []DisplayEvent      `json:"display,omitempty"`
+	Usage            provider.Usage      `json:"usage"`
+	StopReason       provider.StopReason `json:"stopReason"`
 }
 
 func (r *Runtime) Prompt(ctx context.Context, request PromptRequest) (PromptResponse, error) {
 	return r.promptCore(ctx, request, nil)
 }
 
-func (r *Runtime) PromptStream(ctx context.Context, request PromptRequest, onEvent func(provider.Event) error) (PromptResponse, error) {
-	return r.promptCore(ctx, request, onEvent)
+func (r *Runtime) PromptStream(ctx context.Context, request PromptRequest, emit func(DisplayEvent) error) (PromptResponse, error) {
+	return r.promptCore(ctx, request, emit)
 }
 
-func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent func(provider.Event) error) (PromptResponse, error) {
+func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, emit func(DisplayEvent) error) (PromptResponse, error) {
 	currentProvider, err := r.lookupProvider(request.Provider)
 	if err != nil {
 		return PromptResponse{}, err
@@ -110,7 +112,6 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 			Metadata:         runMetadata,
 			ToolMode:         request.ToolMode,
 			MaxIterations:    max(1, request.Agent.maxIterationsOrDefault(6)),
-			OnEvent:          onEvent,
 			StopSequences:    append([]string{}, request.Agent.StopSequences...),
 			ThinkingBudget:   request.Agent.ThinkingBudget,
 			OutputGuardrails: outputGuardrails,
@@ -120,7 +121,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 			return runErr
 		}
 		result = runResult
-		envelope.Response = runResult
+		envelope.Response = agentRunSummaryForPrompt(runResult)
 		return nil
 	})
 	if err != nil {
@@ -142,13 +143,23 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, onEvent
 	if err != nil {
 		return PromptResponse{}, err
 	}
+	display := promptDisplayResult(generated)
+	if emit != nil {
+		for _, event := range display.Display {
+			if err := emit(event); err != nil {
+				return PromptResponse{}, err
+			}
+		}
+	}
 	return PromptResponse{
-		Run:        run,
-		Session:    finalSnapshot.Session,
-		NewEntries: entries,
-		Messages:   generated,
-		Usage:      result.Usage,
-		StopReason: result.StopReason,
+		Run:              run,
+		Session:          finalSnapshot.Session,
+		NewEntries:       entries,
+		Messages:         generated,
+		UserFacingAnswer: display.UserFacingAnswer,
+		Display:          display.Display,
+		Usage:            result.Usage,
+		StopReason:       result.StopReason,
 	}, nil
 }
 

@@ -145,6 +145,9 @@ func TestRequest_Struct(t *testing.T) {
 		Metadata:       map[string]string{"key": "value"},
 		StopSequences:  []string{"STOP"},
 		ThinkingBudget: 1000,
+		ResponseFormat: &ResponseFormat{
+			Type: "json_object",
+		},
 	}
 
 	if req.Model != "gpt-4" {
@@ -158,6 +161,9 @@ func TestRequest_Struct(t *testing.T) {
 	}
 	if req.ThinkingBudget != 1000 {
 		t.Errorf("ThinkingBudget = %v, want 1000", req.ThinkingBudget)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" {
+		t.Errorf("ResponseFormat = %#v, want json_object", req.ResponseFormat)
 	}
 }
 

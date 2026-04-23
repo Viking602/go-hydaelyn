@@ -267,20 +267,54 @@ func (r *Runtime) resolveOutputGuardrails(options AgentOptions) ([]agent.OutputG
 }
 
 func (r *Runtime) resolveTeamOutputGuardrails(names []string) ([]TeamOutputGuardrail, error) {
-	if len(names) == 0 {
-		return nil, nil
-	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	guardrails := make([]TeamOutputGuardrail, 0, len(names))
+	guardrails := make([]TeamOutputGuardrail, 0, len(names)+1)
+	if item, ok := r.teamGuardrails["no_json_to_user"]; ok {
+		guardrails = append(guardrails, item)
+	}
+	if len(names) == 0 {
+		return guardrails, nil
+	}
 	for _, name := range names {
 		item, ok := r.teamGuardrails[name]
 		if !ok {
 			return nil, fmt.Errorf("team output guardrail not found: %s", name)
 		}
+		if name == "no_json_to_user" {
+			continue
+		}
 		guardrails = append(guardrails, item)
 	}
 	return guardrails, nil
+}
+
+func noJSONToUserGuardrail() TeamOutputGuardrail {
+	return NewTeamOutputGuardrail("no_json_to_user", func(_ context.Context, input TeamOutputGuardrailInput) (TeamOutputGuardrailResult, error) {
+		if input.Boundary == TeamOutputBoundaryBlackboard {
+			return AllowTeamOutput(), nil
+		}
+		summary := strings.TrimSpace(input.Output.Summary)
+		if summary == "" || !looksLikeJSON(summary) {
+			return AllowTeamOutput(), nil
+		}
+		if report, ok := team.ExtractSynthesisReport(input.Output.Structured); ok {
+			answer := strings.TrimSpace(report.Answer)
+			if answer != "" {
+				replacement := input.Output
+				replacement.Summary = answer
+				return ReplaceTeamOutput(replacement), nil
+			}
+		}
+		if input.Boundary == TeamOutputBoundaryTaskOutput {
+			return BlockTeamOutput("json summary is not display-safe"), nil
+		}
+		replacement := input.Output
+		replacement.Summary = ""
+		replacement.Findings = nil
+		replacement.Evidence = nil
+		return ReplaceTeamOutput(replacement), nil
+	})
 }
 
 func (r *Runtime) RecordOutputGuardrailDecision(ctx context.Context, decision agent.OutputGuardrailDecision) {

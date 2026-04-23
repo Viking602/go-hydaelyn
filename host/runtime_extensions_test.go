@@ -281,3 +281,44 @@ func TestStageMiddlewareBlockRecordsPolicyOutcome(t *testing.T) {
 		t.Fatalf("expected agent stage, got %#v", event.Payload)
 	}
 }
+
+func TestStageMiddlewareSeesSanitizedAgentSummary(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProvider("ordered-extension", &orderedExtensionProvider{})
+	driver, err := kit.Tool("trace-tool", func(_ context.Context, input struct {
+		Topic string `json:"topic"`
+	}) (string, error) {
+		return "topic:" + input.Topic, nil
+	})
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	runner.RegisterTool(driver)
+	var seen any
+	runner.UseStageMiddleware(middleware.Func(func(ctx context.Context, envelope *middleware.Envelope, next middleware.Next) error {
+		if err := next(ctx, envelope); err != nil {
+			return err
+		}
+		if envelope.Stage == middleware.StageAgent {
+			seen = envelope.Response
+		}
+		return nil
+	}))
+
+	sess, err := runner.CreateSession(context.Background(), session.CreateParams{Branch: "main"})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := runner.Prompt(context.Background(), PromptRequest{
+		SessionID: sess.ID,
+		Provider:  "ordered-extension",
+		Model:     "test",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "go")},
+	}); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+
+	if _, ok := seen.(AgentRunSummary); !ok {
+		t.Fatalf("expected sanitized AgentRunSummary, got %T (%#v)", seen, seen)
+	}
+}

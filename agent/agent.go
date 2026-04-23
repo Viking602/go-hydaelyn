@@ -26,6 +26,7 @@ type Input struct {
 	// hand. Empty/zero values leave the provider default.
 	StopSequences  []string
 	ThinkingBudget int
+	ResponseFormat *provider.ResponseFormat
 
 	// OutputGuardrails run only after a terminal assistant output is
 	// collected. They are distinct from hooks/middleware/capability
@@ -99,12 +100,21 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 		if e.Tools == nil {
 			return Result{}, ErrToolBusMissing
 		}
-		results, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
+		results, terminal, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
 		if err != nil {
 			return Result{}, err
 		}
 		for _, result := range results {
 			current = append(current, message.NewToolResult(result))
+		}
+		if terminal {
+			return Result{
+				Messages:   current,
+				Usage:      totalUsage,
+				StopReason: provider.StopReasonComplete,
+				Iterations: iteration + 1,
+				Thinking:   assistant.Thinking,
+			}, nil
 		}
 	}
 	return Result{
@@ -212,6 +222,7 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input In
 		Metadata:       input.Metadata,
 		StopSequences:  input.StopSequences,
 		ThinkingBudget: input.ThinkingBudget,
+		ResponseFormat: input.ResponseFormat,
 	}
 	if e.Tools != nil {
 		request.Tools = e.Tools.Definitions()
@@ -226,28 +237,32 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input In
 	return e.collect(ctx, stream, input.OnEvent)
 }
 
-func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, error) {
+func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, bool, error) {
 	prepared := make([]tool.Call, 0, len(calls))
+	terminal := false
 	for _, call := range calls {
 		item := tool.Call(call)
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
-			return nil, err
+			return nil, false, err
+		}
+		if e.Tools != nil && e.Tools.IsTerminal(item.Name) {
+			terminal = true
 		}
 		prepared = append(prepared, item)
 	}
 	results, err := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
 		item := tool.Result(current)
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		items = append(items, message.ToolResult(item))
 	}
-	return items, nil
+	return items, terminal, nil
 }
 
 func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent func(provider.Event) error) (message.Message, provider.Usage, provider.StopReason, error) {

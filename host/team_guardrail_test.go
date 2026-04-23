@@ -207,3 +207,37 @@ func TestTeamOutputGuardrailBlocksTaskOutputPublish(t *testing.T) {
 		t.Fatalf("expected shared task output publish to be blocked, got %#v", snapshot.Messages)
 	}
 }
+
+func TestDefaultNoJSONToUserGuardrailBlocksSharedJSONSummary(t *testing.T) {
+	runner := New(Config{})
+	providerDriver := &capturePromptProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: `{"report":{"kind":"research"}}`},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	}
+	runner.RegisterProvider("team-capture", providerDriver)
+	runner.RegisterPattern(sharedOutputPattern{})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "team-capture", Model: "test"})
+	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "team-capture", Model: "test"})
+
+	state, err := runner.StartTeam(context.Background(), StartTeamRequest{
+		Pattern:           "shared-output",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"researcher"},
+		Input:             map[string]any{"task": "do it"},
+		Agent: AgentOptions{
+			AssistantOutputMode: team.AssistantOutputModeShared,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+	snapshot, err := runner.GetSession(context.Background(), state.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if len(snapshot.Messages) != 0 {
+		t.Fatalf("expected default no-json guardrail to block shared publish, got %#v", snapshot.Messages)
+	}
+}
