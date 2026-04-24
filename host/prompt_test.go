@@ -298,6 +298,7 @@ func TestPromptForwardsAgentOptionsAndRecordsOutputGuardrailPolicyOutcome(t *tes
 			MaxIterations:        2,
 			StopSequences:        []string{"STOP"},
 			ThinkingBudget:       42,
+			ExtraBody:            map[string]any{"chat_template_kwargs": map[string]any{"thinking": true}},
 			OutputGuardrailNames: []string{"safe-final"},
 		},
 	})
@@ -314,6 +315,7 @@ func TestPromptForwardsAgentOptionsAndRecordsOutputGuardrailPolicyOutcome(t *tes
 	if request.ThinkingBudget != 42 {
 		t.Fatalf("expected thinking budget to be forwarded, got %d", request.ThinkingBudget)
 	}
+	requireProviderExtraBodyThinkingEnabled(t, request.ExtraBody)
 	if got := response.Messages[len(response.Messages)-1].Text; got != "safe final" {
 		t.Fatalf("expected guardrail replacement in prompt response, got %#v", response.Messages)
 	}
@@ -334,6 +336,14 @@ func TestPromptForwardsAgentOptionsAndRecordsOutputGuardrailPolicyOutcome(t *tes
 	}
 	if got := policyEvent.Payload["outcome"]; got != "replaced" {
 		t.Fatalf("expected replaced outcome, got %#v", policyEvent.Payload)
+	}
+}
+
+func requireProviderExtraBodyThinkingEnabled(t *testing.T, body map[string]any) {
+	t.Helper()
+	extra, ok := body["chat_template_kwargs"].(map[string]any)
+	if !ok || extra["thinking"] != true {
+		t.Fatalf("expected extra body to be forwarded, got %#v", body)
 	}
 }
 

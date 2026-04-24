@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
@@ -27,6 +28,7 @@ type Input struct {
 	StopSequences  []string
 	ThinkingBudget int
 	ResponseFormat *provider.ResponseFormat
+	ExtraBody      map[string]any
 
 	// OutputGuardrails run only after a terminal assistant output is
 	// collected. They are distinct from hooks/middleware/capability
@@ -209,6 +211,10 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return cloned
 }
 
+func cloneAnyMap(values map[string]any) map[string]any {
+	return maps.Clone(values)
+}
+
 // runTurn executes a single model turn: context transform, request assembly,
 // provider stream and event collection.
 func (e Engine) runTurn(ctx context.Context, current []message.Message, input Input) (message.Message, provider.Usage, provider.StopReason, error) {
@@ -223,6 +229,7 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input In
 		StopSequences:  input.StopSequences,
 		ThinkingBudget: input.ThinkingBudget,
 		ResponseFormat: input.ResponseFormat,
+		ExtraBody:      cloneAnyMap(input.ExtraBody),
 	}
 	if e.Tools != nil {
 		request.Tools = e.Tools.Definitions()

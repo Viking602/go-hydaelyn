@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"os"
@@ -183,7 +184,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if apiKey == "" {
 		return nil, fmt.Errorf("openai api key is required")
 	}
-	body, err := json.Marshal(chatCompletionRequest{
+	body, err := marshalChatCompletionRequest(chatCompletionRequest{
 		Model:          request.Model,
 		Messages:       toChatMessages(request.Messages),
 		Tools:          toChatTools(request.Tools),
@@ -192,7 +193,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		Stop:           request.StopSequences,
 		Reasoning:      reasoningFromBudget(request.ThinkingBudget),
 		ResponseFormat: responseFormatFromRequest(request.ResponseFormat),
-	})
+	}, request.ExtraBody)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +226,43 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		body:  resp.Body,
 		state: streamState{reader: shared.NewReader(resp.Body)},
 	}, nil
+}
+
+func marshalChatCompletionRequest(payload chatCompletionRequest, extraBody map[string]any) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return marshalChatCompletionRequestBody(body, extraChatCompletionBodyFields(extraBody))
+}
+
+func marshalChatCompletionRequestBody(body []byte, extraFields map[string]any) ([]byte, error) {
+	merged := map[string]any{}
+	if err := json.Unmarshal(body, &merged); err != nil {
+		return nil, err
+	}
+	maps.Copy(merged, extraFields)
+	return json.Marshal(merged)
+}
+
+func extraChatCompletionBodyFields(extraBody map[string]any) map[string]any {
+	fields := make(map[string]any, len(extraBody))
+	maps.Copy(fields, extraBody)
+	for key := range managedChatCompletionBodyFields {
+		delete(fields, key)
+	}
+	return fields
+}
+
+var managedChatCompletionBodyFields = map[string]struct{}{
+	"model":           {},
+	"messages":        {},
+	"tools":           {},
+	"stream":          {},
+	"stream_options":  {},
+	"stop":            {},
+	"reasoning":       {},
+	"response_format": {},
 }
 
 func responseFormatFromRequest(format *provider.ResponseFormat) any {

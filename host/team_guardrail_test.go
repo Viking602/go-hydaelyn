@@ -79,6 +79,7 @@ func TestStartTeamForwardsAgentOptionsAndOutputGuardrails(t *testing.T) {
 		Agent: AgentOptions{
 			StopSequences:        []string{"STOP"},
 			ThinkingBudget:       9,
+			ExtraBody:            map[string]any{"chat_template_kwargs": map[string]any{"thinking": true}},
 			OutputGuardrailNames: []string{"safe-task"},
 		},
 	})
@@ -95,6 +96,7 @@ func TestStartTeamForwardsAgentOptionsAndOutputGuardrails(t *testing.T) {
 	if request.ThinkingBudget != 9 {
 		t.Fatalf("expected thinking budget to be forwarded, got %d", request.ThinkingBudget)
 	}
+	requireProviderExtraBodyThinkingEnabled(t, request.ExtraBody)
 	if state.Tasks[0].Result == nil || state.Tasks[0].Result.Summary != "safe task answer" {
 		t.Fatalf("expected output guardrail replacement on task result, got %#v", state.Tasks[0].Result)
 	}

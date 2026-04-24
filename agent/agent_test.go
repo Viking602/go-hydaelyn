@@ -159,6 +159,39 @@ func TestEngineForwardsStopAndThinkingBudget(t *testing.T) {
 	}
 }
 
+func TestEngineForwardsExtraBody(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "ok"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	}
+	engine := Engine{Provider: driver}
+	_, err := engine.Run(context.Background(), Input{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 1,
+		ExtraBody: map[string]any{
+			"chat_template_kwargs": map[string]any{"thinking": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(driver.requests) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(driver.requests))
+	}
+	requireExtraBodyThinkingEnabled(t, driver.requests[0].ExtraBody)
+}
+
+func requireExtraBodyThinkingEnabled(t *testing.T, body map[string]any) {
+	t.Helper()
+	extra, ok := body["chat_template_kwargs"].(map[string]any)
+	if !ok || extra["thinking"] != true {
+		t.Fatalf("expected extra body to be forwarded, got %#v", body)
+	}
+}
+
 func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 	driver := &scriptedProvider{
 		turns: [][]provider.Event{

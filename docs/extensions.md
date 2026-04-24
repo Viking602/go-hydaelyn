@@ -31,6 +31,33 @@ runner.UseOutputGuardrail(noSecrets)
 runner.RegisterHook(customHook) // advanced / low-level
 ```
 
+## Provider Body Extras
+
+Business callers can pass provider-specific request body fields through
+`AgentOptions.ExtraBody`. This is intended for OpenAI-compatible extensions
+such as `chat_template_kwargs` or sampling fields not modeled by Hydaelyn yet:
+
+```go
+response, err := runner.Prompt(ctx, host.PromptRequest{
+	SessionID: sessionID,
+	Provider:  "openai",
+	Model:     "qwen",
+	Messages:  messages,
+	Agent: host.AgentOptions{
+		ExtraBody: map[string]any{
+			"chat_template_kwargs": map[string]any{
+				"thinking": true,
+			},
+		},
+	},
+})
+```
+
+The OpenAI provider appends extra fields to the JSON body after Hydaelyn builds
+its managed request. Managed fields such as `model`, `messages`, `tools`,
+`stream`, `stream_options`, `stop`, `reasoning`, and `response_format` are not
+overridden by `ExtraBody`.
+
 ## Execution Order
 
 For a prompt or task turn, Hydaelyn now runs:

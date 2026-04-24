@@ -203,6 +203,55 @@ func TestDriverStreamForwardsStructuredResponseFormat(t *testing.T) {
 	}
 }
 
+func TestDriverStreamForwardsExtraBody(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewDecoder(request.Body).Decode(&captured)
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "qwen",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+		ExtraBody: map[string]any{
+			"chat_template_kwargs": map[string]any{"thinking": true},
+			"temperature":          0.2,
+			"stream":               false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	_ = collectEvents(t, stream)
+
+	requireOpenAIExtraBody(t, captured)
+}
+
+func requireOpenAIExtraBody(t *testing.T, captured map[string]any) {
+	t.Helper()
+	requireChatTemplateThinkingEnabled(t, captured)
+	requireCapturedField(t, captured, "temperature", 0.2)
+	requireCapturedField(t, captured, "stream", true)
+}
+
+func requireChatTemplateThinkingEnabled(t *testing.T, captured map[string]any) {
+	t.Helper()
+	extra, _ := captured["chat_template_kwargs"].(map[string]any)
+	if extra["thinking"] != true {
+		t.Fatalf("expected chat_template_kwargs forwarded, got %#v", captured["chat_template_kwargs"])
+	}
+}
+
+func requireCapturedField(t *testing.T, captured map[string]any, key string, want any) {
+	t.Helper()
+	if captured[key] != want {
+		t.Fatalf("expected %s=%#v, got %#v", key, want, captured[key])
+	}
+}
+
 func collectEvents(t *testing.T, stream provider.Stream) []provider.Event {
 	t.Helper()
 	defer stream.Close()

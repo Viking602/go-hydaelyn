@@ -114,6 +114,7 @@ func (r *Runtime) promptCore(ctx context.Context, request PromptRequest, emit fu
 			MaxIterations:    max(1, request.Agent.maxIterationsOrDefault(6)),
 			StopSequences:    append([]string{}, request.Agent.StopSequences...),
 			ThinkingBudget:   request.Agent.ThinkingBudget,
+			ExtraBody:        cloneAnyMap(request.Agent.ExtraBody),
 			OutputGuardrails: outputGuardrails,
 			OutputRecorder:   r,
 		})

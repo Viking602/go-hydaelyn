@@ -628,24 +628,41 @@ func taskScheduledPayload(task team.Task) map[string]any {
 
 func agentOptionsPayload(options team.AgentOptions) map[string]any {
 	payload := map[string]any{}
-	if options.MaxIterations > 0 {
-		payload["maxIterations"] = options.MaxIterations
+	putPositiveInt(payload, "maxIterations", options.MaxIterations)
+	putStringSlice(payload, "stopSequences", options.StopSequences)
+	putPositiveInt(payload, "thinkingBudget", options.ThinkingBudget)
+	putAnyMap(payload, "extraBody", options.ExtraBody)
+	putStringSlice(payload, "outputGuardrails", options.OutputGuardrails)
+	putStringSlice(payload, "teamOutputGuardrails", options.TeamOutputGuardrails)
+	putStringValue(payload, "assistantOutputMode", string(options.AssistantOutputMode))
+	return nonEmptyPayload(payload)
+}
+
+func putPositiveInt(payload map[string]any, key string, value int) {
+	if value > 0 {
+		payload[key] = value
 	}
-	if len(options.StopSequences) > 0 {
-		payload["stopSequences"] = append([]string{}, options.StopSequences...)
+}
+
+func putStringSlice(payload map[string]any, key string, values []string) {
+	if len(values) > 0 {
+		payload[key] = append([]string{}, values...)
 	}
-	if options.ThinkingBudget > 0 {
-		payload["thinkingBudget"] = options.ThinkingBudget
+}
+
+func putAnyMap(payload map[string]any, key string, values map[string]any) {
+	if len(values) > 0 {
+		payload[key] = cloneAnyMap(values)
 	}
-	if len(options.OutputGuardrails) > 0 {
-		payload["outputGuardrails"] = append([]string{}, options.OutputGuardrails...)
+}
+
+func putStringValue(payload map[string]any, key, value string) {
+	if value != "" {
+		payload[key] = value
 	}
-	if len(options.TeamOutputGuardrails) > 0 {
-		payload["teamOutputGuardrails"] = append([]string{}, options.TeamOutputGuardrails...)
-	}
-	if options.AssistantOutputMode != "" {
-		payload["assistantOutputMode"] = string(options.AssistantOutputMode)
-	}
+}
+
+func nonEmptyPayload(payload map[string]any) map[string]any {
 	if len(payload) == 0 {
 		return nil
 	}

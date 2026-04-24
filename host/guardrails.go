@@ -15,6 +15,7 @@ type AgentOptions struct {
 	MaxIterations        int                      `json:"maxIterations,omitempty"`
 	StopSequences        []string                 `json:"stopSequences,omitempty"`
 	ThinkingBudget       int                      `json:"thinkingBudget,omitempty"`
+	ExtraBody            map[string]any           `json:"extraBody,omitempty"`
 	OutputGuardrails     []agent.OutputGuardrail  `json:"-"`
 	OutputGuardrailNames []string                 `json:"outputGuardrailNames,omitempty"`
 	TeamOutputGuardrails []string                 `json:"teamOutputGuardrails,omitempty"`
@@ -30,36 +31,64 @@ func (o AgentOptions) maxIterationsOrDefault(fallback int) int {
 
 func mergeAgentOptions(base, override AgentOptions) AgentOptions {
 	merged := base
-	if override.MaxIterations > 0 {
-		merged.MaxIterations = override.MaxIterations
-	}
-	if len(override.StopSequences) > 0 {
-		merged.StopSequences = append([]string{}, override.StopSequences...)
-	} else if len(merged.StopSequences) > 0 {
-		merged.StopSequences = append([]string{}, merged.StopSequences...)
-	}
-	if override.ThinkingBudget > 0 {
-		merged.ThinkingBudget = override.ThinkingBudget
-	}
-	if len(override.OutputGuardrails) > 0 {
-		merged.OutputGuardrails = append([]agent.OutputGuardrail{}, override.OutputGuardrails...)
-	} else if len(merged.OutputGuardrails) > 0 {
-		merged.OutputGuardrails = append([]agent.OutputGuardrail{}, merged.OutputGuardrails...)
-	}
-	if len(override.OutputGuardrailNames) > 0 {
-		merged.OutputGuardrailNames = append([]string{}, override.OutputGuardrailNames...)
-	} else if len(merged.OutputGuardrailNames) > 0 {
-		merged.OutputGuardrailNames = append([]string{}, merged.OutputGuardrailNames...)
-	}
-	if len(override.TeamOutputGuardrails) > 0 {
-		merged.TeamOutputGuardrails = append([]string{}, override.TeamOutputGuardrails...)
-	} else if len(merged.TeamOutputGuardrails) > 0 {
-		merged.TeamOutputGuardrails = append([]string{}, merged.TeamOutputGuardrails...)
-	}
-	if override.AssistantOutputMode != "" {
-		merged.AssistantOutputMode = override.AssistantOutputMode
-	}
+	merged.MaxIterations = mergePositiveInt(base.MaxIterations, override.MaxIterations)
+	merged.StopSequences = mergeStringSlice(base.StopSequences, override.StopSequences)
+	merged.ThinkingBudget = mergePositiveInt(base.ThinkingBudget, override.ThinkingBudget)
+	merged.ExtraBody = mergeAnyMap(base.ExtraBody, override.ExtraBody)
+	merged.OutputGuardrails = mergeOutputGuardrails(base.OutputGuardrails, override.OutputGuardrails)
+	merged.OutputGuardrailNames = mergeStringSlice(base.OutputGuardrailNames, override.OutputGuardrailNames)
+	merged.TeamOutputGuardrails = mergeStringSlice(base.TeamOutputGuardrails, override.TeamOutputGuardrails)
+	merged.AssistantOutputMode = mergeAssistantOutputMode(base.AssistantOutputMode, override.AssistantOutputMode)
 	return merged
+}
+
+func mergePositiveInt(base, override int) int {
+	if override > 0 {
+		return override
+	}
+	return base
+}
+
+func mergeStringSlice(base, override []string) []string {
+	if len(override) > 0 {
+		return cloneStringSlice(override)
+	}
+	return cloneStringSlice(base)
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string{}, values...)
+}
+
+func mergeAnyMap(base, override map[string]any) map[string]any {
+	if len(override) > 0 {
+		return cloneAnyMap(override)
+	}
+	return cloneAnyMap(base)
+}
+
+func mergeOutputGuardrails(base, override []agent.OutputGuardrail) []agent.OutputGuardrail {
+	if len(override) > 0 {
+		return cloneOutputGuardrails(override)
+	}
+	return cloneOutputGuardrails(base)
+}
+
+func cloneOutputGuardrails(values []agent.OutputGuardrail) []agent.OutputGuardrail {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]agent.OutputGuardrail{}, values...)
+}
+
+func mergeAssistantOutputMode(base, override team.AssistantOutputMode) team.AssistantOutputMode {
+	if override != "" {
+		return override
+	}
+	return base
 }
 
 func toTeamAgentOptions(options AgentOptions) team.AgentOptions {
@@ -67,6 +96,7 @@ func toTeamAgentOptions(options AgentOptions) team.AgentOptions {
 		MaxIterations:        options.MaxIterations,
 		StopSequences:        append([]string{}, options.StopSequences...),
 		ThinkingBudget:       options.ThinkingBudget,
+		ExtraBody:            cloneAnyMap(options.ExtraBody),
 		OutputGuardrails:     append([]string{}, options.OutputGuardrailNames...),
 		TeamOutputGuardrails: append([]string{}, options.TeamOutputGuardrails...),
 		AssistantOutputMode:  options.AssistantOutputMode,
@@ -78,6 +108,7 @@ func fromTeamAgentOptions(options team.AgentOptions) AgentOptions {
 		MaxIterations:        options.MaxIterations,
 		StopSequences:        append([]string{}, options.StopSequences...),
 		ThinkingBudget:       options.ThinkingBudget,
+		ExtraBody:            cloneAnyMap(options.ExtraBody),
 		OutputGuardrailNames: append([]string{}, options.OutputGuardrails...),
 		TeamOutputGuardrails: append([]string{}, options.TeamOutputGuardrails...),
 		AssistantOutputMode:  options.AssistantOutputMode,
@@ -158,43 +189,74 @@ func BlockTeamOutput(reason string) TeamOutputGuardrailResult {
 
 func cloneTeamResult(result team.Result) *team.Result {
 	cloned := result
-	if len(result.Structured) > 0 {
-		cloned.Structured = cloneAnyMap(result.Structured)
-	}
-	if len(result.ArtifactIDs) > 0 {
-		cloned.ArtifactIDs = append([]string{}, result.ArtifactIDs...)
-	}
-	if len(result.Findings) > 0 {
-		cloned.Findings = append([]team.Finding{}, result.Findings...)
-	}
-	if len(result.Evidence) > 0 {
-		cloned.Evidence = append([]team.Evidence{}, result.Evidence...)
-	}
+	cloned.Structured = cloneAnyMap(result.Structured)
+	cloned.ArtifactIDs = cloneStringSlice(result.ArtifactIDs)
+	cloned.Findings = cloneFindings(result.Findings)
+	cloned.Evidence = cloneEvidence(result.Evidence)
 	return &cloned
+}
+
+func cloneFindings(values []team.Finding) []team.Finding {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]team.Finding{}, values...)
+}
+
+func cloneEvidence(values []team.Evidence) []team.Evidence {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]team.Evidence{}, values...)
 }
 
 func (r *Runtime) resolvedAgentOptionsForTask(state team.RunState, task team.Task) (AgentOptions, error) {
 	options := fromTeamAgentOptions(state.AgentOptions)
 	options.OutputGuardrails = append(options.OutputGuardrails, r.inlineTeamOutputGuardrailsForTeam(state.ID)...)
-	if strings.TrimSpace(task.EffectiveAssigneeAgentID()) == "" {
-		return options, nil
-	}
-	agentInstance, ok := state.Agent(task.EffectiveAssigneeAgentID())
-	if !ok {
-		return options, nil
-	}
-	if strings.TrimSpace(agentInstance.EffectiveProfileName()) == "" {
-		return options, nil
-	}
-	profile, err := r.lookupProfile(agentInstance.EffectiveProfileName())
+	profile, ok, err := r.profileForTask(state, task)
 	if err != nil {
 		return AgentOptions{}, err
 	}
-	options = mergeAgentOptions(fromTeamAgentOptions(profile.AgentOptions), options)
-	if options.MaxIterations <= 0 && profile.MaxTurns > 0 {
-		options.MaxIterations = profile.MaxTurns
+	if !ok {
+		return options, nil
 	}
-	return options, nil
+	return applyProfileAgentOptions(options, profile), nil
+}
+
+func (r *Runtime) profileForTask(state team.RunState, task team.Task) (team.Profile, bool, error) {
+	profileName, ok := profileNameForTask(state, task)
+	if !ok {
+		return team.Profile{}, false, nil
+	}
+	profile, err := r.lookupProfile(profileName)
+	if err != nil {
+		return team.Profile{}, false, err
+	}
+	return profile, true, nil
+}
+
+func profileNameForTask(state team.RunState, task team.Task) (string, bool) {
+	agentID := strings.TrimSpace(task.EffectiveAssigneeAgentID())
+	if agentID == "" {
+		return "", false
+	}
+	agentInstance, ok := state.Agent(agentID)
+	if !ok {
+		return "", false
+	}
+	profileName := strings.TrimSpace(agentInstance.EffectiveProfileName())
+	if profileName == "" {
+		return "", false
+	}
+	return profileName, true
+}
+
+func applyProfileAgentOptions(options AgentOptions, profile team.Profile) AgentOptions {
+	merged := mergeAgentOptions(fromTeamAgentOptions(profile.AgentOptions), options)
+	if merged.MaxIterations <= 0 && profile.MaxTurns > 0 {
+		merged.MaxIterations = profile.MaxTurns
+	}
+	return merged
 }
 
 func (r *Runtime) resolvedAssistantOutputModeForTask(state team.RunState, task team.Task) (team.AssistantOutputMode, error) {
@@ -213,41 +275,60 @@ func (r *Runtime) applyTeamOutputGuardrails(ctx context.Context, teamID, taskID 
 	if err != nil {
 		return nil, false, err
 	}
-	candidate := cloneTeamResult(*result)
-	allowed := true
+	return r.applyTeamOutputGuardrailChain(ctx, teamID, taskID, boundary, cloneTeamResult(*result), guardrails, metadata)
+}
+
+func (r *Runtime) applyTeamOutputGuardrailChain(ctx context.Context, teamID, taskID string, boundary TeamOutputBoundary, candidate *team.Result, guardrails []TeamOutputGuardrail, metadata map[string]string) (*team.Result, bool, error) {
 	for _, guardrail := range guardrails {
 		if guardrail == nil {
 			continue
 		}
-		decision, err := guardrail.Check(ctx, TeamOutputGuardrailInput{
-			TeamID:   teamID,
-			TaskID:   taskID,
-			Boundary: boundary,
-			Output:   *candidate,
-			Metadata: cloneStringMap(metadata),
-		})
+		next, allowed, err := r.applySingleTeamOutputGuardrail(ctx, teamID, taskID, boundary, candidate, guardrail, metadata)
 		if err != nil {
 			return nil, false, err
 		}
-		switch decision.Action {
-		case "", agent.OutputGuardrailActionAllow:
-			continue
-		case agent.OutputGuardrailActionReplace:
-			r.recordTeamOutputGuardrailDecision(ctx, guardrail.Name(), boundary, decision.Action, decision.Reason, metadata)
-			if decision.Replacement != nil {
-				candidate = cloneTeamResult(*decision.Replacement)
-			}
-		case agent.OutputGuardrailActionBlock:
-			r.recordTeamOutputGuardrailDecision(ctx, guardrail.Name(), boundary, decision.Action, decision.Reason, metadata)
-			allowed = false
-		default:
-			return nil, false, fmt.Errorf("unsupported team output guardrail action %q", decision.Action)
-		}
+		candidate = next
 		if !allowed {
 			return candidate, false, nil
 		}
 	}
 	return candidate, true, nil
+}
+
+func (r *Runtime) applySingleTeamOutputGuardrail(ctx context.Context, teamID, taskID string, boundary TeamOutputBoundary, candidate *team.Result, guardrail TeamOutputGuardrail, metadata map[string]string) (*team.Result, bool, error) {
+	decision, err := guardrail.Check(ctx, TeamOutputGuardrailInput{
+		TeamID:   teamID,
+		TaskID:   taskID,
+		Boundary: boundary,
+		Output:   *candidate,
+		Metadata: cloneStringMap(metadata),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return r.applyTeamOutputGuardrailDecision(ctx, boundary, candidate, guardrail.Name(), decision, metadata)
+}
+
+func (r *Runtime) applyTeamOutputGuardrailDecision(ctx context.Context, boundary TeamOutputBoundary, candidate *team.Result, guardrailName string, decision TeamOutputGuardrailResult, metadata map[string]string) (*team.Result, bool, error) {
+	switch decision.Action {
+	case "", agent.OutputGuardrailActionAllow:
+		return candidate, true, nil
+	case agent.OutputGuardrailActionReplace:
+		r.recordTeamOutputGuardrailDecision(ctx, guardrailName, boundary, decision.Action, decision.Reason, metadata)
+		return replacementTeamResult(candidate, decision.Replacement), true, nil
+	case agent.OutputGuardrailActionBlock:
+		r.recordTeamOutputGuardrailDecision(ctx, guardrailName, boundary, decision.Action, decision.Reason, metadata)
+		return candidate, false, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported team output guardrail action %q", decision.Action)
+	}
+}
+
+func replacementTeamResult(current, replacement *team.Result) *team.Result {
+	if replacement == nil {
+		return current
+	}
+	return cloneTeamResult(*replacement)
 }
 
 func (r *Runtime) resolveOutputGuardrails(options AgentOptions) ([]agent.OutputGuardrail, error) {

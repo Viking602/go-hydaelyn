@@ -187,6 +187,7 @@ func agentOptionsValue(value any) team.AgentOptions {
 			MaxIterations:        intValue(current["maxIterations"]),
 			StopSequences:        stringSlice(current["stopSequences"]),
 			ThinkingBudget:       intValue(current["thinkingBudget"]),
+			ExtraBody:            structuredMap(current["extraBody"]),
 			OutputGuardrails:     stringSlice(current["outputGuardrails"]),
 			TeamOutputGuardrails: stringSlice(current["teamOutputGuardrails"]),
 			AssistantOutputMode:  team.AssistantOutputMode(stringValue(current["assistantOutputMode"])),

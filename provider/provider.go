@@ -65,6 +65,7 @@ type Request struct {
 	StopSequences  []string                 `json:"stopSequences,omitempty"`
 	ThinkingBudget int                      `json:"thinkingBudget,omitempty"`
 	ResponseFormat *ResponseFormat          `json:"responseFormat,omitempty"`
+	ExtraBody      map[string]any           `json:"extraBody,omitempty"`
 }
 
 type ResponseFormat struct {

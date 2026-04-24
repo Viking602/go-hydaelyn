@@ -104,6 +104,7 @@ type AgentOptions struct {
 	MaxIterations        int                 `json:"maxIterations,omitempty"`
 	StopSequences        []string            `json:"stopSequences,omitempty"`
 	ThinkingBudget       int                 `json:"thinkingBudget,omitempty"`
+	ExtraBody            map[string]any      `json:"extraBody,omitempty"`
 	OutputGuardrails     []string            `json:"outputGuardrails,omitempty"`
 	TeamOutputGuardrails []string            `json:"teamOutputGuardrails,omitempty"`
 	AssistantOutputMode  AssistantOutputMode `json:"assistantOutputMode,omitempty"`

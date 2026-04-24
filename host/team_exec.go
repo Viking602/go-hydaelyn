@@ -1089,6 +1089,7 @@ func (r *Runtime) runTaskEngine(ctx context.Context, state team.RunState, task t
 			StopSequences:    append([]string{}, options.StopSequences...),
 			ThinkingBudget:   options.ThinkingBudget,
 			ResponseFormat:   responseFormatForTask(task),
+			ExtraBody:        cloneAnyMap(options.ExtraBody),
 			OutputGuardrails: outputGuardrails,
 			OutputRecorder:   r,
 			Metadata:         metadata,
