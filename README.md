@@ -80,6 +80,7 @@ Hydaelyn centers on the `deepsearch` pattern: parallel research tasks run simult
 ### Examples
 
 - [_examples/research](_examples/research/main.go) - Local quickstart
+- [_examples/panel](_examples/panel/main.go) - Panel task-board collaboration
 - [_examples/collab](_examples/collab/main.go) - Collaboration pattern
 - [_examples/tooling](_examples/tooling/main.go) - Tool integration
 - [_examples/approval](_examples/approval/main.go) - Approval flows

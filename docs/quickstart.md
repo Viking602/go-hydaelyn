@@ -29,7 +29,40 @@ state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
 
 Research tasks publish named outputs to the blackboard and the final synthesize task reads them explicitly.
 
-## 2. Planner-Driven Teams
+## 2. Panel Task Board
+
+Use `pattern/panel` when the user question should become a visible todo board
+that experts claim, execute in parallel, cross-review, and synthesize from
+verified findings.
+
+```go
+runner.RegisterPattern(panel.New())
+
+state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
+	Pattern:           "panel",
+	SupervisorProfile: "supervisor",
+	WorkerProfiles:    []string{"security", "frontend"},
+	Input: map[string]any{
+		"query":               "launch auth feature",
+		"requireVerification": true,
+		"todos": []any{
+			map[string]any{"id": "security-review", "title": "review auth threat model", "domain": "security"},
+			map[string]any{"id": "ui-review", "title": "review login UI", "domain": "frontend"},
+		},
+	},
+})
+
+timeline, err := runner.TeamTimeline(context.Background(), state.ID)
+```
+
+Panel uses worker profile names as default domains when `experts` is omitted,
+so the `security` profile claims `domain: "security"` todos. Panel tasks use
+typed reports for research, verification, and synthesis; research reports must
+include at least one claim. The final result also carries
+`Result.Structured["panel"]` with adopted findings, excluded claims, evidence,
+todos, and participants.
+
+## 3. Planner-Driven Teams
 
 Planner tasks can now declare:
 
@@ -59,7 +92,7 @@ plan := planner.Plan{
 }
 ```
 
-## 3. CLI
+## 4. CLI
 
 ```bash
 hydaelyn init .
@@ -74,14 +107,16 @@ hydaelyn evaluate --events events.json
 hydaelyn replay --events events.json
 ```
 
-## 4. Replay And Durable Dataflow
+## 5. Replay And Durable Dataflow
 
 - `runner.TeamEvents(ctx, teamID)` returns the full event stream.
+- `runner.TeamTimeline(ctx, teamID)` returns user-facing collaboration steps.
 - `runner.ReplayTeamState(ctx, teamID)` rebuilds tasks, outputs, artifact refs, and blackboard exchanges.
 - `TaskInputsMaterialized` and `TaskOutputsPublished` events make dataflow visible in replay and inspection.
 
-## 5. Next Docs
+## 6. Next Docs
 
+- [Panel Task Board](panel.md)
 - [Task Dataflow](task-dataflow.md)
 - [Recipe Compiler](recipe.md)
 - [Evaluation](evaluation.md)

@@ -8,147 +8,234 @@ import (
 
 func ReplayTeam(events []Event) team.RunState {
 	state := team.RunState{}
-	tasks := map[string]int{}
+	ctx := replayContext{state: &state, tasks: map[string]int{}}
+	handlers := replayEventHandlers(ctx)
 	for _, event := range events {
 		if state.ID == "" {
 			state.ID = event.TeamID
 		}
-		switch event.Type {
-		case EventTeamStarted:
-			state.Pattern, _ = event.Payload["pattern"].(string)
-			state.Status = team.StatusRunning
-			state.AgentOptions = agentOptionsValue(event.Payload["agentOptions"])
-			if phase, ok := event.Payload["phase"].(string); ok && phase != "" {
-				state.Phase = team.Phase(phase)
-			}
-			if supervisor := memberValue(event.Payload["supervisor"]); supervisor.ID != "" {
-				state.Supervisor = supervisor
-			}
-			if workers := membersValue(event.Payload["workers"]); len(workers) > 0 {
-				state.Workers = append([]team.Member{}, workers...)
-			}
-		case EventTaskScheduled:
-			task := team.Task{
-				ID:                  event.TaskID,
-				Title:               stringValue(event.Payload["title"]),
-				Input:               stringValue(event.Payload["input"]),
-				Status:              team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
-				Kind:                team.TaskKind(stringValue(event.Payload["kind"])),
-				RequiredRole:        team.Role(stringValue(event.Payload["requiredRole"])),
-				AssigneeAgentID:     stringValue(event.Payload["assigneeAgent"]),
-				FailurePolicy:       team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
-				DependsOn:           stringSlice(event.Payload["dependsOn"]),
-				Reads:               stringSlice(event.Payload["reads"]),
-				Writes:              stringSlice(event.Payload["writes"]),
-				Publish:             outputVisibilitySlice(event.Payload["publish"]),
-				Namespace:           stringValue(event.Payload["namespace"]),
-				VerifierRequired:    boolValue(event.Payload["verifierRequired"]),
-				AssistantOutputMode: team.AssistantOutputMode(stringValue(event.Payload["assistantOutputMode"])),
-				IdempotencyKey:      stringValue(event.Payload["idempotencyKey"]),
-				Version:             intValue(event.Payload["taskVersion"]),
-				Budget:              budgetValue(event.Payload["budget"]),
-			}
-			tasks[event.TaskID] = len(state.Tasks)
-			state.Tasks = append(state.Tasks, task)
-		case EventTaskStarted:
-			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusRunning)))
-				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
-					state.Tasks[idx].Version = version
-				}
-				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
-					state.Tasks[idx].IdempotencyKey = key
-				}
-				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
-			}
-		case EventTaskInputsMaterialized:
-			if idx, ok := tasks[event.TaskID]; ok && state.Tasks[idx].Result == nil {
-				state.Tasks[idx].Result = &team.Result{}
-			}
-		case EventTaskCompleted:
-			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], statusValue(event.Payload["status"], string(team.TaskStatusCompleted))))
-				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
-					state.Tasks[idx].Version = version
-				}
-				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
-					state.Tasks[idx].IdempotencyKey = key
-				}
-				state.Tasks[idx].CompletedBy = stringValue(event.Payload["workerId"])
-				state.Tasks[idx].Result = &team.Result{
-					Summary:       stringValue(event.Payload["summary"]),
-					Structured:    structuredMap(event.Payload["structured"]),
-					ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
-					Usage:         usageValue(event.Payload["usage"]),
-					ToolCallCount: intValue(event.Payload["toolCallCount"]),
-				}
-				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
-			}
-		case EventTaskOutputsPublished:
-			if state.Blackboard == nil {
-				state.Blackboard = &blackboard.State{}
-			}
-			for _, source := range sourcesValue(event.Payload["sources"]) {
-				upsertSource(state.Blackboard, source)
-			}
-			for _, artifact := range artifactsValue(event.Payload["artifacts"]) {
-				upsertArtifact(state.Blackboard, artifact)
-			}
-			for _, evidence := range evidenceValue(event.Payload["evidence"]) {
-				upsertEvidence(state.Blackboard, evidence)
-			}
-			for _, claim := range claimsValue(event.Payload["claims"]) {
-				upsertClaim(state.Blackboard, claim)
-			}
-			for _, finding := range findingsValue(event.Payload["findings"]) {
-				upsertFinding(state.Blackboard, finding)
-			}
-			for _, exchange := range exchangesValue(event.Payload["exchanges"]) {
-				state.Blackboard.UpsertExchange(exchange)
-			}
-			for _, verification := range verificationsValue(event.Payload["verifications"]) {
-				state.Blackboard.UpsertVerification(verification)
-			}
-		case EventTaskFailed:
-			if idx, ok := tasks[event.TaskID]; ok {
-				state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusFailed)))
-				if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
-					state.Tasks[idx].Version = version
-				}
-				if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
-					state.Tasks[idx].IdempotencyKey = key
-				}
-				state.Tasks[idx].Attempts = intValue(event.Payload["attempts"])
-				if errorText := stringValue(event.Payload["error"]); errorText != "" {
-					state.Tasks[idx].Error = errorText
-					state.Tasks[idx].Result = &team.Result{Error: errorText}
-				}
-			}
-		case EventApprovalRequested:
-			state.Status = team.StatusPaused
-			state.Result = &team.Result{Error: stringValue(event.Payload["reason"])}
-		case EventCheckpointSaved:
-			state.Status = team.Status(statusValue(event.Payload["status"], string(state.Status)))
-			if state.Result == nil {
-				state.Result = &team.Result{}
-			}
-			state.Result.Summary = stringValue(event.Payload["summary"])
-			state.Result.Error = stringValue(event.Payload["error"])
-			state.Result.Structured = structuredMap(event.Payload["structured"])
-			state.Result.ArtifactIDs = stringSlice(event.Payload["artifactIds"])
-		case EventTeamCompleted:
-			state.Status = team.StatusCompleted
-			state.Phase = team.PhaseComplete
-			state.Result = &team.Result{
-				Summary:       stringValue(event.Payload["summary"]),
-				Structured:    structuredMap(event.Payload["structured"]),
-				ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
-				Usage:         usageValue(event.Payload["usage"]),
-				ToolCallCount: intValue(event.Payload["toolCallCount"]),
-			}
+		if handler := handlers[event.Type]; handler != nil {
+			handler(event)
 		}
 	}
 	return state
+}
+
+type replayContext struct {
+	state *team.RunState
+	tasks map[string]int
+}
+
+func replayEventHandlers(ctx replayContext) map[EventType]func(Event) {
+	return map[EventType]func(Event){
+		EventTeamStarted: func(event Event) {
+			replayTeamStarted(ctx.state, event)
+		},
+		EventTodoPlanned: func(event Event) {
+			replayTodoPlanned(ctx.state, event)
+		},
+		EventTodoClaimed: func(event Event) {
+			ensureTaskBoard(ctx.state)
+			upsertTodo(ctx.state.TaskBoard, todoValue(event))
+		},
+		EventTaskScheduled: func(event Event) {
+			replayTaskScheduled(ctx.state, ctx.tasks, event)
+		},
+		EventTaskStarted: func(event Event) {
+			replayTaskStarted(ctx.state, ctx.tasks, event)
+		},
+		EventTaskInputsMaterialized: func(event Event) {
+			replayTaskInputsMaterialized(ctx.state, ctx.tasks, event)
+		},
+		EventTaskCompleted: func(event Event) {
+			replayTaskCompleted(ctx.state, ctx.tasks, event)
+		},
+		EventTaskOutputsPublished: func(event Event) {
+			replayTaskOutputsPublished(ctx.state, event)
+		},
+		EventTaskFailed: func(event Event) {
+			replayTaskFailed(ctx.state, ctx.tasks, event)
+		},
+		EventApprovalRequested: func(event Event) {
+			replayApprovalRequested(ctx.state, event)
+		},
+		EventCheckpointSaved: func(event Event) {
+			replayCheckpointSaved(ctx.state, event)
+		},
+		EventTeamCompleted: func(event Event) {
+			replayTeamCompleted(ctx.state, event)
+		},
+	}
+}
+
+func replayTeamStarted(state *team.RunState, event Event) {
+	state.Pattern, _ = event.Payload["pattern"].(string)
+	state.Status = team.StatusRunning
+	state.AgentOptions = agentOptionsValue(event.Payload["agentOptions"])
+	state.InteractionMode = team.InteractionMode(stringValue(event.Payload["interactionMode"]))
+	if phase, ok := event.Payload["phase"].(string); ok && phase != "" {
+		state.Phase = team.Phase(phase)
+	}
+	if supervisor := memberValue(event.Payload["supervisor"]); supervisor.ID != "" {
+		state.Supervisor = supervisor
+	}
+	if workers := membersValue(event.Payload["workers"]); len(workers) > 0 {
+		state.Workers = append([]team.Member{}, workers...)
+	}
+}
+
+func replayTodoPlanned(state *team.RunState, event Event) {
+	ensureTaskBoard(state)
+	state.TaskBoard.Plan.ID = stringValue(event.Payload["planId"])
+	state.TaskBoard.Plan.Goal = stringValue(event.Payload["goal"])
+	state.TaskBoard.Plan.CreatedAt = event.RecordedAt
+	state.TaskBoard.Plan.UpdatedAt = event.RecordedAt
+	if mode := team.InteractionMode(stringValue(event.Payload["mode"])); mode != "" {
+		state.InteractionMode = mode
+	}
+}
+
+func replayTaskScheduled(state *team.RunState, tasks map[string]int, event Event) {
+	task := team.Task{
+		ID:                  event.TaskID,
+		Title:               stringValue(event.Payload["title"]),
+		Input:               stringValue(event.Payload["input"]),
+		Status:              team.TaskStatus(statusValue(event.Payload["status"], string(team.TaskStatusPending))),
+		Kind:                team.TaskKind(stringValue(event.Payload["kind"])),
+		Stage:               team.TaskStage(stringValue(event.Payload["stage"])),
+		TodoID:              stringValue(event.Payload["todoId"]),
+		RequiredRole:        team.Role(stringValue(event.Payload["requiredRole"])),
+		AssigneeAgentID:     stringValue(event.Payload["assigneeAgent"]),
+		FailurePolicy:       team.FailurePolicy(stringValue(event.Payload["failurePolicy"])),
+		DependsOn:           stringSlice(event.Payload["dependsOn"]),
+		Reads:               stringSlice(event.Payload["reads"]),
+		ReadSelectors:       exchangeSelectorsValue(event.Payload["readSelectors"]),
+		Writes:              stringSlice(event.Payload["writes"]),
+		Publish:             outputVisibilitySlice(event.Payload["publish"]),
+		Namespace:           stringValue(event.Payload["namespace"]),
+		VerifierRequired:    boolValue(event.Payload["verifierRequired"]),
+		ExpectedReportKind:  team.ReportKind(stringValue(event.Payload["expectedReportKind"])),
+		AssistantOutputMode: team.AssistantOutputMode(stringValue(event.Payload["assistantOutputMode"])),
+		IdempotencyKey:      stringValue(event.Payload["idempotencyKey"]),
+		Version:             intValue(event.Payload["taskVersion"]),
+		Budget:              budgetValue(event.Payload["budget"]),
+	}
+	tasks[event.TaskID] = len(state.Tasks)
+	state.Tasks = append(state.Tasks, task)
+	applyScheduledTaskToBoard(state, task)
+}
+
+func replayTaskInputsMaterialized(state *team.RunState, tasks map[string]int, event Event) {
+	idx, ok := tasks[event.TaskID]
+	if ok && state.Tasks[idx].Result == nil {
+		state.Tasks[idx].Result = &team.Result{}
+	}
+}
+
+func replayTaskStarted(state *team.RunState, tasks map[string]int, event Event) {
+	idx, ok := tasks[event.TaskID]
+	if !ok {
+		return
+	}
+	state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusRunning)))
+	applyTaskLifecycleMetadata(&state.Tasks[idx], event)
+	applyStartedTaskToBoard(state, state.Tasks[idx])
+}
+
+func replayTaskCompleted(state *team.RunState, tasks map[string]int, event Event) {
+	idx, ok := tasks[event.TaskID]
+	if !ok {
+		return
+	}
+	state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], statusValue(event.Payload["status"], string(team.TaskStatusCompleted))))
+	applyTaskLifecycleMetadata(&state.Tasks[idx], event)
+	state.Tasks[idx].CompletedBy = stringValue(event.Payload["workerId"])
+	state.Tasks[idx].Result = &team.Result{
+		Summary:       stringValue(event.Payload["summary"]),
+		Structured:    structuredMap(event.Payload["structured"]),
+		ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
+		Usage:         usageValue(event.Payload["usage"]),
+		ToolCallCount: intValue(event.Payload["toolCallCount"]),
+	}
+	applyCompletedTaskToBoard(state, state.Tasks[idx])
+}
+
+func replayTaskOutputsPublished(state *team.RunState, event Event) {
+	if state.Blackboard == nil {
+		state.Blackboard = &blackboard.State{}
+	}
+	for _, source := range sourcesValue(event.Payload["sources"]) {
+		upsertSource(state.Blackboard, source)
+	}
+	for _, artifact := range artifactsValue(event.Payload["artifacts"]) {
+		upsertArtifact(state.Blackboard, artifact)
+	}
+	for _, evidence := range evidenceValue(event.Payload["evidence"]) {
+		upsertEvidence(state.Blackboard, evidence)
+	}
+	for _, claim := range claimsValue(event.Payload["claims"]) {
+		upsertClaim(state.Blackboard, claim)
+	}
+	for _, finding := range findingsValue(event.Payload["findings"]) {
+		upsertFinding(state.Blackboard, finding)
+	}
+	for _, exchange := range exchangesValue(event.Payload["exchanges"]) {
+		state.Blackboard.UpsertExchange(exchange)
+	}
+	for _, verification := range verificationsValue(event.Payload["verifications"]) {
+		state.Blackboard.UpsertVerification(verification)
+	}
+}
+
+func replayTaskFailed(state *team.RunState, tasks map[string]int, event Event) {
+	idx, ok := tasks[event.TaskID]
+	if !ok {
+		return
+	}
+	state.Tasks[idx].Status = team.TaskStatus(statusValue(event.Payload["statusAfter"], string(team.TaskStatusFailed)))
+	applyTaskLifecycleMetadata(&state.Tasks[idx], event)
+	if errorText := stringValue(event.Payload["error"]); errorText != "" {
+		state.Tasks[idx].Error = errorText
+		state.Tasks[idx].Result = &team.Result{Error: errorText}
+	}
+}
+
+func replayApprovalRequested(state *team.RunState, event Event) {
+	state.Status = team.StatusPaused
+	state.Result = &team.Result{Error: stringValue(event.Payload["reason"])}
+}
+
+func applyTaskLifecycleMetadata(task *team.Task, event Event) {
+	if version := intValue(event.Payload["taskVersionAfter"]); version > 0 {
+		task.Version = version
+	}
+	if key := stringValue(event.Payload["idempotencyKey"]); key != "" {
+		task.IdempotencyKey = key
+	}
+	task.Attempts = intValue(event.Payload["attempts"])
+}
+
+func replayCheckpointSaved(state *team.RunState, event Event) {
+	state.Status = team.Status(statusValue(event.Payload["status"], string(state.Status)))
+	if state.Result == nil {
+		state.Result = &team.Result{}
+	}
+	state.Result.Summary = stringValue(event.Payload["summary"])
+	state.Result.Error = stringValue(event.Payload["error"])
+	state.Result.Structured = structuredMap(event.Payload["structured"])
+	state.Result.ArtifactIDs = stringSlice(event.Payload["artifactIds"])
+}
+
+func replayTeamCompleted(state *team.RunState, event Event) {
+	state.Status = team.StatusCompleted
+	state.Phase = team.PhaseComplete
+	state.Result = &team.Result{
+		Summary:       stringValue(event.Payload["summary"]),
+		Structured:    structuredMap(event.Payload["structured"]),
+		ArtifactIDs:   stringSlice(event.Payload["artifactIds"]),
+		Usage:         usageValue(event.Payload["usage"]),
+		ToolCallCount: intValue(event.Payload["toolCallCount"]),
+	}
 }
 
 func stringValue(value any) string {
@@ -240,6 +327,157 @@ func membersValue(value any) []team.Member {
 	}
 }
 
+func ensureTaskBoard(state *team.RunState) {
+	if state.TaskBoard != nil {
+		return
+	}
+	state.TaskBoard = &team.TaskBoard{Plan: team.TodoPlan{ID: state.ID + "-todo-plan"}}
+}
+
+func todoValue(event Event) team.TodoItem {
+	status := team.TodoStatus(statusValue(event.Payload["status"], string(team.TodoStatusClaimed)))
+	return team.TodoItem{
+		ID:                   stringValue(event.Payload["todoId"]),
+		Title:                stringValue(event.Payload["title"]),
+		Domain:               stringValue(event.Payload["domain"]),
+		RequiredCapabilities: stringSlice(event.Payload["requiredCapabilities"]),
+		Priority:             team.TodoPriority(stringValue(event.Payload["priority"])),
+		ExpectedReportKind:   team.ReportKind(stringValue(event.Payload["expectedReportKind"])),
+		VerificationPolicy:   todoVerificationPolicyValue(event.Payload["verificationPolicy"]),
+		Status:               status,
+		PrimaryAgentID:       stringValue(event.Payload["agentId"]),
+		TaskID:               event.TaskID,
+		ClaimedAt:            event.RecordedAt,
+		UpdatedAt:            event.RecordedAt,
+	}
+}
+
+func upsertTodo(board *team.TaskBoard, todo team.TodoItem) {
+	if board == nil || todo.ID == "" {
+		return
+	}
+	for idx := range board.Plan.Items {
+		if board.Plan.Items[idx].ID == todo.ID {
+			mergeTodo(&board.Plan.Items[idx], todo)
+			board.Plan.UpdatedAt = todo.UpdatedAt
+			return
+		}
+	}
+	board.Plan.Items = append(board.Plan.Items, todo)
+	board.Plan.UpdatedAt = todo.UpdatedAt
+}
+
+func mergeTodo(existing *team.TodoItem, incoming team.TodoItem) {
+	if incoming.Title != "" {
+		existing.Title = incoming.Title
+	}
+	if incoming.Input != "" {
+		existing.Input = incoming.Input
+	}
+	if incoming.Domain != "" {
+		existing.Domain = incoming.Domain
+	}
+	if len(incoming.RequiredCapabilities) > 0 {
+		existing.RequiredCapabilities = append([]string{}, incoming.RequiredCapabilities...)
+	}
+	if incoming.Priority != "" {
+		existing.Priority = incoming.Priority
+	}
+	if incoming.ExpectedReportKind != "" {
+		existing.ExpectedReportKind = incoming.ExpectedReportKind
+	}
+	if incoming.VerificationPolicy != (team.TodoVerificationPolicy{}) {
+		existing.VerificationPolicy = incoming.VerificationPolicy
+	}
+	if incoming.Status != "" {
+		existing.Status = incoming.Status
+	}
+	if incoming.PrimaryAgentID != "" {
+		existing.PrimaryAgentID = incoming.PrimaryAgentID
+	}
+	if incoming.TaskID != "" {
+		existing.TaskID = incoming.TaskID
+	}
+	if !incoming.ClaimedAt.IsZero() {
+		existing.ClaimedAt = incoming.ClaimedAt
+	}
+	if !incoming.UpdatedAt.IsZero() {
+		existing.UpdatedAt = incoming.UpdatedAt
+	}
+}
+
+func applyScheduledTaskToBoard(state *team.RunState, task team.Task) {
+	if state.TaskBoard == nil || task.TodoID == "" {
+		return
+	}
+	idx := todoIndex(state.TaskBoard, task.TodoID)
+	if idx < 0 {
+		return
+	}
+	todo := &state.TaskBoard.Plan.Items[idx]
+	switch {
+	case task.Kind == team.TaskKindVerify || task.Stage == team.TaskStageReview || task.Stage == team.TaskStageVerify:
+		todo.ReviewerAgentIDs = appendUniqueString(todo.ReviewerAgentIDs, task.EffectiveAssigneeAgentID())
+		todo.ReviewTaskIDs = appendUniqueString(todo.ReviewTaskIDs, task.ID)
+		if todo.Status != team.TodoStatusVerified {
+			todo.Status = team.TodoStatusReviewing
+		}
+	default:
+		if todo.TaskID == "" {
+			todo.TaskID = task.ID
+		}
+	}
+	todo.UpdatedAt = state.TaskBoard.Plan.UpdatedAt
+}
+
+func applyStartedTaskToBoard(state *team.RunState, task team.Task) {
+	if state.TaskBoard == nil || task.TodoID == "" || task.Kind == team.TaskKindVerify {
+		return
+	}
+	idx := todoIndex(state.TaskBoard, task.TodoID)
+	if idx < 0 {
+		return
+	}
+	state.TaskBoard.Plan.Items[idx].Status = team.TodoStatusRunning
+}
+
+func applyCompletedTaskToBoard(state *team.RunState, task team.Task) {
+	if state.TaskBoard == nil || task.TodoID == "" {
+		return
+	}
+	idx := todoIndex(state.TaskBoard, task.TodoID)
+	if idx < 0 {
+		return
+	}
+	switch {
+	case task.Kind == team.TaskKindVerify || task.Stage == team.TaskStageReview || task.Stage == team.TaskStageVerify:
+		state.TaskBoard.Plan.Items[idx].Status = team.TodoStatusVerified
+	default:
+		state.TaskBoard.Plan.Items[idx].Status = team.TodoStatusCompleted
+	}
+}
+
+func todoIndex(board *team.TaskBoard, todoID string) int {
+	for idx, todo := range board.Plan.Items {
+		if todo.ID == todoID {
+			return idx
+		}
+	}
+	return -1
+}
+
+func appendUniqueString(items []string, value string) []string {
+	if value == "" {
+		return items
+	}
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
 func statusValue(value any, fallback string) string {
 	if text, ok := value.(string); ok && text != "" {
 		return text
@@ -277,6 +515,78 @@ func outputVisibilitySlice(value any) []team.OutputVisibility {
 		result = append(result, team.OutputVisibility(item))
 	}
 	return result
+}
+
+func exchangeSelectorsValue(value any) []blackboard.ExchangeSelector {
+	switch current := value.(type) {
+	case []blackboard.ExchangeSelector:
+		return append([]blackboard.ExchangeSelector{}, current...)
+	case []map[string]any:
+		result := make([]blackboard.ExchangeSelector, 0, len(current))
+		for _, item := range current {
+			result = append(result, exchangeSelectorValue(item))
+		}
+		return result
+	case []any:
+		result := make([]blackboard.ExchangeSelector, 0, len(current))
+		for _, item := range current {
+			if selector, ok := item.(blackboard.ExchangeSelector); ok {
+				result = append(result, selector)
+				continue
+			}
+			if payload, ok := item.(map[string]any); ok {
+				result = append(result, exchangeSelectorValue(payload))
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func exchangeSelectorValue(payload map[string]any) blackboard.ExchangeSelector {
+	return blackboard.ExchangeSelector{
+		Keys:              stringSlice(payload["keys"]),
+		Namespaces:        stringSlice(payload["namespaces"]),
+		TaskIDs:           stringSlice(payload["taskIds"]),
+		ValueTypes:        exchangeValueTypeSlice(payload["valueTypes"]),
+		ClaimIDs:          stringSlice(payload["claimIds"]),
+		FindingIDs:        stringSlice(payload["findingIds"]),
+		ArtifactIDs:       stringSlice(payload["artifactIds"]),
+		RequireVerified:   boolValue(payload["requireVerified"]),
+		MinConfidence:     floatValue(payload["minConfidence"]),
+		Limit:             intValue(payload["limit"]),
+		IncludeText:       boolValue(payload["includeText"]),
+		IncludeStructured: boolValue(payload["includeStructured"]),
+		IncludeArtifacts:  boolValue(payload["includeArtifacts"]),
+		Required:          boolValue(payload["required"]),
+		Label:             stringValue(payload["label"]),
+	}
+}
+
+func exchangeValueTypeSlice(value any) []blackboard.ExchangeValueType {
+	items := stringSlice(value)
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]blackboard.ExchangeValueType, 0, len(items))
+	for _, item := range items {
+		result = append(result, blackboard.ExchangeValueType(item))
+	}
+	return result
+}
+
+func todoVerificationPolicyValue(value any) team.TodoVerificationPolicy {
+	payload := structuredMap(value)
+	if len(payload) == 0 {
+		return team.TodoVerificationPolicy{}
+	}
+	return team.TodoVerificationPolicy{
+		Required:      boolValue(payload["required"]),
+		Mode:          stringValue(payload["mode"]),
+		MinConfidence: floatValue(payload["minConfidence"]),
+		Reviewers:     intValue(payload["reviewers"]),
+	}
 }
 
 func structuredMap(value any) map[string]any {

@@ -52,7 +52,18 @@ func (r *Runtime) startPlannedTeam(ctx context.Context, pattern team.Pattern, re
 	if err != nil {
 		return team.RunState{}, err
 	}
-	return r.buildPlannedState(request, plan)
+	state, err := r.buildPlannedState(request, plan)
+	if err != nil {
+		return team.RunState{}, err
+	}
+	if decorator, ok := pattern.(plannedStateDecorator); ok {
+		return decorator.DecoratePlannedState(request, plan, state)
+	}
+	return state, nil
+}
+
+type plannedStateDecorator interface {
+	DecoratePlannedState(request team.StartRequest, plan planner.Plan, state team.RunState) (team.RunState, error)
 }
 
 func (r *Runtime) plannerTemplate(pattern team.Pattern, request team.StartRequest) (planner.Template, error) {
@@ -76,14 +87,19 @@ func (r *Runtime) buildPlannedState(request team.StartRequest, plan planner.Plan
 	if !requireVerification {
 		requireVerification, _ = request.Input["requireVerification"].(bool)
 	}
+	interactionMode := request.InteractionMode
+	if interactionMode == "" && request.Pattern == string(team.InteractionModePanel) {
+		interactionMode = team.InteractionModePanel
+	}
 	return team.RunState{
-		ID:         request.TeamID,
-		Pattern:    request.Pattern,
-		Status:     team.StatusRunning,
-		Phase:      team.PhaseResearch,
-		Supervisor: supervisor,
-		Workers:    workers,
-		Tasks:      tasks,
+		ID:              request.TeamID,
+		Pattern:         request.Pattern,
+		Status:          team.StatusRunning,
+		Phase:           team.PhaseResearch,
+		InteractionMode: interactionMode,
+		Supervisor:      supervisor,
+		Workers:         workers,
+		Tasks:           tasks,
 		Planning: &team.PlanningState{
 			PlannerName:     request.Planner,
 			Goal:            plan.Goal,
@@ -146,6 +162,7 @@ func (r *Runtime) planTasksToRuntimeTasks(specs []planner.TaskSpec, workers []te
 			ID:                   spec.ID,
 			Kind:                 kind,
 			Stage:                spec.Stage,
+			TodoID:               spec.TodoID,
 			Title:                spec.Title,
 			Input:                spec.Input,
 			RequiredRole:         spec.RequiredRole,
@@ -159,6 +176,7 @@ func (r *Runtime) planTasksToRuntimeTasks(specs []planner.TaskSpec, workers []te
 			Publish:              append([]team.OutputVisibility{}, spec.Publish...),
 			Namespace:            spec.Namespace,
 			VerifierRequired:     spec.VerifierRequired,
+			ExpectedReportKind:   spec.ExpectedReportKind,
 			FailurePolicy:        spec.FailurePolicy,
 			Status:               team.TaskStatusPending,
 		}

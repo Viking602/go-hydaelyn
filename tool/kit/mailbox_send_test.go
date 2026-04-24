@@ -162,3 +162,52 @@ func TestSendMessage_NilMailbox(t *testing.T) {
 		t.Fatalf("expected IsError when mailbox is nil, got: %+v", res)
 	}
 }
+
+func TestSendMessage_CarriesThreadAndReferences(t *testing.T) {
+	stub, driver := newToolWithStub(nil, []string{"env-1"})
+	args, _ := json.Marshal(map[string]any{
+		"agentId":  "agent-b",
+		"body":     "claim needs more evidence",
+		"threadId": "thread-1",
+		"intent":   "challenge",
+		"references": []map[string]any{{
+			"kind": "claim",
+			"id":   "claim-1",
+		}},
+	})
+	res, err := driver.Execute(callerCtx(), tool.Call{ID: "c1", Name: "send_message", Arguments: args}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("unexpected: err=%v res=%+v", err, res)
+	}
+	if stub.received.CorrelationID != "thread-1" {
+		t.Fatalf("expected thread id to become correlation id, got %#v", stub.received)
+	}
+	if stub.received.Letter.Intent != mailbox.IntentChallenge {
+		t.Fatalf("expected challenge intent, got %s", stub.received.Letter.Intent)
+	}
+	refs, ok := stub.received.Letter.Structured["references"].([]map[string]string)
+	if !ok || len(refs) != 1 || refs[0]["id"] != "claim-1" {
+		t.Fatalf("expected structured reference, got %#v", stub.received.Letter.Structured)
+	}
+}
+
+func TestChallengeClaimToolSendsChallengeLetter(t *testing.T) {
+	stub := &stubMailbox{ids: []string{"env-1"}}
+	driver := NewChallengeClaimTool(stubProvider{mbox: stub})
+	args, _ := json.Marshal(map[string]any{
+		"agentId":  "agent-b",
+		"claimId":  "claim-2",
+		"reason":   "only one weak source",
+		"threadId": "thread-2",
+	})
+	res, err := driver.Execute(callerCtx(), tool.Call{ID: "c1", Name: "challenge_claim", Arguments: args}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("unexpected: err=%v res=%+v", err, res)
+	}
+	if stub.received.Letter.Intent != mailbox.IntentChallenge || stub.received.CorrelationID != "thread-2" {
+		t.Fatalf("expected challenge letter, got %#v", stub.received)
+	}
+	if stub.received.Letter.Structured["claimId"] != "claim-2" {
+		t.Fatalf("expected claim id in structured payload, got %#v", stub.received.Letter.Structured)
+	}
+}

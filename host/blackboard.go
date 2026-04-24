@@ -36,19 +36,25 @@ func (r *Runtime) applyBlackboardUpdate(state team.RunState, task team.Task) tea
 	var verificationStatus blackboard.VerificationStatus
 	switch task.Kind {
 	case team.TaskKindResearch:
-		request := blackboard.PublishRequest{
-			TaskID:     task.ID,
-			Title:      task.Title,
-			Summary:    task.Result.Summary,
-			Confidence: task.Result.Confidence,
-			Evidence:   evidenceInputs(task.Result.Evidence),
-		}
-		published := publishPipeline.Publish(state.Blackboard, request)
-		if published.ClaimID != "" {
-			claimIDs = append(claimIDs, published.ClaimID)
-		}
-		if published.FindingID != "" {
-			findingIDs = append(findingIDs, published.FindingID)
+		if report, ok := team.ExtractResearchReport(task.Result.Structured); ok {
+			var scopedReport team.ResearchReport
+			claimIDs, findingIDs, scopedReport = publishResearchReport(state.Blackboard, task, report)
+			task = taskWithStructuredReport(task, scopedReport)
+		} else {
+			request := blackboard.PublishRequest{
+				TaskID:     task.ID,
+				Title:      task.Title,
+				Summary:    task.Result.Summary,
+				Confidence: task.Result.Confidence,
+				Evidence:   evidenceInputs(task.Result.Evidence),
+			}
+			published := publishPipeline.Publish(state.Blackboard, request)
+			if published.ClaimID != "" {
+				claimIDs = append(claimIDs, published.ClaimID)
+			}
+			if published.FindingID != "" {
+				findingIDs = append(findingIDs, published.FindingID)
+			}
 		}
 	case team.TaskKindVerify:
 		readExchanges := verifierPublishedInputs(state.Blackboard, task)
@@ -84,7 +90,232 @@ func (r *Runtime) applyBlackboardUpdate(state team.RunState, task team.Task) tea
 			_, _ = state.Blackboard.UpsertExchangeCAS(exchangeForTaskOutput(task, key, claimIDs, findingIDs, verificationStatus))
 		}
 	}
+	state = replaceTaskByID(state, task)
 	return state
+}
+
+func publishResearchReport(board *blackboard.State, task team.Task, report team.ResearchReport) ([]string, []string, team.ResearchReport) {
+	scopedReport := team.ResearchReport{
+		Kind:       report.Kind,
+		Confidence: report.Confidence,
+		Notes:      blackboard.SanitizeText(report.Notes),
+		Metadata:   sanitizeStringMap(report.Metadata),
+	}
+	if board == nil {
+		return nil, nil, scopedReport
+	}
+	evidenceIDs := make([]string, 0, len(report.Evidence))
+	evidenceIDByReportID := map[string]string{}
+	for idx, item := range report.Evidence {
+		reportID := strings.TrimSpace(item.ID)
+		id := scopedReportID("evidence", task.ID, idx+1, reportID)
+		if reportID != "" {
+			evidenceIDByReportID[reportID] = id
+		}
+		evidenceIDs = appendUnique(evidenceIDs, id)
+		snippet := blackboard.SanitizeText(item.Snippet)
+		scopedReport.Evidence = append(scopedReport.Evidence, team.ReportEvidence{
+			ID:      id,
+			Source:  blackboard.SanitizeText(item.Source),
+			Snippet: snippet,
+			URL:     blackboard.SanitizeText(item.URL),
+			Score:   item.Score,
+		})
+		upsertEvidence(board, blackboard.Evidence{
+			ID:       id,
+			TaskID:   task.ID,
+			SourceID: blackboard.SanitizeText(item.Source),
+			Summary:  snippet,
+			Snippet:  snippet,
+			Score:    item.Score,
+		})
+	}
+	claimIDs := make([]string, 0, len(report.Claims))
+	claimIDByReportID := map[string]string{}
+	for idx, item := range report.Claims {
+		reportID := strings.TrimSpace(item.ID)
+		id := scopedReportID("claim", task.ID, idx+1, reportID)
+		if reportID != "" {
+			claimIDByReportID[reportID] = id
+		}
+		claimEvidenceIDs := remapReportIDs(item.EvidenceIDs, evidenceIDByReportID)
+		if len(claimEvidenceIDs) == 0 && len(evidenceIDs) > 0 {
+			claimEvidenceIDs = append([]string{}, evidenceIDs...)
+		}
+		claimIDs = appendUnique(claimIDs, id)
+		scopedReport.Claims = append(scopedReport.Claims, team.ReportClaim{
+			ID:          id,
+			Summary:     blackboard.SanitizeText(item.Summary),
+			EvidenceIDs: append([]string{}, claimEvidenceIDs...),
+			Confidence:  item.Confidence,
+		})
+		upsertClaim(board, blackboard.Claim{
+			ID:          id,
+			TaskID:      task.ID,
+			Summary:     blackboard.SanitizeText(item.Summary),
+			EvidenceIDs: claimEvidenceIDs,
+			Confidence:  item.Confidence,
+		})
+	}
+	findingIDs := make([]string, 0, len(report.Findings))
+	for idx, item := range report.Findings {
+		id := scopedReportID("finding", task.ID, idx+1, item.ID)
+		itemClaimIDs := remapReportIDs(item.ClaimIDs, claimIDByReportID)
+		if len(itemClaimIDs) == 0 && len(claimIDs) > 0 {
+			itemClaimIDs = append([]string{}, claimIDs...)
+		}
+		findingIDs = appendUnique(findingIDs, id)
+		scopedReport.Findings = append(scopedReport.Findings, team.ReportFinding{
+			ID:         id,
+			Summary:    blackboard.SanitizeText(item.Summary),
+			ClaimIDs:   append([]string{}, itemClaimIDs...),
+			Confidence: item.Confidence,
+		})
+		upsertFinding(board, blackboard.Finding{
+			ID:          id,
+			TaskID:      task.ID,
+			Summary:     blackboard.SanitizeText(item.Summary),
+			ClaimIDs:    itemClaimIDs,
+			EvidenceIDs: append([]string{}, evidenceIDs...),
+			Confidence:  item.Confidence,
+		})
+	}
+	if len(findingIDs) == 0 {
+		for idx, claimID := range claimIDs {
+			summary := ""
+			confidence := report.Confidence
+			if idx < len(report.Claims) {
+				summary = report.Claims[idx].Summary
+				if report.Claims[idx].Confidence > 0 {
+					confidence = report.Claims[idx].Confidence
+				}
+			}
+			id := scopedReportID("finding", task.ID, idx+1, "")
+			findingIDs = appendUnique(findingIDs, id)
+			scopedReport.Findings = append(scopedReport.Findings, team.ReportFinding{
+				ID:         id,
+				Summary:    blackboard.SanitizeText(summary),
+				ClaimIDs:   []string{claimID},
+				Confidence: confidence,
+			})
+			upsertFinding(board, blackboard.Finding{
+				ID:          id,
+				TaskID:      task.ID,
+				Summary:     blackboard.SanitizeText(summary),
+				ClaimIDs:    []string{claimID},
+				EvidenceIDs: append([]string{}, evidenceIDs...),
+				Confidence:  confidence,
+			})
+		}
+	}
+	return claimIDs, findingIDs, scopedReport
+}
+
+func taskWithStructuredReport(task team.Task, report team.ResearchReport) team.Task {
+	if task.Result == nil {
+		return task
+	}
+	result := *task.Result
+	result.Structured = cloneStructuredMap(result.Structured)
+	result.Structured[team.ReportKey] = report
+	task.Result = &result
+	return task
+}
+
+func replaceTaskByID(state team.RunState, task team.Task) team.RunState {
+	for idx := range state.Tasks {
+		if state.Tasks[idx].ID == task.ID {
+			state.Tasks[idx] = task
+			return state
+		}
+	}
+	return state
+}
+
+func scopedReportID(prefix, taskID string, idx int, reportID string) string {
+	taskToken := reportIDToken(taskID)
+	if taskToken == "" {
+		taskToken = "task"
+	}
+	idToken := reportIDToken(reportID)
+	if idToken == "" {
+		return fmt.Sprintf("%s-%s-%d", prefix, taskToken, idx)
+	}
+	return fmt.Sprintf("%s-%s-%s", prefix, taskToken, idToken)
+}
+
+func reportIDToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, current := range value {
+		if isReportIDRune(current) {
+			builder.WriteRune(current)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
+func isReportIDRune(current rune) bool {
+	return current >= 'a' && current <= 'z' ||
+		current >= 'A' && current <= 'Z' ||
+		current >= '0' && current <= '9' ||
+		current == '_' ||
+		current == '-' ||
+		current == '.'
+}
+
+func remapReportIDs(ids []string, mapping map[string]string) []string {
+	items := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if mapped, ok := mapping[id]; ok {
+			items = appendUnique(items, mapped)
+		}
+	}
+	return items
+}
+
+func upsertEvidence(board *blackboard.State, item blackboard.Evidence) {
+	for idx := range board.Evidence {
+		if board.Evidence[idx].ID == item.ID {
+			board.Evidence[idx] = item
+			return
+		}
+	}
+	board.Evidence = append(board.Evidence, item)
+}
+
+func upsertClaim(board *blackboard.State, item blackboard.Claim) {
+	for idx := range board.Claims {
+		if board.Claims[idx].ID == item.ID {
+			board.Claims[idx] = item
+			return
+		}
+	}
+	board.Claims = append(board.Claims, item)
+}
+
+func upsertFinding(board *blackboard.State, item blackboard.Finding) {
+	for idx := range board.Findings {
+		if board.Findings[idx].ID == item.ID {
+			board.Findings[idx] = item
+			return
+		}
+	}
+	board.Findings = append(board.Findings, item)
 }
 
 func evidenceInputs(items []team.Evidence) []blackboard.EvidenceInput {
@@ -308,27 +539,14 @@ func claimsForVerifierTask(board *blackboard.State, task team.Task) []blackboard
 // exactly which claim received which verdict with what confidence, so
 // whenever it is present and valid it wins.
 func typedVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) ([]blackboard.VerificationResult, bool) {
-	report, ok := team.ExtractVerificationReport(payload)
-	if !ok {
+	report, handled, valid := strictTypedVerificationReport(payload)
+	if !handled {
 		return nil, false
 	}
-	if err := team.ValidateVerificationReport(report); err != nil {
+	if !valid {
 		return nil, true
 	}
 	perClaim := report.PerClaim
-	if len(perClaim) == 0 {
-		// Overall-only verdict: fan it out across every claim the task
-		// is supposed to adjudicate, so downstream SupportsClaim can
-		// still match a supported overall against the pending claims.
-		perClaim = make([]team.VerificationClaim, 0, len(claimsByID))
-		for claimID := range claimsByID {
-			perClaim = append(perClaim, team.VerificationClaim{
-				ClaimID:    claimID,
-				Status:     report.Status,
-				Confidence: report.Confidence,
-			})
-		}
-	}
 	results := make([]blackboard.VerificationResult, 0, len(perClaim))
 	for _, claim := range perClaim {
 		claimID := strings.TrimSpace(claim.ClaimID)
@@ -371,6 +589,18 @@ func typedVerificationResults(payload map[string]any, claimsByID map[string]blac
 		})
 	}
 	return results, true
+}
+
+func strictTypedVerificationReport(payload map[string]any) (team.VerificationReport, bool, bool) {
+	rawReport, ok := payload[team.ReportKey]
+	if !ok {
+		return team.VerificationReport{}, false, false
+	}
+	report, ok := team.ExtractVerificationReport(map[string]any{team.ReportKey: rawReport})
+	if !ok || team.ValidateVerificationReport(report) != nil || len(report.PerClaim) == 0 {
+		return team.VerificationReport{}, true, false
+	}
+	return report, true, true
 }
 
 func structuredVerificationResults(payload map[string]any, claimsByID map[string]blackboard.Claim, fallbackEvidenceIDs []string, task team.Task) []blackboard.VerificationResult {

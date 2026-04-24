@@ -116,6 +116,10 @@ func (a *API) TeamEvents(ctx context.Context, teamID string) ([]storage.Event, e
 	return a.runtime.TeamEvents(ctx, teamID)
 }
 
+func (a *API) TeamTimeline(ctx context.Context, teamID string) ([]host.TimelineItem, error) {
+	return a.runtime.TeamTimeline(ctx, teamID)
+}
+
 func (a *API) ResumeTeam(ctx context.Context, teamID string) (team.RunState, error) {
 	return a.runtime.ResumeTeam(ctx, teamID)
 }

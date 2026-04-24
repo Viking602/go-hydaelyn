@@ -3,6 +3,7 @@
 - [North Star Runtime](architecture/north-star-runtime.md)
 - [Active Plan](plans/active-plan.md)
 - [Quickstart](quickstart.md)
+- [Panel Task Board](panel.md)
 - [Task Dataflow](task-dataflow.md)
 - [Recipe Compiler](recipe.md)
 - [Evaluation](evaluation.md)

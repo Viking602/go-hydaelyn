@@ -224,6 +224,47 @@ func TestSupportedFindingsRequireEvidenceAndConfidence(t *testing.T) {
 	}
 }
 
+func TestUpsertVerificationMergesReviewerVerdictsConservatively(t *testing.T) {
+	state := State{}
+	state.UpsertVerification(VerificationResult{
+		ClaimID:     "claim-1",
+		Status:      VerificationStatusSupported,
+		Confidence:  0.91,
+		EvidenceIDs: []string{"evidence-1"},
+		Rationale:   "reviewer one supports",
+	})
+	state.UpsertVerification(VerificationResult{
+		ClaimID:    "claim-1",
+		Status:     VerificationStatusContradicted,
+		Confidence: 0.8,
+		Rationale:  "reviewer two contradicts",
+	})
+	state.UpsertVerification(VerificationResult{
+		ClaimID:     "claim-1",
+		Status:      VerificationStatusSupported,
+		Confidence:  0.95,
+		EvidenceIDs: []string{"evidence-2"},
+		Rationale:   "late support",
+	})
+
+	if len(state.Verifications) != 1 {
+		t.Fatalf("expected one merged verification result, got %#v", state.Verifications)
+	}
+	got := state.Verifications[0]
+	if got.Status != VerificationStatusContradicted {
+		t.Fatalf("expected contradicted to dominate later supported verdicts, got %#v", got)
+	}
+	if got.Confidence != 0.95 {
+		t.Fatalf("expected max confidence retained, got %#v", got)
+	}
+	if !reflect.DeepEqual(got.EvidenceIDs, []string{"evidence-1", "evidence-2"}) {
+		t.Fatalf("expected evidence ids to be merged, got %#v", got)
+	}
+	if !strings.Contains(got.Rationale, "reviewer one supports") || !strings.Contains(got.Rationale, "reviewer two contradicts") || !strings.Contains(got.Rationale, "late support") {
+		t.Fatalf("expected rationales to be retained, got %#v", got)
+	}
+}
+
 func TestInferVerificationStatus_ConservativeDefault(t *testing.T) {
 	cases := []struct {
 		text string

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/mailbox"
 	"github.com/Viking602/go-hydaelyn/storage"
 	"github.com/Viking602/go-hydaelyn/team"
@@ -147,6 +148,10 @@ func (r *Runtime) recordMailboxEvent(ctx context.Context, eventType storage.Even
 		"teamRunId":     env.TeamRunID,
 		"fromAgentId":   env.From.AgentID,
 		"toAgentId":     env.To.AgentID,
+		"subject":       blackboard.SanitizeText(env.Letter.Subject),
+		"body":          blackboard.SanitizeText(env.Letter.Body),
+		"structured":    sanitizeMailboxEventValue(env.Letter.Structured),
+		"artifactIds":   sanitizeStringSlice(env.Letter.ArtifactIDs),
 		"intent":        string(env.Letter.Intent),
 		"priority":      string(env.Letter.Priority),
 		"state":         string(env.State),
@@ -163,4 +168,72 @@ func (r *Runtime) recordMailboxEvent(ctx context.Context, eventType storage.Even
 		Type:    eventType,
 		Payload: payload,
 	})
+}
+
+func sanitizeMailboxEventValue(value any) any {
+	switch current := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return blackboard.SanitizeText(current)
+	case []string:
+		return sanitizeStringSlice(current)
+	case []any:
+		items := make([]any, 0, len(current))
+		for _, item := range current {
+			items = append(items, sanitizeMailboxEventValue(item))
+		}
+		return items
+	case []map[string]string:
+		items := make([]map[string]string, 0, len(current))
+		for _, item := range current {
+			items = append(items, sanitizeStringMap(item))
+		}
+		return items
+	case []map[string]any:
+		items := make([]map[string]any, 0, len(current))
+		for _, item := range current {
+			items = append(items, sanitizeAnyMap(item))
+		}
+		return items
+	case map[string]string:
+		return sanitizeStringMap(current)
+	case map[string]any:
+		return sanitizeAnyMap(current)
+	default:
+		return value
+	}
+}
+
+func sanitizeAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = sanitizeMailboxEventValue(value)
+	}
+	return out
+}
+
+func sanitizeStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = blackboard.SanitizeText(value)
+	}
+	return out
+}
+
+func sanitizeStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, blackboard.SanitizeText(value))
+	}
+	return out
 }

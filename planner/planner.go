@@ -13,25 +13,27 @@ type VerificationPolicy struct {
 }
 
 type TaskSpec struct {
-	ID                   string                  `json:"id"`
-	Kind                 string                  `json:"kind,omitempty"`
-	Stage                team.TaskStage          `json:"stage,omitempty"`
-	Title                string                  `json:"title,omitempty"`
-	Input                string                  `json:"input,omitempty"`
-	RequiredRole         team.Role               `json:"requiredRole,omitempty"`
-	RequiredCapabilities []string                `json:"requiredCapabilities,omitempty"`
-	Budget               team.Budget             `json:"budget,omitempty"`
-	AssigneeAgentID      string                  `json:"assigneeAgentId,omitempty"`
-	DependsOn            []string                `json:"dependsOn,omitempty"`
-	Reads                []string                `json:"reads,omitempty"`
+	ID                   string                        `json:"id"`
+	Kind                 string                        `json:"kind,omitempty"`
+	Stage                team.TaskStage                `json:"stage,omitempty"`
+	TodoID               string                        `json:"todoId,omitempty"`
+	Title                string                        `json:"title,omitempty"`
+	Input                string                        `json:"input,omitempty"`
+	RequiredRole         team.Role                     `json:"requiredRole,omitempty"`
+	RequiredCapabilities []string                      `json:"requiredCapabilities,omitempty"`
+	Budget               team.Budget                   `json:"budget,omitempty"`
+	AssigneeAgentID      string                        `json:"assigneeAgentId,omitempty"`
+	DependsOn            []string                      `json:"dependsOn,omitempty"`
+	Reads                []string                      `json:"reads,omitempty"`
 	ReadSelectors        []blackboard.ExchangeSelector `json:"readSelectors,omitempty"`
-	Writes               []string                `json:"writes,omitempty"`
-	Publish              []team.OutputVisibility `json:"publish,omitempty"`
-	VerifyClaims         []string                `json:"verifyClaims,omitempty"`
-	ExchangeSchema       string                  `json:"exchangeSchema,omitempty"`
-	Namespace            string                  `json:"namespace,omitempty"`
-	VerifierRequired     bool                    `json:"verifierRequired,omitempty"`
-	FailurePolicy        team.FailurePolicy      `json:"failurePolicy,omitempty"`
+	Writes               []string                      `json:"writes,omitempty"`
+	Publish              []team.OutputVisibility       `json:"publish,omitempty"`
+	VerifyClaims         []string                      `json:"verifyClaims,omitempty"`
+	ExchangeSchema       string                        `json:"exchangeSchema,omitempty"`
+	Namespace            string                        `json:"namespace,omitempty"`
+	VerifierRequired     bool                          `json:"verifierRequired,omitempty"`
+	ExpectedReportKind   team.ReportKind               `json:"expectedReportKind,omitempty"`
+	FailurePolicy        team.FailurePolicy            `json:"failurePolicy,omitempty"`
 }
 
 type Template struct {

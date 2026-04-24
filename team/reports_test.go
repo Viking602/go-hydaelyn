@@ -84,10 +84,18 @@ func TestExtractSynthesisReport_AbsentReport(t *testing.T) {
 	}
 }
 
-func TestValidateResearchReport_RequiresClaimOrFinding(t *testing.T) {
+func TestValidateResearchReport_RequiresClaim(t *testing.T) {
 	err := ValidateResearchReport(ResearchReport{Kind: ReportKindResearch})
-	if err == nil || !strings.Contains(err.Error(), "claim or finding") {
+	if err == nil || !strings.Contains(err.Error(), "at least one claim") {
 		t.Fatalf("expected missing-claim error, got %v", err)
+	}
+
+	err = ValidateResearchReport(ResearchReport{
+		Kind:     ReportKindResearch,
+		Findings: []ReportFinding{{Summary: "finding without claim"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "at least one claim") {
+		t.Fatalf("expected findings-only report to be rejected, got %v", err)
 	}
 }
 
@@ -109,6 +117,63 @@ func TestValidateResearchReport_RejectsDanglingClaimID(t *testing.T) {
 	err := ValidateResearchReport(report)
 	if err == nil || !strings.Contains(err.Error(), "unknown claim") {
 		t.Fatalf("expected dangling claim error, got %v", err)
+	}
+}
+
+func TestValidateResearchReport_RejectsDuplicateLocalIDs(t *testing.T) {
+	cases := []struct {
+		name   string
+		report ResearchReport
+		want   string
+	}{
+		{
+			name: "duplicate claims",
+			report: ResearchReport{
+				Kind: ReportKindResearch,
+				Claims: []ReportClaim{
+					{ID: "claim-1", Summary: "one"},
+					{ID: "claim-1", Summary: "two"},
+				},
+			},
+			want: "duplicates id claim-1",
+		},
+		{
+			name: "duplicate evidence",
+			report: ResearchReport{
+				Kind:     ReportKindResearch,
+				Claims:   []ReportClaim{{ID: "claim-1", Summary: "one"}},
+				Evidence: []ReportEvidence{{ID: "evidence-1", Snippet: "one"}, {ID: "evidence-1", Snippet: "two"}},
+			},
+			want: "duplicates id evidence-1",
+		},
+		{
+			name: "duplicate findings",
+			report: ResearchReport{
+				Kind:     ReportKindResearch,
+				Claims:   []ReportClaim{{ID: "claim-1", Summary: "one"}},
+				Findings: []ReportFinding{{ID: "finding-1", Summary: "one"}, {ID: "finding-1", Summary: "two"}},
+			},
+			want: "duplicates id finding-1",
+		},
+		{
+			name: "canonical claim collision",
+			report: ResearchReport{
+				Kind: ReportKindResearch,
+				Claims: []ReportClaim{
+					{ID: "claim 1", Summary: "one"},
+					{ID: "claim-1", Summary: "two"},
+				},
+			},
+			want: "duplicates id claim-1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateResearchReport(tc.report)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected duplicate id error containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }
 

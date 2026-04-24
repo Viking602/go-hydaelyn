@@ -155,12 +155,12 @@ func (Pipeline) Publish(state *State, request PublishRequest) PublishResult {
 		state = &State{}
 	}
 	title := normalize(request.Title)
-	summary := redact(normalize(request.Summary))
+	summary := SanitizeText(request.Summary)
 	sourceID := ensureSource(state, request.TaskID, title)
 	artifactID := ensureArtifact(state, request.TaskID, title, summary)
 	evidenceIDs := make([]string, 0, len(request.Evidence))
 	for idx, item := range request.Evidence {
-		snippet := redact(normalize(item.Snippet))
+		snippet := SanitizeText(item.Snippet)
 		if source := normalize(item.Source); source != "" {
 			sourceID = ensureSource(state, request.TaskID, source)
 		}
@@ -183,11 +183,87 @@ func (s *State) UpsertVerification(result VerificationResult) {
 	result.Rationale = normalize(result.Rationale)
 	for idx := range s.Verifications {
 		if s.Verifications[idx].ClaimID == result.ClaimID {
-			s.Verifications[idx] = result
+			s.Verifications[idx] = mergeVerificationResult(s.Verifications[idx], result)
 			return
 		}
 	}
 	s.Verifications = append(s.Verifications, result)
+}
+
+func mergeVerificationResult(left, right VerificationResult) VerificationResult {
+	merged := VerificationResult{
+		ClaimID:     left.ClaimID,
+		Status:      moreConservativeStatus(left.Status, right.Status),
+		Confidence:  maxFloat(left.Confidence, right.Confidence),
+		EvidenceIDs: appendUniqueStrings(left.EvidenceIDs, right.EvidenceIDs...),
+		Rationale:   mergeRationale(left.Rationale, right.Rationale),
+	}
+	if merged.ClaimID == "" {
+		merged.ClaimID = right.ClaimID
+	}
+	return merged
+}
+
+func moreConservativeStatus(left, right VerificationStatus) VerificationStatus {
+	if verificationStatusRank(right) > verificationStatusRank(left) {
+		return right
+	}
+	return left
+}
+
+func verificationStatusRank(status VerificationStatus) int {
+	switch status {
+	case VerificationStatusContradicted:
+		return 3
+	case VerificationStatusInsufficient:
+		return 2
+	case VerificationStatusSupported:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func maxFloat(left, right float64) float64 {
+	if right > left {
+		return right
+	}
+	return left
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	out := append([]string{}, base...)
+	seen := map[string]struct{}{}
+	for _, value := range out {
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range values {
+		value = normalize(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func mergeRationale(left, right string) string {
+	left = normalize(left)
+	right = normalize(right)
+	switch {
+	case left == "":
+		return right
+	case right == "", right == left:
+		return left
+	default:
+		return left + " | " + right
+	}
 }
 
 func (s *State) UpsertExchange(exchange Exchange) Exchange {
@@ -330,6 +406,10 @@ func InferVerificationStatus(text string) VerificationStatus {
 	default:
 		return VerificationStatusInsufficient
 	}
+}
+
+func SanitizeText(text string) string {
+	return redact(normalize(text))
 }
 
 func ensureSource(state *State, taskID, title string) string {

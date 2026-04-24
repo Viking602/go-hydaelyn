@@ -48,10 +48,10 @@ type ReportClaim struct {
 }
 
 type ReportEvidence struct {
-	ID      string `json:"id,omitempty"`
-	Source  string `json:"source,omitempty"`
-	Snippet string `json:"snippet"`
-	URL     string `json:"url,omitempty"`
+	ID      string  `json:"id,omitempty"`
+	Source  string  `json:"source,omitempty"`
+	Snippet string  `json:"snippet"`
+	URL     string  `json:"url,omitempty"`
 	Score   float64 `json:"score,omitempty"`
 }
 
@@ -68,12 +68,12 @@ type ReportFinding struct {
 // explicit status is NOT inferred to pass — the guardrail rejects the
 // report and the verifier must re-emit a fully-typed decision.
 type VerificationReport struct {
-	Kind       ReportKind           `json:"kind"`
-	Status     VerificationStatus   `json:"status"`
-	Confidence float64              `json:"confidence,omitempty"`
-	PerClaim   []VerificationClaim  `json:"perClaim,omitempty"`
-	Reason     string               `json:"reason,omitempty"`
-	Metadata   map[string]string    `json:"metadata,omitempty"`
+	Kind       ReportKind          `json:"kind"`
+	Status     VerificationStatus  `json:"status"`
+	Confidence float64             `json:"confidence,omitempty"`
+	PerClaim   []VerificationClaim `json:"perClaim,omitempty"`
+	Reason     string              `json:"reason,omitempty"`
+	Metadata   map[string]string   `json:"metadata,omitempty"`
 }
 
 type VerificationClaim struct {
@@ -155,30 +155,58 @@ func ExtractSynthesisReport(structured map[string]any) (SynthesisReport, bool) {
 }
 
 // ValidateResearchReport checks the structural invariants the control
-// plane relies on. A research report must have at least one claim or
-// finding, and every finding.ClaimIDs entry must reference a claim in the
-// same report — otherwise the claim-supports-finding chain is already
-// broken at the worker boundary and we do not want to paper over that in
-// the host layer.
+// plane relies on. A research report must have at least one claim, and every
+// finding.ClaimIDs entry must reference a claim in the same report —
+// otherwise the claim-supports-finding chain is already broken at the worker
+// boundary and we do not want to paper over that in the host layer.
 func ValidateResearchReport(report ResearchReport) error {
 	if report.Kind != ReportKindResearch {
 		return fmt.Errorf("research report must have kind=%s, got %q", ReportKindResearch, report.Kind)
 	}
-	if len(report.Claims) == 0 && len(report.Findings) == 0 {
-		return fmt.Errorf("research report must include at least one claim or finding")
+	if len(report.Claims) == 0 {
+		return fmt.Errorf("research report must include at least one claim")
 	}
+	claimIDs, err := validateResearchClaims(report.Claims)
+	if err != nil {
+		return err
+	}
+	if err := validateResearchEvidence(report.Evidence); err != nil {
+		return err
+	}
+	return validateResearchFindings(report.Findings, claimIDs)
+}
+
+func validateResearchClaims(claims []ReportClaim) (map[string]struct{}, error) {
 	claimIDs := map[string]struct{}{}
-	for idx, claim := range report.Claims {
+	for idx, claim := range claims {
 		if strings.TrimSpace(claim.Summary) == "" {
-			return fmt.Errorf("research report claim[%d] missing summary", idx)
+			return nil, fmt.Errorf("research report claim[%d] missing summary", idx)
 		}
-		if claim.ID != "" {
-			claimIDs[claim.ID] = struct{}{}
+		if err := recordUniqueReportID("claim", idx, claim.ID, claimIDs); err != nil {
+			return nil, err
 		}
 	}
-	for idx, finding := range report.Findings {
+	return claimIDs, nil
+}
+
+func validateResearchEvidence(evidence []ReportEvidence) error {
+	evidenceIDs := map[string]struct{}{}
+	for idx, item := range evidence {
+		if err := recordUniqueReportID("evidence", idx, item.ID, evidenceIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateResearchFindings(findings []ReportFinding, claimIDs map[string]struct{}) error {
+	findingIDs := map[string]struct{}{}
+	for idx, finding := range findings {
 		if strings.TrimSpace(finding.Summary) == "" {
 			return fmt.Errorf("research report finding[%d] missing summary", idx)
+		}
+		if err := recordUniqueReportID("finding", idx, finding.ID, findingIDs); err != nil {
+			return err
 		}
 		for _, claimID := range finding.ClaimIDs {
 			if claimID == "" {
@@ -190,6 +218,52 @@ func ValidateResearchReport(report ResearchReport) error {
 		}
 	}
 	return nil
+}
+
+func recordUniqueReportID(kind string, idx int, id string, seen map[string]struct{}) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	key := canonicalReportIDToken(id)
+	if key == "" {
+		key = id
+	}
+	if _, exists := seen[key]; exists {
+		return fmt.Errorf("research report %s[%d] duplicates id %s", kind, idx, id)
+	}
+	seen[key] = struct{}{}
+	return nil
+}
+
+func canonicalReportIDToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, current := range value {
+		if isReportIDTokenRune(current) {
+			builder.WriteRune(current)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
+func isReportIDTokenRune(current rune) bool {
+	return current >= 'a' && current <= 'z' ||
+		current >= 'A' && current <= 'Z' ||
+		current >= '0' && current <= '9' ||
+		current == '_' ||
+		current == '-' ||
+		current == '.'
 }
 
 // ValidateVerificationReport enforces that the overall status is a

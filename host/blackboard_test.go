@@ -106,6 +106,186 @@ func TestVerificationProviderUsesTaskMetadata(t *testing.T) {
 	}
 }
 
+func TestPublishResearchReportSanitizesAndScopesReportIDs(t *testing.T) {
+	board := &blackboard.State{}
+	report := team.ResearchReport{
+		Kind: team.ReportKindResearch,
+		Evidence: []team.ReportEvidence{{
+			ID:      "evidence-1",
+			Source:  "source user@example.com",
+			Snippet: "token sk-secret1234567890 belongs to user@example.com",
+		}},
+		Claims: []team.ReportClaim{{
+			ID:          "claim-1",
+			Summary:     "contact user@example.com before launch",
+			EvidenceIDs: []string{"evidence-1"},
+		}},
+		Findings: []team.ReportFinding{{
+			ID:       "finding-1",
+			Summary:  "claim-1 is backed by sk-secret1234567890",
+			ClaimIDs: []string{"claim-1"},
+		}},
+		Metadata: map[string]string{
+			"owner": "user@example.com",
+			"token": "sk-secret1234567890",
+		},
+	}
+
+	firstClaims, firstFindings, firstScoped := publishResearchReport(board, team.Task{ID: "security"}, report)
+	secondClaims, _, _ := publishResearchReport(board, team.Task{ID: "frontend"}, report)
+
+	if len(board.Claims) != 2 || len(board.Evidence) != 2 || len(board.Findings) != 2 {
+		t.Fatalf("expected task-scoped typed report objects, got %#v", board)
+	}
+	if firstClaims[0] == secondClaims[0] {
+		t.Fatalf("expected report-local ids to be scoped per task, got %q", firstClaims[0])
+	}
+	if board.Claims[0].EvidenceIDs[0] != "evidence-security-evidence-1" {
+		t.Fatalf("expected claim evidence id to be remapped, got %#v", board.Claims[0])
+	}
+	if board.Findings[0].ClaimIDs[0] != firstClaims[0] || firstFindings[0] != "finding-security-finding-1" {
+		t.Fatalf("expected finding claim id to be remapped, findings=%#v ids=%#v", board.Findings, firstFindings)
+	}
+	if firstScoped.Claims[0].ID != firstClaims[0] || firstScoped.Claims[0].EvidenceIDs[0] != "evidence-security-evidence-1" || firstScoped.Findings[0].ClaimIDs[0] != firstClaims[0] {
+		t.Fatalf("expected scoped report to carry remapped ids, got %#v", firstScoped)
+	}
+	serialized := strings.Join([]string{
+		board.Claims[0].Summary,
+		board.Evidence[0].SourceID,
+		board.Evidence[0].Snippet,
+		board.Findings[0].Summary,
+		firstScoped.Metadata["owner"],
+		firstScoped.Metadata["token"],
+	}, " ")
+	if strings.Contains(serialized, "user@example.com") || strings.Contains(serialized, "sk-secret") {
+		t.Fatalf("expected typed report text to be sanitized, got %q", serialized)
+	}
+
+	noFindingReport := report
+	noFindingReport.Findings = nil
+	publishResearchReport(board, team.Task{ID: "api"}, noFindingReport)
+	fallbackFinding := board.Findings[len(board.Findings)-1]
+	if fallbackFinding.ID != "finding-api-1" || strings.Contains(fallbackFinding.Summary, "user@example.com") {
+		t.Fatalf("expected fallback finding to be scoped and sanitized, got %#v", fallbackFinding)
+	}
+}
+
+func TestResearchExchangeUsesScopedReportIDsForVerifierInputs(t *testing.T) {
+	runner := New(Config{})
+	researchTask := team.Task{
+		ID:        "security-review",
+		Kind:      team.TaskKindResearch,
+		Stage:     team.TaskStageImplement,
+		Writes:    []string{"panel.research.security-review"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		Namespace: "panel.todo.security-review",
+		Result: &team.Result{
+			Summary: "research complete",
+			Structured: map[string]any{
+				team.ReportKey: map[string]any{
+					"kind": string(team.ReportKindResearch),
+					"claims": []any{map[string]any{
+						"id":          "claim-1",
+						"summary":     "claim one",
+						"evidenceIds": []any{"evidence-1"},
+					}},
+					"evidence": []any{map[string]any{
+						"id":      "evidence-1",
+						"snippet": "evidence one",
+					}},
+				},
+			},
+		},
+	}
+	state := team.RunState{
+		Tasks:      []team.Task{researchTask},
+		Blackboard: &blackboard.State{},
+	}
+
+	state = runner.applyBlackboardUpdate(state, researchTask)
+	exchanges := state.Blackboard.ExchangesForKey("panel.research.security-review")
+	if len(exchanges) != 1 {
+		t.Fatalf("expected research exchange, got %#v", state.Blackboard)
+	}
+	report, ok := team.ExtractResearchReport(exchanges[0].Structured)
+	if !ok {
+		t.Fatalf("expected structured research report in exchange, got %#v", exchanges[0].Structured)
+	}
+	if report.Claims[0].ID != "claim-security-review-claim-1" || report.Claims[0].EvidenceIDs[0] != "evidence-security-review-evidence-1" {
+		t.Fatalf("expected verifier input report to use scoped ids, got %#v", report)
+	}
+
+	verifyTask := team.Task{
+		ID:        "security-review-review",
+		Kind:      team.TaskKindVerify,
+		Namespace: "panel.review.security-review",
+		DependsOn: []string{"security-review"},
+		Writes:    []string{"panel.review.security-review"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		Result: &team.Result{
+			Summary: "supported",
+			Structured: map[string]any{
+				team.ReportKey: map[string]any{
+					"kind":   string(team.ReportKindVerification),
+					"status": string(team.VerificationStatusSupported),
+					"perClaim": []any{map[string]any{
+						"claimId": "claim-security-review-claim-1",
+						"status":  string(team.VerificationStatusSupported),
+					}},
+				},
+			},
+		},
+	}
+	state = runner.applyBlackboardUpdate(state, verifyTask)
+	if supported := state.Blackboard.ExchangesForKey("supported_findings"); len(supported) != 1 {
+		t.Fatalf("expected scoped verifier claim id to publish supported finding, got %#v", supported)
+	}
+}
+
+func TestApplyTaskOutcomeKeepsScopedReportAfterBlackboardPublish(t *testing.T) {
+	runner := New(Config{})
+	state := team.RunState{
+		ID:         "team-1",
+		Tasks:      []team.Task{{ID: "security-review", Kind: team.TaskKindResearch, Status: team.TaskStatusPending}},
+		Blackboard: &blackboard.State{},
+	}
+	completed := state.Tasks[0]
+	completed.Status = team.TaskStatusCompleted
+	completed.Result = &team.Result{
+		Summary: "research done",
+		Structured: map[string]any{
+			team.ReportKey: map[string]any{
+				"kind": string(team.ReportKindResearch),
+				"claims": []any{map[string]any{
+					"id":      "claim-1",
+					"summary": "contact user@example.com",
+				}},
+				"metadata": map[string]any{
+					"owner": "user@example.com",
+				},
+			},
+		},
+	}
+
+	updated, applied, published, _, err := runner.applyTaskOutcome(context.Background(), state, 0, completed)
+	if err != nil {
+		t.Fatalf("applyTaskOutcome() error = %v", err)
+	}
+	if !applied || !published {
+		t.Fatalf("expected completed research task to publish, applied=%v published=%v", applied, published)
+	}
+	report, ok := team.ExtractResearchReport(updated.Tasks[0].Result.Structured)
+	if !ok {
+		t.Fatalf("expected scoped research report, got %#v", updated.Tasks[0].Result.Structured)
+	}
+	if report.Claims[0].ID != "claim-security-review-claim-1" {
+		t.Fatalf("expected task result to retain scoped claim id, got %#v", report.Claims)
+	}
+	if strings.Contains(report.Claims[0].Summary+report.Metadata["owner"], "user@example.com") {
+		t.Fatalf("expected task result to retain sanitized report, got %#v", report)
+	}
+}
+
 func TestCollaborationBlackboard_GuardedSynthesisRequiresVerifiedClaims(t *testing.T) {
 	// Under the selector-based model, VerifierRequired=true translates to
 	// RequireVerified on every read. Exchanges no longer pass merely because
@@ -428,6 +608,53 @@ func TestVerifierStructuredClaimsOverrideSummaryHeuristics(t *testing.T) {
 	// contradiction when deciding whether synthesis may proceed.
 	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGateBlockDecision || status != string(blackboard.VerificationStatusContradicted) {
 		t.Fatalf("expected mixed claim-level results to block on the contradicted claim, got decision=%q status=%q ok=%v", decision, status, ok)
+	}
+}
+
+func TestVerifierTypedReportRequiresPerClaimVerdicts(t *testing.T) {
+	runner := New(Config{})
+	state := team.RunState{
+		Blackboard: &blackboard.State{
+			Claims: []blackboard.Claim{
+				{ID: "claim-1", TaskID: "impl-1", EvidenceIDs: []string{"evidence-1"}},
+				{ID: "claim-2", TaskID: "impl-1", EvidenceIDs: []string{"evidence-2"}},
+			},
+			Findings: []blackboard.Finding{
+				{ID: "finding-1", TaskID: "impl-1", Summary: "one", ClaimIDs: []string{"claim-1"}},
+				{ID: "finding-2", TaskID: "impl-1", Summary: "two", ClaimIDs: []string{"claim-2"}},
+			},
+		},
+	}
+
+	verifyTask := team.Task{
+		ID:        "verify-1",
+		Kind:      team.TaskKindVerify,
+		Namespace: "verify.impl-1",
+		Version:   1,
+		DependsOn: []string{"impl-1"},
+		Writes:    []string{"verify.impl-1"},
+		Publish:   []team.OutputVisibility{team.OutputVisibilityBlackboard},
+		Result: &team.Result{
+			Summary: "supported",
+			Structured: map[string]any{
+				team.ReportKey: map[string]any{
+					"kind":   string(team.ReportKindVerification),
+					"status": string(team.VerificationStatusSupported),
+				},
+			},
+		},
+	}
+
+	state = runner.applyBlackboardUpdate(state, verifyTask)
+
+	if got := len(state.Blackboard.Verifications); got != 0 {
+		t.Fatalf("expected overall-only typed report to publish no claim results, got %#v", state.Blackboard.Verifications)
+	}
+	if supported := state.Blackboard.ExchangesForKey("supported_findings"); len(supported) != 0 {
+		t.Fatalf("expected no supported findings from overall-only typed report, got %#v", supported)
+	}
+	if decision, status, ok := verifierGateEvidence(state.Blackboard, verifyTask); !ok || decision != verifierGateBlockDecision || status != string(blackboard.VerificationStatusInsufficient) {
+		t.Fatalf("expected overall-only typed report to block synthesis, got decision=%q status=%q ok=%v", decision, status, ok)
 	}
 }
 

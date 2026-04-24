@@ -219,7 +219,10 @@ func canonicalResultFromStructured(task team.Task, structured map[string]any, ar
 		}
 		summary := researchReportSummary(report)
 		confidence := reportConfidence(report.Confidence, structured, 0.5)
-		return newTaskResult(summary, confidence, artifactIDs, structured, task.Title), true, nil
+		result := newTaskResult(summary, confidence, artifactIDs, structured, task.Title)
+		result.Evidence = researchEvidence(report, task.Title)
+		result.Findings = researchFindings(report, confidence)
+		return result, true, nil
 	case team.TaskKindVerify:
 		report, ok := team.ExtractVerificationReport(structured)
 		if !ok {
@@ -243,6 +246,50 @@ func canonicalResultFromStructured(task team.Task, structured map[string]any, ar
 	default:
 		return nil, false, nil
 	}
+}
+
+func researchEvidence(report team.ResearchReport, fallbackSource string) []team.Evidence {
+	if len(report.Evidence) == 0 {
+		if strings.TrimSpace(report.Notes) == "" {
+			return nil
+		}
+		return []team.Evidence{{Source: fallbackSource, Snippet: strings.TrimSpace(report.Notes)}}
+	}
+	items := make([]team.Evidence, 0, len(report.Evidence))
+	for _, evidence := range report.Evidence {
+		source := strings.TrimSpace(evidence.Source)
+		if source == "" {
+			source = fallbackSource
+		}
+		items = append(items, team.Evidence{
+			Source:  source,
+			Snippet: strings.TrimSpace(evidence.Snippet),
+		})
+	}
+	return items
+}
+
+func researchFindings(report team.ResearchReport, fallbackConfidence float64) []team.Finding {
+	if len(report.Findings) > 0 {
+		items := make([]team.Finding, 0, len(report.Findings))
+		for _, finding := range report.Findings {
+			confidence := finding.Confidence
+			if confidence <= 0 {
+				confidence = fallbackConfidence
+			}
+			items = append(items, team.Finding{Summary: strings.TrimSpace(finding.Summary), Confidence: confidence})
+		}
+		return items
+	}
+	items := make([]team.Finding, 0, len(report.Claims))
+	for _, claim := range report.Claims {
+		confidence := claim.Confidence
+		if confidence <= 0 {
+			confidence = fallbackConfidence
+		}
+		items = append(items, team.Finding{Summary: strings.TrimSpace(claim.Summary), Confidence: confidence})
+	}
+	return items
 }
 
 func newTaskResult(summary string, confidence float64, artifactIDs []string, structured map[string]any, source string) *team.Result {

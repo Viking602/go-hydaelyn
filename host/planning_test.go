@@ -1,8 +1,11 @@
 package host
 
 import (
+	"context"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/internal/plugin"
+	"github.com/Viking602/go-hydaelyn/pattern/panel"
 	"github.com/Viking602/go-hydaelyn/planner"
 	"github.com/Viking602/go-hydaelyn/team"
 )
@@ -121,5 +124,62 @@ func TestBuildPlannedStatePreservesCollaborationContract(t *testing.T) {
 	}
 	if verifyTask.AssigneeAgentID != "worker-2" {
 		t.Fatalf("expected verifier assignment to worker-2, got %#v", verifyTask.AssigneeAgentID)
+	}
+}
+
+func TestPanelPlannerPathKeepsTaskBoardClaims(t *testing.T) {
+	runner := New(Config{})
+	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor})
+	runner.RegisterProfile(team.Profile{Name: "security", Role: team.RoleResearcher})
+	runner.RegisterProfile(team.Profile{Name: "frontend", Role: team.RoleResearcher})
+	if err := runner.RegisterPlugin(plugin.Spec{
+		Type: plugin.TypePlanner,
+		Name: "panel-planner",
+		Component: fakePlanner{
+			planFn: func(_ context.Context, request planner.PlanRequest) (planner.Plan, error) {
+				return planner.Plan{
+					Goal:  request.Template.Goal,
+					Tasks: append([]planner.TaskSpec{}, request.Template.Tasks...),
+				}, nil
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterPlugin(planner) error = %v", err)
+	}
+
+	state, err := runner.startPlannedTeam(context.Background(), panel.New(), team.StartRequest{
+		TeamID:            "team-panel",
+		Pattern:           "panel",
+		Planner:           "panel-planner",
+		SupervisorProfile: "supervisor",
+		WorkerProfiles:    []string{"security", "frontend"},
+		Input: map[string]any{
+			"query": "launch auth feature",
+			"todos": []any{
+				map[string]any{"id": "security-review", "title": "review auth threat model", "domain": "security"},
+				map[string]any{"id": "ui-review", "title": "review login UI", "domain": "frontend"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("startPlannedTeam() error = %v", err)
+	}
+	if state.InteractionMode != team.InteractionModePanel {
+		t.Fatalf("expected panel interaction mode, got %#v", state.InteractionMode)
+	}
+	if state.TaskBoard == nil || len(state.TaskBoard.Plan.Items) != 2 {
+		t.Fatalf("expected planned panel task board, got %#v", state.TaskBoard)
+	}
+	if state.Tasks[0].AssigneeAgentID != "worker-1" || state.Tasks[1].AssigneeAgentID != "worker-2" {
+		t.Fatalf("expected domain-based panel claims to override generic planner assignment, got %#v", state.Tasks)
+	}
+	if state.TaskBoard.Plan.Items[0].PrimaryAgentID != "worker-1" || state.TaskBoard.Plan.Items[1].PrimaryAgentID != "worker-2" {
+		t.Fatalf("expected task board to record claimed experts, got %#v", state.TaskBoard.Plan.Items)
+	}
+	if state.Tasks[0].ExpectedReportKind != team.ReportKindResearch || state.Tasks[1].ExpectedReportKind != team.ReportKindResearch {
+		t.Fatalf("expected planned panel research tasks to require research reports, got %#v", state.Tasks)
+	}
+	if len(state.Threads) != 1 || state.Threads[0].Mode != team.InteractionModePanel {
+		t.Fatalf("expected planned panel conversation thread, got %#v", state.Threads)
 	}
 }

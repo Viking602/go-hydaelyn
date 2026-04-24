@@ -61,6 +61,23 @@ Task lifecycle events now carry additive execution metadata:
 
 Consumers must tolerate these additive fields and may rely on them for replay validation.
 
+### Panel Collaboration
+
+The panel task-board contract is additive:
+
+- `team.InteractionMode`
+- `team.TodoPlan`, `team.TodoItem`, `team.TaskBoard`
+- `team.AgentCapability`
+- `team.ConversationThread`, `team.ConversationMessage`
+- `team.Task.ExpectedReportKind`
+- `host.Runtime.TeamTimeline`
+
+`panel` tasks use typed reports for research, verification, and synthesis;
+typed research reports must include at least one claim, and typed verification
+reports must include `perClaim`.
+`deepsearch` remains compatible with legacy research prose; typed research is
+required only when a task sets `ExpectedReportKind`.
+
 ## CLI Surface
 
 `cli validate --recipe ... --strict-dataflow` is a supported additive validation mode. It reports:

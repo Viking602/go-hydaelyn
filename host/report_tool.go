@@ -48,6 +48,9 @@ func (t submitReportTool) Execute(_ context.Context, call tool.Call, _ tool.Upda
 }
 
 func reportKindForTask(task team.Task) (team.ReportKind, bool) {
+	if task.ExpectedReportKind != "" {
+		return task.ExpectedReportKind, true
+	}
 	switch task.Kind {
 	case team.TaskKindSynthesize:
 		return team.ReportKindSynthesis, true
@@ -95,6 +98,12 @@ func validTypedReport(kind team.ReportKind, text string) bool {
 		return false
 	}
 	switch kind {
+	case team.ReportKindResearch:
+		report, ok := team.ExtractResearchReport(structured)
+		return ok && team.ValidateResearchReport(report) == nil
+	case team.ReportKindVerification:
+		report, ok := team.ExtractVerificationReport(structured)
+		return ok && len(report.PerClaim) > 0 && team.ValidateVerificationReport(report) == nil
 	case team.ReportKindSynthesis:
 		report, ok := team.ExtractSynthesisReport(structured)
 		return ok && team.ValidateSynthesisReport(report) == nil
@@ -105,6 +114,10 @@ func validTypedReport(kind team.ReportKind, text string) bool {
 
 func typedReportRetryPrompt(kind team.ReportKind) string {
 	switch kind {
+	case team.ReportKindResearch:
+		return `Your previous output was not a valid research report. Return exactly one JSON object with top-level field "report". The report must have kind="research" and include at least one claim. Findings are optional, but findings-only reports are not valid because panel verification is claim-based. Do not emit prose, markdown fences, or commentary outside the JSON object.`
+	case team.ReportKindVerification:
+		return `Your previous output was not a valid verification report. Return exactly one JSON object with top-level field "report". The report must have kind="verification", a status of "supported", "contradicted", or "insufficient", and explicit perClaim statuses when adjudicating claims. Do not emit prose, markdown fences, or commentary outside the JSON object.`
 	case team.ReportKindSynthesis:
 		return `Your previous output was not a valid synthesis report. Return exactly one JSON object with top-level field "report". The report must have kind="synthesis" and a non-empty answer field. Do not emit prose, markdown fences, or commentary outside the JSON object.`
 	default:
@@ -114,29 +127,146 @@ func typedReportRetryPrompt(kind team.ReportKind) string {
 
 func reportSchemaForKind(kind team.ReportKind) message.JSONSchema {
 	switch kind {
+	case team.ReportKindResearch:
+		return researchReportSchema()
+	case team.ReportKindVerification:
+		return verificationReportSchema()
 	case team.ReportKindSynthesis:
-		return message.JSONSchema{
-			Type: "object",
-			Properties: map[string]message.JSONSchema{
-				"kind":   {Type: "string", Enum: []string{string(team.ReportKindSynthesis)}},
-				"answer": {Type: "string"},
-				"citations": {
-					Type: "array",
-					Items: schemaPointer(message.JSONSchema{
-						Type: "object",
-						Properties: map[string]message.JSONSchema{
-							"exchangeId": {Type: "string"},
-							"findingId":  {Type: "string"},
-							"claimId":    {Type: "string"},
-							"excerpt":    {Type: "string"},
-						},
-					}),
-				},
-			},
-			Required: []string{"kind", "answer"},
-		}
+		return synthesisReportSchema()
 	default:
 		return message.JSONSchema{Type: "object"}
+	}
+}
+
+func researchReportSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "object",
+		Properties: map[string]message.JSONSchema{
+			"kind":       {Type: "string", Enum: []string{string(team.ReportKindResearch)}},
+			"claims":     reportClaimsSchema(),
+			"evidence":   reportEvidenceSchema(),
+			"findings":   reportFindingsSchema(),
+			"confidence": {Type: "number"},
+			"notes":      {Type: "string"},
+			"metadata":   {Type: "object", AdditionalProperties: true},
+		},
+		Required: []string{"kind", "claims"},
+	}
+}
+
+func reportClaimsSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "array",
+		Items: schemaPointer(message.JSONSchema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"id":          {Type: "string"},
+				"summary":     {Type: "string"},
+				"evidenceIds": {Type: "array", Items: &message.JSONSchema{Type: "string"}},
+				"confidence":  {Type: "number"},
+			},
+			Required: []string{"summary"},
+		}),
+	}
+}
+
+func reportEvidenceSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "array",
+		Items: schemaPointer(message.JSONSchema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"id":      {Type: "string"},
+				"source":  {Type: "string"},
+				"snippet": {Type: "string"},
+				"url":     {Type: "string"},
+				"score":   {Type: "number"},
+			},
+			Required: []string{"snippet"},
+		}),
+	}
+}
+
+func reportFindingsSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "array",
+		Items: schemaPointer(message.JSONSchema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"id":         {Type: "string"},
+				"summary":    {Type: "string"},
+				"claimIds":   {Type: "array", Items: &message.JSONSchema{Type: "string"}},
+				"confidence": {Type: "number"},
+			},
+			Required: []string{"summary"},
+		}),
+	}
+}
+
+func verificationReportSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "object",
+		Properties: map[string]message.JSONSchema{
+			"kind":       {Type: "string", Enum: []string{string(team.ReportKindVerification)}},
+			"status":     {Type: "string", Enum: verificationStatusEnums()},
+			"confidence": {Type: "number"},
+			"perClaim":   perClaimSchema(),
+			"reason":     {Type: "string"},
+			"metadata":   {Type: "object", AdditionalProperties: true},
+		},
+		Required: []string{"kind", "status", "perClaim"},
+	}
+}
+
+func perClaimSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "array",
+		Items: schemaPointer(message.JSONSchema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"claimId":     {Type: "string"},
+				"status":      {Type: "string", Enum: verificationStatusEnums()},
+				"confidence":  {Type: "number"},
+				"evidenceIds": {Type: "array", Items: &message.JSONSchema{Type: "string"}},
+				"reason":      {Type: "string"},
+			},
+			Required: []string{"claimId", "status"},
+		}),
+	}
+}
+
+func synthesisReportSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "object",
+		Properties: map[string]message.JSONSchema{
+			"kind":      {Type: "string", Enum: []string{string(team.ReportKindSynthesis)}},
+			"answer":    {Type: "string"},
+			"citations": citationSchema(),
+		},
+		Required: []string{"kind", "answer"},
+	}
+}
+
+func citationSchema() message.JSONSchema {
+	return message.JSONSchema{
+		Type: "array",
+		Items: schemaPointer(message.JSONSchema{
+			Type: "object",
+			Properties: map[string]message.JSONSchema{
+				"exchangeId": {Type: "string"},
+				"findingId":  {Type: "string"},
+				"claimId":    {Type: "string"},
+				"excerpt":    {Type: "string"},
+			},
+		}),
+	}
+}
+
+func verificationStatusEnums() []string {
+	return []string{
+		string(team.VerificationStatusSupported),
+		string(team.VerificationStatusContradicted),
+		string(team.VerificationStatusInsufficient),
 	}
 }
 

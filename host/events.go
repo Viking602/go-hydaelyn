@@ -128,9 +128,10 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 		TeamID: state.ID,
 		Type:   storage.EventTeamStarted,
 		Payload: map[string]any{
-			"pattern":      state.Pattern,
-			"phase":        string(state.Phase),
-			"agentOptions": agentOptionsPayload(state.AgentOptions),
+			"pattern":         state.Pattern,
+			"phase":           string(state.Phase),
+			"interactionMode": string(state.InteractionMode),
+			"agentOptions":    agentOptionsPayload(state.AgentOptions),
 			"supervisor": map[string]string{
 				"id":          state.Supervisor.ID,
 				"role":        string(state.Supervisor.Role),
@@ -154,12 +155,76 @@ func (r *Runtime) recordInitialEvents(ctx context.Context, state team.RunState) 
 			return err
 		}
 	}
+	if err := r.recordTaskBoardEvents(ctx, state); err != nil {
+		return err
+	}
 	for _, task := range state.Tasks {
 		if err := r.recordTaskScheduledEvent(ctx, state, task); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *Runtime) recordTaskBoardEvents(ctx context.Context, state team.RunState) error {
+	if state.TaskBoard == nil {
+		return nil
+	}
+	if err := r.appendEvent(ctx, storage.Event{
+		RunID:  state.ID,
+		TeamID: state.ID,
+		Type:   storage.EventTodoPlanned,
+		Payload: map[string]any{
+			"goal":      state.TaskBoard.Plan.Goal,
+			"planId":    state.TaskBoard.Plan.ID,
+			"todoCount": len(state.TaskBoard.Plan.Items),
+			"mode":      string(state.InteractionMode),
+		},
+	}); err != nil {
+		return err
+	}
+	for _, todo := range state.TaskBoard.Plan.Items {
+		if todo.PrimaryAgentID == "" {
+			continue
+		}
+		if err := r.appendEvent(ctx, storage.Event{
+			RunID:   state.ID,
+			TeamID:  state.ID,
+			TaskID:  todo.TaskID,
+			Type:    storage.EventTodoClaimed,
+			Payload: todoClaimedPayload(todo),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func todoClaimedPayload(todo team.TodoItem) map[string]any {
+	return map[string]any{
+		"todoId":               todo.ID,
+		"title":                todo.Title,
+		"domain":               todo.Domain,
+		"priority":             string(todo.Priority),
+		"agentId":              todo.PrimaryAgentID,
+		"requiredCapabilities": append([]string{}, todo.RequiredCapabilities...),
+		"expectedReportKind":   string(todo.ExpectedReportKind),
+		"verificationPolicy":   todoVerificationPolicyPayload(todo.VerificationPolicy),
+		"status":               string(todo.Status),
+	}
+}
+
+func todoVerificationPolicyPayload(policy team.TodoVerificationPolicy) map[string]any {
+	payload := map[string]any{}
+	if policy.Required {
+		payload["required"] = policy.Required
+	}
+	putStringValue(payload, "mode", policy.Mode)
+	if policy.MinConfidence > 0 {
+		payload["minConfidence"] = policy.MinConfidence
+	}
+	putPositiveInt(payload, "reviewers", policy.Reviewers)
+	return nonEmptyPayload(payload)
 }
 
 func (r *Runtime) recordTaskScheduledEvent(ctx context.Context, state team.RunState, task team.Task) error {
@@ -607,23 +672,69 @@ func taskScheduledPayload(task team.Task) map[string]any {
 		"input":               task.Input,
 		"status":              string(task.Status),
 		"kind":                string(task.Kind),
+		"stage":               string(task.Stage),
+		"todoId":              task.TodoID,
 		"requiredRole":        string(task.RequiredRole),
 		"assigneeAgent":       task.AssigneeAgentID,
 		"failurePolicy":       string(task.FailurePolicy),
 		"dependsOn":           task.DependsOn,
 		"reads":               task.Reads,
+		"readSelectors":       exchangeSelectorsPayload(task.ReadSelectors),
 		"writes":              task.Writes,
 		"publish":             outputVisibilities(task.Publish),
 		"taskVersion":         task.Version,
 		"idempotencyKey":      task.IdempotencyKey,
 		"namespace":           task.Namespace,
 		"verifierRequired":    task.VerifierRequired,
+		"expectedReportKind":  string(task.ExpectedReportKind),
 		"assistantOutputMode": string(task.AssistantOutputMode),
 		"budget": map[string]any{
 			"tokens":    task.Budget.Tokens,
 			"toolCalls": task.Budget.ToolCalls,
 		},
 	}
+}
+
+func exchangeSelectorsPayload(selectors []blackboard.ExchangeSelector) []map[string]any {
+	if len(selectors) == 0 {
+		return nil
+	}
+	payload := make([]map[string]any, 0, len(selectors))
+	for _, selector := range selectors {
+		payload = append(payload, exchangeSelectorPayload(selector))
+	}
+	return payload
+}
+
+func exchangeSelectorPayload(selector blackboard.ExchangeSelector) map[string]any {
+	payload := map[string]any{}
+	putStringSlice(payload, "keys", selector.Keys)
+	putStringSlice(payload, "namespaces", selector.Namespaces)
+	putStringSlice(payload, "taskIds", selector.TaskIDs)
+	putStringSlice(payload, "valueTypes", exchangeValueTypes(selector.ValueTypes))
+	putStringSlice(payload, "claimIds", selector.ClaimIDs)
+	putStringSlice(payload, "findingIds", selector.FindingIDs)
+	putStringSlice(payload, "artifactIds", selector.ArtifactIDs)
+	putBoolValue(payload, "requireVerified", selector.RequireVerified)
+	putPositiveFloat(payload, "minConfidence", selector.MinConfidence)
+	putPositiveInt(payload, "limit", selector.Limit)
+	putBoolValue(payload, "includeText", selector.IncludeText)
+	putBoolValue(payload, "includeStructured", selector.IncludeStructured)
+	putBoolValue(payload, "includeArtifacts", selector.IncludeArtifacts)
+	putBoolValue(payload, "required", selector.Required)
+	putStringValue(payload, "label", selector.Label)
+	return payload
+}
+
+func exchangeValueTypes(types []blackboard.ExchangeValueType) []string {
+	if len(types) == 0 {
+		return nil
+	}
+	items := make([]string, 0, len(types))
+	for _, valueType := range types {
+		items = append(items, string(valueType))
+	}
+	return items
 }
 
 func agentOptionsPayload(options team.AgentOptions) map[string]any {
@@ -640,6 +751,18 @@ func agentOptionsPayload(options team.AgentOptions) map[string]any {
 
 func putPositiveInt(payload map[string]any, key string, value int) {
 	if value > 0 {
+		payload[key] = value
+	}
+}
+
+func putPositiveFloat(payload map[string]any, key string, value float64) {
+	if value > 0 {
+		payload[key] = value
+	}
+}
+
+func putBoolValue(payload map[string]any, key string, value bool) {
+	if value {
 		payload[key] = value
 	}
 }

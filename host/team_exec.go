@@ -21,6 +21,7 @@ import (
 type StartTeamRequest struct {
 	TeamID            string
 	Pattern           string
+	InteractionMode   team.InteractionMode
 	Planner           string
 	SupervisorProfile string
 	WorkerProfiles    []string
@@ -89,6 +90,7 @@ func (r *Runtime) startTeamPrepared(ctx context.Context, request StartTeamReques
 	startRequest := team.StartRequest{
 		TeamID:            request.TeamID,
 		Pattern:           request.Pattern,
+		InteractionMode:   request.InteractionMode,
 		Planner:           request.Planner,
 		SupervisorProfile: request.SupervisorProfile,
 		WorkerProfiles:    request.WorkerProfiles,
@@ -447,6 +449,8 @@ func (r *Runtime) applyTaskOutcome(ctx context.Context, state team.RunState, ind
 	if allowBlackboard {
 		state.Tasks[index] = item
 		state = r.applyBlackboardUpdate(state, item)
+		item = state.Tasks[index]
+		messageResult = item.Result
 		blackboardPublished = true
 	}
 	taskOutputResult, allowTaskOutput, err := r.applyTeamOutputGuardrails(ctx, state.ID, item.ID, TeamOutputBoundaryTaskOutput, messageResult, options.TeamOutputGuardrails, map[string]string{
@@ -861,8 +865,8 @@ func (r *Runtime) initialTaskMessages(state team.RunState, task team.Task, agent
 		system.Visibility = message.VisibilityPrivate
 		messages = append(messages, system)
 	}
-	if task.Kind == team.TaskKindSynthesize {
-		system := message.NewText(message.RoleSystem, synthesizeReportPrompt)
+	if kind, ok := reportKindForTask(task); ok {
+		system := message.NewText(message.RoleSystem, typedReportPromptForKind(kind))
 		system.TeamID = state.ID
 		system.AgentID = agentInstance.ID
 		system.Visibility = message.VisibilityPrivate
@@ -1133,7 +1137,16 @@ func (r *Runtime) persistTaskMessages(ctx context.Context, task team.Task, gener
 	return err
 }
 
-const synthesizeReportPrompt = "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"synthesis\" and a non-empty answer field containing the final answer. Do not emit prose, markdown fences, or commentary outside the JSON object."
+func typedReportPromptForKind(kind team.ReportKind) string {
+	switch kind {
+	case team.ReportKindResearch:
+		return "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"research\" and include at least one claim for this task. Evidence and findings are optional, but findings-only reports are not valid. Do not emit prose, markdown fences, or commentary outside the JSON object."
+	case team.ReportKindVerification:
+		return "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"verification\", an overall status, and perClaim statuses for every claim you adjudicate. Do not emit prose, markdown fences, or commentary outside the JSON object."
+	default:
+		return "Return exactly one JSON object with top-level field \"report\". The report must have kind=\"synthesis\" and a non-empty answer field containing the final answer. Do not emit prose, markdown fences, or commentary outside the JSON object."
+	}
+}
 
 func (r *Runtime) taskToolBus(task team.Task, profile team.Profile) *tool.Bus {
 	bus := r.tools.Subset(profile.ToolNames)

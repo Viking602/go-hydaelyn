@@ -44,6 +44,8 @@ const (
 	IntentCancel    LetterIntent = "cancel"
 	IntentBroadcast LetterIntent = "broadcast"
 	IntentHandoff   LetterIntent = "handoff"
+	IntentChallenge LetterIntent = "challenge"
+	IntentReview    LetterIntent = "review"
 )
 
 // LetterPriority orders deliveries within a recipient's inbox.

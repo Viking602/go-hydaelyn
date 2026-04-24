@@ -30,15 +30,17 @@ type SendMessageInput struct {
 	Role    string `json:"role,omitempty"`
 	Group   string `json:"group,omitempty"`
 
-	Subject       string         `json:"subject,omitempty"`
-	Body          string         `json:"body"`
-	Structured    map[string]any `json:"structured,omitempty"`
-	ArtifactIDs   []string       `json:"artifactIds,omitempty"`
-	Intent        string         `json:"intent,omitempty"`
-	Priority      string         `json:"priority,omitempty"`
-	CorrelationID string         `json:"correlationId,omitempty"`
-	InReplyTo     string         `json:"inReplyTo,omitempty"`
-	TTLSeconds    int            `json:"ttlSeconds,omitempty"`
+	Subject       string           `json:"subject,omitempty"`
+	Body          string           `json:"body"`
+	Structured    map[string]any   `json:"structured,omitempty"`
+	ArtifactIDs   []string         `json:"artifactIds,omitempty"`
+	ThreadID      string           `json:"threadId,omitempty"`
+	References    []team.Reference `json:"references,omitempty"`
+	Intent        string           `json:"intent,omitempty"`
+	Priority      string           `json:"priority,omitempty"`
+	CorrelationID string           `json:"correlationId,omitempty"`
+	InReplyTo     string           `json:"inReplyTo,omitempty"`
+	TTLSeconds    int              `json:"ttlSeconds,omitempty"`
 }
 
 // SendMessageOutput is returned to the LLM.
@@ -65,14 +67,27 @@ func NewSendMessageTool(provider MailboxProvider) tool.Driver {
 			InputSchema: message.JSONSchema{
 				Type: "object",
 				Properties: map[string]message.JSONSchema{
-					"kind":          {Type: "string", Description: "Recipient kind: agent, role, or group. Inferred from which field is set if omitted."},
-					"agentId":       {Type: "string", Description: "Recipient agent id (required when kind=agent)."},
-					"role":          {Type: "string", Description: "Recipient role (required when kind=role)."},
-					"group":         {Type: "string", Description: "Recipient group label (required when kind=group)."},
-					"subject":       {Type: "string", Description: "One-line subject line."},
-					"body":          {Type: "string", Description: "Free-text body of the letter."},
-					"structured":    {Type: "object", AdditionalProperties: true, Description: "Optional structured payload."},
-					"artifactIds":   {Type: "array", Items: &message.JSONSchema{Type: "string"}, Description: "References to artifacts already on the blackboard."},
+					"kind":        {Type: "string", Description: "Recipient kind: agent, role, or group. Inferred from which field is set if omitted."},
+					"agentId":     {Type: "string", Description: "Recipient agent id (required when kind=agent)."},
+					"role":        {Type: "string", Description: "Recipient role (required when kind=role)."},
+					"group":       {Type: "string", Description: "Recipient group label (required when kind=group)."},
+					"subject":     {Type: "string", Description: "One-line subject line."},
+					"body":        {Type: "string", Description: "Free-text body of the letter."},
+					"structured":  {Type: "object", AdditionalProperties: true, Description: "Optional structured payload."},
+					"artifactIds": {Type: "array", Items: &message.JSONSchema{Type: "string"}, Description: "References to artifacts already on the blackboard."},
+					"threadId":    {Type: "string", Description: "Conversation thread id for user-visible collaboration."},
+					"references": {
+						Type: "array",
+						Items: &message.JSONSchema{
+							Type: "object",
+							Properties: map[string]message.JSONSchema{
+								"kind": {Type: "string", Description: "Referenced object kind: task, todo, claim, evidence, finding, artifact, or message."},
+								"id":   {Type: "string", Description: "Referenced object id."},
+							},
+							Required: []string{"kind", "id"},
+						},
+						Description: "Structured references that make the natural-language message auditable.",
+					},
 					"intent":        {Type: "string", Description: "ask, answer, delegate, cancel, broadcast, or handoff."},
 					"priority":      {Type: "string", Description: "low, normal, high, or urgent."},
 					"correlationId": {Type: "string", Description: "Ties this letter to a thread."},
@@ -91,10 +106,7 @@ func (t *sendMessageTool) Definition() tool.Definition {
 }
 
 func (t *sendMessageTool) Execute(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
-	if t.provider == nil {
-		return errorResult(call, "mailbox unavailable"), nil
-	}
-	box := t.provider.Mailbox()
+	box := t.mailbox()
 	if box == nil {
 		return errorResult(call, "mailbox unavailable"), nil
 	}
@@ -103,56 +115,21 @@ func (t *sendMessageTool) Execute(ctx context.Context, call tool.Call, _ tool.Up
 		return errorResult(call, "send_message can only be invoked inside a team task"), nil
 	}
 
-	var input SendMessageInput
-	raw := call.Arguments
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	if err := json.Unmarshal(raw, &input); err != nil {
+	input, err := parseSendMessageInput(call.Arguments)
+	if err != nil {
 		return errorResult(call, fmt.Sprintf("invalid send_message arguments: %v", err)), nil
 	}
-	if strings.TrimSpace(input.Body) == "" && len(input.Structured) == 0 && len(input.ArtifactIDs) == 0 {
+	if !input.HasPayload() {
 		return errorResult(call, "send_message requires body, structured, or artifactIds"), nil
 	}
-
-	addr, err := resolveSendAddress(caller.TeamRunID, input)
+	send, err := input.SendInput(caller)
 	if err != nil {
 		return errorResult(call, err.Error()), nil
 	}
 
-	letter := mailbox.Letter{
-		Subject:     input.Subject,
-		Body:        input.Body,
-		Structured:  input.Structured,
-		ArtifactIDs: append([]string{}, input.ArtifactIDs...),
-		Intent:      normalizeIntent(input.Intent),
-		Priority:    normalizePriority(input.Priority),
-	}
-
-	send := mailbox.SendInput{
-		TeamRunID: caller.TeamRunID,
-		From: mailbox.Address{
-			Kind:      mailbox.AddressKindAgent,
-			TeamRunID: caller.TeamRunID,
-			AgentID:   caller.AgentID,
-		},
-		To:            addr,
-		Letter:        letter,
-		CorrelationID: input.CorrelationID,
-		InReplyTo:     input.InReplyTo,
-	}
-	if input.TTLSeconds > 0 {
-		send.TTL = time.Duration(input.TTLSeconds) * time.Second
-	}
-
 	ids, sendErr := box.Send(ctx, send)
 	if sendErr != nil {
-		if errors.Is(sendErr, mailbox.ErrNoRecipients) ||
-			errors.Is(sendErr, mailbox.ErrInvalidAddress) ||
-			errors.Is(sendErr, mailbox.ErrRateLimited) ||
-			errors.Is(sendErr, mailbox.ErrOverSize) ||
-			errors.Is(sendErr, mailbox.ErrHopLimit) ||
-			errors.Is(sendErr, mailbox.ErrMailboxFull) {
+		if sendMessageUserError(sendErr) {
 			return errorResult(call, sendErr.Error()), nil
 		}
 		return tool.Result{}, sendErr
@@ -166,6 +143,95 @@ func (t *sendMessageTool) Execute(ctx context.Context, call tool.Call, _ tool.Up
 		Content:    fmt.Sprintf("delivered to %d recipient(s)", len(ids)),
 		Structured: payload,
 	}, nil
+}
+
+func (t *sendMessageTool) mailbox() mailbox.Mailbox {
+	if t.provider == nil {
+		return nil
+	}
+	return t.provider.Mailbox()
+}
+
+func parseSendMessageInput(args json.RawMessage) (SendMessageInput, error) {
+	var input SendMessageInput
+	if len(args) == 0 {
+		args = json.RawMessage("{}")
+	}
+	if err := json.Unmarshal(args, &input); err != nil {
+		return SendMessageInput{}, err
+	}
+	return input, nil
+}
+
+func (in SendMessageInput) HasPayload() bool {
+	return strings.TrimSpace(in.Body) != "" || len(in.Structured) > 0 || len(in.ArtifactIDs) > 0
+}
+
+func (in SendMessageInput) SendInput(caller tool.CallerInfo) (mailbox.SendInput, error) {
+	addr, err := resolveSendAddress(caller.TeamRunID, in)
+	if err != nil {
+		return mailbox.SendInput{}, err
+	}
+	send := mailbox.SendInput{
+		TeamRunID: caller.TeamRunID,
+		From: mailbox.Address{
+			Kind:      mailbox.AddressKindAgent,
+			TeamRunID: caller.TeamRunID,
+			AgentID:   caller.AgentID,
+		},
+		To:            addr,
+		Letter:        in.Letter(),
+		CorrelationID: in.CorrelationIDOrThread(),
+		InReplyTo:     in.InReplyTo,
+	}
+	if in.TTLSeconds > 0 {
+		send.TTL = time.Duration(in.TTLSeconds) * time.Second
+	}
+	return send, nil
+}
+
+func (in SendMessageInput) Letter() mailbox.Letter {
+	return mailbox.Letter{
+		Subject:     in.Subject,
+		Body:        in.Body,
+		Structured:  in.StructuredWithCollaborationRefs(),
+		ArtifactIDs: append([]string{}, in.ArtifactIDs...),
+		Intent:      normalizeIntent(in.Intent),
+		Priority:    normalizePriority(in.Priority),
+	}
+}
+
+func (in SendMessageInput) CorrelationIDOrThread() string {
+	if in.CorrelationID != "" {
+		return in.CorrelationID
+	}
+	return in.ThreadID
+}
+
+func (in SendMessageInput) StructuredWithCollaborationRefs() map[string]any {
+	structured := cloneStructured(in.Structured)
+	if strings.TrimSpace(in.ThreadID) != "" {
+		if structured == nil {
+			structured = map[string]any{}
+		}
+		structured["threadId"] = in.ThreadID
+	}
+	if len(in.References) > 0 {
+		if structured == nil {
+			structured = map[string]any{}
+		}
+		structured["references"] = referencesPayload(in.References)
+	}
+	return structured
+}
+
+func sendMessageUserError(err error) bool {
+	return errors.Is(err, mailbox.ErrNoRecipients) ||
+		errors.Is(err, mailbox.ErrInvalidAddress) ||
+		errors.Is(err, mailbox.ErrRateLimited) ||
+		errors.Is(err, mailbox.ErrOverSize) ||
+		errors.Is(err, mailbox.ErrHopLimit) ||
+		errors.Is(err, mailbox.ErrMailboxFull)
 }
 
 func resolveSendAddress(teamRunID string, in SendMessageInput) (mailbox.Address, error) {
@@ -217,9 +283,35 @@ func normalizeIntent(v string) mailbox.LetterIntent {
 		return mailbox.IntentBroadcast
 	case "handoff":
 		return mailbox.IntentHandoff
+	case "challenge":
+		return mailbox.IntentChallenge
+	case "review":
+		return mailbox.IntentReview
 	default:
 		return mailbox.LetterIntent(strings.ToLower(strings.TrimSpace(v)))
 	}
+}
+
+func cloneStructured(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	clone := make(map[string]any, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
+}
+
+func referencesPayload(refs []team.Reference) []map[string]string {
+	items := make([]map[string]string, 0, len(refs))
+	for _, ref := range refs {
+		items = append(items, map[string]string{
+			"kind": string(ref.Kind),
+			"id":   ref.ID,
+		})
+	}
+	return items
 }
 
 func normalizePriority(v string) mailbox.LetterPriority {

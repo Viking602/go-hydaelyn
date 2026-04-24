@@ -40,6 +40,8 @@ type EventType string
 const (
 	EventTeamStarted            EventType = "TeamStarted"
 	EventPlanCreated            EventType = "PlanCreated"
+	EventTodoPlanned            EventType = "TodoPlanned"
+	EventTodoClaimed            EventType = "TodoClaimed"
 	EventTaskScheduled          EventType = "TaskScheduled"
 	EventTaskStarted            EventType = "TaskStarted"
 	EventLeaseAcquired          EventType = "LeaseAcquired"
@@ -61,6 +63,7 @@ const (
 	EventTeamCompleted          EventType = "TeamCompleted"
 	EventSupervisorObserved     EventType = "SupervisorObserved"
 	EventConflictRaised         EventType = "ConflictRaised"
+	EventConversationMessage    EventType = "ConversationMessage"
 	EventSupervisorDecision     EventType = "SupervisorDecision"
 	EventTaskRunGranted         EventType = "TaskRunGranted"
 	EventSynthesisPacketBuilt   EventType = "SynthesisPacketBuilt"

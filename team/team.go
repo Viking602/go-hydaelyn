@@ -176,6 +176,7 @@ type Task struct {
 	ID                   string                        `json:"id"`
 	Kind                 TaskKind                      `json:"kind"`
 	Stage                TaskStage                     `json:"stage,omitempty"`
+	TodoID               string                        `json:"todoId,omitempty"`
 	Title                string                        `json:"title,omitempty"`
 	Input                string                        `json:"input,omitempty"`
 	RequiredRole         Role                          `json:"requiredRole,omitempty"`
@@ -190,6 +191,7 @@ type Task struct {
 	Publish              []OutputVisibility            `json:"publish,omitempty"`
 	Namespace            string                        `json:"namespace,omitempty"`
 	VerifierRequired     bool                          `json:"verifierRequired,omitempty"`
+	ExpectedReportKind   ReportKind                    `json:"expectedReportKind,omitempty"`
 	AssistantOutputMode  AssistantOutputMode           `json:"assistantOutputMode,omitempty"`
 	FailurePolicy        FailurePolicy                 `json:"failurePolicy,omitempty"`
 	IdempotencyKey       string                        `json:"idempotencyKey,omitempty"`
@@ -207,30 +209,34 @@ type Task struct {
 }
 
 type RunState struct {
-	ID                  string            `json:"id"`
-	Pattern             string            `json:"pattern"`
-	SessionID           string            `json:"sessionId,omitempty"`
-	Version             int               `json:"version,omitempty"`
-	Status              Status            `json:"status"`
-	Phase               Phase             `json:"phase"`
-	Supervisor          AgentInstance     `json:"supervisor"`
-	Workers             []AgentInstance   `json:"workers,omitempty"`
-	Tasks               []Task            `json:"tasks,omitempty"`
-	Result              *Result           `json:"result,omitempty"`
-	Planning            *PlanningState    `json:"planning,omitempty"`
-	Blackboard          *blackboard.State `json:"blackboard,omitempty"`
-	Control             *ControlState     `json:"control,omitempty"`
-	Input               map[string]any    `json:"input,omitempty"`
-	AgentOptions        AgentOptions      `json:"agentOptions,omitempty"`
-	Metadata            map[string]string `json:"metadata,omitempty"`
-	RequireVerification bool              `json:"requireVerification,omitempty"`
-	CreatedAt           time.Time         `json:"createdAt"`
-	UpdatedAt           time.Time         `json:"updatedAt"`
+	ID                  string               `json:"id"`
+	Pattern             string               `json:"pattern"`
+	SessionID           string               `json:"sessionId,omitempty"`
+	Version             int                  `json:"version,omitempty"`
+	Status              Status               `json:"status"`
+	Phase               Phase                `json:"phase"`
+	InteractionMode     InteractionMode      `json:"interactionMode,omitempty"`
+	Supervisor          AgentInstance        `json:"supervisor"`
+	Workers             []AgentInstance      `json:"workers,omitempty"`
+	Tasks               []Task               `json:"tasks,omitempty"`
+	Result              *Result              `json:"result,omitempty"`
+	Planning            *PlanningState       `json:"planning,omitempty"`
+	TaskBoard           *TaskBoard           `json:"taskBoard,omitempty"`
+	Threads             []ConversationThread `json:"threads,omitempty"`
+	Blackboard          *blackboard.State    `json:"blackboard,omitempty"`
+	Control             *ControlState        `json:"control,omitempty"`
+	Input               map[string]any       `json:"input,omitempty"`
+	AgentOptions        AgentOptions         `json:"agentOptions,omitempty"`
+	Metadata            map[string]string    `json:"metadata,omitempty"`
+	RequireVerification bool                 `json:"requireVerification,omitempty"`
+	CreatedAt           time.Time            `json:"createdAt"`
+	UpdatedAt           time.Time            `json:"updatedAt"`
 }
 
 type StartRequest struct {
 	TeamID            string            `json:"teamId,omitempty"`
 	Pattern           string            `json:"pattern"`
+	InteractionMode   InteractionMode   `json:"interactionMode,omitempty"`
 	Planner           string            `json:"planner,omitempty"`
 	SupervisorProfile string            `json:"supervisorProfile"`
 	WorkerProfiles    []string          `json:"workerProfiles"`
