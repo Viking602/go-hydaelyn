@@ -13,6 +13,14 @@ type Definition = message.ToolDefinition
 type Schema = message.JSONSchema
 type Call = message.ToolCall
 type Result = message.ToolResult
+type EffectType = message.ToolEffectType
+type RetryPolicy = message.ToolRetryPolicy
+
+const (
+	EffectReadOnly           EffectType = message.ToolEffectReadOnly
+	EffectWrite              EffectType = message.ToolEffectWrite
+	EffectExternalSideEffect EffectType = message.ToolEffectExternalSideEffect
+)
 
 type Mode string
 

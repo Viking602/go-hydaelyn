@@ -36,6 +36,7 @@ Hydaelyn 的目标不是再做一个 Go 版 LLM 调用封装，而是做成一�
 - v0.8 已引入 OTel observer 适配器（回调注入零依赖）、全链路 trace、runtime control API、secret/PII redaction
 - v0.9 已引入 TaskQueue（含 backpressure MaxPending/MaxInflight）、worker lease/heartbeat/recovery、MCP resources/prompts/tools 完整支持
 - v1.0 CLI 支持 fake/openai/anthropic 三种 provider，4 个端到端示例（approval/durable/research/tooling），文档套齐全
+- v1.1 开始引入 additive `orchestrator` 包，先把 Run / Task / TaskExecutionLease / Handoff / Policy / Response / Replay 合同落成独立 primitives，再逐步把旧 Team + Pattern 适配到该层。
 
 后续重点为外置生态仓库实际拆分与分布式跨节点真实部署演示。
 

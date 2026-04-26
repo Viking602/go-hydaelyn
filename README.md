@@ -73,7 +73,25 @@ func main() {
 
 ## Core Concepts
 
-Hydaelyn centers on the `deepsearch` pattern: parallel research tasks run simultaneously, optional verification checks their outputs, and a final synthesize task produces the result. The `host` runtime embeds into your application and coordinates supervisor and worker profiles. Supervisors orchestrate the workflow while workers execute tasks. All task outputs publish to a shared blackboard that downstream tasks read explicitly.
+Hydaelyn centers on embeddable multi-agent runtime primitives. Existing
+`deepsearch` and panel patterns still run through `host`, while new durable
+orchestration work should model execution as `Run + Task + TaskExecutionLease`
+through the `orchestrator` package. Patterns provide presets; the runtime owns
+state transitions, typed reports, handoff, policy, response outbox, and replay.
+
+Minimal run-level orchestration:
+
+```go
+rt := hydaelyn.NewOrchestrator()
+run, err := rt.QueueRun(context.Background(), hydaelyn.StartRunCommand{
+	Request: "coordinate a multi-agent run",
+})
+if err != nil {
+	panic(err)
+}
+events, _ := rt.RunEvents(context.Background(), run.ID)
+fmt.Println(len(events))
+```
 
 ## Examples + Read Next
 

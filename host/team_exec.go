@@ -30,6 +30,9 @@ type StartTeamRequest struct {
 	Agent             AgentOptions
 }
 
+// StartTeam is the legacy Team + Pattern entrypoint. New orchestration
+// adapters should model execution through orchestrator.StartRun,
+// TaskStore-backed tasks, and TaskExecutionLease.
 func (r *Runtime) StartTeam(ctx context.Context, request StartTeamRequest) (team.RunState, error) {
 	var state team.RunState
 	err := r.runStage(ctx, &middleware.Envelope{

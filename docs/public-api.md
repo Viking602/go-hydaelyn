@@ -10,6 +10,7 @@ The v1 public surface includes:
 - `host`
 - `mcp`
 - `observe`
+- `orchestrator`
 - `planner`
 - `plugin`
 - `security`
@@ -60,6 +61,19 @@ Task lifecycle events now carry additive execution metadata:
 - `leaseId` when queue-backed execution is active
 
 Consumers must tolerate these additive fields and may rely on them for replay validation.
+
+### Orchestrator Runtime
+
+The run-level orchestration contract is additive and is the preferred surface
+for new durable adapters:
+
+- `orchestrator.StartRun`, `QueueRun`, `RunEvents`, `RunTimeline`, `ReplayRunState`
+- `orchestrator.Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
+- `orchestrator.RunStore`, `TaskStore`, `EventStore`, `MailboxOutbox`, `ResponseOutbox`
+- `orchestrator.Flow` as preset metadata, not a state-transition bypass
+
+Legacy `host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
+`ReplayTeamState` stay callable for the current migration window.
 
 ### Panel Collaboration
 

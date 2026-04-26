@@ -4,6 +4,7 @@
 - [Active Plan](plans/active-plan.md)
 - [Quickstart](quickstart.md)
 - [Panel Task Board](panel.md)
+- [Orchestrator Runtime](orchestrator-runtime.md)
 - [Task Dataflow](task-dataflow.md)
 - [Recipe Compiler](recipe.md)
 - [Evaluation](evaluation.md)

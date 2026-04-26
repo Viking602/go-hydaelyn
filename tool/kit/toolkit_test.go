@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/tooltest"
@@ -30,6 +31,39 @@ func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {
 	result := tooltest.MustCall(t, driver, map[string]any{"query": "hydaelyn"})
 	if result.Content != "hydaelyn" {
 		t.Fatalf("unexpected content: %q", result.Content)
+	}
+}
+
+func TestToolCarriesRuntimeGovernanceMetadata(t *testing.T) {
+	type input struct {
+		Target string `json:"target"`
+	}
+	driver, err := Tool("deploy", func(context.Context, input) (string, error) {
+		return "ok", nil
+	},
+		Effect(tool.EffectExternalSideEffect),
+		RequiresActionTask(),
+		Idempotent(false),
+		Timeout(5*time.Second),
+		Retry(tool.RetryPolicy{MaxAttempts: 2, Backoff: time.Second}),
+		PolicyTags("prod", "approval"),
+		RiskLevel("high"),
+	)
+	if err != nil {
+		t.Fatalf("Tool() error = %v", err)
+	}
+	def := driver.Definition()
+	if def.EffectType != tool.EffectExternalSideEffect || !def.RequiresActionTask {
+		t.Fatalf("expected action-gated side-effect metadata, got %#v", def)
+	}
+	if def.Timeout != 5*time.Second || def.RetryPolicy.MaxAttempts != 2 || def.RetryPolicy.Backoff != time.Second {
+		t.Fatalf("expected timeout/retry metadata, got %#v", def)
+	}
+	if len(def.PolicyTags) != 2 || def.PolicyTags[0] != "prod" || def.PolicyTags[1] != "approval" {
+		t.Fatalf("expected policy tags, got %#v", def.PolicyTags)
+	}
+	if def.RiskLevel != "high" {
+		t.Fatalf("expected risk level, got %q", def.RiskLevel)
 	}
 }
 

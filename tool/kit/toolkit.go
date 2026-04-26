@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -22,6 +23,12 @@ type toolConfig struct {
 	requiredPermissions []string
 	requiresApproval    bool
 	riskLevel           string
+	effectType          tool.EffectType
+	requiresActionTask  bool
+	idempotent          bool
+	timeout             time.Duration
+	retryPolicy         tool.RetryPolicy
+	policyTags          []string
 }
 
 func Description(description string) ToolOption {
@@ -63,6 +70,42 @@ func RequiresApproval() ToolOption {
 func RiskLevel(level string) ToolOption {
 	return func(cfg *toolConfig) {
 		cfg.riskLevel = level
+	}
+}
+
+func Effect(effectType tool.EffectType) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.effectType = effectType
+	}
+}
+
+func RequiresActionTask() ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.requiresActionTask = true
+	}
+}
+
+func Idempotent(idempotent bool) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.idempotent = idempotent
+	}
+}
+
+func Timeout(timeout time.Duration) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.timeout = timeout
+	}
+}
+
+func Retry(policy tool.RetryPolicy) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.retryPolicy = policy
+	}
+}
+
+func PolicyTags(tags ...string) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.policyTags = append([]string{}, tags...)
 	}
 }
 
@@ -160,10 +203,17 @@ func newFunctionTool(name string, fn any, cfg toolConfig) (*functionTool, error)
 				RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
 				RequiresApproval:    cfg.requiresApproval,
 				RiskLevel:           cfg.riskLevel,
+				Idempotent:          cfg.idempotent,
 			},
 			RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
 			RequiresApproval:    cfg.requiresApproval,
 			RiskLevel:           cfg.riskLevel,
+			EffectType:          cfg.effectType,
+			RequiresActionTask:  cfg.requiresActionTask,
+			Idempotent:          cfg.idempotent,
+			Timeout:             cfg.timeout,
+			RetryPolicy:         cfg.retryPolicy,
+			PolicyTags:          append([]string{}, cfg.policyTags...),
 		},
 		fn:         value,
 		inputType:  inputType,

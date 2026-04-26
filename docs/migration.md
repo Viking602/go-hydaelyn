@@ -2,6 +2,43 @@
 
 ## 从 v0.1 风格迁移到当前 runtime
 
+## 从 Team + Pattern 迁移到 Orchestrator Runtime
+
+旧模型：
+
+- `Pattern.Start` 创建完整 `team.RunState`
+- pattern 或 host drive loop 直接推进 runnable task
+- mailbox、blackboard、queue lease 分散表达任务进度
+
+新模型：
+
+- `orchestrator.StartRun` 创建 `Run + RootTask`
+- planner/router adapter 创建一等 `Task`
+- `DispatchTask` 只写任务信封，不能授予执行权限
+- agent/component 必须 `AcquireTaskExecution` 后才能执行
+- `SubmitTypedReport` 是唯一正式任务提交协议
+- `ResponseTask` 和 `OutputGateway` 是唯一用户消息链路
+
+兼容策略：
+
+- `host.StartTeam` 仍可用，但只作为 legacy compatibility entrypoint。
+- 新代码优先直接使用 `orchestrator` 包；旧 pattern 可以作为 planner/router preset 输入。
+- side-effecting tool 必须补齐 `EffectType` / `RequiresActionTask` / `Idempotent`
+  等治理字段，并通过 ActionTask 运行。
+- 下游展示最终答案时优先消费 response outbox / `UserMessage`，不要让普通
+  agent 直接创建或发布用户可见消息。
+
+API 映射：
+
+- `StartTeam` -> `StartRun` / `QueueRun`
+- `QueueTeam` -> `QueueRun`
+- `TeamEvents` -> `RunEvents`
+- `TeamTimeline` -> `RunTimeline`
+- `ReplayTeamState` -> `ReplayRunState`
+- `Pattern` -> `Flow`
+- `SupervisorProfile` -> `ControllerProfile`
+- `WorkerProfiles` -> `AgentProfiles`
+
 ### 1. Task assignee
 
 旧模型：

@@ -49,6 +49,19 @@ type ToolSecurity struct {
 	Idempotent          bool     `json:"idempotent,omitempty"`
 }
 
+type ToolEffectType string
+
+const (
+	ToolEffectReadOnly           ToolEffectType = "read_only"
+	ToolEffectWrite              ToolEffectType = "write"
+	ToolEffectExternalSideEffect ToolEffectType = "external_side_effect"
+)
+
+type ToolRetryPolicy struct {
+	MaxAttempts int           `json:"maxAttempts,omitempty"`
+	Backoff     time.Duration `json:"backoff,omitempty"`
+}
+
 type ToolDefinition struct {
 	Name                string            `json:"name"`
 	Description         string            `json:"description,omitempty"`
@@ -61,6 +74,12 @@ type ToolDefinition struct {
 	RequiredPermissions []string          `json:"requiredPermissions,omitempty"`
 	RequiresApproval    bool              `json:"requiresApproval,omitempty"`
 	RiskLevel           string            `json:"riskLevel,omitempty"`
+	EffectType          ToolEffectType    `json:"effectType,omitempty"`
+	RequiresActionTask  bool              `json:"requiresActionTask,omitempty"`
+	Idempotent          bool              `json:"idempotent,omitempty"`
+	Timeout             time.Duration     `json:"timeout,omitempty"`
+	RetryPolicy         ToolRetryPolicy   `json:"retryPolicy,omitempty"`
+	PolicyTags          []string          `json:"policyTags,omitempty"`
 }
 
 type ToolCall struct {
