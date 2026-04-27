@@ -12,7 +12,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/legacy/observe"
 	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
 	"github.com/Viking602/go-hydaelyn/legacy/team"
-	"github.com/Viking602/go-hydaelyn/legacy/tool/kit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"

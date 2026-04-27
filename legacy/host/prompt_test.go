@@ -11,7 +11,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/internal/session"
 	"github.com/Viking602/go-hydaelyn/legacy/storage"
-	"github.com/Viking602/go-hydaelyn/legacy/tool/kit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 )

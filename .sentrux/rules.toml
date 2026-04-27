@@ -74,6 +74,12 @@ from = "provider/*"
 to = "legacy/*"
 reason = "Provider façade must remain legacy-free."
 
-# Note: internal/cli/* and internal/slow/* still import legacy — they get
-# cleaned up in M4.2 / M4.3. Add boundaries for them then.
-# Note: transport/* migrates off legacy/tool/kit in M4.3. Add boundary then.
+[[boundaries]]
+from = "internal/cli/*"
+to = "legacy/*"
+reason = "v2 CLI is library-only; no legacy team/eval/recipe code path."
+
+[[boundaries]]
+from = "transport/*"
+to = "legacy/*"
+reason = "Transport adapters depend on tool/kit (post-M4.3), not legacy."
