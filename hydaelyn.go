@@ -1,29 +1,20 @@
+// Package hydaelyn is the public façade for the Hydaelyn orchestrator runtime.
+//
+// All exported names re-route to the orchestrator package; legacy host/team
+// runtimes were removed in v2.0.
 package hydaelyn
 
-import (
-	"github.com/Viking602/go-hydaelyn/legacy/host"
-	"github.com/Viking602/go-hydaelyn/legacy/team"
-	"github.com/Viking602/go-hydaelyn/orchestrator"
-)
+import "github.com/Viking602/go-hydaelyn/orchestrator"
 
 // New constructs the primary Run/Task orchestrator runtime.
 func New(cfg Config) *Runtime { return orchestrator.NewRuntime(cfg) }
 
-// NewOrchestrator constructs the primary Run/Task orchestrator runtime.
-//
-// Deprecated: use New.
-func NewOrchestrator() *OrchestratorRuntime { return orchestrator.NewMemoryRuntime() }
-
-// NewTeamRuntime constructs the legacy Team + Pattern runtime.
-func NewTeamRuntime(cfg TeamConfig) *TeamRuntime { return host.New(cfg) }
-
-// Public façade types. Each is a Go type alias for the equivalent type
-// in a subpackage, so values constructed via either name are
+// Public façade types. Each is a Go type alias for the equivalent type in the
+// orchestrator package, so values constructed via either name are
 // interchangeable.
 type (
 	Runtime                     = orchestrator.Runtime
 	Config                      = orchestrator.Config
-	OrchestratorRuntime         = orchestrator.Runtime
 	Run                         = orchestrator.Run
 	Task                        = orchestrator.Task
 	RunStatus                   = orchestrator.RunStatus
@@ -55,15 +46,6 @@ type (
 	PipelineComponents          = orchestrator.PipelineComponents
 	UserMessage                 = orchestrator.UserMessage
 	UserMessageType             = orchestrator.UserMessageType
-
-	// Deprecated: use Runtime plus Run/Task APIs. This alias remains for
-	// compatibility during the Team + Pattern migration window.
-	TeamRuntime      = host.Runtime
-	TeamConfig       = host.Config
-	StartTeamRequest = host.StartTeamRequest
-
-	Profile = team.Profile
-	Role    = team.Role
 )
 
 const (
