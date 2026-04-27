@@ -18,6 +18,7 @@ func (AckEnvelopeCommand) CommandName() string            { return "mailbox.ack"
 func (DeadLetterCommand) CommandName() string             { return "mailbox.dead_letter" }
 func (SubmitTypedReportCommand) CommandName() string      { return "report.submit_typed" }
 func (SubmitUserInputCommand) CommandName() string        { return "user_input.submit" }
+func (ToolInvocation) CommandName() string                { return "tool.invoke" }
 func (HandoffCommand) CommandName() string                { return "handoff.request" }
 func (SubmitResponseOutputCommand) CommandName() string   { return "response.submit_output" }
 func (PublishResponseCommand) CommandName() string        { return "response.publish" }
@@ -267,6 +268,9 @@ func (r *Runtime) executeReportResponseCommand(ctx context.Context, command Runt
 		return nil, true, r.SubmitTypedReport(ctx, cmd)
 	case SubmitUserInputCommand:
 		return nil, true, r.SubmitUserInput(ctx, cmd)
+	case ToolInvocation:
+		result, err := r.InvokeTool(ctx, cmd)
+		return result, true, err
 	case HandoffCommand:
 		return nil, true, r.RequestHandoff(ctx, cmd)
 	case SubmitResponseOutputCommand:

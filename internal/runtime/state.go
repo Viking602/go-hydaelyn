@@ -122,12 +122,14 @@ var allowedRunTransitions = map[RunStatus]map[RunStatus]bool{
 var allowedTaskTransitions = map[TaskStatus]map[TaskStatus]bool{
 	TaskStatusCreated: {
 		TaskStatusPlanned:    true,
+		TaskStatusPaused:     true,
 		TaskStatusCancelled:  true,
 		TaskStatusFailed:     true,
 		TaskStatusDispatched: true,
 	},
 	TaskStatusPlanned: {
 		TaskStatusValidated: true,
+		TaskStatusPaused:    true,
 		TaskStatusBlocked:   true,
 		TaskStatusCancelled: true,
 		TaskStatusFailed:    true,
@@ -135,6 +137,7 @@ var allowedTaskTransitions = map[TaskStatus]map[TaskStatus]bool{
 	TaskStatusValidated: {
 		TaskStatusRouted:            true,
 		TaskStatusWaitingDependency: true,
+		TaskStatusPaused:            true,
 		TaskStatusBlocked:           true,
 		TaskStatusCancelled:         true,
 		TaskStatusFailed:            true,
@@ -142,12 +145,14 @@ var allowedTaskTransitions = map[TaskStatus]map[TaskStatus]bool{
 	TaskStatusRouted: {
 		TaskStatusWaitingDependency: true,
 		TaskStatusDispatched:        true,
+		TaskStatusPaused:            true,
 		TaskStatusBlocked:           true,
 		TaskStatusCancelled:         true,
 		TaskStatusFailed:            true,
 	},
 	TaskStatusWaitingDependency: {
 		TaskStatusDispatched: true,
+		TaskStatusPaused:     true,
 		TaskStatusBlocked:    true,
 		TaskStatusCancelled:  true,
 		TaskStatusFailed:     true,
@@ -194,6 +199,7 @@ var allowedTaskTransitions = map[TaskStatus]map[TaskStatus]bool{
 	TaskStatusBlocked: {
 		TaskStatusDispatched: true,
 		TaskStatusRunning:    true,
+		TaskStatusPaused:     true,
 		TaskStatusCancelled:  true,
 		TaskStatusFailed:     true,
 	},

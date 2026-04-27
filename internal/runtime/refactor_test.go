@@ -116,6 +116,85 @@ func TestPolicyAppliesToRuntimeBoundaries(t *testing.T) {
 	}
 }
 
+func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing.T) {
+	ctx := context.Background()
+
+	dispatchPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationDispatch: PolicyEffectRequireApproval}}
+	dispatchRT := NewRuntime(Config{PolicyEngine: dispatchPolicy})
+	dispatchRun := mustStartRun(t, ctx, dispatchRT, "run-policy-dispatch")
+	dispatchTask := mustCreateTask(t, ctx, dispatchRT, CreateTaskCommand{RunID: dispatchRun.ID, TaskID: "worker", OwnerAgentID: "agent-a"})
+	if _, err := dispatchRT.DispatchTask(ctx, DispatchTaskCommand{RunID: dispatchRun.ID, TaskID: dispatchTask.ID, TargetAgentID: "agent-a"}); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("dispatch require_approval should block command, got %v", err)
+	}
+	assertPolicyBlockedTask(t, ctx, dispatchRT, dispatchRun.ID, dispatchTask.ID, TaskStatusPaused, RunStatusWaitingApproval)
+	if collectEventTypes(dispatchRT.Events(dispatchRun.ID)).Contains(EventTaskDispatched) {
+		t.Fatalf("dispatch require_approval must not queue a task envelope")
+	}
+
+	handoffPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationHandoff: PolicyEffectRequireApproval}}
+	handoffRT := NewRuntime(Config{PolicyEngine: handoffPolicy})
+	handoffRun := mustStartRun(t, ctx, handoffRT, "run-policy-handoff")
+	handoffTask := mustCreateTask(t, ctx, handoffRT, CreateTaskCommand{RunID: handoffRun.ID, TaskID: "handoff", OwnerAgentID: "agent-a"})
+	if err := handoffRT.RequestHandoff(ctx, HandoffCommand{RunID: handoffRun.ID, TaskID: handoffTask.ID, FromAgentID: "agent-a", ToAgentID: "agent-b", TaskVersion: handoffTask.Version}); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("handoff require_approval should block command, got %v", err)
+	}
+	assertPolicyBlockedTask(t, ctx, handoffRT, handoffRun.ID, handoffTask.ID, TaskStatusPaused, RunStatusWaitingApproval)
+	afterHandoff := mustLoadTask(t, ctx, handoffRT, handoffRun.ID, handoffTask.ID)
+	if afterHandoff.OwnerAgentID != "agent-a" {
+		t.Fatalf("blocked handoff changed owner: %#v", afterHandoff)
+	}
+
+	toolPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationToolCall: PolicyEffectPause}}
+	toolRT := NewRuntime(Config{PolicyEngine: toolPolicy})
+	toolRT.RegisterTool(Tool{Name: "deploy", EffectType: ToolEffectWrite})
+	toolRun := mustStartRun(t, ctx, toolRT, "run-policy-tool")
+	toolTask := mustCreateTask(t, ctx, toolRT, CreateTaskCommand{RunID: toolRun.ID, TaskID: "tool", Type: TaskTypeAction, OwnerAgentID: "agent-a"})
+	toolLease := leaseTask(t, ctx, toolRT, toolRun.ID, toolTask.ID, HolderAgent, "agent-a")
+	if _, err := toolRT.InvokeTool(ctx, ToolInvocation{RunID: toolRun.ID, TaskID: toolTask.ID, LeaseID: toolLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: toolTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("tool_call pause should block command, got %v", err)
+	}
+	assertPolicyBlockedTask(t, ctx, toolRT, toolRun.ID, toolTask.ID, TaskStatusPaused, RunStatusBlocked)
+	if active := toolRT.ActiveLeaseCount(toolRun.ID, toolTask.ID); active != 0 {
+		t.Fatalf("policy pause must release active lease, got %d", active)
+	}
+
+	actionPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationAction: PolicyEffectPause}}
+	actionRT := NewRuntime(Config{PolicyEngine: actionPolicy})
+	actionRun := mustStartRun(t, ctx, actionRT, "run-policy-action")
+	actionTask := mustCreateTask(t, ctx, actionRT, CreateTaskCommand{RunID: actionRun.ID, TaskID: "action", Type: TaskTypeAction, OwnerAgentID: "agent-a"})
+	actionLease := leaseTask(t, ctx, actionRT, actionRun.ID, actionTask.ID, HolderAgent, "agent-a")
+	if _, err := actionRT.StartActionAttempt(ctx, StartActionAttemptCommand{RunID: actionRun.ID, TaskID: actionTask.ID, LeaseID: actionLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: actionTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("action pause should block command, got %v", err)
+	}
+	assertPolicyBlockedTask(t, ctx, actionRT, actionRun.ID, actionTask.ID, TaskStatusPaused, RunStatusBlocked)
+	if active := actionRT.ActiveLeaseCount(actionRun.ID, actionTask.ID); active != 0 {
+		t.Fatalf("policy pause must release action lease, got %d", active)
+	}
+
+	responsePolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationResponsePublish: PolicyEffectRequireApproval}}
+	responseRT := NewRuntime(Config{PolicyEngine: responsePolicy})
+	responseRun := mustStartRun(t, ctx, responseRT, "run-policy-response")
+	responseTask := mustCreateTask(t, ctx, responseRT, CreateTaskCommand{RunID: responseRun.ID, TaskID: "response", Type: TaskTypeResponse, OwnerComponent: "response_composer"})
+	responseLease := leaseTask(t, ctx, responseRT, responseRun.ID, responseTask.ID, HolderComponent, "response_composer")
+	if err := responseRT.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{RunID: responseRun.ID, TaskID: responseTask.ID, LeaseID: responseLease.ID, HolderType: HolderComponent, HolderID: "response_composer", TaskVersion: responseTask.Version, Payload: "safe"}); err != nil {
+		t.Fatalf("SubmitResponseOutput() error = %v", err)
+	}
+	message := responseRT.ResponseOutbox(responseRun.ID)[0]
+	if err := responseRT.PublishResponse(ctx, PublishResponseCommand{RunID: responseRun.ID, MessageID: message.ID}); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("response_publish require_approval should block command, got %v", err)
+	}
+	responseRunAfter, err := responseRT.Run(ctx, responseRun.ID)
+	if err != nil {
+		t.Fatalf("Run(response after policy) error = %v", err)
+	}
+	if responseRunAfter.Status != RunStatusWaitingApproval || !collectEventTypes(responseRT.Events(responseRun.ID)).Contains(EventApprovalRequested) {
+		t.Fatalf("response_publish require_approval did not create approval blocker: run=%#v events=%#v", responseRunAfter, responseRT.Events(responseRun.ID))
+	}
+	if got := responseRT.ResponseOutbox(responseRun.ID)[0].Status; got != UserMessageQueued {
+		t.Fatalf("blocked response publish mutated message status to %s", got)
+	}
+}
+
 func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
@@ -315,12 +394,16 @@ func TestPublishResponseDoesNotHoldRuntimeLockDuringGatewayCall(t *testing.T) {
 type recordingPolicy struct {
 	operations []PolicyOperation
 	deny       map[PolicyOperation]bool
+	effects    map[PolicyOperation]PolicyEffect
 }
 
 func (p *recordingPolicy) Authorize(_ context.Context, request PolicyRequest) (PolicyDecision, error) {
 	p.operations = append(p.operations, request.Operation)
 	if p.deny[request.Operation] {
 		return PolicyDecision{Effect: PolicyEffectDeny, Reason: "test deny"}, nil
+	}
+	if effect := p.effects[request.Operation]; effect != "" {
+		return PolicyDecision{Effect: effect, Reason: "test " + string(effect)}, nil
 	}
 	return PolicyDecision{Effect: PolicyEffectAllow}, nil
 }
@@ -446,6 +529,24 @@ func assertPipelineOutcome(t *testing.T, ctx context.Context, rt *Runtime, polic
 	spans := rt.TraceSpans(run.ID)
 	if !containsSpan(spans, "runtime.pipeline") || !containsSpan(spans, "policy.authorize.dispatch") || !containsSpan(spans, "mailbox.dispatch") {
 		t.Fatalf("expected pipeline/policy/mailbox spans, got %#v", spans)
+	}
+}
+
+func assertPolicyBlockedTask(t *testing.T, ctx context.Context, rt *Runtime, runID, taskID string, taskStatus TaskStatus, runStatus RunStatus) {
+	t.Helper()
+	task := mustLoadTask(t, ctx, rt, runID, taskID)
+	if task.Status != taskStatus {
+		t.Fatalf("policy effect set task status %s, want %s: %#v", task.Status, taskStatus, task)
+	}
+	run, err := rt.Run(ctx, runID)
+	if err != nil {
+		t.Fatalf("Run(%s) error = %v", runID, err)
+	}
+	if run.Status != runStatus {
+		t.Fatalf("policy effect set run status %s, want %s: %#v", run.Status, runStatus, run)
+	}
+	if !collectEventTypes(rt.Events(runID)).Contains(EventTaskPaused) {
+		t.Fatalf("policy effect did not emit TaskPaused, events=%#v", rt.Events(runID))
 	}
 }
 

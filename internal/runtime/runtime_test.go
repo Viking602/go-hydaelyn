@@ -322,6 +322,9 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if blocked.Status != TaskStatusWaitingUserInput || currentRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification did not block task/run: task=%#v run=%#v", blocked, currentRun)
 	}
+	if !collectEventTypes(rt.Events(run.ID)).Contains(EventSystemResponseBypassAudited) {
+		t.Fatalf("system clarification response should emit bypass audit event, events=%#v", rt.Events(run.ID))
+	}
 	if active := rt.ActiveLeaseCount(run.ID, worker.ID); active != 0 {
 		t.Fatalf("needs_clarification must release active lease, got %d", active)
 	}

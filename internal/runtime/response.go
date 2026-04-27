@@ -190,6 +190,11 @@ func (r *Runtime) queueSystemResponseLocked(runID, sourceTaskID string, messageT
 	}
 	r.tasks[runID][task.ID] = task
 	r.appendEventLocked(runID, task.ID, EventResponseTaskCreated, taskEventPayload(task))
+	r.appendEventLocked(runID, task.ID, EventSystemResponseBypassAudited, map[string]any{
+		"sourceTaskId": sourceTaskID,
+		"messageType":  string(messageType),
+		"reason":       "system_response_queued_without_component_lease",
+	})
 	now := time.Now().UTC()
 	message := UserMessage{
 		ID:             r.newID("msg"),
