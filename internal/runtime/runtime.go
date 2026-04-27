@@ -37,6 +37,8 @@ type Runtime struct {
 	traceSpans        map[string][]TraceSpan
 	seq               map[string]int
 	nextID            int
+	subscribers       map[string][]*blackboardSubscription
+	nextSubID         uint64
 }
 
 type Config struct {
@@ -72,6 +74,7 @@ func NewRuntime(config Config) *Runtime {
 		actionAttempts:    map[string]ActionAttempt{},
 		traceSpans:        map[string][]TraceSpan{},
 		seq:               map[string]int{},
+		subscribers:       map[string][]*blackboardSubscription{},
 	}
 	if config.StoreProvider != nil {
 		rt.storeProvider = config.StoreProvider
@@ -393,6 +396,7 @@ func (r *Runtime) writeBlackboardLocked(item BlackboardItem) BlackboardItem {
 		"visibility": string(item.Visibility),
 		"key":        item.Key,
 	})
+	r.notifySubscribersLocked(item)
 	return item
 }
 

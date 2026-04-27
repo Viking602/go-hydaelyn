@@ -29,6 +29,7 @@ type TraceStore interface {
 type BlackboardStore interface {
 	WriteItem(context.Context, BlackboardItem) error
 	SelectItems(context.Context, string, BlackboardSelector) ([]BlackboardItem, error)
+	Subscribe(context.Context, string, BlackboardFilter) (<-chan BlackboardItem, func() error, error)
 }
 
 type ResponseOutbox interface {
