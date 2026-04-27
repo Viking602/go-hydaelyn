@@ -4,82 +4,14 @@
 # Strategy notes:
 # - Layers were intentionally NOT modeled here. Sentrux 0.5.7's layer_direction
 #   forbids any cross-layer import once layers are declared, which is too coarse
-#   for our progressive cleanup. We rely on explicit [[boundaries]] instead.
-# - `no_god_files` is held off until M6 deletes legacy/host/runtime.go (the only
-#   god file in the tree, fan-out=17). Re-enable in M6 along with legacy removal.
+#   for our boundaries (e.g., orchestrator façade → internal/runtime).
+# - The legacy/* tree was deleted in M6 (v2.0); historical legacy code is
+#   preserved on the archive/legacy-v1 branch, not in main.
 
 [constraints]
-# Acyclic always. Already 0 — keep it that way through M5 package split.
+# Acyclic always.
 max_cycles = 0
-# Per-file coupling ceiling. M3/M5 must not regress this.
+# Per-file coupling ceiling.
 max_coupling = "B"
-# no_god_files = true   # TODO(M6): re-enable after rm -rf legacy/.
-
-# ---------- Boundaries (from ADR-008) ----------
-# Hard rule: framework code must NOT depend on legacy/.
-# Each currently-clean module is locked here so any regression is a CI failure.
-
-[[boundaries]]
-from = "internal/runtime/*"
-to = "legacy/*"
-reason = "Framework core must not import legacy. See ADR-008."
-
-[[boundaries]]
-from = "orchestrator/*"
-to = "legacy/*"
-reason = "Public façade must expose only new framework types."
-
-[[boundaries]]
-from = "agent/*"
-to = "legacy/*"
-reason = "Agent kernel must remain legacy-free."
-
-[[boundaries]]
-from = "blackboard/*"
-to = "legacy/*"
-reason = "Blackboard façade must remain legacy-free."
-
-[[boundaries]]
-from = "mailbox/*"
-to = "legacy/*"
-reason = "Mailbox façade must remain legacy-free."
-
-[[boundaries]]
-from = "tool/*"
-to = "legacy/*"
-reason = "Tool layer (post-M4.3 kit promotion) must remain legacy-free."
-
-[[boundaries]]
-from = "flow/*"
-to = "legacy/*"
-reason = "Flow façade must remain legacy-free."
-
-[[boundaries]]
-from = "hook/*"
-to = "legacy/*"
-reason = "Hook façade must remain legacy-free."
-
-[[boundaries]]
-from = "message/*"
-to = "legacy/*"
-reason = "Message façade must remain legacy-free."
-
-[[boundaries]]
-from = "policy/*"
-to = "legacy/*"
-reason = "Policy façade must remain legacy-free."
-
-[[boundaries]]
-from = "provider/*"
-to = "legacy/*"
-reason = "Provider façade must remain legacy-free."
-
-[[boundaries]]
-from = "internal/cli/*"
-to = "legacy/*"
-reason = "v2 CLI is library-only; no legacy team/eval/recipe code path."
-
-[[boundaries]]
-from = "transport/*"
-to = "legacy/*"
-reason = "Transport adapters depend on tool/kit (post-M4.3), not legacy."
+# No file may depend on more than ~15 modules.
+no_god_files = true
