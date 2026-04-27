@@ -21,6 +21,7 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.Engine
 	var _ agent.AgentProfile
 	var _ blackboard.Item
+	var _ blackboard.Selector
 	var _ flow.Flow
 	var _ policy.Engine = policy.EngineFunc(func(context.Context, policy.Request) (policy.Decision, error) {
 		return policy.Decision{Effect: policy.EffectAllow}, nil
@@ -39,6 +40,9 @@ func TestPublicAPISmoke(t *testing.T) {
 	}
 	if run.ID == "" {
 		t.Fatalf("QueueRun() returned empty run: %#v", run)
+	}
+	if events, err := runner.RunEvents(context.Background(), run.ID); err != nil || len(events) == 0 {
+		t.Fatalf("RunEvents() returned no events for queued run")
 	}
 
 	var _ host.Runtime

@@ -67,12 +67,12 @@ func (r *Runtime) DecideApproval(_ context.Context, cmd DecideApprovalCommand) e
 		"reason":     cmd.Reason,
 	})
 	if task, ok := r.tasks[approval.RunID][approval.TaskID]; ok && task.Status == TaskStatusPaused && cmd.Decision == "approved" {
-		task.Status = TaskStatusDispatched
-		task.Version++
-		r.saveTaskLocked(task)
+		if _, err := r.transitionTaskLocked(task, TaskStatusDispatched); err != nil {
+			return err
+		}
 	}
 	if run, ok := r.runs[approval.RunID]; ok && run.Status == RunStatusWaitingApproval && cmd.Decision == "approved" {
-		if _, err := r.updateRunLocked(run, RunStatusRunning); err != nil {
+		if _, err := r.transitionRunLocked(run, RunStatusRunning); err != nil {
 			return err
 		}
 	}

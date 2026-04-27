@@ -231,6 +231,7 @@ const (
 	EventBlackboardItemWritten    EventType = "BlackboardItemWritten"
 	EventHandoffRequested         EventType = "HandoffRequested"
 	EventHandoffApplied           EventType = "HandoffApplied"
+	EventHandoffEnvelopeQueued    EventType = "HandoffEnvelopeQueued"
 	EventApprovalRequested        EventType = "ApprovalRequested"
 	EventApprovalDecided          EventType = "ApprovalDecided"
 	EventTaskOwnerChanged         EventType = "TaskOwnerChanged"

@@ -356,12 +356,9 @@ func (r *Runtime) validatePipelinePlanLocked(ctx context.Context, run Run, plan 
 	for _, planned := range plan.Tasks {
 		task := r.tasks[run.ID][planned.ID]
 		if task.ID != "" && task.Status == TaskStatusPlanned {
-			if err = validateTaskTransition(task.Status, TaskStatusValidated); err != nil {
+			if _, err = r.transitionTaskLocked(task, TaskStatusValidated); err != nil {
 				return Run{}, err
 			}
-			task.Status = TaskStatusValidated
-			task.Version++
-			r.saveTaskLocked(task)
 		}
 	}
 	return run, nil
@@ -395,12 +392,9 @@ func (r *Runtime) routePipelinePlanLocked(ctx context.Context, run Run, plan Tod
 	for _, route := range routing.Routes {
 		task := r.tasks[run.ID][route.TaskID]
 		if task.ID != "" && task.Status == TaskStatusValidated {
-			if err = validateTaskTransition(task.Status, TaskStatusRouted); err != nil {
+			if _, err = r.transitionTaskLocked(task, TaskStatusRouted); err != nil {
 				return Run{}, RoutingPlan{}, err
 			}
-			task.Status = TaskStatusRouted
-			task.Version++
-			r.saveTaskLocked(task)
 		}
 	}
 	return run, routing, nil
@@ -419,9 +413,6 @@ func (r *Runtime) dispatchRoutingLocked(ctx context.Context, run Run, routing Ro
 		if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(run.ID, task.DependsOn) {
 			continue
 		}
-		if err = validateTaskTransition(task.Status, TaskStatusDispatched); err != nil {
-			return err
-		}
 		if _, err = r.authorizeLocked(ctx, PolicyRequest{
 			Operation: PolicyOperationDispatch,
 			RunID:     run.ID,
@@ -430,9 +421,10 @@ func (r *Runtime) dispatchRoutingLocked(ctx context.Context, run Run, routing Ro
 		}); err != nil {
 			return err
 		}
-		task.Status = TaskStatusDispatched
-		task.UpdatedAt = time.Now().UTC()
-		r.tasks[task.RunID][task.ID] = task
+		task, err = r.transitionTaskPreserveVersionLocked(task, TaskStatusDispatched)
+		if err != nil {
+			return err
+		}
 		env.RunID = run.ID
 		env.TaskID = task.ID
 		env.TargetAgentID = firstNonEmpty(env.TargetAgentID, task.OwnerAgentID)
@@ -468,6 +460,14 @@ func (r *Runtime) transitionRunLocked(run Run, to RunStatus) (Run, error) {
 }
 
 func (r *Runtime) transitionTaskLocked(task Task, to TaskStatus) (Task, error) {
+	return r.transitionTaskStatusLocked(task, to, true)
+}
+
+func (r *Runtime) transitionTaskPreserveVersionLocked(task Task, to TaskStatus) (Task, error) {
+	return r.transitionTaskStatusLocked(task, to, false)
+}
+
+func (r *Runtime) transitionTaskStatusLocked(task Task, to TaskStatus, bumpVersion bool) (Task, error) {
 	if task.Status == to {
 		return task, nil
 	}
@@ -478,34 +478,10 @@ func (r *Runtime) transitionTaskLocked(task Task, to TaskStatus) (Task, error) {
 		return Task{}, ErrInvalidTransition
 	}
 	task.Status = to
-	task.Version++
+	if bumpVersion {
+		task.Version++
+	}
 	task.UpdatedAt = time.Now().UTC()
 	r.tasks[task.RunID][task.ID] = task
 	return task, nil
-}
-
-func validateRunTransition(from, to RunStatus) error {
-	if from == to {
-		return nil
-	}
-	if isTerminalRun(from) {
-		return ErrTerminalState
-	}
-	if !allowedRunTransitions[from][to] {
-		return ErrInvalidTransition
-	}
-	return nil
-}
-
-func validateTaskTransition(from, to TaskStatus) error {
-	if from == to {
-		return nil
-	}
-	if isTerminalTask(from) {
-		return ErrTerminalState
-	}
-	if !allowedTaskTransitions[from][to] {
-		return ErrInvalidTransition
-	}
-	return nil
 }

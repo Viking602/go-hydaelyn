@@ -63,9 +63,6 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 	if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(cmd.RunID, task.DependsOn) {
 		return TaskEnvelope{}, ErrDependencyUnmet
 	}
-	if err := validateTaskTransition(task.Status, TaskStatusDispatched); err != nil {
-		return TaskEnvelope{}, err
-	}
 	if _, err := r.authorizeLocked(ctx, PolicyRequest{
 		Operation: PolicyOperationDispatch,
 		RunID:     cmd.RunID,
@@ -79,6 +76,10 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 		return TaskEnvelope{}, err
 	}
 	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "mailbox.dispatch", "mailbox")
+	task, err := r.transitionTaskPreserveVersionLocked(task, TaskStatusDispatched)
+	if err != nil {
+		return TaskEnvelope{}, err
+	}
 	now := time.Now().UTC()
 	env := TaskEnvelope{
 		ID:              r.newID("env"),
@@ -94,8 +95,6 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 		RetryPolicy:     task.RetryPolicy,
 		CreatedAt:       now,
 	}
-	task.Status = TaskStatusDispatched
-	r.saveTaskLocked(task)
 	r.writeEnvelopeLocked(env)
 	return env, nil
 }
@@ -153,7 +152,10 @@ func (r *Runtime) AcquireTaskExecution(_ context.Context, cmd AcquireTaskExecuti
 		HeartbeatAt: now,
 		Status:      LeaseStatusActive,
 	}
-	task.Status = TaskStatusRunning
+	task, err := r.transitionTaskPreserveVersionLocked(task, TaskStatusRunning)
+	if err != nil {
+		return TaskExecutionLease{}, false, err
+	}
 	task.Attempts++
 	r.saveTaskLocked(task)
 	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "lease.acquire", "lease")
@@ -260,9 +262,10 @@ func (r *Runtime) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
 		if task, ok := r.tasks[env.RunID][env.TaskID]; ok && !isTerminalTask(task.Status) {
 			r.releaseActiveLeaseLocked(env.RunID, env.TaskID)
 			if task.Status != TaskStatusDispatched {
-				task.Status = TaskStatusDispatched
-				task.Version++
-				task = r.saveTaskLocked(task)
+				task, err = r.transitionTaskLocked(task, TaskStatusDispatched)
+				if err != nil {
+					return err
+				}
 			}
 			env.TaskVersion = task.Version
 			env.DeliveredAt = time.Time{}
@@ -286,9 +289,11 @@ func (r *Runtime) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
 		return ErrNotFound
 	}
 	if !isTerminalTask(task.Status) {
-		task.Status = TaskStatusBlocked
+		task, err = r.transitionTaskLocked(task, TaskStatusBlocked)
+		if err != nil {
+			return err
+		}
 		task.Error = cmd.Reason
-		task.Version++
 		r.saveTaskLocked(task)
 	}
 	r.appendEventLocked(env.RunID, env.TaskID, EventEnvelopeDeadLettered, map[string]any{

@@ -18,7 +18,7 @@
 //   - [message]      — shared message/content data types
 //   - [hook]         — pre/post-turn hook contracts
 //   - [transport]    — integration transports such as MCP
-//   - [legacy]       — deprecated Team + Pattern compatibility packages
+//   - [legacy]       — deprecated host/team/pattern compatibility only
 //
 // Types under internal/ are implementation details. Runtime storage,
 // mailbox, scheduler, observe, transition, command-handler, and replay

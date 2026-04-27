@@ -1,6 +1,9 @@
 package runtime
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type HandoffCommand struct {
 	RunID          string
@@ -71,6 +74,11 @@ func (r *Runtime) applyHandoffLocked(task *Task, request *HandoffRequest, fallba
 	if contextSummary == "" {
 		contextSummary = fallbackContext
 	}
+	r.appendEventLocked(task.RunID, task.ID, EventHandoffRequested, map[string]any{
+		"fromAgentId": fromAgentID,
+		"toAgentId":   request.ToAgentID,
+		"reason":      request.Reason,
+	})
 	if contextSummary != "" {
 		r.writeBlackboardLocked(BlackboardItem{
 			RunID:      task.RunID,
@@ -84,26 +92,23 @@ func (r *Runtime) applyHandoffLocked(task *Task, request *HandoffRequest, fallba
 			Version:    task.Version,
 		})
 	}
-	r.appendEventLocked(task.RunID, task.ID, EventHandoffRequested, map[string]any{
-		"fromAgentId": fromAgentID,
-		"toAgentId":   request.ToAgentID,
-		"reason":      request.Reason,
-	})
-	r.appendEventLocked(task.RunID, task.ID, EventHandoffApplied, map[string]any{
-		"fromAgentId": fromAgentID,
-		"toAgentId":   request.ToAgentID,
-	})
 	task.OwnerAgentID = request.ToAgentID
 	task.OwnerComponent = ""
-	task.Status = TaskStatusDispatched
-	task.Version++
 	task.HandoffCount++
 	task.OwnerHistory = append(task.OwnerHistory, request.ToAgentID)
-	*task = r.saveTaskLocked(*task)
+	next, err := r.transitionTaskLocked(*task, TaskStatusDispatched)
+	if err != nil {
+		return err
+	}
+	*task = r.saveTaskLocked(next)
 	r.appendEventLocked(task.RunID, task.ID, EventTaskOwnerChanged, map[string]any{
 		"ownerAgentId": request.ToAgentID,
 		"version":      task.Version,
 		"task":         taskEventPayload(*task),
+	})
+	r.appendEventLocked(task.RunID, task.ID, EventHandoffApplied, map[string]any{
+		"fromAgentId": fromAgentID,
+		"toAgentId":   request.ToAgentID,
 	})
 	env := TaskEnvelope{
 		ID:            r.newID("env"),
@@ -119,8 +124,34 @@ func (r *Runtime) applyHandoffLocked(task *Task, request *HandoffRequest, fallba
 		},
 		CreatedAt: task.UpdatedAt,
 	}
-	r.writeEnvelopeLocked(env)
+	r.writeHandoffEnvelopeLocked(env)
 	return nil
+}
+
+func (r *Runtime) writeHandoffEnvelopeLocked(env TaskEnvelope) TaskEnvelope {
+	if env.ID == "" {
+		env.ID = r.newID("env")
+	}
+	if env.CreatedAt.IsZero() {
+		env.CreatedAt = time.Now().UTC()
+	}
+	if env.Status == "" {
+		env.Status = "pending"
+	}
+	if env.Type == "" {
+		env.Type = "HandoffEnvelope"
+	}
+	if env.TaskVersion == 0 {
+		if task, ok := r.tasks[env.RunID][env.TaskID]; ok {
+			env.TaskVersion = task.Version
+		}
+	}
+	r.envelopes[env.ID] = env
+	r.envelopesByRun[env.RunID] = append(r.envelopesByRun[env.RunID], env.ID)
+	r.appendEventLocked(env.RunID, env.TaskID, EventHandoffEnvelopeQueued, map[string]any{
+		"envelope": envPayload(env),
+	})
+	return env
 }
 
 func containsString(items []string, want string) bool {

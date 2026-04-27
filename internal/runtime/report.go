@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -84,9 +85,9 @@ func (r *Runtime) applyReportActionResultLocked(ctx context.Context, run Run, ta
 			return Task{}, TypedReport{}, err
 		}
 		if err := r.applyActionResultLocked(&task, report.ActionResult); err != nil {
-			r.tasks[task.RunID][task.ID] = task
 			if errors.Is(err, ErrActionReconcileRequired) {
-				if _, runErr := r.updateRunLocked(run, RunStatusReconcileRequired); runErr != nil {
+				r.releaseLeaseLocked(cmd.LeaseID)
+				if _, runErr := r.transitionRunLocked(run, RunStatusReconcileRequired); runErr != nil {
 					return Task{}, TypedReport{}, runErr
 				}
 			}
@@ -104,18 +105,20 @@ func (r *Runtime) applyReportStatusLocked(ctx context.Context, run Run, task Tas
 	case ReportStatusSuccess:
 		return r.applySuccessfulReportLocked(task, cmd.LeaseID, report)
 	case ReportStatusPartialSuccess:
-		task.Status = TaskStatusRunning
 		task.Result = &report
 		r.saveTaskLocked(task)
 		return nil
 	case ReportStatusFailed:
 		return r.applyFailedReportLocked(task, cmd.LeaseID, report)
 	case ReportStatusBlocked:
-		task.Status = TaskStatusBlocked
+		task, err := r.transitionTaskLocked(task, TaskStatusBlocked)
+		if err != nil {
+			return err
+		}
 		task.Error = report.Summary
 		task.Result = &report
-		task.Version++
 		r.saveTaskLocked(task)
+		r.releaseLeaseLocked(cmd.LeaseID)
 		r.appendEventLocked(cmd.RunID, cmd.TaskID, EventTaskBlocked, map[string]any{
 			"reason": report.Summary,
 			"task":   taskEventPayload(task),
@@ -136,9 +139,11 @@ func (r *Runtime) applySuccessfulReportLocked(task Task, leaseID string, report 
 	if !completionCriteriaSatisfied(task, report) {
 		return ErrCompletionCriteriaUnmet
 	}
-	task.Status = TaskStatusCompleted
+	task, err := r.transitionTaskLocked(task, TaskStatusCompleted)
+	if err != nil {
+		return err
+	}
 	task.Result = &report
-	task.Version++
 	r.saveTaskLocked(task)
 	r.releaseLeaseLocked(leaseID)
 	r.appendEventLocked(task.RunID, task.ID, EventTaskCompleted, map[string]any{
@@ -151,10 +156,12 @@ func (r *Runtime) applySuccessfulReportLocked(task Task, leaseID string, report 
 func (r *Runtime) applyFailedReportLocked(task Task, leaseID string, report TypedReport) error {
 	reason := reportFailureReason(report)
 	if canRetryTask(task) {
-		task.Status = TaskStatusDispatched
+		task, err := r.transitionTaskLocked(task, TaskStatusDispatched)
+		if err != nil {
+			return err
+		}
 		task.Error = reason
 		task.Result = &report
-		task.Version++
 		r.saveTaskLocked(task)
 		r.releaseLeaseLocked(leaseID)
 		r.writeEnvelopeLocked(TaskEnvelope{
@@ -170,10 +177,12 @@ func (r *Runtime) applyFailedReportLocked(task Task, leaseID string, report Type
 		})
 		return nil
 	}
-	task.Status = TaskStatusFailed
+	task, err := r.transitionTaskLocked(task, TaskStatusFailed)
+	if err != nil {
+		return err
+	}
 	task.Error = reason
 	task.Result = &report
-	task.Version++
 	r.saveTaskLocked(task)
 	r.releaseLeaseLocked(leaseID)
 	r.appendEventLocked(task.RunID, task.ID, EventTaskFailed, map[string]any{
@@ -185,13 +194,16 @@ func (r *Runtime) applyFailedReportLocked(task Task, leaseID string, report Type
 
 func (r *Runtime) applyApprovalReportLocked(run Run, task Task, cmd SubmitTypedReportCommand, report TypedReport) error {
 	approval, token := r.createApprovalLocked(task, report.Summary, cmd.HolderID)
-	task.Status = TaskStatusPaused
-	task.Result = &report
-	task.Version++
-	r.saveTaskLocked(task)
-	if _, err := r.updateRunLocked(run, RunStatusWaitingApproval); err != nil {
+	task, err := r.transitionTaskLocked(task, TaskStatusPaused)
+	if err != nil {
 		return err
 	}
+	task.Result = &report
+	r.saveTaskLocked(task)
+	if _, err := r.transitionRunLocked(run, RunStatusWaitingApproval); err != nil {
+		return err
+	}
+	r.releaseLeaseLocked(cmd.LeaseID)
 	r.writeCriticalContextLocked(task.RunID, task.ID, BlackboardItemContext, SourceIdentity{Type: SourceAgent, ID: cmd.HolderID}, "approval", report.Summary)
 	r.appendEventLocked(cmd.RunID, cmd.TaskID, EventApprovalRequested, map[string]any{
 		"approvalId":  approval.ApprovalID,
@@ -206,12 +218,14 @@ func (r *Runtime) applyApprovalReportLocked(run Run, task Task, cmd SubmitTypedR
 }
 
 func (r *Runtime) applyClarificationReportLocked(run Run, task Task, leaseID string, report TypedReport) error {
-	task.Status = TaskStatusWaitingUserInput
+	task, err := r.transitionTaskLocked(task, TaskStatusWaitingUserInput)
+	if err != nil {
+		return err
+	}
 	task.Result = &report
 	task.Error = report.Summary
-	task.Version++
 	r.saveTaskLocked(task)
-	if _, err := r.updateRunLocked(run, RunStatusWaitingUserInput); err != nil {
+	if _, err := r.transitionRunLocked(run, RunStatusWaitingUserInput); err != nil {
 		return err
 	}
 	r.releaseLeaseLocked(leaseID)
@@ -243,7 +257,7 @@ func (r *Runtime) applyHandoffReportLocked(ctx context.Context, task Task, cmd S
 	return nil
 }
 
-func (r *Runtime) SubmitUserInput(_ context.Context, cmd SubmitUserInputCommand) error {
+func (r *Runtime) SubmitUserInput(ctx context.Context, cmd SubmitUserInputCommand) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run, ok := r.runs[cmd.RunID]
@@ -252,6 +266,18 @@ func (r *Runtime) SubmitUserInput(_ context.Context, cmd SubmitUserInputCommand)
 	}
 	if isTerminalRun(run.Status) {
 		return ErrTerminalState
+	}
+	task, shouldRedispatch := r.tasks[cmd.RunID][cmd.TaskID]
+	shouldRedispatch = shouldRedispatch && (task.Status == TaskStatusBlocked || task.Status == TaskStatusWaitingUserInput)
+	if shouldRedispatch {
+		if _, err := r.authorizeLocked(ctx, PolicyRequest{
+			Operation: PolicyOperationDispatch,
+			RunID:     cmd.RunID,
+			TaskID:    cmd.TaskID,
+			Actor:     SourceIdentity{Type: SourceSystem, ID: "user_input"},
+		}); err != nil {
+			return err
+		}
 	}
 	item := BlackboardItem{
 		RunID:      cmd.RunID,
@@ -262,13 +288,31 @@ func (r *Runtime) SubmitUserInput(_ context.Context, cmd SubmitUserInputCommand)
 		Payload:    cmd.Input,
 	}
 	r.writeBlackboardLocked(item)
-	if _, err := r.updateRunLocked(run, RunStatusRunning); err != nil {
+	if _, err := r.transitionRunLocked(run, RunStatusRunning); err != nil {
 		return err
 	}
-	if task, ok := r.tasks[cmd.RunID][cmd.TaskID]; ok && (task.Status == TaskStatusBlocked || task.Status == TaskStatusWaitingUserInput) {
-		task.Status = TaskStatusRunning
-		task.Version++
+	if shouldRedispatch {
+		var err error
+		task, err = r.transitionTaskLocked(task, TaskStatusDispatched)
+		if err != nil {
+			return err
+		}
+		task.Error = ""
 		r.saveTaskLocked(task)
+		r.recordTraceLocked(cmd.RunID, cmd.TaskID, "mailbox.dispatch", "mailbox")
+		r.writeEnvelopeLocked(TaskEnvelope{
+			RunID:           cmd.RunID,
+			TaskID:          cmd.TaskID,
+			TargetAgentID:   task.OwnerAgentID,
+			TargetComponent: task.OwnerComponent,
+			Type:            "TaskEnvelope",
+			Status:          "pending",
+			TaskVersion:     task.Version,
+			ReadSelectors:   slices.Clone(task.ReadSelectors),
+			WriteTargets:    slices.Clone(task.WriteTargets),
+			RetryPolicy:     task.RetryPolicy,
+			CreatedAt:       time.Now().UTC(),
+		})
 	}
 	r.appendEventLocked(cmd.RunID, cmd.TaskID, EventUserInputSubmitted, map[string]any{
 		"input": cmd.Input,
@@ -386,9 +430,13 @@ func (r *Runtime) applyActionResultLocked(task *Task, result *ActionResult) erro
 	switch result.Status {
 	case ActionAttemptUnknown:
 		r.recordTraceLocked(task.RunID, task.ID, "action.reconcile_required", "action")
-		task.Status = TaskStatusReconcileRequired
+		next, err := r.transitionTaskLocked(*task, TaskStatusReconcileRequired)
+		if err != nil {
+			return err
+		}
+		*task = next
 		task.Error = "action attempt requires reconciliation"
-		task.Version++
+		r.saveTaskLocked(*task)
 		r.writeCriticalContextLocked(task.RunID, task.ID, BlackboardItemActionResult, SourceIdentity{Type: SourceTool, ID: result.AttemptID}, "action_reconcile_required", result.Summary)
 		r.appendEventLocked(task.RunID, task.ID, EventActionReconcileRequired, map[string]any{
 			"attemptId": result.AttemptID,
@@ -396,7 +444,6 @@ func (r *Runtime) applyActionResultLocked(task *Task, result *ActionResult) erro
 		})
 		return ErrActionReconcileRequired
 	case ActionAttemptFailed, ActionAttemptTimeout, ActionAttemptCancelled:
-		task.Status = TaskStatusFailed
 		task.Error = result.Error
 	case ActionAttemptSucceeded:
 		r.recordTraceLocked(task.RunID, task.ID, "action.result", "action")

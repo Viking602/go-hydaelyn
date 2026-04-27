@@ -322,6 +322,9 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if blocked.Status != TaskStatusWaitingUserInput || currentRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification did not block task/run: task=%#v run=%#v", blocked, currentRun)
 	}
+	if active := rt.ActiveLeaseCount(run.ID, worker.ID); active != 0 {
+		t.Fatalf("needs_clarification must release active lease, got %d", active)
+	}
 	if err := rt.SubmitUserInput(ctx, SubmitUserInputCommand{RunID: run.ID, TaskID: worker.ID, Input: "region=us-east-1"}); err != nil {
 		t.Fatalf("SubmitUserInput() error = %v", err)
 	}
@@ -331,6 +334,13 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	}
 	if resumedRun.Status != RunStatusRunning {
 		t.Fatalf("expected run to resume running, got %#v", resumedRun)
+	}
+	resumedTask, err := rt.Task(ctx, run.ID, worker.ID)
+	if err != nil {
+		t.Fatalf("Task(resumed) error = %v", err)
+	}
+	if resumedTask.Status != TaskStatusDispatched {
+		t.Fatalf("SubmitUserInput must redispatch instead of running task directly, got %#v", resumedTask)
 	}
 
 	action, err := rt.CreateTask(ctx, CreateTaskCommand{
@@ -431,6 +441,9 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if reconcileTask.Status != TaskStatusReconcileRequired || reconcileTask.Attempts != 1 {
 		t.Fatalf("unknown action must block without auto retry, got %#v", reconcileTask)
 	}
+	if active := rt.ActiveLeaseCount(run.ID, unknownAction.ID); active != 0 {
+		t.Fatalf("reconcile_required must release active lease, got %d", active)
+	}
 	if !collectEventTypes(rt.Events(run.ID)).Contains(EventActionReconcileRequired) {
 		t.Fatalf("expected ActionReconcileRequired event, got %#v", rt.Events(run.ID))
 	}
@@ -481,11 +494,14 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 		t.Fatalf("handoff did not transfer ownership: %#v", handedOff)
 	}
 	events := rt.Events(run.ID)
+	requestedIdx := indexEvent(events, EventHandoffRequested)
 	contextIdx := indexEvent(events, EventBlackboardItemWritten)
-	appliedIdx := indexEvent(events, EventHandoffApplied)
 	ownerIdx := indexEvent(events, EventTaskOwnerChanged)
-	if contextIdx < 0 || appliedIdx < 0 || ownerIdx < 0 || !(contextIdx < appliedIdx && appliedIdx < ownerIdx) {
-		t.Fatalf("handoff context must be written before owner transfer, events=%#v", events)
+	appliedIdx := indexEvent(events, EventHandoffApplied)
+	queuedIdx := indexEvent(events, EventHandoffEnvelopeQueued)
+	if requestedIdx < 0 || contextIdx < 0 || ownerIdx < 0 || appliedIdx < 0 || queuedIdx < 0 ||
+		!(requestedIdx < contextIdx && contextIdx < ownerIdx && ownerIdx < appliedIdx && appliedIdx < queuedIdx) {
+		t.Fatalf("handoff event order is invalid, events=%#v", events)
 	}
 	if err := rt.RequestHandoff(ctx, HandoffCommand{
 		RunID:       run.ID,

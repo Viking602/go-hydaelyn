@@ -378,20 +378,6 @@ func (r *Runtime) writeEnvelopeLocked(env TaskEnvelope) TaskEnvelope {
 	return env
 }
 
-func (r *Runtime) updateRunLocked(run Run, status RunStatus) (Run, error) {
-	if err := validateRunTransition(run.Status, status); err != nil {
-		return Run{}, err
-	}
-	run.Status = status
-	run.UpdatedAt = time.Now().UTC()
-	r.runs[run.ID] = run
-	r.appendEventLocked(run.ID, run.RootTaskID, EventRunStatusChanged, map[string]any{
-		"to":  string(status),
-		"run": runPayload(run),
-	})
-	return run, nil
-}
-
 func (r *Runtime) saveTaskLocked(task Task) Task {
 	task.UpdatedAt = time.Now().UTC()
 	r.tasks[task.RunID][task.ID] = task

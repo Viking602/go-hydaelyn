@@ -84,8 +84,10 @@ func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOu
 	sanitized.UpdatedAt = time.Now().UTC()
 	r.messages[sanitized.ID] = sanitized
 	r.messagesByRun[cmd.RunID] = append(r.messagesByRun[cmd.RunID], sanitized.ID)
-	task.Status = TaskStatusCompleted
-	task.Version++
+	task, err = r.transitionTaskLocked(task, TaskStatusCompleted)
+	if err != nil {
+		return err
+	}
 	task.Result = &TypedReport{Status: ReportStatusSuccess, Summary: "response queued"}
 	r.saveTaskLocked(task)
 	r.releaseLeaseLocked(cmd.LeaseID)

@@ -188,10 +188,39 @@ func TestApprovalResumeTokenRecovery(t *testing.T) {
 	if len(rt.resumeTokens) != 1 {
 		t.Fatalf("expected resumable approval blocker, got %#v", rt.resumeTokens)
 	}
+	if active := rt.ActiveLeaseCount(run.ID, approvalTask.ID); active != 0 {
+		t.Fatalf("needs_approval must release active lease, got %d", active)
+	}
 	for tokenID := range rt.resumeTokens {
 		if _, err := rt.RecoverResumeToken(ctx, RecoverResumeTokenCommand{TokenID: tokenID}); err != nil {
 			t.Fatalf("RecoverResumeToken() error = %v", err)
 		}
+	}
+}
+
+func TestBlockedReportReleasesLease(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run := mustStartRun(t, ctx, rt, "run-blocked-report")
+	task := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "worker", OwnerAgentID: "agent-a"})
+	lease := leaseTask(t, ctx, rt, run.ID, task.ID, HolderAgent, "agent-a")
+	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  HolderAgent,
+		HolderID:    "agent-a",
+		TaskVersion: task.Version,
+		Report:      TypedReport{Status: ReportStatusBlocked, Summary: "blocked by dependency"},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport(blocked) error = %v", err)
+	}
+	blocked := mustLoadTask(t, ctx, rt, run.ID, task.ID)
+	if blocked.Status != TaskStatusBlocked {
+		t.Fatalf("blocked report should block task, got %#v", blocked)
+	}
+	if active := rt.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+		t.Fatalf("blocked report must release active lease, got %d", active)
 	}
 }
 
@@ -233,6 +262,9 @@ func TestActionAttemptReconcileAndSourceIdentitySelector(t *testing.T) {
 	reconcile := mustLoadTask(t, ctx, rt, run.ID, actionTask.ID)
 	if reconcile.Status != TaskStatusReconcileRequired {
 		t.Fatalf("unknown action attempt should require reconcile, got %#v", reconcile)
+	}
+	if active := rt.ActiveLeaseCount(run.ID, actionTask.ID); active != 0 {
+		t.Fatalf("reconcile-required action attempt must release active lease, got %d", active)
 	}
 
 	if err := rt.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: "source", Type: BlackboardItemClaim, Source: SourceIdentity{Type: SourceAgent, ID: "agent-source"}, Visibility: BlackboardVisibilityAgentVisible, Payload: "claim"}); err != nil {

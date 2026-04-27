@@ -101,12 +101,16 @@ func (r *Runtime) CompleteActionAttempt(_ context.Context, cmd CompleteActionAtt
 	})
 	if attempt.RequiresReconcile {
 		task := r.tasks[cmd.RunID][cmd.TaskID]
-		task.Status = TaskStatusReconcileRequired
+		var err error
+		task, err = r.transitionTaskLocked(task, TaskStatusReconcileRequired)
+		if err != nil {
+			return ActionAttempt{}, err
+		}
 		task.Error = "action attempt requires reconciliation"
-		task.Version++
 		r.saveTaskLocked(task)
+		r.releaseLeaseLocked(cmd.LeaseID)
 		if run, ok := r.runs[cmd.RunID]; ok {
-			if _, err := r.updateRunLocked(run, RunStatusReconcileRequired); err != nil {
+			if _, err := r.transitionRunLocked(run, RunStatusReconcileRequired); err != nil {
 				return ActionAttempt{}, err
 			}
 		}

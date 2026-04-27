@@ -187,6 +187,7 @@ const (
 	EventBlackboardItemWritten    = runtimeimpl.EventBlackboardItemWritten
 	EventHandoffRequested         = runtimeimpl.EventHandoffRequested
 	EventHandoffApplied           = runtimeimpl.EventHandoffApplied
+	EventHandoffEnvelopeQueued    = runtimeimpl.EventHandoffEnvelopeQueued
 	EventApprovalRequested        = runtimeimpl.EventApprovalRequested
 	EventApprovalDecided          = runtimeimpl.EventApprovalDecided
 	EventTaskOwnerChanged         = runtimeimpl.EventTaskOwnerChanged
