@@ -90,6 +90,14 @@ func (r *Runtime) Subscribe(ctx context.Context, runID string, filter Blackboard
 	return r.inner.Subscribe(ctx, runID, filter)
 }
 
+func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
+	return r.inner.WriteItem(ctx, item)
+}
+
+func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
+	return r.inner.SelectItems(ctx, runID, selector)
+}
+
 func (r *Runtime) WaitForBlackboard(ctx context.Context, runID string, filter BlackboardFilter, predicate func([]BlackboardItem) bool, timeout time.Duration) ([]BlackboardItem, error) {
 	return r.inner.WaitForBlackboard(ctx, runID, filter, predicate, timeout)
 }
