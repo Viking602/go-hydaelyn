@@ -111,6 +111,9 @@ type CreateTaskCommand struct {
 	Tags               []string
 	CompletionCriteria []string
 	DependsOn          []string
+	AwaitMode          AwaitMode
+	AwaitQuorum        int
+	OnDependencyFailed OnDependencyFailed
 	ReadSelectors      []BlackboardSelector
 	WriteTargets       []string
 	RetryPolicy        RetryPolicy
@@ -192,6 +195,9 @@ func (r *Runtime) CreateTask(_ context.Context, cmd CreateTaskCommand) (Task, er
 		Tags:               slices.Clone(cmd.Tags),
 		CompletionCriteria: slices.Clone(cmd.CompletionCriteria),
 		DependsOn:          slices.Clone(cmd.DependsOn),
+		AwaitMode:          cmd.AwaitMode,
+		AwaitQuorum:        cmd.AwaitQuorum,
+		OnDependencyFailed: cmd.OnDependencyFailed,
 		ReadSelectors:      slices.Clone(cmd.ReadSelectors),
 		WriteTargets:       slices.Clone(cmd.WriteTargets),
 		RetryPolicy:        cmd.RetryPolicy,
@@ -242,7 +248,7 @@ func (r *Runtime) ReadyTasks(runID string) []Task {
 	tasks := r.tasks[runID]
 	out := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
-		if !taskCanBecomeReady(task.Status) || !r.dependenciesCompletedLocked(runID, task.DependsOn) {
+		if !taskCanBecomeReady(task.Status) || !r.dependenciesCompletedLocked(runID, task) {
 			continue
 		}
 		out = append(out, task)
@@ -497,14 +503,55 @@ func retryPolicyPayload(policy RetryPolicy) map[string]any {
 	}
 }
 
-func (r *Runtime) dependenciesCompletedLocked(runID string, deps []string) bool {
-	for _, dep := range deps {
-		task, ok := r.tasks[runID][dep]
-		if !ok || task.Status != TaskStatusCompleted {
-			return false
+// dependencyGateLocked evaluates a task's DependsOn list under its AwaitMode +
+// OnDependencyFailed policy. Returns ready=true when the gate is open and
+// fatal=true when a dep failure should permanently block this task (caller
+// decides whether to surface ErrDependencyFailed).
+func (r *Runtime) dependencyGateLocked(runID string, task Task) (ready bool, fatal bool) {
+	if len(task.DependsOn) == 0 {
+		return true, false
+	}
+	completed, failed := 0, 0
+	for _, dep := range task.DependsOn {
+		depTask, ok := r.tasks[runID][dep]
+		if !ok {
+			continue
+		}
+		switch depTask.Status {
+		case TaskStatusCompleted:
+			completed++
+		case TaskStatusFailed, TaskStatusCancelled:
+			failed++
 		}
 	}
-	return true
+	if failed > 0 {
+		switch task.OnDependencyFailed {
+		case OnDependencyFailedFail:
+			return false, true
+		case OnDependencyFailedSkip:
+			completed += failed
+		}
+	}
+	switch task.AwaitMode {
+	case AwaitModeAny:
+		return completed >= 1, false
+	case AwaitModeQuorum:
+		threshold := task.AwaitQuorum
+		if threshold <= 0 {
+			threshold = 1
+		}
+		return completed >= threshold, false
+	default:
+		return completed == len(task.DependsOn), false
+	}
+}
+
+// dependenciesCompletedLocked retains its old "ready or not" boolean for the
+// hot path (ReadyTasks projection). Callers needing fatal-failure detection
+// must use dependencyGateLocked directly.
+func (r *Runtime) dependenciesCompletedLocked(runID string, task Task) bool {
+	ready, _ := r.dependencyGateLocked(runID, task)
+	return ready
 }
 
 func taskCanBecomeReady(status TaskStatus) bool {

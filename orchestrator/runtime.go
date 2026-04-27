@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	runtimeimpl "github.com/Viking602/go-hydaelyn/internal/runtime"
 )
@@ -71,6 +72,26 @@ func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
 
 func (r *Runtime) RegisterTool(tool Tool) {
 	r.inner.RegisterTool(tool)
+}
+
+func (r *Runtime) RegisterAgent(profile AgentProfile) {
+	r.inner.RegisterAgent(profile)
+}
+
+func (r *Runtime) Agents() []AgentProfile {
+	return r.inner.Agents()
+}
+
+func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
+	return r.inner.DispatchTaskFanOut(ctx, cmd)
+}
+
+func (r *Runtime) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
+	return r.inner.Subscribe(ctx, runID, filter)
+}
+
+func (r *Runtime) WaitForBlackboard(ctx context.Context, runID string, filter BlackboardFilter, predicate func([]BlackboardItem) bool, timeout time.Duration) ([]BlackboardItem, error) {
+	return r.inner.WaitForBlackboard(ctx, runID, filter, predicate, timeout)
 }
 
 func (r *Runtime) SetMessagePolicy(policy MessagePolicyChecker) {

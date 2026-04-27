@@ -21,6 +21,11 @@ var (
 	ErrInvalidTransition       = runtimeimpl.ErrInvalidTransition
 	ErrCompletionCriteriaUnmet = runtimeimpl.ErrCompletionCriteriaUnmet
 	ErrDependencyUnmet         = runtimeimpl.ErrDependencyUnmet
+	ErrDependencyFailed        = runtimeimpl.ErrDependencyFailed
+	ErrInvalidAddress          = runtimeimpl.ErrInvalidAddress
+	ErrNoRecipients            = runtimeimpl.ErrNoRecipients
+	ErrSubscriptionClosed      = runtimeimpl.ErrSubscriptionClosed
+	ErrWaitTimeout             = runtimeimpl.ErrWaitTimeout
 )
 
 type (
@@ -44,6 +49,12 @@ type (
 	RunTimelineKind      = runtimeimpl.RunTimelineKind
 	TraceSpanStatus      = runtimeimpl.TraceSpanStatus
 	PolicyOperation      = runtimeimpl.PolicyOperation
+	AwaitMode            = runtimeimpl.AwaitMode
+	OnDependencyFailed   = runtimeimpl.OnDependencyFailed
+	AddressKind          = runtimeimpl.AddressKind
+	Address              = runtimeimpl.Address
+	AgentProfile         = runtimeimpl.AgentProfile
+	BlackboardFilter     = runtimeimpl.BlackboardFilter
 )
 
 const (
@@ -65,6 +76,18 @@ const (
 
 	TaskTypeWorker   = runtimeimpl.TaskTypeWorker
 	TaskTypeResponse = runtimeimpl.TaskTypeResponse
+
+	AwaitModeAll    = runtimeimpl.AwaitModeAll
+	AwaitModeAny    = runtimeimpl.AwaitModeAny
+	AwaitModeQuorum = runtimeimpl.AwaitModeQuorum
+
+	OnDependencyFailedContinue = runtimeimpl.OnDependencyFailedContinue
+	OnDependencyFailedSkip     = runtimeimpl.OnDependencyFailedSkip
+	OnDependencyFailedFail     = runtimeimpl.OnDependencyFailedFail
+
+	AddressKindAgent = runtimeimpl.AddressKindAgent
+	AddressKindRole  = runtimeimpl.AddressKindRole
+	AddressKindGroup = runtimeimpl.AddressKindGroup
 
 	TaskStatusCreated           = runtimeimpl.TaskStatusCreated
 	TaskStatusPlanned           = runtimeimpl.TaskStatusPlanned
@@ -255,6 +278,7 @@ type (
 	TransitionTaskCommand         = runtimeimpl.TransitionTaskCommand
 	AdvanceRunCommand             = runtimeimpl.AdvanceRunCommand
 	DispatchTaskCommand           = runtimeimpl.DispatchTaskCommand
+	FanOutDispatchTaskCommand     = runtimeimpl.FanOutDispatchTaskCommand
 	AcquireTaskExecutionCommand   = runtimeimpl.AcquireTaskExecutionCommand
 	HeartbeatTaskExecutionCommand = runtimeimpl.HeartbeatTaskExecutionCommand
 	ReleaseTaskExecutionCommand   = runtimeimpl.ReleaseTaskExecutionCommand

@@ -26,6 +26,7 @@ var (
 	ErrInvalidTransition       = errors.New("orchestrator: invalid state transition")
 	ErrCompletionCriteriaUnmet = errors.New("orchestrator: completion criteria unmet")
 	ErrDependencyUnmet         = errors.New("orchestrator: dependency unmet")
+	ErrDependencyFailed        = errors.New("orchestrator: dependency failed")
 )
 
 type RunStatus string
@@ -62,6 +63,31 @@ type TaskType string
 const (
 	TaskTypeWorker   TaskType = "worker"
 	TaskTypeResponse TaskType = "response"
+)
+
+// AwaitMode controls how a task's DependsOn list is evaluated. The zero value
+// (AwaitModeAll) requires every dependency to complete; AwaitModeAny releases
+// after a single completion; AwaitModeQuorum needs at least Task.AwaitQuorum
+// completions.
+type AwaitMode string
+
+const (
+	AwaitModeAll    AwaitMode = ""
+	AwaitModeAny    AwaitMode = "any"
+	AwaitModeQuorum AwaitMode = "quorum"
+)
+
+// OnDependencyFailed governs what happens when one of a task's dependencies
+// reaches a terminal failure state (Failed/Cancelled). The zero value
+// (OnDependencyFailedContinue) keeps waiting (legacy behaviour); Skip counts
+// the failure toward the AwaitMode quota; Fail marks the dependent task as
+// fatally blocked so the dispatcher can fail it.
+type OnDependencyFailed string
+
+const (
+	OnDependencyFailedContinue OnDependencyFailed = ""
+	OnDependencyFailedSkip     OnDependencyFailed = "skip"
+	OnDependencyFailedFail     OnDependencyFailed = "fail"
 )
 
 type TaskStatus string
@@ -289,6 +315,9 @@ type Task struct {
 	Tags               []string             `json:"tags,omitempty"`
 	CompletionCriteria []string             `json:"completionCriteria,omitempty"`
 	DependsOn          []string             `json:"dependsOn,omitempty"`
+	AwaitMode          AwaitMode            `json:"awaitMode,omitempty"`
+	AwaitQuorum        int                  `json:"awaitQuorum,omitempty"`
+	OnDependencyFailed OnDependencyFailed   `json:"onDependencyFailed,omitempty"`
 	ReadSelectors      []BlackboardSelector `json:"readSelectors,omitempty"`
 	WriteTargets       []string             `json:"writeTargets,omitempty"`
 	RetryPolicy        RetryPolicy          `json:"retryPolicy,omitempty"`

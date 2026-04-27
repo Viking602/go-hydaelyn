@@ -403,7 +403,7 @@ func (r *Runtime) dispatchRoutingLocked(ctx context.Context, run Run, routing Ro
 		if task.ID == "" || isTerminalTask(task.Status) {
 			continue
 		}
-		if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(run.ID, task.DependsOn) {
+		if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(run.ID, task) {
 			continue
 		}
 		if _, err = r.authorizeLocked(ctx, PolicyRequest{

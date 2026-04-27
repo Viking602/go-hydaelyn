@@ -71,8 +71,14 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 	if isTerminalTask(task.Status) {
 		return TaskEnvelope{}, ErrTerminalState
 	}
-	if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(cmd.RunID, task.DependsOn) {
-		return TaskEnvelope{}, ErrDependencyUnmet
+	if len(task.DependsOn) > 0 {
+		ready, fatal := r.dependencyGateLocked(cmd.RunID, task)
+		if fatal {
+			return TaskEnvelope{}, ErrDependencyFailed
+		}
+		if !ready {
+			return TaskEnvelope{}, ErrDependencyUnmet
+		}
 	}
 	if _, err := r.authorizeLocked(ctx, PolicyRequest{
 		Operation: PolicyOperationDispatch,
@@ -130,8 +136,14 @@ func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTask
 	if isTerminalTask(task.Status) {
 		return nil, ErrTerminalState
 	}
-	if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(cmd.RunID, task.DependsOn) {
-		return nil, ErrDependencyUnmet
+	if len(task.DependsOn) > 0 {
+		ready, fatal := r.dependencyGateLocked(cmd.RunID, task)
+		if fatal {
+			return nil, ErrDependencyFailed
+		}
+		if !ready {
+			return nil, ErrDependencyUnmet
+		}
 	}
 	recipients, err := ResolveRecipients(r.agentsLocked(), cmd.To)
 	if err != nil {
