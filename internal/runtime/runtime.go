@@ -23,6 +23,8 @@ type Runtime struct {
 	leases            map[string]TaskExecutionLease
 	activeLeaseByTask map[string]string
 	tools             map[string]Tool
+	agents            map[string]AgentProfile
+	agentOrder        []string
 	messages          map[string]UserMessage
 	messagesByRun     map[string][]string
 	flows             map[string]Flow
@@ -59,6 +61,7 @@ func NewRuntime(config Config) *Runtime {
 		leases:            map[string]TaskExecutionLease{},
 		activeLeaseByTask: map[string]string{},
 		tools:             map[string]Tool{},
+		agents:            map[string]AgentProfile{},
 		messages:          map[string]UserMessage{},
 		messagesByRun:     map[string][]string{},
 		flows:             map[string]Flow{},
@@ -271,6 +274,43 @@ func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
 		}
 	}
 	return count
+}
+
+func (r *Runtime) RegisterAgent(profile AgentProfile) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if profile.ID == "" {
+		return
+	}
+	if _, exists := r.agents[profile.ID]; !exists {
+		r.agentOrder = append(r.agentOrder, profile.ID)
+	}
+	clone := profile
+	clone.Groups = slices.Clone(profile.Groups)
+	clone.Metadata = maps.Clone(profile.Metadata)
+	r.agents[profile.ID] = clone
+}
+
+func (r *Runtime) Agents() []AgentProfile {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]AgentProfile, 0, len(r.agentOrder))
+	for _, id := range r.agentOrder {
+		if profile, ok := r.agents[id]; ok {
+			out = append(out, profile)
+		}
+	}
+	return out
+}
+
+func (r *Runtime) agentsLocked() []AgentProfile {
+	out := make([]AgentProfile, 0, len(r.agentOrder))
+	for _, id := range r.agentOrder {
+		if profile, ok := r.agents[id]; ok {
+			out = append(out, profile)
+		}
+	}
+	return out
 }
 
 func (r *Runtime) RegisterTool(tool Tool) {

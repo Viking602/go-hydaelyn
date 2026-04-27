@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,16 @@ type DispatchTaskCommand struct {
 	TargetAgentID   string
 	TargetComponent string
 	Payload         map[string]any
+}
+
+// FanOutDispatchTaskCommand dispatches one task to multiple recipients
+// resolved from an Address. The framework writes one envelope per resolved
+// agent; per-task ownership remains the developer's responsibility.
+type FanOutDispatchTaskCommand struct {
+	RunID   string
+	TaskID  string
+	To      Address
+	Payload map[string]any
 }
 
 type AcquireTaskExecutionCommand struct {
@@ -97,6 +108,72 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 	}
 	r.writeEnvelopeLocked(env)
 	return env, nil
+}
+
+// DispatchTaskFanOut resolves cmd.To against the registered agent profiles
+// and writes one envelope per recipient. The task transitions to Dispatched
+// once (the receivers compete for the lease via AcquireTaskExecution).
+func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run, ok := r.runs[cmd.RunID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if isTerminalRun(run.Status) {
+		return nil, ErrTerminalState
+	}
+	task, ok := r.tasks[cmd.RunID][cmd.TaskID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if isTerminalTask(task.Status) {
+		return nil, ErrTerminalState
+	}
+	if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(cmd.RunID, task.DependsOn) {
+		return nil, ErrDependencyUnmet
+	}
+	recipients, err := ResolveRecipients(r.agentsLocked(), cmd.To)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.authorizeLocked(ctx, PolicyRequest{
+		Operation: PolicyOperationDispatch,
+		RunID:     cmd.RunID,
+		TaskID:    cmd.TaskID,
+		Actor:     SourceIdentity{Type: SourceComponent, ID: "dispatcher"},
+		Metadata: map[string]string{
+			"addressKind": string(cmd.To.Kind),
+			"recipients":  strings.Join(recipients, ","),
+		},
+	}); err != nil {
+		return nil, err
+	}
+	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "mailbox.dispatch_fanout", "mailbox")
+	task, err = r.transitionTaskPreserveVersionLocked(task, TaskStatusDispatched)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	out := make([]TaskEnvelope, 0, len(recipients))
+	for _, agentID := range recipients {
+		env := TaskEnvelope{
+			ID:            r.newID("env"),
+			RunID:         cmd.RunID,
+			TaskID:        cmd.TaskID,
+			TargetAgentID: agentID,
+			Payload:       cloneAnyMap(cmd.Payload),
+			Status:        "pending",
+			TaskVersion:   task.Version,
+			ReadSelectors: slices.Clone(task.ReadSelectors),
+			WriteTargets:  slices.Clone(task.WriteTargets),
+			RetryPolicy:   task.RetryPolicy,
+			CreatedAt:     now,
+		}
+		r.writeEnvelopeLocked(env)
+		out = append(out, env)
+	}
+	return out, nil
 }
 
 func (r *Runtime) AcquireTaskExecution(_ context.Context, cmd AcquireTaskExecutionCommand) (TaskExecutionLease, bool, error) {
