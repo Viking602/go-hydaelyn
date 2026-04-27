@@ -1,8 +1,14 @@
 # Public API Freeze
 
+## Root Package Default
+
+`hydaelyn.New(hydaelyn.Config{})` now returns the primary orchestrator runtime.
+Legacy Team + Pattern execution is available through
+`hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})` and direct `host` imports.
+
 ## Stable Packages
 
-The v1 public surface includes:
+The major-version public surface includes:
 
 - `agent`
 - `blackboard`
@@ -23,7 +29,7 @@ The v1 public surface includes:
 
 These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
 
-## Additive Runtime Contracts
+## Runtime Contracts
 
 The following additive fields and behaviors are now part of the public contract:
 
@@ -64,16 +70,20 @@ Consumers must tolerate these additive fields and may rely on them for replay va
 
 ### Orchestrator Runtime
 
-The run-level orchestration contract is additive and is the preferred surface
-for new durable adapters:
+The run-level orchestration contract is the preferred surface for new durable
+adapters:
 
-- `orchestrator.StartRun`, `QueueRun`, `RunEvents`, `RunTimeline`, `ReplayRunState`
+- `orchestrator.StartRun`, `QueueRun`, `ExecuteCommand`, `RunEvents`, `RunTimeline`, `ReplayRunState`
 - `orchestrator.Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
-- `orchestrator.RunStore`, `TaskStore`, `EventStore`, `MailboxOutbox`, `ResponseOutbox`
+- `orchestrator.RunStore`, `TaskStore`, `EventStore`, `StoreProvider`, `UnitOfWork`
+- `orchestrator.MailboxOutboxStore`, `UserMessageStore`, `ResponseOutbox`, `TraceStore`
+- `orchestrator.PolicyEngine.Authorize(ctx, PolicyRequest)`
+- `orchestrator.ApprovalRequest`, `ResumeToken`, `ActionAttempt`
 - `orchestrator.Flow` as preset metadata, not a state-transition bypass
 
 Legacy `host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
-`ReplayTeamState` stay callable for the current migration window.
+`ReplayTeamState` stay callable through `NewTeamRuntime` and direct `host`
+imports for the current migration window.
 
 ### Panel Collaboration
 

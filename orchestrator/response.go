@@ -25,7 +25,7 @@ type PublishResponseCommand struct {
 	MessageID string
 }
 
-func (r *Runtime) SubmitResponseOutput(_ context.Context, cmd SubmitResponseOutputCommand) error {
+func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOutputCommand) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[cmd.RunID][cmd.TaskID]
@@ -57,20 +57,22 @@ func (r *Runtime) SubmitResponseOutput(_ context.Context, cmd SubmitResponseOutp
 	if message.IdempotencyKey == "" {
 		message.IdempotencyKey = cmd.RunID + ":" + cmd.TaskID + ":" + string(message.Type)
 	}
-	decision := PolicyDecision{Effect: PolicyEffectAllow}
-	if r.messagePolicy != nil {
-		decision = r.messagePolicy(message)
-		if decision.Effect == "" {
-			decision.Effect = PolicyEffectAllow
-		}
-	}
-	if decision.Effect == PolicyEffectDeny || decision.Effect == PolicyEffectAbort {
-		return ErrPolicyDenied
+	decision, err := r.authorizeLocked(ctx, PolicyRequest{
+		Operation: PolicyOperationResponseCompose,
+		RunID:     cmd.RunID,
+		TaskID:    cmd.TaskID,
+		Actor:     actorFromHolder(cmd.HolderType, cmd.HolderID),
+		Message:   &message,
+	})
+	if err != nil {
+		return err
 	}
 	sanitized, err := r.applyResponseObligationsLocked(message, decision)
 	if err != nil {
 		return err
 	}
+	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "response.compose", "response")
+	r.writeCriticalContextLocked(cmd.RunID, cmd.TaskID, BlackboardItemContext, actorFromHolder(cmd.HolderType, cmd.HolderID), "response_payload", sanitized.Payload)
 	r.appendEventLocked(cmd.RunID, cmd.TaskID, EventUserMessageComposed, map[string]any{
 		"message": userMessagePayload(sanitized),
 	})
@@ -95,10 +97,46 @@ func (r *Runtime) SubmitResponseOutput(_ context.Context, cmd SubmitResponseOutp
 	return nil
 }
 
-func (r *Runtime) PublishResponse(_ context.Context, cmd PublishResponseCommand) error {
+func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
+	r.mu.Lock()
+	message, ok := r.messages[cmd.MessageID]
+	if !ok || message.RunID != cmd.RunID {
+		r.mu.Unlock()
+		return ErrNotFound
+	}
+	if message.Status == UserMessagePublished {
+		r.mu.Unlock()
+		return nil
+	}
+	if message.Status != UserMessageQueued {
+		r.mu.Unlock()
+		return ErrInvalidCommand
+	}
+	if _, err := r.authorizeLocked(ctx, PolicyRequest{
+		Operation: PolicyOperationResponsePublish,
+		RunID:     cmd.RunID,
+		TaskID:    message.TaskID,
+		Message:   &message,
+	}); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	gateway := r.outputGateway
+	r.mu.Unlock()
+
+	if err := gateway.Publish(ctx, message); err != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.appendEventLocked(cmd.RunID, message.TaskID, EventResponsePublishFailed, map[string]any{
+			"messageId": message.ID,
+			"reason":    err.Error(),
+		})
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	message, ok := r.messages[cmd.MessageID]
+	message, ok = r.messages[cmd.MessageID]
 	if !ok || message.RunID != cmd.RunID {
 		return ErrNotFound
 	}
@@ -108,6 +146,7 @@ func (r *Runtime) PublishResponse(_ context.Context, cmd PublishResponseCommand)
 	if message.Status != UserMessageQueued {
 		return ErrInvalidCommand
 	}
+	r.recordTraceLocked(cmd.RunID, message.TaskID, "response.publish", "response")
 	message.Status = UserMessagePublished
 	message.PublishedAt = time.Now().UTC()
 	message.UpdatedAt = time.Now().UTC()

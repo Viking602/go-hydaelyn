@@ -13,16 +13,21 @@
 新模型：
 
 - `orchestrator.StartRun` 创建 `Run + RootTask`
+- `Runtime.ExecuteCommand` 作为命令层入口，状态变更走 `StoreProvider + UnitOfWork`
 - planner/router adapter 创建一等 `Task`
 - `DispatchTask` 只写任务信封，不能授予执行权限
 - agent/component 必须 `AcquireTaskExecution` 后才能执行
 - `SubmitTypedReport` 是唯一正式任务提交协议
 - `ResponseTask` 和 `OutputGateway` 是唯一用户消息链路
+- `PolicyEngine.Authorize(ctx, PolicyRequest)` 统一覆盖 dispatch、blackboard、
+  handoff、tool call、action、response publish
+- `needs_clarification` 进入 `waiting_user_input`，并通过 resume token 或用户输入恢复
 
 兼容策略：
 
-- `host.StartTeam` 仍可用，但只作为 legacy compatibility entrypoint。
-- 新代码优先直接使用 `orchestrator` 包；旧 pattern 可以作为 planner/router preset 输入。
+- `hydaelyn.New` 默认返回 Orchestrator runtime。
+- `host.StartTeam` / `hydaelyn.NewTeamRuntime` 仍可用，但只作为 legacy compatibility entrypoint。
+- 新代码优先使用 root `hydaelyn` / `orchestrator` 包；旧 pattern 可以作为 planner/router preset 输入。
 - side-effecting tool 必须补齐 `EffectType` / `RequiresActionTask` / `Idempotent`
   等治理字段，并通过 ActionTask 运行。
 - 下游展示最终答案时优先消费 response outbox / `UserMessage`，不要让普通
@@ -38,6 +43,8 @@ API 映射：
 - `Pattern` -> `Flow`
 - `SupervisorProfile` -> `ControllerProfile`
 - `WorkerProfiles` -> `AgentProfiles`
+- message-only policy -> `PolicyEngine.Authorize(ctx, PolicyRequest)`
+- direct user message write/publish -> `ResponseTask + ResponseOutbox + OutputGateway`
 
 ### 1. Task assignee
 
@@ -93,6 +100,9 @@ API 映射：
 - replay
 - pause / resume / abort
 - admin inspect/replay/events
+- StoreProvider / UnitOfWork runtime contract
+- durable mailbox and response outbox contracts
+- approval / resume token / action attempt lifecycle
 
 仍待后续补齐：
 

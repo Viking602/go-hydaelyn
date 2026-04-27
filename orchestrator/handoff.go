@@ -11,7 +11,7 @@ type HandoffCommand struct {
 	HandoffContext string
 }
 
-func (r *Runtime) RequestHandoff(_ context.Context, cmd HandoffCommand) error {
+func (r *Runtime) RequestHandoff(ctx context.Context, cmd HandoffCommand) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if run, ok := r.runs[cmd.RunID]; !ok {
@@ -31,6 +31,16 @@ func (r *Runtime) RequestHandoff(_ context.Context, cmd HandoffCommand) error {
 		ContextSummary: cmd.HandoffContext,
 		TaskVersion:    cmd.TaskVersion,
 	}
+	if _, err := r.authorizeLocked(ctx, PolicyRequest{
+		Operation: PolicyOperationHandoff,
+		RunID:     cmd.RunID,
+		TaskID:    cmd.TaskID,
+		Actor:     SourceIdentity{Type: SourceAgent, ID: cmd.FromAgentID},
+		Handoff:   request,
+	}); err != nil {
+		return err
+	}
+	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "handoff.request", "handoff")
 	return r.applyHandoffLocked(&task, request, cmd.HandoffContext)
 }
 

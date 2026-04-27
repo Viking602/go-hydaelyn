@@ -1,5 +1,5 @@
 // Package hydaelyn is the root façade for the go-hydaelyn multi-agent
-// runtime. It re-exports the most common entry points so simple
+// runtime. It re-exports the primary Run/Task entry points so simple
 // programs can write:
 //
 //	runtime := hydaelyn.New(hydaelyn.Config{})
@@ -8,18 +8,18 @@
 //
 // Subpackages host the real API surface, grouped by concern:
 //
-//   - [host]       — runtime assembly, session store, plugin registry
+//   - [host]       — deprecated Team + Pattern compatibility runtime
 //   - [agent]      — agent engine and role definitions
-//   - [team]       — team orchestration, patterns, and run state
+//   - [team]       — legacy team orchestration, patterns, and run state
 //   - [provider]   — LLM provider drivers (anthropic, openai, scripted)
 //   - [tool]       — tool contract + kit/tooltest helpers
-//   - [pattern]    — reusable collaboration patterns
+//   - [pattern]    — legacy presets being migrated to Flow
 //   - [hook]       — pre/post-turn hook contracts
 //   - [transport]  — MCP gateway and HTTP control plane
 //   - [observe]    — tracing and metrics observer interface
 //   - [capability] — capability/security policy and context plumbing
 //   - [mailbox]    — agent-to-agent signal messaging (ask/answer/delegate)
-//   - [orchestrator] — run/task runtime primitives, leases, handoff, response
+//   - [orchestrator] — primary run/task runtime primitives, leases, handoff, response
 //   - [planner]    — planner contract and template provider
 //   - [scheduler]  — task queue and lease interfaces
 //   - [storage]    — run/workflow/session persistence drivers

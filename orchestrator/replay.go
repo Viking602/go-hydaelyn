@@ -151,6 +151,8 @@ func taskFromPayload(payload map[string]any) Task {
 		Version:         intFromPayload(payload["version"]),
 		Attempts:        intFromPayload(payload["attempts"]),
 		HandoffCount:    intFromPayload(payload["handoffCount"]),
+		CreatedAt:       timeFromPayload(payload["createdAt"]),
+		UpdatedAt:       timeFromPayload(payload["updatedAt"]),
 	}
 }
 

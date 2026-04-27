@@ -319,7 +319,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if blocked.Status != TaskStatusBlocked || currentRun.Status != RunStatusBlocked {
+	if blocked.Status != TaskStatusWaitingUserInput || currentRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification did not block task/run: task=%#v run=%#v", blocked, currentRun)
 	}
 	if err := rt.SubmitUserInput(ctx, SubmitUserInputCommand{RunID: run.ID, TaskID: worker.ID, Input: "region=us-east-1"}); err != nil {
@@ -428,7 +428,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Task(action unknown) error = %v", err)
 	}
-	if reconcileTask.Status != TaskStatusBlocked || reconcileTask.Attempts != 1 {
+	if reconcileTask.Status != TaskStatusReconcileRequired || reconcileTask.Attempts != 1 {
 		t.Fatalf("unknown action must block without auto retry, got %#v", reconcileTask)
 	}
 	if !collectEventTypes(rt.Events(run.ID)).Contains(EventActionReconcileRequired) {

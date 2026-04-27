@@ -8,9 +8,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Viking602/go-hydaelyn/blob/main/LICENSE)
 [![Module](https://img.shields.io/badge/module-github.com%2FViking602%2Fgo--hydaelyn-007d9c?logo=go)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
 
-Hydaelyn is a multi-agent parallel runtime for Go.
+Hydaelyn is a Run/Task orchestrator for Go.
 
-Embed it into your application with `hydaelyn` (or the lower-level `host` package) to run supervisor-controlled teams, deepsearch-style research flows, and other parallel agent workflows inside a normal Go program.
+Embed it into your application with `hydaelyn` to run durable orchestrator
+workflows where every state change goes through Run/Task commands, policy,
+leases, typed reports, handoff, response outbox, and replay.
 
 ## Install
 
@@ -20,7 +22,8 @@ go get github.com/Viking602/go-hydaelyn@latest
 
 ## Quickstart
 
-Run a multi-agent team without external API keys using a tiny local echo provider:
+Start a run, let the orchestrator create the root task, and inspect the
+append-only event stream:
 
 ```go
 package main
@@ -30,59 +33,35 @@ import (
 	"fmt"
 
 	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/team"
 )
-
-type echoProvider struct{}
-
-func (echoProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "echo"}
-}
-
-func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
-	last := request.Messages[len(request.Messages)-1]
-	return provider.NewSliceStream([]provider.Event{
-		{Kind: provider.EventTextDelta, Text: last.Text},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-	}), nil
-}
 
 func main() {
 	runner := hydaelyn.New(hydaelyn.Config{})
-	runner.RegisterProvider("echo", echoProvider{})
-	runner.RegisterPattern(deepsearch.New())
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-	state, err := runner.StartTeam(context.Background(), hydaelyn.StartTeamRequest{
-		Pattern:           "deepsearch",
-		SupervisorProfile: "supervisor",
-		WorkerProfiles:    []string{"researcher", "researcher"},
-		Input: map[string]any{
-			"query":      "compare options for a Go research assistant",
-			"subqueries": []string{"runtime design", "tool integration"},
-		},
+	run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
+		Request: "compare options for a Go research assistant",
 	})
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(state.Result.Summary)
+	events, err := runner.RunEvents(context.Background(), run.ID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(run.ID, len(events))
 }
 ```
 
 ## Core Concepts
 
-Hydaelyn centers on embeddable multi-agent runtime primitives. Existing
-`deepsearch` and panel patterns still run through `host`, while new durable
-orchestration work should model execution as `Run + Task + TaskExecutionLease`
-through the `orchestrator` package. Patterns provide presets; the runtime owns
-state transitions, typed reports, handoff, policy, response outbox, and replay.
+Hydaelyn centers on embeddable orchestrator primitives. New work should model
+execution as `Run + Task + TaskExecutionLease`. Flow and pattern adapters are
+presets only; they must not bypass `TaskStore`, `PolicyEngine`,
+`TaskExecutionLease`, handoff, `ResponseLayer`, or `OutputGateway`.
 
 Minimal run-level orchestration:
 
 ```go
-rt := hydaelyn.NewOrchestrator()
+rt := hydaelyn.New(hydaelyn.Config{})
 run, err := rt.QueueRun(context.Background(), hydaelyn.StartRunCommand{
 	Request: "coordinate a multi-agent run",
 })
@@ -91,6 +70,12 @@ if err != nil {
 }
 events, _ := rt.RunEvents(context.Background(), run.ID)
 fmt.Println(len(events))
+```
+
+Legacy Team + Pattern code remains available during the migration window:
+
+```go
+teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
 ```
 
 ## Examples + Read Next

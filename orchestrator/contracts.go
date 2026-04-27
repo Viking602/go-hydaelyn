@@ -21,6 +21,11 @@ type EventStore interface {
 	ListEvents(context.Context, string) ([]Event, error)
 }
 
+type TraceStore interface {
+	SaveTraceSpan(context.Context, TraceSpan) error
+	ListTraceSpans(context.Context, string) ([]TraceSpan, error)
+}
+
 type BlackboardStore interface {
 	WriteItem(context.Context, BlackboardItem) error
 	SelectItems(context.Context, string, BlackboardSelector) ([]BlackboardItem, error)
@@ -32,12 +37,50 @@ type ResponseOutbox interface {
 	ListMessages(context.Context, string) ([]UserMessage, error)
 }
 
+type UserMessageStore interface {
+	QueueMessage(context.Context, UserMessage) error
+	LoadMessage(context.Context, string, string) (UserMessage, error)
+	UpdateMessage(context.Context, UserMessage) error
+	ListMessages(context.Context, string) ([]UserMessage, error)
+}
+
+type MailboxOutboxStore interface {
+	QueueEnvelope(context.Context, TaskEnvelope) error
+	LoadEnvelope(context.Context, string) (TaskEnvelope, error)
+	UpdateEnvelope(context.Context, TaskEnvelope) error
+	ListEnvelopes(context.Context, string) ([]TaskEnvelope, error)
+}
+
+type UnitOfWork interface {
+	Runs() RunStore
+	Tasks() TaskStore
+	Events() EventStore
+	Blackboard() BlackboardStore
+	MailboxOutbox() MailboxOutboxStore
+	UserMessages() UserMessageStore
+	Trace() TraceStore
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
+type StoreProvider interface {
+	Begin(context.Context) (UnitOfWork, error)
+}
+
+type RuntimeCommand interface {
+	CommandName() string
+}
+
 type PolicyEngine interface {
-	EvaluateMessage(context.Context, UserMessage) (PolicyDecision, error)
+	Authorize(context.Context, PolicyRequest) (PolicyDecision, error)
 }
 
 type OutputGateway interface {
 	Publish(context.Context, UserMessage) error
+}
+
+type UserTimelineProjector interface {
+	ProjectUserTimeline(context.Context, []Event) ([]RunTimelineItem, error)
 }
 
 type Projector interface {
@@ -66,6 +109,7 @@ type Dispatcher interface {
 
 type TaskMonitor interface {
 	Advance(context.Context, Run) error
+	DecideDeadLetter(context.Context, TaskEnvelope, string) (TaskMonitorDecision, error)
 }
 
 type Intent struct {
@@ -142,3 +186,45 @@ type ApprovalDecision struct {
 }
 
 type MailboxOutbox = TaskEnvelope
+
+type PolicyOperation string
+
+const (
+	PolicyOperationDispatch        PolicyOperation = "dispatch"
+	PolicyOperationBlackboardRead  PolicyOperation = "blackboard_read"
+	PolicyOperationBlackboardWrite PolicyOperation = "blackboard_write"
+	PolicyOperationHandoff         PolicyOperation = "handoff"
+	PolicyOperationToolCall        PolicyOperation = "tool_call"
+	PolicyOperationAction          PolicyOperation = "action"
+	PolicyOperationResponseCompose PolicyOperation = "response_compose"
+	PolicyOperationResponsePublish PolicyOperation = "response_publish"
+)
+
+type PolicyRequest struct {
+	Operation PolicyOperation     `json:"operation"`
+	RunID     string              `json:"runId,omitempty"`
+	TaskID    string              `json:"taskId,omitempty"`
+	Actor     SourceIdentity      `json:"actor,omitempty"`
+	Tool      *Tool               `json:"tool,omitempty"`
+	Message   *UserMessage        `json:"message,omitempty"`
+	Handoff   *HandoffRequest     `json:"handoff,omitempty"`
+	Selector  *BlackboardSelector `json:"selector,omitempty"`
+	Item      *BlackboardItem     `json:"item,omitempty"`
+	Action    *ActionAttempt      `json:"action,omitempty"`
+	Metadata  map[string]string   `json:"metadata,omitempty"`
+}
+
+type TaskMonitorDecision struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+	Retry    bool   `json:"retry,omitempty"`
+}
+
+type PipelineComponents struct {
+	IntentAnalyzer IntentAnalyzer
+	Planner        Planner
+	Validator      PlanValidator
+	Router         TaskRouter
+	Dispatcher     Dispatcher
+	TaskMonitor    TaskMonitor
+}

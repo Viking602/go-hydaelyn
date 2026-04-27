@@ -37,10 +37,20 @@ func TestPublicAPISmoke(t *testing.T) {
 
 	runner := New(Config{})
 	var _ *Runtime = runner
-	runner.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {
+	run, err := runner.QueueRun(context.Background(), StartRunCommand{Request: "primary runtime smoke"})
+	if err != nil {
+		t.Fatalf("QueueRun() error = %v", err)
+	}
+	if run.ID == "" {
+		t.Fatalf("QueueRun() returned empty run: %#v", run)
+	}
+
+	legacy := NewTeamRuntime(TeamConfig{})
+	var _ *TeamRuntime = legacy
+	legacy.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {
 		return capability.Result{Output: "ok"}, nil
 	})
-	if _, err := runner.InvokeCapability(context.Background(), capability.Call{Type: capability.TypeSearch, Name: "web"}); err != nil {
+	if _, err := legacy.InvokeCapability(context.Background(), capability.Call{Type: capability.TypeSearch, Name: "web"}); err != nil {
 		t.Fatalf("InvokeCapability() error = %v", err)
 	}
 }

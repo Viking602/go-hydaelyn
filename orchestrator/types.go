@@ -37,8 +37,10 @@ const (
 	RunStatusRunning           RunStatus = "running"
 	RunStatusSynthesizing      RunStatus = "synthesizing"
 	RunStatusReviewing         RunStatus = "reviewing"
+	RunStatusWaitingUserInput  RunStatus = "waiting_user_input"
 	RunStatusWaitingApproval   RunStatus = "waiting_approval"
 	RunStatusExecuting         RunStatus = "executing"
+	RunStatusReconcileRequired RunStatus = "reconcile_required"
 	RunStatusComposingResponse RunStatus = "composing_response"
 	RunStatusCompleted         RunStatus = "completed"
 	RunStatusFailed            RunStatus = "failed"
@@ -67,6 +69,8 @@ const (
 	TaskStatusDispatched        TaskStatus = "dispatched"
 	TaskStatusRunning           TaskStatus = "running"
 	TaskStatusPaused            TaskStatus = "paused"
+	TaskStatusWaitingUserInput  TaskStatus = "waiting_user_input"
+	TaskStatusReconcileRequired TaskStatus = "reconcile_required"
 	TaskStatusBlocked           TaskStatus = "blocked"
 	TaskStatusCompleted         TaskStatus = "completed"
 	TaskStatusFailed            TaskStatus = "failed"
@@ -218,10 +222,15 @@ const (
 	EventTaskBlocked              EventType = "TaskBlocked"
 	EventTaskPaused               EventType = "TaskPaused"
 	EventUserInputSubmitted       EventType = "UserInputSubmitted"
+	EventResumeTokenCreated       EventType = "ResumeTokenCreated"
 	EventActionReconcileRequired  EventType = "ActionReconcileRequired"
+	EventActionAttemptStarted     EventType = "ActionAttemptStarted"
+	EventActionAttemptUpdated     EventType = "ActionAttemptUpdated"
 	EventBlackboardItemWritten    EventType = "BlackboardItemWritten"
 	EventHandoffRequested         EventType = "HandoffRequested"
 	EventHandoffApplied           EventType = "HandoffApplied"
+	EventApprovalRequested        EventType = "ApprovalRequested"
+	EventApprovalDecided          EventType = "ApprovalDecided"
 	EventTaskOwnerChanged         EventType = "TaskOwnerChanged"
 	EventPolicyObligationFailed   EventType = "PolicyObligationFailed"
 	EventResponseTaskCreated      EventType = "ResponseTaskCreated"
@@ -229,7 +238,11 @@ const (
 	EventUserMessagePolicyChecked EventType = "UserMessagePolicyChecked"
 	EventUserMessageQueued        EventType = "UserMessageQueued"
 	EventResponsePublished        EventType = "ResponsePublished"
+	EventResponsePublishFailed    EventType = "ResponsePublishFailed"
 	EventTaskMonitorDecision      EventType = "TaskMonitorDecision"
+	EventMailboxRetryScheduled    EventType = "MailboxRetryScheduled"
+	EventTraceSpanStarted         EventType = "TraceSpanStarted"
+	EventTraceSpanEnded           EventType = "TraceSpanEnded"
 )
 
 type ReplayMode string
@@ -353,11 +366,12 @@ type BlackboardItem struct {
 }
 
 type BlackboardSelector struct {
-	RunID          string               `json:"runId,omitempty"`
-	TaskID         string               `json:"taskId,omitempty"`
-	ItemTypes      []BlackboardItemType `json:"itemTypes,omitempty"`
-	SourceTypes    []SourceType         `json:"sourceTypes,omitempty"`
-	SourceIDs      []string             `json:"sourceIds,omitempty"`
+	RunID       string               `json:"runId,omitempty"`
+	TaskID      string               `json:"taskId,omitempty"`
+	ItemTypes   []BlackboardItemType `json:"itemTypes,omitempty"`
+	SourceTypes []SourceType         `json:"sourceTypes,omitempty"`
+	SourceIDs   []string             `json:"sourceIds,omitempty"`
+	// Deprecated: use SourceTypes: [SourceAgent] plus SourceIDs instead.
 	SourceAgentIDs []string             `json:"sourceAgentIds,omitempty"`
 	Visibility     BlackboardVisibility `json:"visibility,omitempty"`
 	Tags           []string             `json:"tags,omitempty"`
@@ -469,3 +483,26 @@ type ReplaySideEffects struct {
 }
 
 type MessagePolicyChecker func(UserMessage) PolicyDecision
+
+type TraceSpanStatus string
+
+const (
+	TraceSpanStarted TraceSpanStatus = "started"
+	TraceSpanEnded   TraceSpanStatus = "ended"
+	TraceSpanFailed  TraceSpanStatus = "failed"
+)
+
+type TraceSpan struct {
+	ID        string            `json:"spanId"`
+	RunID     string            `json:"runId,omitempty"`
+	TaskID    string            `json:"taskId,omitempty"`
+	TraceID   string            `json:"traceId,omitempty"`
+	ParentID  string            `json:"parentId,omitempty"`
+	Name      string            `json:"name"`
+	Component string            `json:"component,omitempty"`
+	Status    TraceSpanStatus   `json:"status"`
+	StartedAt time.Time         `json:"startedAt"`
+	EndedAt   time.Time         `json:"endedAt,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}

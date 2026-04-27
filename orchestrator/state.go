@@ -22,9 +22,13 @@ type AdvanceRunCommand struct {
 
 var allowedRunTransitions = map[RunStatus]map[RunStatus]bool{
 	RunStatusCreated: {
-		RunStatusPlanning:  true,
-		RunStatusCancelled: true,
-		RunStatusFailed:    true,
+		RunStatusPlanning:          true,
+		RunStatusWaitingUserInput:  true,
+		RunStatusWaitingApproval:   true,
+		RunStatusReconcileRequired: true,
+		RunStatusBlocked:           true,
+		RunStatusCancelled:         true,
+		RunStatusFailed:            true,
 	},
 	RunStatusPlanning: {
 		RunStatusValidating: true,
@@ -51,11 +55,13 @@ var allowedRunTransitions = map[RunStatus]map[RunStatus]bool{
 		RunStatusCancelled: true,
 	},
 	RunStatusRunning: {
-		RunStatusSynthesizing:    true,
-		RunStatusWaitingApproval: true,
-		RunStatusBlocked:         true,
-		RunStatusFailed:          true,
-		RunStatusCancelled:       true,
+		RunStatusSynthesizing:      true,
+		RunStatusWaitingUserInput:  true,
+		RunStatusWaitingApproval:   true,
+		RunStatusReconcileRequired: true,
+		RunStatusBlocked:           true,
+		RunStatusFailed:            true,
+		RunStatusCancelled:         true,
 	},
 	RunStatusSynthesizing: {
 		RunStatusReviewing:         true,
@@ -72,14 +78,29 @@ var allowedRunTransitions = map[RunStatus]map[RunStatus]bool{
 		RunStatusCancelled:         true,
 	},
 	RunStatusWaitingApproval: {
+		RunStatusExecuting:         true,
+		RunStatusRunning:           true,
+		RunStatusReconcileRequired: true,
+		RunStatusBlocked:           true,
+		RunStatusCancelled:         true,
+	},
+	RunStatusWaitingUserInput: {
+		RunStatusRunning:   true,
+		RunStatusBlocked:   true,
+		RunStatusCancelled: true,
+		RunStatusFailed:    true,
+	},
+	RunStatusReconcileRequired: {
 		RunStatusExecuting: true,
 		RunStatusRunning:   true,
 		RunStatusBlocked:   true,
 		RunStatusCancelled: true,
+		RunStatusFailed:    true,
 	},
 	RunStatusExecuting: {
 		RunStatusComposingResponse: true,
 		RunStatusWaitingApproval:   true,
+		RunStatusReconcileRequired: true,
 		RunStatusBlocked:           true,
 		RunStatusFailed:            true,
 		RunStatusCancelled:         true,
@@ -139,14 +160,31 @@ var allowedTaskTransitions = map[TaskStatus]map[TaskStatus]bool{
 		TaskStatusFailed:    true,
 	},
 	TaskStatusRunning: {
-		TaskStatusDispatched: true,
-		TaskStatusPaused:     true,
-		TaskStatusBlocked:    true,
-		TaskStatusCompleted:  true,
-		TaskStatusFailed:     true,
-		TaskStatusCancelled:  true,
+		TaskStatusDispatched:        true,
+		TaskStatusPaused:            true,
+		TaskStatusWaitingUserInput:  true,
+		TaskStatusReconcileRequired: true,
+		TaskStatusBlocked:           true,
+		TaskStatusCompleted:         true,
+		TaskStatusFailed:            true,
+		TaskStatusCancelled:         true,
 	},
 	TaskStatusPaused: {
+		TaskStatusDispatched:       true,
+		TaskStatusRunning:          true,
+		TaskStatusWaitingUserInput: true,
+		TaskStatusBlocked:          true,
+		TaskStatusCancelled:        true,
+		TaskStatusFailed:           true,
+	},
+	TaskStatusWaitingUserInput: {
+		TaskStatusDispatched: true,
+		TaskStatusRunning:    true,
+		TaskStatusBlocked:    true,
+		TaskStatusCancelled:  true,
+		TaskStatusFailed:     true,
+	},
+	TaskStatusReconcileRequired: {
 		TaskStatusDispatched: true,
 		TaskStatusRunning:    true,
 		TaskStatusBlocked:    true,
@@ -191,7 +229,7 @@ func (r *Runtime) TransitionTask(_ context.Context, cmd TransitionTaskCommand) e
 	return nil
 }
 
-func (r *Runtime) AdvanceRun(_ context.Context, cmd AdvanceRunCommand) (Run, error) {
+func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run, ok := r.runs[cmd.RunID]
@@ -201,49 +239,210 @@ func (r *Runtime) AdvanceRun(_ context.Context, cmd AdvanceRunCommand) (Run, err
 	if isTerminalRun(run.Status) {
 		return Run{}, ErrTerminalState
 	}
+	span := r.startTraceSpanLocked(StartTraceSpanCommand{
+		RunID:     run.ID,
+		TaskID:    run.RootTaskID,
+		Name:      "runtime.pipeline",
+		Component: "orchestrator",
+	})
 	var err error
-	for _, status := range []RunStatus{
-		RunStatusPlanning,
-		RunStatusValidating,
-		RunStatusRouting,
-		RunStatusDispatching,
-		RunStatusRunning,
-	} {
-		run, err = r.transitionRunLocked(run, status)
-		if err != nil {
-			return Run{}, err
-		}
+	defer func() {
+		r.finishTraceSpanLocked(span, err)
+	}()
+	run, plan, err := r.createPipelinePlanLocked(ctx, run)
+	if err != nil {
+		return Run{}, err
+	}
+	run, err = r.validatePipelinePlanLocked(ctx, run, plan)
+	if err != nil {
+		return Run{}, err
+	}
+	run, routing, err := r.routePipelinePlanLocked(ctx, run, plan)
+	if err != nil {
+		return Run{}, err
+	}
+	run, err = r.transitionRunLocked(run, RunStatusDispatching)
+	if err != nil {
+		return Run{}, err
+	}
+	if err = r.dispatchRoutingLocked(ctx, run, routing); err != nil {
+		return Run{}, err
+	}
+	run, err = r.transitionRunLocked(run, RunStatusRunning)
+	if err != nil {
+		return Run{}, err
+	}
+	if err = r.pipeline.TaskMonitor.Advance(ctx, run); err != nil {
+		return Run{}, err
+	}
+	return run, nil
+}
+
+func (r *Runtime) createPipelinePlanLocked(ctx context.Context, run Run) (Run, TodoPlan, error) {
+	run, err := r.transitionRunLocked(run, RunStatusPlanning)
+	if err != nil {
+		return Run{}, TodoPlan{}, err
+	}
+	intent, err := r.pipeline.IntentAnalyzer.AnalyzeIntent(ctx, run)
+	if err != nil {
+		return Run{}, TodoPlan{}, err
 	}
 	r.appendEventLocked(run.ID, run.RootTaskID, EventIntentAnalyzed, map[string]any{
-		"summary": run.Request,
+		"summary": intent.Summary,
 	})
-	plan := TodoPlan{RunID: run.ID, Tasks: []Task{r.tasks[run.ID][run.RootTaskID]}}
+	plan, err := r.pipeline.Planner.CreatePlan(ctx, intent)
+	if err != nil {
+		return Run{}, TodoPlan{}, err
+	}
+	if plan.RunID == "" {
+		plan.RunID = run.ID
+	}
+	if len(plan.Tasks) == 0 {
+		plan.Tasks = []Task{r.tasks[run.ID][run.RootTaskID]}
+	}
+	r.preparePlanTasksLocked(run, plan)
 	r.appendEventLocked(run.ID, run.RootTaskID, EventPlanCreated, map[string]any{
 		"taskCount": len(plan.Tasks),
 	})
+	return run, plan, nil
+}
+
+func (r *Runtime) preparePlanTasksLocked(run Run, plan TodoPlan) {
+	for _, planned := range plan.Tasks {
+		if planned.ID == "" || planned.ID == run.RootTaskID {
+			continue
+		}
+		planned = normalizePlannedTask(run.ID, planned)
+		if r.tasks[run.ID] == nil {
+			r.tasks[run.ID] = map[string]Task{}
+		}
+		if _, exists := r.tasks[run.ID][planned.ID]; exists {
+			continue
+		}
+		r.tasks[run.ID][planned.ID] = planned
+		r.appendEventLocked(run.ID, planned.ID, EventTaskCreated, taskEventPayload(planned))
+	}
+}
+
+func normalizePlannedTask(runID string, task Task) Task {
+	if task.RunID == "" {
+		task.RunID = runID
+	}
+	if task.Status == "" {
+		task.Status = TaskStatusPlanned
+	}
+	if task.Version == 0 {
+		task.Version = 1
+	}
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = time.Now().UTC()
+	}
+	task.UpdatedAt = task.CreatedAt
+	return task
+}
+
+func (r *Runtime) validatePipelinePlanLocked(ctx context.Context, run Run, plan TodoPlan) (Run, error) {
+	var err error
+	run, err = r.transitionRunLocked(run, RunStatusValidating)
+	if err != nil {
+		return Run{}, err
+	}
+	if err = r.pipeline.Validator.ValidatePlan(ctx, plan); err != nil {
+		return Run{}, err
+	}
 	r.appendEventLocked(run.ID, run.RootTaskID, EventPlanValidated, map[string]any{
 		"valid": true,
 	})
-	r.appendEventLocked(run.ID, run.RootTaskID, EventRoutingPlanCreated, map[string]any{
-		"routeCount": len(plan.Tasks),
-	})
-	root := r.tasks[run.ID][run.RootTaskID]
-	if !isTerminalTask(root.Status) {
-		root.Status = TaskStatusDispatched
-		root.UpdatedAt = time.Now().UTC()
-		r.tasks[root.RunID][root.ID] = root
-		r.writeEnvelopeLocked(TaskEnvelope{
-			ID:              r.newID("env"),
-			RunID:           root.RunID,
-			TaskID:          root.ID,
-			TargetComponent: root.OwnerComponent,
-			Type:            "TaskEnvelope",
-			Status:          "pending",
-			TaskVersion:     root.Version,
-			CreatedAt:       time.Now().UTC(),
-		})
+	for _, planned := range plan.Tasks {
+		task := r.tasks[run.ID][planned.ID]
+		if task.ID != "" && task.Status == TaskStatusPlanned {
+			if err = validateTaskTransition(task.Status, TaskStatusValidated); err != nil {
+				return Run{}, err
+			}
+			task.Status = TaskStatusValidated
+			task.Version++
+			r.saveTaskLocked(task)
+		}
 	}
 	return run, nil
+}
+
+func (r *Runtime) routePipelinePlanLocked(ctx context.Context, run Run, plan TodoPlan) (Run, RoutingPlan, error) {
+	var err error
+	run, err = r.transitionRunLocked(run, RunStatusRouting)
+	if err != nil {
+		return Run{}, RoutingPlan{}, err
+	}
+	routing, err := r.pipeline.Router.RouteTasks(ctx, plan)
+	if err != nil {
+		return Run{}, RoutingPlan{}, err
+	}
+	if routing.RunID == "" {
+		routing.RunID = run.ID
+	}
+	if len(routing.Routes) == 0 {
+		for _, task := range plan.Tasks {
+			routing.Routes = append(routing.Routes, TaskRoute{
+				TaskID:          task.ID,
+				TargetAgentID:   task.OwnerAgentID,
+				TargetComponent: task.OwnerComponent,
+			})
+		}
+	}
+	r.appendEventLocked(run.ID, run.RootTaskID, EventRoutingPlanCreated, map[string]any{
+		"routeCount": len(routing.Routes),
+	})
+	for _, route := range routing.Routes {
+		task := r.tasks[run.ID][route.TaskID]
+		if task.ID != "" && task.Status == TaskStatusValidated {
+			if err = validateTaskTransition(task.Status, TaskStatusRouted); err != nil {
+				return Run{}, RoutingPlan{}, err
+			}
+			task.Status = TaskStatusRouted
+			task.Version++
+			r.saveTaskLocked(task)
+		}
+	}
+	return run, routing, nil
+}
+
+func (r *Runtime) dispatchRoutingLocked(ctx context.Context, run Run, routing RoutingPlan) error {
+	envelopes, err := r.pipeline.Dispatcher.Dispatch(ctx, routing)
+	if err != nil {
+		return err
+	}
+	for _, env := range envelopes {
+		task := r.tasks[run.ID][env.TaskID]
+		if task.ID == "" || isTerminalTask(task.Status) {
+			continue
+		}
+		if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(run.ID, task.DependsOn) {
+			continue
+		}
+		if err = validateTaskTransition(task.Status, TaskStatusDispatched); err != nil {
+			return err
+		}
+		if _, err = r.authorizeLocked(ctx, PolicyRequest{
+			Operation: PolicyOperationDispatch,
+			RunID:     run.ID,
+			TaskID:    task.ID,
+			Actor:     SourceIdentity{Type: SourceComponent, ID: "dispatcher"},
+		}); err != nil {
+			return err
+		}
+		task.Status = TaskStatusDispatched
+		task.UpdatedAt = time.Now().UTC()
+		r.tasks[task.RunID][task.ID] = task
+		env.RunID = run.ID
+		env.TaskID = task.ID
+		env.TargetAgentID = firstNonEmpty(env.TargetAgentID, task.OwnerAgentID)
+		env.TargetComponent = firstNonEmpty(env.TargetComponent, task.OwnerComponent)
+		env.TaskVersion = task.Version
+		env.CreatedAt = time.Now().UTC()
+		r.recordTraceLocked(run.ID, task.ID, "mailbox.dispatch", "mailbox")
+		r.writeEnvelopeLocked(env)
+	}
+	return nil
 }
 
 func (r *Runtime) transitionRunLocked(run Run, to RunStatus) (Run, error) {
@@ -283,4 +482,30 @@ func (r *Runtime) transitionTaskLocked(task Task, to TaskStatus) (Task, error) {
 	task.UpdatedAt = time.Now().UTC()
 	r.tasks[task.RunID][task.ID] = task
 	return task, nil
+}
+
+func validateRunTransition(from, to RunStatus) error {
+	if from == to {
+		return nil
+	}
+	if isTerminalRun(from) {
+		return ErrTerminalState
+	}
+	if !allowedRunTransitions[from][to] {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+func validateTaskTransition(from, to TaskStatus) error {
+	if from == to {
+		return nil
+	}
+	if isTerminalTask(from) {
+		return ErrTerminalState
+	}
+	if !allowedTaskTransitions[from][to] {
+		return ErrInvalidTransition
+	}
+	return nil
 }

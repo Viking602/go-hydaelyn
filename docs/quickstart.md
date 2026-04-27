@@ -1,124 +1,106 @@
 # Quickstart
 
-## 1. Minimal Deepsearch Run
+## 1. Minimal Orchestrator Run
 
 ```go
-runner := host.New(host.Config{})
-runner.RegisterProvider("echo", myProvider)
-runner.RegisterPattern(deepsearch.New())
+runner := hydaelyn.New(hydaelyn.Config{})
 
-runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
-runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-
-state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
-	Pattern:           "deepsearch",
-	SupervisorProfile: "supervisor",
-	WorkerProfiles:    []string{"researcher", "researcher"},
-	Input: map[string]any{
-		"query":      "compare options for a Go research assistant",
-		"subqueries": []string{"runtime design", "tool integration"},
-	},
+run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
+	Request: "compare options for a Go research assistant",
 })
-```
-
-`deepsearch` now runs as:
-
-1. parallel research tasks
-2. optional verification tasks
-3. an explicit synthesize task
-
-Research tasks publish named outputs to the blackboard and the final synthesize task reads them explicitly.
-
-## 2. Panel Task Board
-
-Use `pattern/panel` when the user question should become a visible todo board
-that experts claim, execute in parallel, cross-review, and synthesize from
-verified findings.
-
-```go
-runner.RegisterPattern(panel.New())
-
-state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
-	Pattern:           "panel",
-	SupervisorProfile: "supervisor",
-	WorkerProfiles:    []string{"security", "frontend"},
-	Input: map[string]any{
-		"query":               "launch auth feature",
-		"requireVerification": true,
-		"todos": []any{
-			map[string]any{"id": "security-review", "title": "review auth threat model", "domain": "security"},
-			map[string]any{"id": "ui-review", "title": "review login UI", "domain": "frontend"},
-		},
-	},
-})
-
-timeline, err := runner.TeamTimeline(context.Background(), state.ID)
-```
-
-Panel uses worker profile names as default domains when `experts` is omitted,
-so the `security` profile claims `domain: "security"` todos. Panel tasks use
-typed reports for research, verification, and synthesis; research reports must
-include at least one claim. The final result also carries
-`Result.Structured["panel"]` with adopted findings, excluded claims, evidence,
-todos, and participants.
-
-## 3. Planner-Driven Teams
-
-Planner tasks can now declare:
-
-- `reads`
-- `writes`
-- `publish`
-
-```go
-plan := planner.Plan{
-	Tasks: []planner.TaskSpec{
-		{
-			ID:      "research-1",
-			Kind:    string(team.TaskKindResearch),
-			Input:   "branch one",
-			Writes:  []string{"research.branch-1"},
-			Publish: []team.OutputVisibility{team.OutputVisibilityShared, team.OutputVisibilityBlackboard},
-		},
-		{
-			ID:              "synth-1",
-			Kind:            string(team.TaskKindSynthesize),
-			AssigneeAgentID: "supervisor",
-			Reads:           []string{"research.branch-1"},
-			Publish:         []team.OutputVisibility{team.OutputVisibilityShared},
-			DependsOn:       []string{"research-1"},
-		},
-	},
+if err != nil {
+	panic(err)
 }
+
+timeline, err := runner.RunTimeline(context.Background(), run.ID)
 ```
 
-## 4. CLI
+`QueueRun` uses the primary runtime path:
+
+1. `StartRun` creates `Run + RootTask`.
+2. `IntentAnalyzer -> Planner -> Validator -> Router -> Dispatcher` advances the run.
+3. `DispatchTask` writes mailbox outbox envelopes only.
+4. `AcquireTaskExecution` grants the execution lease.
+5. `SubmitTypedReport` is the task completion protocol.
+6. Response tasks queue sanitized `UserMessage` records.
+7. `OutputGateway` publishes queued messages.
+8. `ReplayRunState` rebuilds state from events without redelivery or re-execution.
+
+## 2. Executing A Task
+
+```go
+task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	RunID:        run.ID,
+	TaskID:       "research-1",
+	OwnerAgentID: "agent-a",
+})
+
+env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+	RunID:         run.ID,
+	TaskID:        task.ID,
+	TargetAgentID: "agent-a",
+})
+
+lease, acquired, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	RunID:      run.ID,
+	TaskID:     task.ID,
+	EnvelopeID: env.ID,
+	HolderType: hydaelyn.HolderAgent,
+	HolderID:   "agent-a",
+	TTL:        time.Minute,
+})
+
+err = runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	RunID:       run.ID,
+	TaskID:      task.ID,
+	LeaseID:     lease.ID,
+	HolderType:  hydaelyn.HolderAgent,
+	HolderID:    "agent-a",
+	TaskVersion: task.Version,
+	Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "done"},
+})
+```
+
+Mailbox ack is not completion. A task can only complete through a typed report
+accepted under an active lease.
+
+## 3. Flow Presets
+
+`Flow` replaces `Pattern` as the new preset contract. A flow can select planner,
+router, policy, and projector presets, but it cannot bypass runtime primitives.
+
+```go
+err := runner.RegisterFlow(hydaelyn.Flow{Name: "deepsearch"})
+```
+
+## 4. Legacy Team + Pattern
+
+Existing `host.StartTeam` and pattern packages remain callable for compatibility:
+
+```go
+teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
+```
+
+Use this path only for migration. New features should target `Run`, `Task`,
+`TaskExecutionLease`, `TypedReport`, `Handoff`, `ResponseOutbox`, and replay.
+
+## 5. CLI And Legacy Docs
+
+The CLI still accepts Team request files while migration continues:
 
 ```bash
-hydaelyn init .
-hydaelyn new team.json
 hydaelyn validate --recipe recipe.yaml
 hydaelyn compile --recipe recipe.yaml
 hydaelyn validate --request team.json
 hydaelyn run --request team.json --events events.json
-hydaelyn inspect team --events events.json
-hydaelyn inspect events --events events.json --task task-1
-hydaelyn evaluate --events events.json
 hydaelyn replay --events events.json
 ```
 
-## 5. Replay And Durable Dataflow
-
-- `runner.TeamEvents(ctx, teamID)` returns the full event stream.
-- `runner.TeamTimeline(ctx, teamID)` returns user-facing collaboration steps.
-- `runner.ReplayTeamState(ctx, teamID)` rebuilds tasks, outputs, artifact refs, and blackboard exchanges.
-- `TaskInputsMaterialized` and `TaskOutputsPublished` events make dataflow visible in replay and inspection.
-
 ## 6. Next Docs
 
-- [Panel Task Board](panel.md)
+- [Orchestrator Runtime](orchestrator-runtime.md)
+- [Migration Notes](migration.md)
+- [Public API Freeze](public-api.md)
 - [Task Dataflow](task-dataflow.md)
 - [Recipe Compiler](recipe.md)
 - [Evaluation](evaluation.md)
-- [Durable Execution](durable-execution.md)
-- [Plugin Development](plugin-development.md)

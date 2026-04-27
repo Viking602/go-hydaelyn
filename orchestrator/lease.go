@@ -43,7 +43,7 @@ type DeadLetterCommand struct {
 	Reason     string
 }
 
-func (r *Runtime) DispatchTask(_ context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
+func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	run, ok := r.runs[cmd.RunID]
@@ -63,6 +63,22 @@ func (r *Runtime) DispatchTask(_ context.Context, cmd DispatchTaskCommand) (Task
 	if len(task.DependsOn) > 0 && !r.dependenciesCompletedLocked(cmd.RunID, task.DependsOn) {
 		return TaskEnvelope{}, ErrDependencyUnmet
 	}
+	if err := validateTaskTransition(task.Status, TaskStatusDispatched); err != nil {
+		return TaskEnvelope{}, err
+	}
+	if _, err := r.authorizeLocked(ctx, PolicyRequest{
+		Operation: PolicyOperationDispatch,
+		RunID:     cmd.RunID,
+		TaskID:    cmd.TaskID,
+		Actor:     SourceIdentity{Type: SourceComponent, ID: "dispatcher"},
+		Metadata: map[string]string{
+			"targetAgentId":   cmd.TargetAgentID,
+			"targetComponent": cmd.TargetComponent,
+		},
+	}); err != nil {
+		return TaskEnvelope{}, err
+	}
+	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "mailbox.dispatch", "mailbox")
 	now := time.Now().UTC()
 	env := TaskEnvelope{
 		ID:              r.newID("env"),
@@ -140,6 +156,7 @@ func (r *Runtime) AcquireTaskExecution(_ context.Context, cmd AcquireTaskExecuti
 	task.Status = TaskStatusRunning
 	task.Attempts++
 	r.saveTaskLocked(task)
+	r.recordTraceLocked(cmd.RunID, cmd.TaskID, "lease.acquire", "lease")
 	if cmd.EnvelopeID != "" {
 		env.Status = "delivered"
 		env.Attempts++
@@ -220,12 +237,47 @@ func (r *Runtime) AckEnvelope(_ context.Context, cmd AckEnvelopeCommand) error {
 	return nil
 }
 
-func (r *Runtime) DeadLetter(_ context.Context, cmd DeadLetterCommand) error {
+func (r *Runtime) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	env, ok := r.envelopes[cmd.EnvelopeID]
 	if !ok {
 		return ErrNotFound
+	}
+	decision, err := r.pipeline.TaskMonitor.DecideDeadLetter(ctx, env, cmd.Reason)
+	if err != nil {
+		return err
+	}
+	r.recordTraceLocked(env.RunID, env.TaskID, "task_monitor.dead_letter", "task_monitor")
+	if decision.Retry {
+		env.Status = "pending"
+		env.Attempts++
+		backoff := env.RetryPolicy.Backoff
+		if backoff <= 0 {
+			backoff = time.Second
+		}
+		env.NextRetryAt = time.Now().UTC().Add(backoff)
+		if task, ok := r.tasks[env.RunID][env.TaskID]; ok && !isTerminalTask(task.Status) {
+			r.releaseActiveLeaseLocked(env.RunID, env.TaskID)
+			if task.Status != TaskStatusDispatched {
+				task.Status = TaskStatusDispatched
+				task.Version++
+				task = r.saveTaskLocked(task)
+			}
+			env.TaskVersion = task.Version
+			env.DeliveredAt = time.Time{}
+		}
+		r.envelopes[cmd.EnvelopeID] = env
+		r.appendEventLocked(env.RunID, env.TaskID, EventMailboxRetryScheduled, map[string]any{
+			"envelopeId":  cmd.EnvelopeID,
+			"reason":      cmd.Reason,
+			"nextRetryAt": env.NextRetryAt,
+		})
+		r.appendEventLocked(env.RunID, env.TaskID, EventTaskMonitorDecision, map[string]any{
+			"decision": decision.Decision,
+			"reason":   decision.Reason,
+		})
+		return nil
 	}
 	env.Status = "dead"
 	r.envelopes[cmd.EnvelopeID] = env
@@ -244,8 +296,8 @@ func (r *Runtime) DeadLetter(_ context.Context, cmd DeadLetterCommand) error {
 		"reason":     cmd.Reason,
 	})
 	r.appendEventLocked(env.RunID, env.TaskID, EventTaskMonitorDecision, map[string]any{
-		"decision": "blocked",
-		"reason":   cmd.Reason,
+		"decision": decision.Decision,
+		"reason":   decision.Reason,
 	})
 	return nil
 }
@@ -292,6 +344,25 @@ func (r *Runtime) validateEnvelopeForAcquireLocked(cmd AcquireTaskExecutionComma
 
 func activeLeaseKey(runID, taskID string) string {
 	return runID + "\x00" + taskID
+}
+
+func (r *Runtime) releaseActiveLeaseLocked(runID, taskID string) {
+	key := activeLeaseKey(runID, taskID)
+	leaseID := r.activeLeaseByTask[key]
+	if leaseID == "" {
+		return
+	}
+	lease, ok := r.leases[leaseID]
+	if !ok || lease.Status != LeaseStatusActive {
+		delete(r.activeLeaseByTask, key)
+		return
+	}
+	lease.Status = LeaseStatusReleased
+	r.leases[lease.ID] = lease
+	delete(r.activeLeaseByTask, key)
+	r.appendEventLocked(runID, taskID, EventTaskExecutionReleased, map[string]any{
+		"leaseId": lease.ID,
+	})
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {

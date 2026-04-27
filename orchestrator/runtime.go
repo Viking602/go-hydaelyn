@@ -13,6 +13,7 @@ const maxHandoffDepth = 8
 
 type Runtime struct {
 	mu                sync.Mutex
+	storeProvider     StoreProvider
 	runs              map[string]Run
 	tasks             map[string]map[string]Task
 	events            map[string][]Event
@@ -25,13 +26,30 @@ type Runtime struct {
 	messages          map[string]UserMessage
 	messagesByRun     map[string][]string
 	flows             map[string]Flow
-	messagePolicy     MessagePolicyChecker
+	policy            PolicyEngine
+	outputGateway     OutputGateway
+	pipeline          PipelineComponents
+	approvals         map[string]ApprovalRequest
+	resumeTokens      map[string]ResumeToken
+	actionAttempts    map[string]ActionAttempt
+	traceSpans        map[string][]TraceSpan
 	seq               map[string]int
 	nextID            int
 }
 
+type Config struct {
+	StoreProvider StoreProvider
+	PolicyEngine  PolicyEngine
+	OutputGateway OutputGateway
+	Pipeline      PipelineComponents
+}
+
 func NewMemoryRuntime() *Runtime {
-	return &Runtime{
+	return NewRuntime(Config{})
+}
+
+func NewRuntime(config Config) *Runtime {
+	rt := &Runtime{
 		runs:              map[string]Run{},
 		tasks:             map[string]map[string]Task{},
 		events:            map[string][]Event{},
@@ -44,8 +62,27 @@ func NewMemoryRuntime() *Runtime {
 		messages:          map[string]UserMessage{},
 		messagesByRun:     map[string][]string{},
 		flows:             map[string]Flow{},
+		policy:            allowPolicyEngine{},
+		outputGateway:     memoryOutputGateway{},
+		approvals:         map[string]ApprovalRequest{},
+		resumeTokens:      map[string]ResumeToken{},
+		actionAttempts:    map[string]ActionAttempt{},
+		traceSpans:        map[string][]TraceSpan{},
 		seq:               map[string]int{},
 	}
+	if config.StoreProvider != nil {
+		rt.storeProvider = config.StoreProvider
+	} else {
+		rt.storeProvider = runtimeStoreProvider{runtime: rt}
+	}
+	if config.PolicyEngine != nil {
+		rt.policy = config.PolicyEngine
+	}
+	if config.OutputGateway != nil {
+		rt.outputGateway = config.OutputGateway
+	}
+	rt.pipeline = defaultPipeline(config.Pipeline)
+	return rt
 }
 
 type StartRunCommand struct {
@@ -247,7 +284,37 @@ func (r *Runtime) RegisterTool(tool Tool) {
 func (r *Runtime) SetMessagePolicy(policy MessagePolicyChecker) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.messagePolicy = policy
+	if policy == nil {
+		r.policy = allowPolicyEngine{}
+		return
+	}
+	r.policy = messagePolicyAdapter{check: policy}
+}
+
+func (r *Runtime) SetPolicyEngine(policy PolicyEngine) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if policy == nil {
+		r.policy = allowPolicyEngine{}
+		return
+	}
+	r.policy = policy
+}
+
+func (r *Runtime) SetOutputGateway(gateway OutputGateway) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if gateway == nil {
+		r.outputGateway = memoryOutputGateway{}
+		return
+	}
+	r.outputGateway = gateway
+}
+
+func (r *Runtime) SetPipeline(components PipelineComponents) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pipeline = defaultPipeline(components)
 }
 
 func (r *Runtime) appendEventLocked(runID, taskID string, typ EventType, payload map[string]any) {
@@ -274,6 +341,7 @@ func (r *Runtime) writeBlackboardLocked(item BlackboardItem) BlackboardItem {
 		item.CreatedAt = time.Now().UTC()
 	}
 	r.blackboard[item.RunID] = append(r.blackboard[item.RunID], item)
+	r.recordTraceLocked(item.RunID, item.TaskID, "blackboard.write", "blackboard")
 	r.appendEventLocked(item.RunID, item.TaskID, EventBlackboardItemWritten, map[string]any{
 		"itemId":     item.ID,
 		"sourceType": string(item.Source.Type),
@@ -310,7 +378,10 @@ func (r *Runtime) writeEnvelopeLocked(env TaskEnvelope) TaskEnvelope {
 	return env
 }
 
-func (r *Runtime) updateRunLocked(run Run, status RunStatus) Run {
+func (r *Runtime) updateRunLocked(run Run, status RunStatus) (Run, error) {
+	if err := validateRunTransition(run.Status, status); err != nil {
+		return Run{}, err
+	}
 	run.Status = status
 	run.UpdatedAt = time.Now().UTC()
 	r.runs[run.ID] = run
@@ -318,7 +389,7 @@ func (r *Runtime) updateRunLocked(run Run, status RunStatus) Run {
 		"to":  string(status),
 		"run": runPayload(run),
 	})
-	return run
+	return run, nil
 }
 
 func (r *Runtime) saveTaskLocked(task Task) Task {
@@ -349,6 +420,8 @@ func taskEventPayload(task Task) map[string]any {
 		"completionCriteria": slices.Clone(task.CompletionCriteria),
 		"dependsOn":          slices.Clone(task.DependsOn),
 		"retryPolicy":        retryPolicyPayload(task.RetryPolicy),
+		"createdAt":          task.CreatedAt,
+		"updatedAt":          task.UpdatedAt,
 	}
 }
 
@@ -426,4 +499,13 @@ func stringsCompare(a, b string) int {
 	default:
 		return 0
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

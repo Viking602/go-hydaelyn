@@ -181,7 +181,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if err != nil {
 		t.Fatalf("Run(clarification) error = %v", err)
 	}
-	if clarificationRun.Status != RunStatusBlocked {
+	if clarificationRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification should block run, got %#v", clarificationRun)
 	}
 	messages := rt.ResponseOutbox(run.ID)

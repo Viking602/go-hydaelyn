@@ -6,31 +6,68 @@ import (
 	"github.com/Viking602/go-hydaelyn/team"
 )
 
-// New constructs a [Runtime] from the given [Config]. It is a thin alias
-// for [host.New]; callers that need to customise middleware, plugins,
-// or session storage should import [host] directly.
-func New(cfg Config) *Runtime { return host.New(cfg) }
+// New constructs the primary Run/Task orchestrator runtime.
+func New(cfg Config) *Runtime { return orchestrator.NewRuntime(cfg) }
 
-// NewOrchestrator constructs the additive Run/Task orchestrator runtime.
-// The current implementation is in-memory and is intended for embedding,
-// tests, and adapter development while durable drivers converge.
+// NewOrchestrator constructs the primary Run/Task orchestrator runtime.
+//
+// Deprecated: use New.
 func NewOrchestrator() *OrchestratorRuntime { return orchestrator.NewMemoryRuntime() }
+
+// NewTeamRuntime constructs the legacy Team + Pattern runtime.
+func NewTeamRuntime(cfg TeamConfig) *TeamRuntime { return host.New(cfg) }
 
 // Public façade types. Each is a Go type alias for the equivalent type
 // in a subpackage, so values constructed via either name are
 // interchangeable.
 type (
-	Runtime          = host.Runtime
-	Config           = host.Config
-	StartTeamRequest = host.StartTeamRequest
+	Runtime                     = orchestrator.Runtime
+	Config                      = orchestrator.Config
+	OrchestratorRuntime         = orchestrator.Runtime
+	Run                         = orchestrator.Run
+	Task                        = orchestrator.Task
+	RunStatus                   = orchestrator.RunStatus
+	TaskStatus                  = orchestrator.TaskStatus
+	TaskType                    = orchestrator.TaskType
+	StartRunCommand             = orchestrator.StartRunCommand
+	CreateTaskCommand           = orchestrator.CreateTaskCommand
+	AdvanceRunCommand           = orchestrator.AdvanceRunCommand
+	DispatchTaskCommand         = orchestrator.DispatchTaskCommand
+	AcquireTaskExecutionCommand = orchestrator.AcquireTaskExecutionCommand
+	SubmitTypedReportCommand    = orchestrator.SubmitTypedReportCommand
+	SubmitResponseOutputCommand = orchestrator.SubmitResponseOutputCommand
+	PublishResponseCommand      = orchestrator.PublishResponseCommand
+	HandoffCommand              = orchestrator.HandoffCommand
+	RunTimelineItem             = orchestrator.RunTimelineItem
+	TypedReport                 = orchestrator.TypedReport
+	TaskExecutionLease          = orchestrator.TaskExecutionLease
+	TaskEnvelope                = orchestrator.TaskEnvelope
+	HolderType                  = orchestrator.HolderType
+	ReportStatus                = orchestrator.ReportStatus
+	Flow                        = orchestrator.Flow
+	PolicyRequest               = orchestrator.PolicyRequest
+	PolicyDecision              = orchestrator.PolicyDecision
+	UserMessage                 = orchestrator.UserMessage
 
-	OrchestratorRuntime = orchestrator.Runtime
-	Run                 = orchestrator.Run
-	Task                = orchestrator.Task
-	StartRunCommand     = orchestrator.StartRunCommand
-	AdvanceRunCommand   = orchestrator.AdvanceRunCommand
-	RunTimelineItem     = orchestrator.RunTimelineItem
+	// Deprecated: use Runtime plus Run/Task APIs. This alias remains for
+	// compatibility during the Team + Pattern migration window.
+	TeamRuntime      = host.Runtime
+	TeamConfig       = host.Config
+	StartTeamRequest = host.StartTeamRequest
 
 	Profile = team.Profile
 	Role    = team.Role
+)
+
+const (
+	HolderAgent     = orchestrator.HolderAgent
+	HolderComponent = orchestrator.HolderComponent
+
+	ReportStatusSuccess            = orchestrator.ReportStatusSuccess
+	ReportStatusPartialSuccess     = orchestrator.ReportStatusPartialSuccess
+	ReportStatusFailed             = orchestrator.ReportStatusFailed
+	ReportStatusBlocked            = orchestrator.ReportStatusBlocked
+	ReportStatusNeedsHandoff       = orchestrator.ReportStatusNeedsHandoff
+	ReportStatusNeedsApproval      = orchestrator.ReportStatusNeedsApproval
+	ReportStatusNeedsClarification = orchestrator.ReportStatusNeedsClarification
 )
