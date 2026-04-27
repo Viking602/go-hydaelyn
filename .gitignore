@@ -1,6 +1,8 @@
 .claude/
 .omc/
 .sisyphus/
-.sentrux/
+.sentrux/*
+!.sentrux/rules.toml
+!.sentrux/business-words.baseline
 benchmarks/_external/
 benchmarks/results/

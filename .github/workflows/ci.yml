@@ -106,6 +106,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
+  architecture-gate:
+    runs-on: ubuntu-latest
+
+    env:
+      SENTRUX_VERSION: v0.5.7
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install sentrux binary
+        run: |
+          curl -fsSL -o /usr/local/bin/sentrux \
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/sentrux-linux-x86_64"
+          chmod +x /usr/local/bin/sentrux
+          sentrux --version
+
+      - name: Install Go grammar plugin
+        run: sentrux plugin add go
+
+      - name: Architectural rules (.sentrux/rules.toml)
+        run: sentrux check .
+
+      - name: Framework business-word boundary (ADR-008)
+        run: ./scripts/check-business-words.sh
+
   release-soak:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
