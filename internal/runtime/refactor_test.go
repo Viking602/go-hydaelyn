@@ -148,7 +148,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	toolRT := NewRuntime(Config{PolicyEngine: toolPolicy})
 	toolRT.RegisterTool(Tool{Name: "deploy", EffectType: ToolEffectWrite})
 	toolRun := mustStartRun(t, ctx, toolRT, "run-policy-tool")
-	toolTask := mustCreateTask(t, ctx, toolRT, CreateTaskCommand{RunID: toolRun.ID, TaskID: "tool", Type: TaskTypeAction, OwnerAgentID: "agent-a"})
+	toolTask := mustCreateTask(t, ctx, toolRT, CreateTaskCommand{RunID: toolRun.ID, TaskID: "tool", Type: TaskTypeWorker, AllowsAction: true, OwnerAgentID: "agent-a"})
 	toolLease := leaseTask(t, ctx, toolRT, toolRun.ID, toolTask.ID, HolderAgent, "agent-a")
 	if _, err := toolRT.InvokeTool(ctx, ToolInvocation{RunID: toolRun.ID, TaskID: toolTask.ID, LeaseID: toolLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: toolTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("tool_call pause should block command, got %v", err)
@@ -161,7 +161,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	actionPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationAction: PolicyEffectPause}}
 	actionRT := NewRuntime(Config{PolicyEngine: actionPolicy})
 	actionRun := mustStartRun(t, ctx, actionRT, "run-policy-action")
-	actionTask := mustCreateTask(t, ctx, actionRT, CreateTaskCommand{RunID: actionRun.ID, TaskID: "action", Type: TaskTypeAction, OwnerAgentID: "agent-a"})
+	actionTask := mustCreateTask(t, ctx, actionRT, CreateTaskCommand{RunID: actionRun.ID, TaskID: "action", Type: TaskTypeWorker, AllowsAction: true, OwnerAgentID: "agent-a"})
 	actionLease := leaseTask(t, ctx, actionRT, actionRun.ID, actionTask.ID, HolderAgent, "agent-a")
 	if _, err := actionRT.StartActionAttempt(ctx, StartActionAttemptCommand{RunID: actionRun.ID, TaskID: actionTask.ID, LeaseID: actionLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: actionTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("action pause should block command, got %v", err)
@@ -307,7 +307,7 @@ func TestActionAttemptReconcileAndSourceIdentitySelector(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
 	run := mustStartRun(t, ctx, rt, "run-action-selector")
-	actionTask := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "action", Type: TaskTypeAction, OwnerAgentID: "agent-a"})
+	actionTask := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "action", Type: TaskTypeWorker, AllowsAction: true, OwnerAgentID: "agent-a"})
 	actionLease := leaseTask(t, ctx, rt, run.ID, actionTask.ID, HolderAgent, "agent-a")
 	attempt, err := rt.StartActionAttempt(ctx, StartActionAttemptCommand{
 		RunID:       run.ID,

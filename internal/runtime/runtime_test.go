@@ -33,7 +33,8 @@ func TestLeaseReportAndMailboxContracts(t *testing.T) {
 	dependent, err := rt.CreateTask(ctx, CreateTaskCommand{
 		RunID:          run.ID,
 		TaskID:         "synthesis-1",
-		Type:           TaskTypeSynthesis,
+		Type:           TaskTypeWorker,
+		Tags:           []string{"synthesis"},
 		OwnerComponent: "synthesizer",
 		DependsOn:      []string{task.ID},
 	})
@@ -349,7 +350,8 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	action, err := rt.CreateTask(ctx, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "action-1",
-		Type:         TaskTypeAction,
+		Type:         TaskTypeWorker,
+		AllowsAction: true,
 		OwnerAgentID: "agent-a",
 	})
 	if err != nil {
@@ -366,7 +368,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 		Report: TypedReport{
 			Status:       ReportStatusSuccess,
 			Summary:      "deployed",
-			ActionResult: &ActionResult{AttemptID: "attempt-1", Status: ActionAttemptSucceeded, Output: "ok"},
+			ActionOutcome: &ActionOutcome{AttemptID: "attempt-1", Status: ActionAttemptSucceeded, Output: "ok"},
 		},
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(action success) error = %v", err)
@@ -382,7 +384,8 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	failedAction, err := rt.CreateTask(ctx, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "action-failed",
-		Type:         TaskTypeAction,
+		Type:         TaskTypeWorker,
+		AllowsAction: true,
 		OwnerAgentID: "agent-a",
 	})
 	if err != nil {
@@ -399,7 +402,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 		Report: TypedReport{
 			Status:       ReportStatusSuccess,
 			Summary:      "attempt failed",
-			ActionResult: &ActionResult{AttemptID: "attempt-failed", Status: ActionAttemptFailed, Error: "denied"},
+			ActionOutcome: &ActionOutcome{AttemptID: "attempt-failed", Status: ActionAttemptFailed, Error: "denied"},
 		},
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(action failed) error = %v", err)
@@ -415,7 +418,8 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	unknownAction, err := rt.CreateTask(ctx, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "action-unknown",
-		Type:         TaskTypeAction,
+		Type:         TaskTypeWorker,
+		AllowsAction: true,
 		OwnerAgentID: "agent-a",
 	})
 	if err != nil {
@@ -432,7 +436,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 		Report: TypedReport{
 			Status:       ReportStatusSuccess,
 			Summary:      "unknown",
-			ActionResult: &ActionResult{AttemptID: "attempt-unknown", Status: ActionAttemptUnknown},
+			ActionOutcome: &ActionOutcome{AttemptID: "attempt-unknown", Status: ActionAttemptUnknown},
 		},
 	}); !errors.Is(err, ErrActionReconcileRequired) {
 		t.Fatalf("expected unknown action reconcile error, got %v", err)

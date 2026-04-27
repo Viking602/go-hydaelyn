@@ -37,8 +37,6 @@ const (
 	RunStatusRouting           RunStatus = "routing"
 	RunStatusDispatching       RunStatus = "dispatching"
 	RunStatusRunning           RunStatus = "running"
-	RunStatusSynthesizing      RunStatus = "synthesizing"
-	RunStatusReviewing         RunStatus = "reviewing"
 	RunStatusWaitingUserInput  RunStatus = "waiting_user_input"
 	RunStatusWaitingApproval   RunStatus = "waiting_approval"
 	RunStatusExecuting         RunStatus = "executing"
@@ -50,14 +48,20 @@ const (
 	RunStatusCancelled         RunStatus = "cancelled"
 )
 
+// TaskType is a free-form label set by the developer when creating a task.
+// The framework only guarantees behavior for two reserved values:
+//
+//   - TaskTypeWorker:   default; ordinary work performed by an agent.
+//   - TaskTypeResponse: composes the user-visible response (response.go).
+//
+// Any other value is opaque to the runtime and may be used for business
+// classification (use Task.Tags for cross-cutting categorization). To allow a
+// task to drive ActionAttempts, set Task.AllowsAction (not the type).
 type TaskType string
 
 const (
-	TaskTypeWorker    TaskType = "worker"
-	TaskTypeSynthesis TaskType = "synthesis"
-	TaskTypeReview    TaskType = "review"
-	TaskTypeAction    TaskType = "action"
-	TaskTypeResponse  TaskType = "response"
+	TaskTypeWorker   TaskType = "worker"
+	TaskTypeResponse TaskType = "response"
 )
 
 type TaskStatus string
@@ -135,6 +139,10 @@ const (
 	BlackboardVisibilityUserVisible          BlackboardVisibility = "user_visible"
 )
 
+// BlackboardItemType is the kind of evidence/output a blackboard entry carries.
+// The framework writes only generic kinds (claim/evidence/finding/...) and
+// leaves business-specific kinds to the developer; pass any string when the
+// caller writes its own item.
 type BlackboardItemType string
 
 const (
@@ -145,9 +153,6 @@ const (
 	BlackboardItemContext        BlackboardItemType = "context"
 	BlackboardItemTaskOutput     BlackboardItemType = "task_output"
 	BlackboardItemHandoffContext BlackboardItemType = "handoff_context"
-	BlackboardItemSynthesis      BlackboardItemType = "synthesis"
-	BlackboardItemReviewResult   BlackboardItemType = "review_result"
-	BlackboardItemActionResult   BlackboardItemType = "action_result"
 )
 
 type SourceType string
@@ -280,6 +285,8 @@ type Task struct {
 	Attempts           int                  `json:"attempts,omitempty"`
 	HandoffCount       int                  `json:"handoffCount,omitempty"`
 	OwnerHistory       []string             `json:"ownerHistory,omitempty"`
+	AllowsAction       bool                 `json:"allowsAction,omitempty"`
+	Tags               []string             `json:"tags,omitempty"`
 	CompletionCriteria []string             `json:"completionCriteria,omitempty"`
 	DependsOn          []string             `json:"dependsOn,omitempty"`
 	ReadSelectors      []BlackboardSelector `json:"readSelectors,omitempty"`
@@ -307,14 +314,17 @@ type TaskExecutionLease struct {
 }
 
 type TypedReport struct {
-	Status       ReportStatus    `json:"status"`
-	Summary      string          `json:"summary,omitempty"`
-	Structured   map[string]any  `json:"structured,omitempty"`
-	ActionResult *ActionResult   `json:"actionResult,omitempty"`
-	Handoff      *HandoffRequest `json:"handoff,omitempty"`
+	Status        ReportStatus    `json:"status"`
+	Summary       string          `json:"summary,omitempty"`
+	Structured    map[string]any  `json:"structured,omitempty"`
+	ActionOutcome *ActionOutcome  `json:"actionOutcome,omitempty"`
+	Handoff       *HandoffRequest `json:"handoff,omitempty"`
 }
 
-type ActionResult struct {
+// ActionOutcome is the structured outcome of an ActionAttempt. The framework
+// owns the action-attempt protocol; the contents (Output, ArtifactRefs, etc.)
+// are opaque domain payloads supplied by the caller.
+type ActionOutcome struct {
 	AttemptID         string              `json:"attemptId"`
 	ResultID          string              `json:"resultId,omitempty"`
 	ActionID          string              `json:"actionId,omitempty"`

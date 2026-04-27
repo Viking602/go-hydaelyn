@@ -53,8 +53,6 @@ const (
 	RunStatusRouting           = runtimeimpl.RunStatusRouting
 	RunStatusDispatching       = runtimeimpl.RunStatusDispatching
 	RunStatusRunning           = runtimeimpl.RunStatusRunning
-	RunStatusSynthesizing      = runtimeimpl.RunStatusSynthesizing
-	RunStatusReviewing         = runtimeimpl.RunStatusReviewing
 	RunStatusWaitingUserInput  = runtimeimpl.RunStatusWaitingUserInput
 	RunStatusWaitingApproval   = runtimeimpl.RunStatusWaitingApproval
 	RunStatusExecuting         = runtimeimpl.RunStatusExecuting
@@ -65,11 +63,8 @@ const (
 	RunStatusBlocked           = runtimeimpl.RunStatusBlocked
 	RunStatusCancelled         = runtimeimpl.RunStatusCancelled
 
-	TaskTypeWorker    = runtimeimpl.TaskTypeWorker
-	TaskTypeSynthesis = runtimeimpl.TaskTypeSynthesis
-	TaskTypeReview    = runtimeimpl.TaskTypeReview
-	TaskTypeAction    = runtimeimpl.TaskTypeAction
-	TaskTypeResponse  = runtimeimpl.TaskTypeResponse
+	TaskTypeWorker   = runtimeimpl.TaskTypeWorker
+	TaskTypeResponse = runtimeimpl.TaskTypeResponse
 
 	TaskStatusCreated           = runtimeimpl.TaskStatusCreated
 	TaskStatusPlanned           = runtimeimpl.TaskStatusPlanned
@@ -125,9 +120,6 @@ const (
 	BlackboardItemContext        = runtimeimpl.BlackboardItemContext
 	BlackboardItemTaskOutput     = runtimeimpl.BlackboardItemTaskOutput
 	BlackboardItemHandoffContext = runtimeimpl.BlackboardItemHandoffContext
-	BlackboardItemSynthesis      = runtimeimpl.BlackboardItemSynthesis
-	BlackboardItemReviewResult   = runtimeimpl.BlackboardItemReviewResult
-	BlackboardItemActionResult   = runtimeimpl.BlackboardItemActionResult
 
 	SourceAgent     = runtimeimpl.SourceAgent
 	SourceComponent = runtimeimpl.SourceComponent
@@ -230,7 +222,7 @@ type (
 	Task               = runtimeimpl.Task
 	TaskExecutionLease = runtimeimpl.TaskExecutionLease
 	TypedReport        = runtimeimpl.TypedReport
-	ActionResult       = runtimeimpl.ActionResult
+	ActionOutcome      = runtimeimpl.ActionOutcome
 	Tool               = runtimeimpl.Tool
 	RetryPolicy        = runtimeimpl.RetryPolicy
 	SourceIdentity     = runtimeimpl.SourceIdentity

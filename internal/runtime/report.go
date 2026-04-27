@@ -58,22 +58,22 @@ func (r *Runtime) SubmitTypedReport(ctx context.Context, cmd SubmitTypedReportCo
 		"holderId":    cmd.HolderID,
 		"taskVersion": cmd.TaskVersion,
 	})
-	task, report, err = r.applyReportActionResultLocked(ctx, run, task, cmd, report)
+	task, report, err = r.applyReportActionOutcomeLocked(ctx, run, task, cmd, report)
 	if err != nil {
 		return err
 	}
 	return r.applyReportStatusLocked(ctx, run, task, cmd, report)
 }
 
-func (r *Runtime) applyReportActionResultLocked(ctx context.Context, run Run, task Task, cmd SubmitTypedReportCommand, report TypedReport) (Task, TypedReport, error) {
-	if report.ActionResult != nil {
+func (r *Runtime) applyReportActionOutcomeLocked(ctx context.Context, run Run, task Task, cmd SubmitTypedReportCommand, report TypedReport) (Task, TypedReport, error) {
+	if report.ActionOutcome != nil {
 		attempt := ActionAttempt{
-			AttemptID:         report.ActionResult.AttemptID,
-			ActionID:          report.ActionResult.ActionID,
+			AttemptID:         report.ActionOutcome.AttemptID,
+			ActionID:          report.ActionOutcome.ActionID,
 			RunID:             cmd.RunID,
 			TaskID:            cmd.TaskID,
-			Status:            report.ActionResult.Status,
-			ExternalResultRef: report.ActionResult.ExternalResultRef,
+			Status:            report.ActionOutcome.Status,
+			ExternalResultRef: report.ActionOutcome.ExternalResultRef,
 		}
 		if _, err := r.authorizeLocked(ctx, PolicyRequest{
 			Operation: PolicyOperationAction,
@@ -84,7 +84,7 @@ func (r *Runtime) applyReportActionResultLocked(ctx context.Context, run Run, ta
 		}); err != nil {
 			return Task{}, TypedReport{}, err
 		}
-		if err := r.applyActionResultLocked(&task, report.ActionResult); err != nil {
+		if err := r.applyActionOutcomeLocked(&task, report.ActionOutcome); err != nil {
 			if errors.Is(err, ErrActionReconcileRequired) {
 				r.releaseLeaseLocked(cmd.LeaseID)
 				if _, runErr := r.transitionRunLocked(run, RunStatusReconcileRequired); runErr != nil {
@@ -93,7 +93,7 @@ func (r *Runtime) applyReportActionResultLocked(ctx context.Context, run Run, ta
 			}
 			return Task{}, TypedReport{}, err
 		}
-		if actionAttemptFailed(report.ActionResult.Status) && report.Status == ReportStatusSuccess {
+		if actionAttemptFailed(report.ActionOutcome.Status) && report.Status == ReportStatusSuccess {
 			report.Status = ReportStatusFailed
 		}
 	}
@@ -348,8 +348,8 @@ func actionAttemptFailed(status ActionAttemptStatus) bool {
 }
 
 func reportFailureReason(report TypedReport) string {
-	if report.ActionResult != nil && report.ActionResult.Error != "" {
-		return report.ActionResult.Error
+	if report.ActionOutcome != nil && report.ActionOutcome.Error != "" {
+		return report.ActionOutcome.Error
 	}
 	return report.Summary
 }
@@ -366,7 +366,7 @@ func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvoc
 		return ToolInvocationResult{}, ErrNotFound
 	}
 	if tool.RequiresActionTask || tool.EffectType == ToolEffectWrite || tool.EffectType == ToolEffectExternalSideEffect {
-		if task.Type != TaskTypeAction {
+		if !task.AllowsAction {
 			return ToolInvocationResult{}, ErrActionTaskRequired
 		}
 		if _, _, err := r.validateSubmissionLocked(cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion); err != nil {
@@ -423,8 +423,8 @@ func (r *Runtime) validateSubmissionLocked(runID, taskID, leaseID string, holder
 	return run, task, nil
 }
 
-func (r *Runtime) applyActionResultLocked(task *Task, result *ActionResult) error {
-	if task.Type != TaskTypeAction {
+func (r *Runtime) applyActionOutcomeLocked(task *Task, result *ActionOutcome) error {
+	if !task.AllowsAction {
 		return ErrActionTaskRequired
 	}
 	switch result.Status {
@@ -437,7 +437,7 @@ func (r *Runtime) applyActionResultLocked(task *Task, result *ActionResult) erro
 		*task = next
 		task.Error = "action attempt requires reconciliation"
 		r.saveTaskLocked(*task)
-		r.writeCriticalContextLocked(task.RunID, task.ID, BlackboardItemActionResult, SourceIdentity{Type: SourceTool, ID: result.AttemptID}, "action_reconcile_required", result.Summary)
+		r.writeCriticalContextLocked(task.RunID, task.ID, BlackboardItemEvidence, SourceIdentity{Type: SourceTool, ID: result.AttemptID}, "action_reconcile_required", result.Summary)
 		r.appendEventLocked(task.RunID, task.ID, EventActionReconcileRequired, map[string]any{
 			"attemptId": result.AttemptID,
 			"status":    string(result.Status),
@@ -450,10 +450,10 @@ func (r *Runtime) applyActionResultLocked(task *Task, result *ActionResult) erro
 		r.writeBlackboardLocked(BlackboardItem{
 			RunID:      task.RunID,
 			TaskID:     task.ID,
-			Type:       BlackboardItemActionResult,
+			Type:       BlackboardItemEvidence,
 			Source:     SourceIdentity{Type: SourceTool, ID: result.AttemptID},
 			Visibility: BlackboardVisibilityAgentVisible,
-			Key:        "action_result",
+			Key:        "action_outcome",
 			Payload:    result.Output,
 		})
 	}

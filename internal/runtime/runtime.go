@@ -101,6 +101,8 @@ type CreateTaskCommand struct {
 	AssignedAgentID    string
 	OwnerAgentID       string
 	OwnerComponent     string
+	AllowsAction       bool
+	Tags               []string
 	CompletionCriteria []string
 	DependsOn          []string
 	ReadSelectors      []BlackboardSelector
@@ -180,6 +182,8 @@ func (r *Runtime) CreateTask(_ context.Context, cmd CreateTaskCommand) (Task, er
 		OwnerComponent:     cmd.OwnerComponent,
 		Status:             status,
 		Version:            1,
+		AllowsAction:       cmd.AllowsAction,
+		Tags:               slices.Clone(cmd.Tags),
 		CompletionCriteria: slices.Clone(cmd.CompletionCriteria),
 		DependsOn:          slices.Clone(cmd.DependsOn),
 		ReadSelectors:      slices.Clone(cmd.ReadSelectors),

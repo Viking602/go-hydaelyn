@@ -40,7 +40,7 @@ func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttempt
 	if err != nil {
 		return ActionAttempt{}, err
 	}
-	if task.Type != TaskTypeAction {
+	if !task.AllowsAction {
 		return ActionAttempt{}, ErrActionTaskRequired
 	}
 	attempt := ActionAttempt{
@@ -80,7 +80,7 @@ func (r *Runtime) CompleteActionAttempt(_ context.Context, cmd CompleteActionAtt
 	}
 	if _, task, err := r.validateSubmissionLocked(cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion); err != nil {
 		return ActionAttempt{}, err
-	} else if task.Type != TaskTypeAction {
+	} else if !task.AllowsAction {
 		return ActionAttempt{}, ErrActionTaskRequired
 	}
 	attempt, ok := r.actionAttempts[cmd.AttemptID]
