@@ -1,67 +1,79 @@
+// approval demonstrates the human-in-the-loop tool gate: a policy engine
+// requires approval for any tool flagged RequiresActionTask, the runtime
+// pauses, a human decides, and the call resumes.
+//
+//	go run ./_examples/approval
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/plugin"
-	"github.com/Viking602/go-hydaelyn/legacy/host"
-	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
-	"github.com/Viking602/go-hydaelyn/legacy/planner"
-	"github.com/Viking602/go-hydaelyn/legacy/team"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/orchestrator"
 )
 
-type echoProvider struct{}
+type approvalGate struct{}
 
-func (echoProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "echo"}
-}
-
-func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
-	last := request.Messages[len(request.Messages)-1]
-	return provider.NewSliceStream([]provider.Event{
-		{Kind: provider.EventTextDelta, Text: last.Text},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-	}), nil
-}
-
-type askHumanPlanner struct{}
-
-func (askHumanPlanner) Plan(_ context.Context, request planner.PlanRequest) (planner.Plan, error) {
-	return planner.Plan{
-		Goal: request.Goal,
-		Tasks: []planner.TaskSpec{
-			{ID: "task-1", Kind: string(team.TaskKindResearch), Title: "branch", Input: "branch", RequiredRole: team.RoleResearcher},
-		},
-	}, nil
-}
-
-func (askHumanPlanner) Review(_ context.Context, _ planner.ReviewInput) (planner.ReviewDecision, error) {
-	return planner.ReviewDecision{Action: planner.ReviewActionAskHuman, Reason: "need human approval"}, nil
-}
-
-func (askHumanPlanner) Replan(_ context.Context, _ planner.ReplanInput) (planner.Plan, error) {
-	return planner.Plan{}, nil
+func (approvalGate) Authorize(_ context.Context, req orchestrator.PolicyRequest) (orchestrator.PolicyDecision, error) {
+	if req.Operation == orchestrator.PolicyOperationToolCall && req.Tool != nil && req.Tool.RequiresActionTask {
+		return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectRequireApproval, Reason: "needs human ack"}, nil
+	}
+	return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectAllow}, nil
 }
 
 func main() {
-	runner := host.New(host.Config{})
-	runner.RegisterProvider("echo", echoProvider{})
-	runner.RegisterPattern(deepsearch.New())
-	_ = runner.RegisterPlugin(plugin.Spec{Type: plugin.TypePlanner, Name: "ask-human", Component: askHumanPlanner{}})
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
-		Pattern:           "deepsearch",
-		Planner:           "ask-human",
-		SupervisorProfile: "supervisor",
-		WorkerProfiles:    []string{"researcher"},
-		Input:             map[string]any{"query": "review a rollout plan that needs approval"},
+	ctx := context.Background()
+	rt := orchestrator.NewRuntime(orchestrator.Config{PolicyEngine: approvalGate{}})
+
+	rt.RegisterAgent(orchestrator.AgentProfile{ID: "actuator"})
+	rt.RegisterTool(orchestrator.Tool{
+		Name:               "deploy.rollback",
+		EffectType:         orchestrator.ToolEffectWrite,
+		RequiresActionTask: true,
 	})
+
+	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "rollback bad release"})
+	must(err)
+	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+		RunID: run.ID, TaskID: "rollback", OwnerAgentID: "actuator", AllowsAction: true,
+	})
+	must(err)
+	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "actuator",
+	})
+	must(err)
+	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
+		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		TTL: time.Minute,
+	})
+	must(err)
+
+	// First call hits the policy gate and is paused.
+	_, err = rt.InvokeTool(ctx, orchestrator.ToolInvocation{
+		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
+		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		TaskVersion: task.Version, ToolName: "deploy.rollback",
+	})
+	if !errors.Is(err, orchestrator.ErrPolicyDenied) {
+		panic(fmt.Errorf("expected ErrPolicyDenied, got %v", err))
+	}
+	fmt.Println("paused: policy demands approval")
+
+	approval, _, err := rt.RequestApproval(ctx, orchestrator.RequestApprovalCommand{
+		RunID: run.ID, TaskID: task.ID, RequesterAgentID: "actuator", Reason: "rollback to last green",
+	})
+	must(err)
+	must(rt.DecideApproval(ctx, orchestrator.DecideApprovalCommand{
+		RunID: run.ID, ApprovalID: approval.ApprovalID, DecidedBy: "oncall", Decision: "approved",
+	}))
+	fmt.Println("approval granted:", approval.ApprovalID)
+}
+
+func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(state.Status)
-	fmt.Println(state.Result.Error)
 }

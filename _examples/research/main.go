@@ -1,46 +1,49 @@
+// research demonstrates fan-out by group. A single dispatch produces one
+// envelope per group member; whichever agent acquires the lease first owns
+// the task (work-stealing semantics).
+//
+//	go run ./_examples/research
 package main
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/legacy/host"
-	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
-	"github.com/Viking602/go-hydaelyn/legacy/team"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/orchestrator"
 )
 
-type echoProvider struct{}
-
-func (echoProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "echo"}
-}
-
-func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
-	last := request.Messages[len(request.Messages)-1]
-	return provider.NewSliceStream([]provider.Event{
-		{Kind: provider.EventTextDelta, Text: last.Text},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-	}), nil
-}
+const groupResearchers = "researchers"
 
 func main() {
-	runner := host.New(host.Config{})
-	runner.RegisterProvider("echo", echoProvider{})
-	runner.RegisterPattern(deepsearch.New())
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
-		Pattern:           "deepsearch",
-		SupervisorProfile: "supervisor",
-		WorkerProfiles:    []string{"researcher", "researcher"},
-		Input: map[string]any{
-			"query":      "compare options for a Go research assistant",
-			"subqueries": []string{"runtime design", "tool integration"},
-		},
+	ctx := context.Background()
+	rt := orchestrator.NewRuntime(orchestrator.Config{})
+
+	pool := []string{"r1", "r2", "r3"}
+	for _, id := range pool {
+		rt.RegisterAgent(orchestrator.AgentProfile{ID: id, Groups: []string{groupResearchers}})
+	}
+
+	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "compare Go agent runtimes"})
+	must(err)
+	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+		RunID: run.ID, TaskID: "investigate", OwnerComponent: "orchestrator",
 	})
+	must(err)
+
+	envelopes, err := rt.DispatchTaskFanOut(ctx, orchestrator.FanOutDispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID,
+		To:      orchestrator.Address{Kind: orchestrator.AddressKindGroup, Group: groupResearchers},
+		Payload: map[string]any{"query": "compare Go agent runtimes"},
+	})
+	must(err)
+	fmt.Printf("fan-out: %d envelope(s) for group %q\n", len(envelopes), groupResearchers)
+	for _, env := range envelopes {
+		fmt.Printf("  envelope %s → agent %s\n", env.ID, env.TargetAgentID)
+	}
+}
+
+func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(state.Result.Summary)
 }
