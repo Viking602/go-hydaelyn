@@ -5,34 +5,30 @@ import (
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/internal/blackboard"
-	"github.com/Viking602/go-hydaelyn/internal/plugin"
-	"github.com/Viking602/go-hydaelyn/internal/security"
-	"github.com/Viking602/go-hydaelyn/observe"
-	"github.com/Viking602/go-hydaelyn/planner"
-	"github.com/Viking602/go-hydaelyn/scheduler"
-	"github.com/Viking602/go-hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/blackboard"
+	"github.com/Viking602/go-hydaelyn/flow"
+	"github.com/Viking602/go-hydaelyn/legacy/capability"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
+	"github.com/Viking602/go-hydaelyn/legacy/tool/kit"
+	"github.com/Viking602/go-hydaelyn/policy"
+	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
 	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
 
 func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.Engine
-	var _ blackboard.State
-	var _ capability.Call
-	var _ capability.Policy
-	var _ host.Runtime
+	var _ agent.AgentProfile
+	var _ blackboard.Item
+	var _ flow.Flow
+	var _ policy.Engine = policy.EngineFunc(func(context.Context, policy.Request) (policy.Decision, error) {
+		return policy.Decision{Effect: policy.EffectAllow}, nil
+	})
+	var _ provider.Driver
 	var _ mcp.Gateway
-	var _ observe.Observer = observe.NewMemoryObserver()
-	var _ planner.Plan
-	var _ plugin.Spec
-	var _ security.Context
-	var _ scheduler.TaskLease
-	var _ team.RunState
 	var _ tool.Mode
+	_ = Tool{Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true}
 	_ = kit.Profile("researcher")
 
 	runner := New(Config{})
@@ -45,6 +41,10 @@ func TestPublicAPISmoke(t *testing.T) {
 		t.Fatalf("QueueRun() returned empty run: %#v", run)
 	}
 
+	var _ host.Runtime
+	var _ team.RunState
+	var _ capability.Call
+	var _ capability.Policy
 	legacy := NewTeamRuntime(TeamConfig{})
 	var _ *TeamRuntime = legacy
 	legacy.RegisterCapability(capability.TypeSearch, "web", func(context.Context, capability.Call) (capability.Result, error) {

@@ -42,7 +42,10 @@ This lets a planner describe:
 
 The planner still compiles into the existing `planner -> team -> host` runtime path. There is no separate orchestration engine in-tree.
 
-For declarative authoring, use the in-tree [`recipe`](recipe.md) compiler. It produces `planner.Plan` plus the matching `host.StartTeamRequest`, and can be wrapped in a static planner plugin when needed.
+For legacy declarative authoring, use the [`legacy/recipe`](recipe.md)
+compiler. It produces `legacy/planner.Plan` plus the matching
+`legacy/host.StartTeamRequest`, and can be wrapped in a static planner plugin
+when needed.
 
 ## Recommended Integration Order
 

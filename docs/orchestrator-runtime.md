@@ -1,8 +1,10 @@
 # Orchestrator Runtime
 
-`orchestrator` is the runtime primitive layer for the
-`Team + Pattern -> Run + Orchestrator + TaskStore` migration. It deliberately
-keeps business platform semantics out of the core package.
+`orchestrator` is the public facade for the primary Run/Task runtime. It keeps
+business platform semantics and implementation details out of the public
+package; command handlers, state transitions, storage, mailbox, lease,
+blackboard, handoff, approval, action, response, trace, and replay internals
+live under `internal/runtime`.
 
 ## Execution Chain
 
@@ -30,9 +32,9 @@ Mailbox delivery is notification only. The execution permission boundary is
 active lease.
 
 `Runtime.ExecuteCommand(ctx, RuntimeCommand)` is the command-layer entrypoint.
-State-changing commands execute behind the `StoreProvider -> UnitOfWork`
-contract so durable drivers can make `RunStore + TaskStore + EventStore`
-updates atomic. The memory runtime implements the same contracts as durable
+State-changing commands execute behind the internal `StoreProvider ->
+UnitOfWork` contract so `RunStore + TaskStore + EventStore` updates stay
+atomic. The memory runtime implements the same internal contracts as durable
 drivers; it is no longer a separate semantic path.
 
 ## State Ownership
@@ -78,7 +80,7 @@ The in-memory implementation covers the contract-level primitives:
 ## Adapter Boundary
 
 Existing `host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
-`ReplayTeamState` remain available through direct `host` imports or
+`ReplayTeamState` remain available through `legacy/host` or
 `hydaelyn.NewTeamRuntime` as compatibility entrypoints. New orchestration work
 should wrap existing planners, profiles, tools, and patterns around
 `orchestrator.Runtime` instead of letting a pattern own durable state

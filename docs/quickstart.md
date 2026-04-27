@@ -75,7 +75,8 @@ err := runner.RegisterFlow(hydaelyn.Flow{Name: "deepsearch"})
 
 ## 4. Legacy Team + Pattern
 
-Existing `host.StartTeam` and pattern packages remain callable for compatibility:
+Existing `host.StartTeam` and pattern packages remain callable under
+`legacy/` for compatibility:
 
 ```go
 teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
@@ -101,6 +102,6 @@ hydaelyn replay --events events.json
 - [Orchestrator Runtime](orchestrator-runtime.md)
 - [Migration Notes](migration.md)
 - [Public API Freeze](public-api.md)
-- [Task Dataflow](task-dataflow.md)
-- [Recipe Compiler](recipe.md)
-- [Evaluation](evaluation.md)
+- Legacy [Task Dataflow](task-dataflow.md)
+- Legacy [Recipe Compiler](recipe.md)
+- Legacy [Evaluation](evaluation.md)

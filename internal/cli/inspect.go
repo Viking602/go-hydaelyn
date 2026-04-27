@@ -6,11 +6,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/host"
 	"github.com/Viking602/go-hydaelyn/internal/blackboard"
-	"github.com/Viking602/go-hydaelyn/recipe"
-	"github.com/Viking602/go-hydaelyn/storage"
+	"github.com/Viking602/go-hydaelyn/legacy/eval"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/recipe"
+	"github.com/Viking602/go-hydaelyn/legacy/storage"
 )
 
 func runInspect(args []string, stdout io.Writer) error {

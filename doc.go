@@ -1,4 +1,4 @@
-// Package hydaelyn is the root façade for the go-hydaelyn multi-agent
+// Package hydaelyn is the root facade for the go-hydaelyn Orchestrator
 // runtime. It re-exports the primary Run/Task entry points so simple
 // programs can write:
 //
@@ -6,28 +6,21 @@
 //
 // without importing any subpackage.
 //
-// Subpackages host the real API surface, grouped by concern:
+// Public packages are grouped by stable extension concern:
 //
-//   - [host]       — deprecated Team + Pattern compatibility runtime
-//   - [agent]      — agent engine and role definitions
-//   - [team]       — legacy team orchestration, patterns, and run state
-//   - [provider]   — LLM provider drivers (anthropic, openai, scripted)
-//   - [tool]       — tool contract + kit/tooltest helpers
-//   - [pattern]    — legacy presets being migrated to Flow
-//   - [hook]       — pre/post-turn hook contracts
-//   - [transport]  — MCP gateway and HTTP control plane
-//   - [observe]    — tracing and metrics observer interface
-//   - [capability] — capability/security policy and context plumbing
-//   - [mailbox]    — agent-to-agent signal messaging (ask/answer/delegate)
 //   - [orchestrator] — primary run/task runtime primitives, leases, handoff, response
-//   - [planner]    — planner contract and template provider
-//   - [scheduler]  — task queue and lease interfaces
-//   - [storage]    — run/workflow/session persistence drivers
-//   - [message]    — shared message/content data types
-//   - [recipe]     — YAML/JSON runtime configuration loader
-//   - [eval]       — evaluation suites and runners (eval/run, eval/cases)
-//   - [cli]        — command-line entry point implementation
+//   - [agent]        — agent engine and profile contracts
+//   - [tool]         — tool contract, effect types, and tooltest helpers
+//   - [flow]         — flow preset contracts
+//   - [policy]       — unified authorization contract
+//   - [blackboard]   — blackboard item and selector contracts
+//   - [provider]     — LLM provider drivers (anthropic, openai, scripted)
+//   - [message]      — shared message/content data types
+//   - [hook]         — pre/post-turn hook contracts
+//   - [transport]    — integration transports such as MCP
+//   - [legacy]       — deprecated Team + Pattern compatibility packages
 //
-// Types under the internal/ tree are implementation details and are
-// exposed only when they must appear in a public signature.
+// Types under internal/ are implementation details. Runtime storage,
+// mailbox, scheduler, observe, transition, command-handler, and replay
+// internals are not public extension points.
 package hydaelyn

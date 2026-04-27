@@ -26,7 +26,7 @@
 兼容策略：
 
 - `hydaelyn.New` 默认返回 Orchestrator runtime。
-- `host.StartTeam` / `hydaelyn.NewTeamRuntime` 仍可用，但只作为 legacy compatibility entrypoint。
+- `legacy/host.StartTeam` / `hydaelyn.NewTeamRuntime` 仍可用，但只作为 legacy compatibility entrypoint。
 - 新代码优先使用 root `hydaelyn` / `orchestrator` 包；旧 pattern 可以作为 planner/router preset 输入。
 - side-effecting tool 必须补齐 `EffectType` / `RequiresActionTask` / `Idempotent`
   等治理字段，并通过 ActionTask 运行。

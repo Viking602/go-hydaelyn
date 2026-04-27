@@ -1,13 +1,14 @@
-# Recipe Compiler
+# Legacy Recipe Compiler
 
 ## Purpose
 
-The in-tree `recipe` package provides a declarative authoring layer over the existing `planner -> team -> host` runtime.
+The `legacy/recipe` package provides a declarative authoring layer over the
+legacy `planner -> team -> host` runtime.
 
 It compiles YAML or JSON into:
 
-- `host.StartTeamRequest`
-- `planner.Plan`
+- `legacy/host.StartTeamRequest`
+- `legacy/planner.Plan`
 
 ## Supported Authoring Primitives
 

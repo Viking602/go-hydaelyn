@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/pattern/panel"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/pattern/panel"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/team"
 )
 
 type panelProvider struct{}

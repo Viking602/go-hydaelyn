@@ -10,10 +10,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/mailbox"
-	"github.com/Viking602/go-hydaelyn/storage"
-	"github.com/Viking602/go-hydaelyn/team"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/mailbox"
+	"github.com/Viking602/go-hydaelyn/legacy/storage"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
 )
 
 func main() {

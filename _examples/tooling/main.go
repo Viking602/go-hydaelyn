@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/capability"
-	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/legacy/capability"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
 )
 
 func main() {

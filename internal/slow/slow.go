@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/observe"
+	"github.com/Viking602/go-hydaelyn/legacy/observe"
 )
 
 var (

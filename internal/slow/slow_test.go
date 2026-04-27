@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/observe"
+	"github.com/Viking602/go-hydaelyn/legacy/observe"
 )
 
 type spyObserver struct {

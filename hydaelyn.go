@@ -1,9 +1,9 @@
 package hydaelyn
 
 import (
-	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
 	"github.com/Viking602/go-hydaelyn/orchestrator"
-	"github.com/Viking602/go-hydaelyn/team"
 )
 
 // New constructs the primary Run/Task orchestrator runtime.
@@ -42,12 +42,19 @@ type (
 	TypedReport                 = orchestrator.TypedReport
 	TaskExecutionLease          = orchestrator.TaskExecutionLease
 	TaskEnvelope                = orchestrator.TaskEnvelope
+	Tool                        = orchestrator.Tool
+	ToolEffectType              = orchestrator.ToolEffectType
+	RetryPolicy                 = orchestrator.RetryPolicy
 	HolderType                  = orchestrator.HolderType
 	ReportStatus                = orchestrator.ReportStatus
 	Flow                        = orchestrator.Flow
+	PolicyEngine                = orchestrator.PolicyEngine
 	PolicyRequest               = orchestrator.PolicyRequest
 	PolicyDecision              = orchestrator.PolicyDecision
+	OutputGateway               = orchestrator.OutputGateway
+	PipelineComponents          = orchestrator.PipelineComponents
 	UserMessage                 = orchestrator.UserMessage
+	UserMessageType             = orchestrator.UserMessageType
 
 	// Deprecated: use Runtime plus Run/Task APIs. This alias remains for
 	// compatibility during the Team + Pattern migration window.
@@ -70,4 +77,16 @@ const (
 	ReportStatusNeedsHandoff       = orchestrator.ReportStatusNeedsHandoff
 	ReportStatusNeedsApproval      = orchestrator.ReportStatusNeedsApproval
 	ReportStatusNeedsClarification = orchestrator.ReportStatusNeedsClarification
+
+	ToolEffectReadOnly           = orchestrator.ToolEffectReadOnly
+	ToolEffectWrite              = orchestrator.ToolEffectWrite
+	ToolEffectExternalSideEffect = orchestrator.ToolEffectExternalSideEffect
+
+	UserMessageTypeFinalAnswer          = orchestrator.UserMessageTypeFinalAnswer
+	UserMessageTypeProgressUpdate       = orchestrator.UserMessageTypeProgressUpdate
+	UserMessageTypeApprovalRequest      = orchestrator.UserMessageTypeApprovalRequest
+	UserMessageTypeClarificationRequest = orchestrator.UserMessageTypeClarificationRequest
+	UserMessageTypeExecutionResult      = orchestrator.UserMessageTypeExecutionResult
+	UserMessageTypeErrorNotice          = orchestrator.UserMessageTypeErrorNotice
+	UserMessageTypeBlockedNotice        = orchestrator.UserMessageTypeBlockedNotice
 )

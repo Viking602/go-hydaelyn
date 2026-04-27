@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/eval/cases"
-	"github.com/Viking602/go-hydaelyn/eval/run"
+	"github.com/Viking602/go-hydaelyn/legacy/eval/cases"
+	"github.com/Viking602/go-hydaelyn/legacy/eval/run"
 )
 
 func runDeterministic(ctx context.Context, args []string, stdout io.Writer) error {

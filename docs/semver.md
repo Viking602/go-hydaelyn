@@ -16,24 +16,21 @@ Stable packages:
 
 - `agent`
 - `blackboard`
-- `capability`
-- `host`
-- `mcp`
-- `observe`
-- `planner`
-- `plugin`
-- `recipe`
-- `scheduler`
-- `team`
+- `flow`
+- `orchestrator`
+- `policy`
+- `provider`
 - `tool`
-- `toolkit`
-- `evaluation`
+- `transport/mcp`
 
 Implementation-detail packages:
 
-- `providers/*`
-- `transport/*`
-- `tooltest`
+- `internal/*`
+- `legacy/*`
+- `tool/tooltest`
+
+`legacy/*` is source-compatible during the migration window, but it is not the
+primary vNext runtime contract.
 
 ## Compatibility Rules
 

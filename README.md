@@ -78,6 +78,10 @@ Legacy Team + Pattern code remains available during the migration window:
 teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
 ```
 
+Direct imports for the old runtime now live under `legacy/`, for example
+`github.com/Viking602/go-hydaelyn/legacy/host` and
+`github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch`.
+
 ## Examples + Read Next
 
 ### Examples
@@ -103,7 +107,10 @@ by `go build ./...`. Build or run one explicitly with `go run ./_examples/resear
 
 ## Where Hydaelyn Fits
 
-Hydaelyn is designed to live inside your Go application. You compose a `host` runtime, register providers, tools, patterns, and profiles, and then run supervisor-led teams in the same process as the rest of your system.
+Hydaelyn is designed to live inside your Go application. Compose the
+Orchestrator runtime, register stable provider/tool/policy/flow contracts, and
+drive work through Run/Task commands. Legacy host/team/pattern code remains
+available only through `legacy/` compatibility packages.
 
 The CLI is useful for inspection and workflow support, but the library is the primary surface. MCP can be plugged in as one integration path, not as the core execution model. V1 stays single-process, and the intended extension model is composition around the runtime rather than subclassing a framework.
 

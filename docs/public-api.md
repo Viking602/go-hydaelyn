@@ -4,7 +4,8 @@
 
 `hydaelyn.New(hydaelyn.Config{})` now returns the primary orchestrator runtime.
 Legacy Team + Pattern execution is available through
-`hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})` and direct `host` imports.
+`hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})` and direct `legacy/host`
+imports.
 
 ## Stable Packages
 
@@ -12,61 +13,22 @@ The major-version public surface includes:
 
 - `agent`
 - `blackboard`
-- `capability`
-- `host`
-- `mcp`
-- `observe`
+- `flow`
 - `orchestrator`
-- `planner`
-- `plugin`
-- `security`
-- `recipe`
-- `scheduler`
-- `team`
+- `policy`
+- `provider`
 - `tool`
-- `toolkit`
-- `evaluation`
+- `transport/mcp`
+
+Deprecated Team + Pattern compatibility packages live under `legacy/` and are
+not the primary runtime surface.
 
 These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
 
 ## Runtime Contracts
 
-The following additive fields and behaviors are now part of the public contract:
-
-### `planner.TaskSpec`
-
-- `Reads []string`
-- `Writes []string`
-- `Publish []team.OutputVisibility`
-- `VerifyClaims []string`
-- `ExchangeSchema string`
-
-### `blackboard.VerificationResult`
-
-- `ClaimID string`
-- `Status blackboard.VerificationStatus`
-- `Confidence float64`
-- `EvidenceIDs []string`
-
-Supported claim semantics are now claim-level, not summary-level. A claim only counts as supported when:
-
-- `status == supported`
-- `confidence >= 0.7`
-- `evidenceIds` is not empty
-
-### Runtime / Replay Event Payloads
-
-Task lifecycle events now carry additive execution metadata:
-
-- `statusBefore`
-- `statusAfter`
-- `taskVersionBefore`
-- `taskVersionAfter`
-- `idempotencyKey`
-- `workerId`
-- `leaseId` when queue-backed execution is active
-
-Consumers must tolerate these additive fields and may rely on them for replay validation.
+The primary contract is Run/Task orchestration. Legacy planner/team/panel
+contracts remain under `legacy/` and are not the vNext default path.
 
 ### Orchestrator Runtime
 
@@ -75,32 +37,19 @@ adapters:
 
 - `orchestrator.StartRun`, `QueueRun`, `ExecuteCommand`, `RunEvents`, `RunTimeline`, `ReplayRunState`
 - `orchestrator.Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
-- `orchestrator.RunStore`, `TaskStore`, `EventStore`, `StoreProvider`, `UnitOfWork`
-- `orchestrator.MailboxOutboxStore`, `UserMessageStore`, `ResponseOutbox`, `TraceStore`
 - `orchestrator.PolicyEngine.Authorize(ctx, PolicyRequest)`
 - `orchestrator.ApprovalRequest`, `ResumeToken`, `ActionAttempt`
 - `orchestrator.Flow` as preset metadata, not a state-transition bypass
 
-Legacy `host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
-`ReplayTeamState` stay callable through `NewTeamRuntime` and direct `host`
+Legacy `legacy/host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
+`ReplayTeamState` stay callable through `NewTeamRuntime` and `legacy/host`
 imports for the current migration window.
 
-### Panel Collaboration
+### Legacy Collaboration
 
-The panel task-board contract is additive:
-
-- `team.InteractionMode`
-- `team.TodoPlan`, `team.TodoItem`, `team.TaskBoard`
-- `team.AgentCapability`
-- `team.ConversationThread`, `team.ConversationMessage`
-- `team.Task.ExpectedReportKind`
-- `host.Runtime.TeamTimeline`
-
-`panel` tasks use typed reports for research, verification, and synthesis;
-typed research reports must include at least one claim, and typed verification
-reports must include `perClaim`.
-`deepsearch` remains compatible with legacy research prose; typed research is
-required only when a task sets `ExpectedReportKind`.
+Panel, deepsearch, recipe, evaluation, queue, storage, mailbox, scheduler, and
+observe packages moved under `legacy/`. They remain available for migration,
+but new orchestration work should not depend on them as primary architecture.
 
 ## CLI Surface
 
@@ -117,11 +66,14 @@ required only when a task sets `ExpectedReportKind`.
 
 These packages remain implementation detail:
 
-- `providers/*`
-- `transport/*`
-- `tooltest`
+- `internal/runtime/*`
+- runtime storage and UnitOfWork implementations
+- mailbox outbox dispatchers
+- scheduler/observe internals
+- command handlers and transition tables
+- replay/recovery internals
 
-`transport/http/control` remains internal and only exposes callable runtime
-control capabilities. Hydaelyn does not ship endpoint catalogs, a
-standard-library router, or a canonical `net/http` route tree for these
-operations.
+Legacy HTTP control helpers moved under `legacy/transport/http/control`.
+Hydaelyn does not ship endpoint catalogs, a standard-library router, or a
+canonical `net/http` route tree for these operations as part of the primary
+runtime API.

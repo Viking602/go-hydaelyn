@@ -4,16 +4,20 @@
 
 Hydaelyn persists enough runtime detail to replay task execution, blackboard exchange flow, and verifier evidence, not only final summaries.
 
-Durable surfaces:
+Legacy durable surfaces:
 
 - `EventStore`
 - `ReplayTeamState`
-- `recipe.Compile(...)`
-- `recipe.ValidateStrictDataflow(...)`
-- `evaluation.Evaluate(...)`
+- `legacy/recipe.Compile(...)`
+- `legacy/recipe.ValidateStrictDataflow(...)`
+- `legacy/eval.Evaluate(...)`
 - `pause / resume / abort`
 - queue-backed `QueueTeam / RunQueueWorker / RecoverQueueLeases`
 - task input/output dataflow events
+
+The primary Orchestrator path exposes durability through Run/Task commands,
+internal UnitOfWork storage, append-only events, response outbox, and replay
+projection. New code should use `hydaelyn.New` / `orchestrator.Runtime`.
 
 ## Queue Contract
 

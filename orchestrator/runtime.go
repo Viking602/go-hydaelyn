@@ -2,46 +2,18 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
-	"maps"
-	"slices"
-	"sync"
-	"time"
+
+	runtimeimpl "github.com/Viking602/go-hydaelyn/internal/runtime"
 )
 
-const maxHandoffDepth = 8
-
-type Runtime struct {
-	mu                sync.Mutex
-	storeProvider     StoreProvider
-	runs              map[string]Run
-	tasks             map[string]map[string]Task
-	events            map[string][]Event
-	blackboard        map[string][]BlackboardItem
-	envelopes         map[string]TaskEnvelope
-	envelopesByRun    map[string][]string
-	leases            map[string]TaskExecutionLease
-	activeLeaseByTask map[string]string
-	tools             map[string]Tool
-	messages          map[string]UserMessage
-	messagesByRun     map[string][]string
-	flows             map[string]Flow
-	policy            PolicyEngine
-	outputGateway     OutputGateway
-	pipeline          PipelineComponents
-	approvals         map[string]ApprovalRequest
-	resumeTokens      map[string]ResumeToken
-	actionAttempts    map[string]ActionAttempt
-	traceSpans        map[string][]TraceSpan
-	seq               map[string]int
-	nextID            int
-}
-
 type Config struct {
-	StoreProvider StoreProvider
 	PolicyEngine  PolicyEngine
 	OutputGateway OutputGateway
 	Pipeline      PipelineComponents
+}
+
+type Runtime struct {
+	inner *runtimeimpl.Runtime
 }
 
 func NewMemoryRuntime() *Runtime {
@@ -49,463 +21,185 @@ func NewMemoryRuntime() *Runtime {
 }
 
 func NewRuntime(config Config) *Runtime {
-	rt := &Runtime{
-		runs:              map[string]Run{},
-		tasks:             map[string]map[string]Task{},
-		events:            map[string][]Event{},
-		blackboard:        map[string][]BlackboardItem{},
-		envelopes:         map[string]TaskEnvelope{},
-		envelopesByRun:    map[string][]string{},
-		leases:            map[string]TaskExecutionLease{},
-		activeLeaseByTask: map[string]string{},
-		tools:             map[string]Tool{},
-		messages:          map[string]UserMessage{},
-		messagesByRun:     map[string][]string{},
-		flows:             map[string]Flow{},
-		policy:            allowPolicyEngine{},
-		outputGateway:     memoryOutputGateway{},
-		approvals:         map[string]ApprovalRequest{},
-		resumeTokens:      map[string]ResumeToken{},
-		actionAttempts:    map[string]ActionAttempt{},
-		traceSpans:        map[string][]TraceSpan{},
-		seq:               map[string]int{},
-	}
-	if config.StoreProvider != nil {
-		rt.storeProvider = config.StoreProvider
-	} else {
-		rt.storeProvider = runtimeStoreProvider{runtime: rt}
-	}
-	if config.PolicyEngine != nil {
-		rt.policy = config.PolicyEngine
-	}
-	if config.OutputGateway != nil {
-		rt.outputGateway = config.OutputGateway
-	}
-	rt.pipeline = defaultPipeline(config.Pipeline)
-	return rt
+	return &Runtime{inner: runtimeimpl.NewRuntime(runtimeimpl.Config{
+		PolicyEngine:  config.PolicyEngine,
+		OutputGateway: config.OutputGateway,
+		Pipeline:      config.Pipeline,
+	})}
 }
 
-type StartRunCommand struct {
-	RunID      string
-	RootTaskID string
-	Request    string
-	Metadata   map[string]string
+func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task, error) {
+	return r.inner.StartRun(ctx, cmd)
 }
 
-type CreateTaskCommand struct {
-	RunID              string
-	TaskID             string
-	ParentTaskID       string
-	Type               TaskType
-	Goal               string
-	AssignedAgentID    string
-	OwnerAgentID       string
-	OwnerComponent     string
-	CompletionCriteria []string
-	DependsOn          []string
-	ReadSelectors      []BlackboardSelector
-	WriteTargets       []string
-	RetryPolicy        RetryPolicy
-	PolicyDecisions    []PolicyDecision
+func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, error) {
+	return r.inner.CreateTask(ctx, cmd)
 }
 
-func (r *Runtime) StartRun(_ context.Context, cmd StartRunCommand) (Run, Task, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := time.Now().UTC()
-	runID := cmd.RunID
-	if runID == "" {
-		runID = r.newID("run")
-	}
-	rootID := cmd.RootTaskID
-	if rootID == "" {
-		rootID = r.newID("task")
-	}
-	run := Run{
-		ID:         runID,
-		Status:     RunStatusCreated,
-		Request:    cmd.Request,
-		RootTaskID: rootID,
-		Metadata:   maps.Clone(cmd.Metadata),
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	root := Task{
-		ID:             rootID,
-		RunID:          runID,
-		Type:           TaskTypeWorker,
-		OwnerComponent: "orchestrator",
-		Status:         TaskStatusCreated,
-		Version:        1,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	r.runs[runID] = run
-	r.tasks[runID] = map[string]Task{rootID: root}
-	r.appendEventLocked(runID, rootID, EventRunStarted, map[string]any{
-		"request": cmd.Request,
-		"run":     runPayload(run),
-	})
-	r.appendEventLocked(runID, rootID, EventTaskCreated, taskEventPayload(root))
-	return run, root, nil
+func (r *Runtime) Run(ctx context.Context, runID string) (Run, error) {
+	return r.inner.Run(ctx, runID)
 }
 
-func (r *Runtime) CreateTask(_ context.Context, cmd CreateTaskCommand) (Task, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	run, ok := r.runs[cmd.RunID]
-	if !ok {
-		return Task{}, ErrNotFound
-	}
-	if isTerminalRun(run.Status) {
-		return Task{}, ErrTerminalState
-	}
-	taskID := cmd.TaskID
-	if taskID == "" {
-		taskID = r.newID("task")
-	}
-	now := time.Now().UTC()
-	status := TaskStatusCreated
-	if len(cmd.DependsOn) > 0 {
-		status = TaskStatusWaitingDependency
-	}
-	task := Task{
-		ID:                 taskID,
-		RunID:              cmd.RunID,
-		ParentTaskID:       cmd.ParentTaskID,
-		Type:               cmd.Type,
-		Goal:               cmd.Goal,
-		AssignedAgentID:    cmd.AssignedAgentID,
-		OwnerAgentID:       cmd.OwnerAgentID,
-		OwnerComponent:     cmd.OwnerComponent,
-		Status:             status,
-		Version:            1,
-		CompletionCriteria: slices.Clone(cmd.CompletionCriteria),
-		DependsOn:          slices.Clone(cmd.DependsOn),
-		ReadSelectors:      slices.Clone(cmd.ReadSelectors),
-		WriteTargets:       slices.Clone(cmd.WriteTargets),
-		RetryPolicy:        cmd.RetryPolicy,
-		PolicyDecisions:    slices.Clone(cmd.PolicyDecisions),
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-	if task.Type == "" {
-		task.Type = TaskTypeWorker
-	}
-	if task.AssignedAgentID == "" && task.OwnerAgentID != "" {
-		task.AssignedAgentID = task.OwnerAgentID
-	}
-	if task.OwnerAgentID != "" {
-		task.OwnerHistory = []string{task.OwnerAgentID}
-	}
-	if r.tasks[cmd.RunID] == nil {
-		r.tasks[cmd.RunID] = map[string]Task{}
-	}
-	r.tasks[cmd.RunID][task.ID] = task
-	r.appendEventLocked(cmd.RunID, task.ID, EventTaskCreated, taskEventPayload(task))
-	return task, nil
-}
-
-func (r *Runtime) Run(_ context.Context, runID string) (Run, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	run, ok := r.runs[runID]
-	if !ok {
-		return Run{}, ErrNotFound
-	}
-	return run, nil
-}
-
-func (r *Runtime) Task(_ context.Context, runID, taskID string) (Task, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	task, ok := r.tasks[runID][taskID]
-	if !ok {
-		return Task{}, ErrNotFound
-	}
-	return task, nil
+func (r *Runtime) Task(ctx context.Context, runID, taskID string) (Task, error) {
+	return r.inner.Task(ctx, runID, taskID)
 }
 
 func (r *Runtime) ReadyTasks(runID string) []Task {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tasks := r.tasks[runID]
-	out := make([]Task, 0, len(tasks))
-	for _, task := range tasks {
-		if !taskCanBecomeReady(task.Status) || !r.dependenciesCompletedLocked(runID, task.DependsOn) {
-			continue
-		}
-		out = append(out, task)
-	}
-	slices.SortFunc(out, func(a, b Task) int {
-		return stringsCompare(a.ID, b.ID)
-	})
-	return out
+	return r.inner.ReadyTasks(runID)
 }
 
 func (r *Runtime) Events(runID string) []Event {
-	events, _ := r.RunEvents(context.Background(), runID)
-	return events
+	return r.inner.Events(runID)
 }
 
-func (r *Runtime) RunEvents(_ context.Context, runID string) ([]Event, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.runs[runID]; !ok && len(r.events[runID]) == 0 {
-		return nil, ErrNotFound
-	}
-	return slices.Clone(r.events[runID]), nil
+func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]Event, error) {
+	return r.inner.RunEvents(ctx, runID)
 }
 
 func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	count := 0
-	for _, lease := range r.leases {
-		if lease.RunID == runID && lease.TaskID == taskID && lease.Status == LeaseStatusActive {
-			count++
-		}
-	}
-	return count
+	return r.inner.ActiveLeaseCount(runID, taskID)
 }
 
 func (r *Runtime) RegisterTool(tool Tool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if tool.Name == "" {
-		return
-	}
-	if tool.EffectType == "" {
-		tool.EffectType = ToolEffectReadOnly
-	}
-	r.tools[tool.Name] = tool
+	r.inner.RegisterTool(tool)
 }
 
 func (r *Runtime) SetMessagePolicy(policy MessagePolicyChecker) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if policy == nil {
-		r.policy = allowPolicyEngine{}
-		return
-	}
-	r.policy = messagePolicyAdapter{check: policy}
+	r.inner.SetMessagePolicy(policy)
 }
 
 func (r *Runtime) SetPolicyEngine(policy PolicyEngine) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if policy == nil {
-		r.policy = allowPolicyEngine{}
-		return
-	}
-	r.policy = policy
+	r.inner.SetPolicyEngine(policy)
 }
 
 func (r *Runtime) SetOutputGateway(gateway OutputGateway) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if gateway == nil {
-		r.outputGateway = memoryOutputGateway{}
-		return
-	}
-	r.outputGateway = gateway
+	r.inner.SetOutputGateway(gateway)
 }
 
 func (r *Runtime) SetPipeline(components PipelineComponents) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.pipeline = defaultPipeline(components)
+	r.inner.SetPipeline(components)
 }
 
-func (r *Runtime) appendEventLocked(runID, taskID string, typ EventType, payload map[string]any) {
-	r.seq[runID]++
-	if r.seq[runID] == 1 && len(r.events[runID]) > 0 {
-		r.seq[runID] = len(r.events[runID]) + 1
-	}
-	event := Event{
-		RunID:      runID,
-		TaskID:     taskID,
-		Sequence:   r.seq[runID],
-		Type:       typ,
-		Payload:    payload,
-		RecordedAt: time.Now().UTC(),
-	}
-	r.events[runID] = append(r.events[runID], event)
+func (r *Runtime) ExecuteCommand(ctx context.Context, command RuntimeCommand) (any, error) {
+	return r.inner.ExecuteCommand(ctx, command)
 }
 
-func (r *Runtime) writeBlackboardLocked(item BlackboardItem) BlackboardItem {
-	if item.ID == "" {
-		item.ID = r.newID("bb")
-	}
-	if item.CreatedAt.IsZero() {
-		item.CreatedAt = time.Now().UTC()
-	}
-	r.blackboard[item.RunID] = append(r.blackboard[item.RunID], item)
-	r.recordTraceLocked(item.RunID, item.TaskID, "blackboard.write", "blackboard")
-	r.appendEventLocked(item.RunID, item.TaskID, EventBlackboardItemWritten, map[string]any{
-		"itemId":     item.ID,
-		"sourceType": string(item.Source.Type),
-		"sourceId":   item.Source.ID,
-		"visibility": string(item.Visibility),
-		"key":        item.Key,
-	})
-	return item
+func (r *Runtime) TransitionRun(ctx context.Context, cmd TransitionRunCommand) error {
+	return r.inner.TransitionRun(ctx, cmd)
 }
 
-func (r *Runtime) writeEnvelopeLocked(env TaskEnvelope) TaskEnvelope {
-	if env.ID == "" {
-		env.ID = r.newID("env")
-	}
-	if env.CreatedAt.IsZero() {
-		env.CreatedAt = time.Now().UTC()
-	}
-	if env.Status == "" {
-		env.Status = "pending"
-	}
-	if env.Type == "" {
-		env.Type = "TaskEnvelope"
-	}
-	if env.TaskVersion == 0 {
-		if task, ok := r.tasks[env.RunID][env.TaskID]; ok {
-			env.TaskVersion = task.Version
-		}
-	}
-	r.envelopes[env.ID] = env
-	r.envelopesByRun[env.RunID] = append(r.envelopesByRun[env.RunID], env.ID)
-	r.appendEventLocked(env.RunID, env.TaskID, EventTaskDispatched, map[string]any{
-		"envelope": envPayload(env),
-	})
-	return env
+func (r *Runtime) TransitionTask(ctx context.Context, cmd TransitionTaskCommand) error {
+	return r.inner.TransitionTask(ctx, cmd)
 }
 
-func (r *Runtime) updateRunLocked(run Run, status RunStatus) (Run, error) {
-	if err := validateRunTransition(run.Status, status); err != nil {
-		return Run{}, err
-	}
-	run.Status = status
-	run.UpdatedAt = time.Now().UTC()
-	r.runs[run.ID] = run
-	r.appendEventLocked(run.ID, run.RootTaskID, EventRunStatusChanged, map[string]any{
-		"to":  string(status),
-		"run": runPayload(run),
-	})
-	return run, nil
+func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, error) {
+	return r.inner.AdvanceRun(ctx, cmd)
 }
 
-func (r *Runtime) saveTaskLocked(task Task) Task {
-	task.UpdatedAt = time.Now().UTC()
-	r.tasks[task.RunID][task.ID] = task
-	return task
+func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
+	return r.inner.DispatchTask(ctx, cmd)
 }
 
-func (r *Runtime) newID(prefix string) string {
-	r.nextID++
-	return fmt.Sprintf("%s-%d", prefix, r.nextID)
+func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (TaskExecutionLease, bool, error) {
+	return r.inner.AcquireTaskExecution(ctx, cmd)
 }
 
-func taskEventPayload(task Task) map[string]any {
-	return map[string]any{
-		"taskId":             task.ID,
-		"runId":              task.RunID,
-		"parentTaskId":       task.ParentTaskID,
-		"type":               string(task.Type),
-		"goal":               task.Goal,
-		"status":             string(task.Status),
-		"version":            task.Version,
-		"attempts":           task.Attempts,
-		"handoffCount":       task.HandoffCount,
-		"assignedAgentId":    task.AssignedAgentID,
-		"ownerAgentId":       task.OwnerAgentID,
-		"ownerComponent":     task.OwnerComponent,
-		"completionCriteria": slices.Clone(task.CompletionCriteria),
-		"dependsOn":          slices.Clone(task.DependsOn),
-		"retryPolicy":        retryPolicyPayload(task.RetryPolicy),
-		"createdAt":          task.CreatedAt,
-		"updatedAt":          task.UpdatedAt,
-	}
+func (r *Runtime) HeartbeatTaskExecution(ctx context.Context, cmd HeartbeatTaskExecutionCommand) error {
+	return r.inner.HeartbeatTaskExecution(ctx, cmd)
 }
 
-func runPayload(run Run) map[string]any {
-	return map[string]any{
-		"id":         run.ID,
-		"status":     string(run.Status),
-		"request":    run.Request,
-		"rootTaskId": run.RootTaskID,
-		"metadata":   maps.Clone(run.Metadata),
-		"createdAt":  run.CreatedAt,
-		"updatedAt":  run.UpdatedAt,
-	}
+func (r *Runtime) ReleaseTaskExecution(ctx context.Context, cmd ReleaseTaskExecutionCommand) error {
+	return r.inner.ReleaseTaskExecution(ctx, cmd)
 }
 
-func envPayload(env TaskEnvelope) map[string]any {
-	return map[string]any{
-		"envelopeId":      env.ID,
-		"runId":           env.RunID,
-		"taskId":          env.TaskID,
-		"targetAgentId":   env.TargetAgentID,
-		"targetComponent": env.TargetComponent,
-		"type":            env.Type,
-		"status":          env.Status,
-		"taskVersion":     env.TaskVersion,
-		"attempts":        env.Attempts,
-		"createdAt":       env.CreatedAt,
-		"deliveredAt":     env.DeliveredAt,
-	}
+func (r *Runtime) AckEnvelope(ctx context.Context, cmd AckEnvelopeCommand) error {
+	return r.inner.AckEnvelope(ctx, cmd)
 }
 
-func retryPolicyPayload(policy RetryPolicy) map[string]any {
-	if policy.MaxAttempts == 0 && policy.Backoff == 0 {
-		return nil
-	}
-	return map[string]any{
-		"maxAttempts": policy.MaxAttempts,
-		"backoff":     policy.Backoff,
-	}
+func (r *Runtime) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
+	return r.inner.DeadLetter(ctx, cmd)
 }
 
-func (r *Runtime) dependenciesCompletedLocked(runID string, deps []string) bool {
-	for _, dep := range deps {
-		task, ok := r.tasks[runID][dep]
-		if !ok || task.Status != TaskStatusCompleted {
-			return false
-		}
-	}
-	return true
+func (r *Runtime) SubmitTypedReport(ctx context.Context, cmd SubmitTypedReportCommand) error {
+	return r.inner.SubmitTypedReport(ctx, cmd)
 }
 
-func taskCanBecomeReady(status TaskStatus) bool {
-	switch status {
-	case TaskStatusCreated, TaskStatusPlanned, TaskStatusValidated, TaskStatusRouted, TaskStatusWaitingDependency:
-		return true
-	default:
-		return false
-	}
+func (r *Runtime) SubmitUserInput(ctx context.Context, cmd SubmitUserInputCommand) error {
+	return r.inner.SubmitUserInput(ctx, cmd)
 }
 
-func isTerminalTask(status TaskStatus) bool {
-	return status == TaskStatusCompleted || status == TaskStatusFailed || status == TaskStatusCancelled
+func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvocationResult, error) {
+	return r.inner.InvokeTool(ctx, cmd)
 }
 
-func isTerminalRun(status RunStatus) bool {
-	return status == RunStatusCompleted || status == RunStatusFailed || status == RunStatusCancelled
+func (r *Runtime) RequestHandoff(ctx context.Context, cmd HandoffCommand) error {
+	return r.inner.RequestHandoff(ctx, cmd)
 }
 
-func stringsCompare(a, b string) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
+func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOutputCommand) error {
+	return r.inner.SubmitResponseOutput(ctx, cmd)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
+func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
+	return r.inner.PublishResponse(ctx, cmd)
+}
+
+func (r *Runtime) ResponseOutbox(runID string) []UserMessage {
+	return r.inner.ResponseOutbox(runID)
+}
+
+func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (Run, error) {
+	return r.inner.QueueRun(ctx, cmd)
+}
+
+func (r *Runtime) RunTimeline(ctx context.Context, runID string) ([]RunTimelineItem, error) {
+	return r.inner.RunTimeline(ctx, runID)
+}
+
+func (r *Runtime) RegisterFlow(flow Flow) error {
+	return r.inner.RegisterFlow(flow)
+}
+
+func (r *Runtime) Replay(runID string, mode ReplayMode) (Projection, error) {
+	return r.inner.Replay(runID, mode)
+}
+
+func (r *Runtime) ReplayRunState(runID string) (Projection, error) {
+	return r.inner.ReplayRunState(runID)
+}
+
+func (r *Runtime) Recover(ctx context.Context, runID string) (Projection, error) {
+	return r.inner.Recover(ctx, runID)
+}
+
+func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (ApprovalRequest, ResumeToken, error) {
+	return r.inner.RequestApproval(ctx, cmd)
+}
+
+func (r *Runtime) DecideApproval(ctx context.Context, cmd DecideApprovalCommand) error {
+	return r.inner.DecideApproval(ctx, cmd)
+}
+
+func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeTokenCommand) (ResumeToken, error) {
+	return r.inner.RecoverResumeToken(ctx, cmd)
+}
+
+func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (ActionAttempt, error) {
+	return r.inner.StartActionAttempt(ctx, cmd)
+}
+
+func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (ActionAttempt, error) {
+	return r.inner.CompleteActionAttempt(ctx, cmd)
+}
+
+func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (TraceSpan, error) {
+	return r.inner.StartTraceSpan(ctx, cmd)
+}
+
+func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) error {
+	return r.inner.EndTraceSpan(ctx, cmd)
+}
+
+func (r *Runtime) TraceSpans(runID string) []TraceSpan {
+	return r.inner.TraceSpans(runID)
 }

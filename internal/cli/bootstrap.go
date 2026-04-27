@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Viking602/go-hydaelyn/host"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
 )
 
 func runInit(args []string, _ io.Writer) error {

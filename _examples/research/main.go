@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
 	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/team"
 )
 
 type echoProvider struct{}

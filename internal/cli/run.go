@@ -9,12 +9,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/host"
-	"github.com/Viking602/go-hydaelyn/pattern/deepsearch"
+	"github.com/Viking602/go-hydaelyn/legacy/host"
+	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
+	"github.com/Viking602/go-hydaelyn/legacy/team"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/provider/anthropic"
 	"github.com/Viking602/go-hydaelyn/provider/openai"
-	"github.com/Viking602/go-hydaelyn/team"
 )
 
 func runRun(ctx context.Context, args []string, stdout io.Writer) error {
