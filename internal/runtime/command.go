@@ -11,11 +11,13 @@ func (TransitionRunCommand) CommandName() string          { return "run.transiti
 func (TransitionTaskCommand) CommandName() string         { return "task.transition" }
 func (AdvanceRunCommand) CommandName() string             { return "run.advance" }
 func (DispatchTaskCommand) CommandName() string           { return "task.dispatch" }
+func (FanOutDispatchTaskCommand) CommandName() string     { return "task.dispatch_fanout" }
 func (AcquireTaskExecutionCommand) CommandName() string   { return "task_execution.acquire" }
 func (HeartbeatTaskExecutionCommand) CommandName() string { return "task_execution.heartbeat" }
 func (ReleaseTaskExecutionCommand) CommandName() string   { return "task_execution.release" }
 func (AckEnvelopeCommand) CommandName() string            { return "mailbox.ack" }
 func (DeadLetterCommand) CommandName() string             { return "mailbox.dead_letter" }
+func (WriteBlackboardItemCommand) CommandName() string    { return "blackboard.write_item" }
 func (SubmitTypedReportCommand) CommandName() string      { return "report.submit_typed" }
 func (SubmitUserInputCommand) CommandName() string        { return "user_input.submit" }
 func (ToolInvocation) CommandName() string                { return "tool.invoke" }
@@ -243,6 +245,9 @@ func (r *Runtime) executeMailboxCommand(ctx context.Context, command RuntimeComm
 	case DispatchTaskCommand:
 		env, err := r.DispatchTask(ctx, cmd)
 		return env, true, err
+	case FanOutDispatchTaskCommand:
+		envs, err := r.DispatchTaskFanOut(ctx, cmd)
+		return envs, true, err
 	case AcquireTaskExecutionCommand:
 		lease, acquired, err := r.AcquireTaskExecution(ctx, cmd)
 		return struct {
@@ -264,6 +269,8 @@ func (r *Runtime) executeMailboxCommand(ctx context.Context, command RuntimeComm
 
 func (r *Runtime) executeReportResponseCommand(ctx context.Context, command RuntimeCommand) (any, bool, error) {
 	switch cmd := command.(type) {
+	case WriteBlackboardItemCommand:
+		return nil, true, r.WriteItem(ctx, cmd.Item)
 	case SubmitTypedReportCommand:
 		return nil, true, r.SubmitTypedReport(ctx, cmd)
 	case SubmitUserInputCommand:

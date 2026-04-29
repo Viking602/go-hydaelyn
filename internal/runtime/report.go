@@ -404,9 +404,6 @@ func (r *Runtime) validateSubmissionLocked(runID, taskID, leaseID string, holder
 	if taskVersion != task.Version {
 		return Run{}, Task{}, ErrStaleTaskVersion
 	}
-	if err := validateTaskHolder(task, holderType, holderID); err != nil {
-		return Run{}, Task{}, err
-	}
 	lease, ok := r.leases[leaseID]
 	if !ok || lease.Status != LeaseStatusActive {
 		return Run{}, Task{}, ErrLeaseNotActive

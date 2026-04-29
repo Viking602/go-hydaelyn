@@ -9,8 +9,7 @@ import (
 
 func TestFacadeStateMutationsUseCommandPath(t *testing.T) {
 	ctx := context.Background()
-	durable := &facadeRecordingUnitOfWork{store: runtimeimpl.NewMemoryRuntime()}
-	rt := &Runtime{inner: runtimeimpl.NewRuntime(runtimeimpl.Config{StoreProvider: facadeRecordingStoreProvider{uow: durable}})}
+	rt, durable := newFacadeRuntimeWithRecordingStore()
 
 	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-facade-command", RootTaskID: "root"})
 	if err != nil {
@@ -38,6 +37,85 @@ func TestFacadeStateMutationsUseCommandPath(t *testing.T) {
 	if _, err := durable.store.LoadEnvelope(ctx, env.ID); err != nil {
 		t.Fatalf("durable MailboxOutbox missing facade-dispatched envelope: %v", err)
 	}
+}
+
+func TestFacadeFanOutUsesCommandPath(t *testing.T) {
+	ctx := context.Background()
+	rt, durable := newFacadeRuntimeWithRecordingStore()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-facade-fanout", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	rt.RegisterAgent(AgentProfile{ID: "agent-a", Role: "fanout"})
+	rt.RegisterAgent(AgentProfile{ID: "agent-b", Role: "fanout"})
+	fanout, err := rt.CreateTask(ctx, CreateTaskCommand{RunID: run.ID, TaskID: "fanout", OwnerComponent: "dispatcher"})
+	if err != nil {
+		t.Fatalf("CreateTask(fanout) error = %v", err)
+	}
+	durable.committed = false
+	envs, err := rt.DispatchTaskFanOut(ctx, FanOutDispatchTaskCommand{
+		RunID:  run.ID,
+		TaskID: fanout.ID,
+		To:     Address{Kind: AddressKindRole, Role: "fanout"},
+	})
+	if err != nil {
+		t.Fatalf("DispatchTaskFanOut() error = %v", err)
+	}
+	if !durable.committed {
+		t.Fatalf("DispatchTaskFanOut() did not commit through ExecuteCommand")
+	}
+	if len(envs) != 2 {
+		t.Fatalf("expected 2 fan-out envelopes, got %d", len(envs))
+	}
+	if _, err := durable.store.LoadEnvelope(ctx, envs[0].ID); err != nil {
+		t.Fatalf("durable MailboxOutbox missing first fan-out envelope: %v", err)
+	}
+	if _, err := durable.store.LoadEnvelope(ctx, envs[1].ID); err != nil {
+		t.Fatalf("durable MailboxOutbox missing second fan-out envelope: %v", err)
+	}
+}
+
+func TestFacadeWriteItemUsesCommandPath(t *testing.T) {
+	ctx := context.Background()
+	rt, durable := newFacadeRuntimeWithRecordingStore()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-facade-blackboard", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := rt.CreateTask(ctx, CreateTaskCommand{RunID: run.ID, TaskID: "worker", OwnerAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	durable.committed = false
+	if err := rt.WriteItem(ctx, BlackboardItem{
+		RunID:  run.ID,
+		TaskID: task.ID,
+		Type:   BlackboardItemEvidence,
+		Source: SourceIdentity{
+			Type: SourceAgent,
+			ID:   "agent-a",
+		},
+		Visibility: BlackboardVisibilityAgentVisible,
+		Payload:    "persist me",
+	}); err != nil {
+		t.Fatalf("WriteItem() error = %v", err)
+	}
+	if !durable.committed {
+		t.Fatalf("WriteItem() did not commit through ExecuteCommand")
+	}
+	items, err := durable.store.SelectItems(ctx, run.ID, BlackboardSelector{ItemTypes: []BlackboardItemType{BlackboardItemEvidence}})
+	if err != nil {
+		t.Fatalf("durable BlackboardStore select error = %v", err)
+	}
+	if len(items) != 1 || items[0].Payload != "persist me" {
+		t.Fatalf("durable BlackboardStore missing facade-written item: %#v", items)
+	}
+}
+
+func newFacadeRuntimeWithRecordingStore() (*Runtime, *facadeRecordingUnitOfWork) {
+	durable := &facadeRecordingUnitOfWork{store: runtimeimpl.NewMemoryRuntime()}
+	rt := &Runtime{inner: runtimeimpl.NewRuntime(runtimeimpl.Config{StoreProvider: facadeRecordingStoreProvider{uow: durable}})}
+	return rt, durable
 }
 
 type facadeRecordingStoreProvider struct {

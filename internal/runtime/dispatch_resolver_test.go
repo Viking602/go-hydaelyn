@@ -85,6 +85,79 @@ func TestDispatchTaskFanOutWritesEnvelopePerRecipient(t *testing.T) {
 	}
 }
 
+func TestDispatchTaskFanOutRecipientCanAcquireAndSubmit(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
+	rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
+
+	run := mustStartRun(t, ctx, rt, "run-fanout-claim")
+	task := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+		RunID:          run.ID,
+		TaskID:         "broadcast",
+		OwnerComponent: "dispatcher",
+	})
+	envs, err := rt.DispatchTaskFanOut(ctx, FanOutDispatchTaskCommand{
+		RunID:  run.ID,
+		TaskID: task.ID,
+		To:     Address{Kind: AddressKindRole, Role: "monitor"},
+	})
+	if err != nil {
+		t.Fatalf("DispatchTaskFanOut() error = %v", err)
+	}
+
+	lease, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
+		RunID:      run.ID,
+		TaskID:     task.ID,
+		EnvelopeID: envs[1].ID,
+		HolderType: HolderAgent,
+		HolderID:   envs[1].TargetAgentID,
+	})
+	if err != nil {
+		t.Fatalf("fan-out recipient should acquire via envelope: %v", err)
+	}
+	if !acquired {
+		t.Fatalf("fan-out recipient did not acquire a fresh lease")
+	}
+	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  HolderAgent,
+		HolderID:    envs[1].TargetAgentID,
+		TaskVersion: task.Version,
+		Report:      TypedReport{Status: ReportStatusSuccess, Summary: "handled"},
+	}); err != nil {
+		t.Fatalf("fan-out recipient should submit through acquired lease: %v", err)
+	}
+	after := mustLoadTask(t, ctx, rt, run.ID, task.ID)
+	if after.Status != TaskStatusCompleted {
+		t.Fatalf("fan-out recipient submit should complete task, got %s", after.Status)
+	}
+}
+
+func TestAgentsReturnsDeepCopies(t *testing.T) {
+	rt := NewMemoryRuntime()
+	rt.RegisterAgent(AgentProfile{
+		ID:       "agent-a",
+		Role:     "monitor",
+		Groups:   []string{"alpha"},
+		Metadata: map[string]string{"region": "us"},
+	})
+
+	profiles := rt.Agents()
+	profiles[0].Groups[0] = "mutated"
+	profiles[0].Metadata["region"] = "mutated"
+
+	again := rt.Agents()
+	if got := again[0].Groups[0]; got != "alpha" {
+		t.Fatalf("Agents() leaked mutable Groups slice, got %q", got)
+	}
+	if got := again[0].Metadata["region"]; got != "us" {
+		t.Fatalf("Agents() leaked mutable Metadata map, got %q", got)
+	}
+}
+
 func TestDispatchTaskFanOutNoRecipients(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()

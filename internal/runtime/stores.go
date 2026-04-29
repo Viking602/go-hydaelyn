@@ -134,6 +134,10 @@ func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
 func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.selectItemsLocked(ctx, runID, selector)
+}
+
+func (r *Runtime) selectItemsLocked(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
 	selector = normalizeBlackboardSelector(selector)
 	if _, err := r.authorizeLocked(ctx, PolicyRequest{
 		Operation: PolicyOperationBlackboardRead,

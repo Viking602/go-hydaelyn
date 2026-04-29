@@ -205,9 +205,6 @@ func (r *Runtime) AcquireTaskExecution(_ context.Context, cmd AcquireTaskExecuti
 	if isTerminalTask(task.Status) {
 		return TaskExecutionLease{}, false, ErrTerminalState
 	}
-	if err := validateTaskHolder(task, cmd.HolderType, cmd.HolderID); err != nil {
-		return TaskExecutionLease{}, false, err
-	}
 	var env TaskEnvelope
 	if cmd.EnvelopeID != "" {
 		var err error
@@ -215,6 +212,8 @@ func (r *Runtime) AcquireTaskExecution(_ context.Context, cmd AcquireTaskExecuti
 		if err != nil {
 			return TaskExecutionLease{}, false, err
 		}
+	} else if err := validateTaskHolder(task, cmd.HolderType, cmd.HolderID); err != nil {
+		return TaskExecutionLease{}, false, err
 	}
 	key := activeLeaseKey(cmd.RunID, cmd.TaskID)
 	if leaseID := r.activeLeaseByTask[key]; leaseID != "" {

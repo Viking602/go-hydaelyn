@@ -294,10 +294,7 @@ func (r *Runtime) RegisterAgent(profile AgentProfile) {
 	if _, exists := r.agents[profile.ID]; !exists {
 		r.agentOrder = append(r.agentOrder, profile.ID)
 	}
-	clone := profile
-	clone.Groups = slices.Clone(profile.Groups)
-	clone.Metadata = maps.Clone(profile.Metadata)
-	r.agents[profile.ID] = clone
+	r.agents[profile.ID] = cloneAgentProfile(profile)
 }
 
 func (r *Runtime) Agents() []AgentProfile {
@@ -306,7 +303,7 @@ func (r *Runtime) Agents() []AgentProfile {
 	out := make([]AgentProfile, 0, len(r.agentOrder))
 	for _, id := range r.agentOrder {
 		if profile, ok := r.agents[id]; ok {
-			out = append(out, profile)
+			out = append(out, cloneAgentProfile(profile))
 		}
 	}
 	return out
@@ -320,6 +317,13 @@ func (r *Runtime) agentsLocked() []AgentProfile {
 		}
 	}
 	return out
+}
+
+func cloneAgentProfile(profile AgentProfile) AgentProfile {
+	clone := profile
+	clone.Groups = slices.Clone(profile.Groups)
+	clone.Metadata = maps.Clone(profile.Metadata)
+	return clone
 }
 
 func (r *Runtime) RegisterTool(tool Tool) {

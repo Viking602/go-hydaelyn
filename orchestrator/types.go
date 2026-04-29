@@ -279,6 +279,7 @@ type (
 	AdvanceRunCommand             = runtimeimpl.AdvanceRunCommand
 	DispatchTaskCommand           = runtimeimpl.DispatchTaskCommand
 	FanOutDispatchTaskCommand     = runtimeimpl.FanOutDispatchTaskCommand
+	WriteBlackboardItemCommand    = runtimeimpl.WriteBlackboardItemCommand
 	AcquireTaskExecutionCommand   = runtimeimpl.AcquireTaskExecutionCommand
 	HeartbeatTaskExecutionCommand = runtimeimpl.HeartbeatTaskExecutionCommand
 	ReleaseTaskExecutionCommand   = runtimeimpl.ReleaseTaskExecutionCommand

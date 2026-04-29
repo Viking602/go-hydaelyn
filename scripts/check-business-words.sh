@@ -21,17 +21,18 @@ baseline="$(tr -d '[:space:]' < "$BASELINE_FILE")"
 pattern='Synthesis|ReviewResult|ActionResult|TaskTypeAction|\bHazard\b|\bIncident\b'
 
 count="$(
-  grep -rEc "$pattern" \
-    --include="*.go" \
-    --exclude-dir=legacy \
-    --exclude-dir=_examples \
-    --exclude-dir=docs \
-    --exclude-dir=testdata \
-    --exclude-dir=pattern \
-    --exclude-dir=.git \
-    . 2>/dev/null \
-  | grep -v ':0$' \
-  | awk -F: '{s+=$2} END {print s+0}'
+  {
+    grep -rEc "$pattern" \
+      --include="*.go" \
+      --exclude-dir=legacy \
+      --exclude-dir=_examples \
+      --exclude-dir=docs \
+      --exclude-dir=testdata \
+      --exclude-dir=pattern \
+      --exclude-dir=.git \
+      . 2>/dev/null || true
+  } \
+  | awk -F: '$2 != 0 {s+=$2} END {print s+0}'
 )"
 
 echo "framework business-word count: $count (baseline: $baseline)"

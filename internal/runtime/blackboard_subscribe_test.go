@@ -91,6 +91,34 @@ func TestWaitForBlackboardReplaysAndStreams(t *testing.T) {
 	}
 }
 
+func TestWaitForBlackboardDoesNotMissWriteBetweenReplayAndPredicate(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run := mustStartRun(t, ctx, rt, "run-wait-window")
+
+	calls := 0
+	got, err := rt.WaitForBlackboard(ctx, run.ID,
+		BlackboardFilter{ItemTypes: []BlackboardItemType{BlackboardItemEvidence}},
+		func(items []BlackboardItem) bool {
+			calls++
+			if calls == 1 {
+				if err := rt.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: "t", Type: BlackboardItemEvidence, Source: SourceIdentity{Type: SourceAgent, ID: "a"}, Visibility: BlackboardVisibilityAgentVisible, Payload: "late"}); err != nil {
+					t.Fatalf("WriteItem(late) error = %v", err)
+				}
+				return false
+			}
+			return len(items) == 1 && items[0].Payload == "late"
+		},
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("WaitForBlackboard() missed replay-to-subscribe window write: %v", err)
+	}
+	if len(got) != 1 || got[0].Payload != "late" {
+		t.Fatalf("unexpected wait result: %#v", got)
+	}
+}
+
 func TestWaitForBlackboardTimeout(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()

@@ -72,6 +72,10 @@ type RuntimeCommand interface {
 	CommandName() string
 }
 
+type WriteBlackboardItemCommand struct {
+	Item BlackboardItem
+}
+
 type PolicyEngine interface {
 	Authorize(context.Context, PolicyRequest) (PolicyDecision, error)
 }

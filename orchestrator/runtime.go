@@ -83,7 +83,11 @@ func (r *Runtime) Agents() []AgentProfile {
 }
 
 func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
-	return r.inner.DispatchTaskFanOut(ctx, cmd)
+	result, err := r.inner.ExecuteCommand(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	return result.([]TaskEnvelope), nil
 }
 
 func (r *Runtime) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
@@ -91,7 +95,8 @@ func (r *Runtime) Subscribe(ctx context.Context, runID string, filter Blackboard
 }
 
 func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
-	return r.inner.WriteItem(ctx, item)
+	_, err := r.inner.ExecuteCommand(ctx, WriteBlackboardItemCommand{Item: item})
+	return err
 }
 
 func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {

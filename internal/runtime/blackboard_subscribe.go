@@ -35,11 +35,19 @@ type blackboardSubscription struct {
 // caller MUST drain the channel and call cancel() when done; on full buffer
 // (default 32) the runtime drops the oldest match (non-blocking writer).
 func (r *Runtime) Subscribe(_ context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
-	if runID == "" {
-		return nil, nil, fmt.Errorf("%w: subscribe requires runId", ErrInvalidCommand)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	sub, err := r.subscribeLocked(runID, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sub.ch, func() error { return r.unsubscribe(sub) }, nil
+}
+
+func (r *Runtime) subscribeLocked(runID string, filter BlackboardFilter) (*blackboardSubscription, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("%w: subscribe requires runId", ErrInvalidCommand)
+	}
 	r.nextSubID++
 	sub := &blackboardSubscription{
 		id:     r.nextSubID,
@@ -48,15 +56,16 @@ func (r *Runtime) Subscribe(_ context.Context, runID string, filter BlackboardFi
 		ch:     make(chan BlackboardItem, 32),
 	}
 	r.subscribers[runID] = append(r.subscribers[runID], sub)
-	cancel := func() error {
-		return r.unsubscribe(sub)
-	}
-	return sub.ch, cancel, nil
+	return sub, nil
 }
 
 func (r *Runtime) unsubscribe(sub *blackboardSubscription) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.unsubscribeLocked(sub)
+}
+
+func (r *Runtime) unsubscribeLocked(sub *blackboardSubscription) error {
 	list := r.subscribers[sub.runID]
 	idx := slices.IndexFunc(list, func(s *blackboardSubscription) bool { return s.id == sub.id })
 	if idx < 0 {
@@ -107,17 +116,21 @@ func (r *Runtime) WaitForBlackboard(
 	if predicate == nil {
 		return nil, fmt.Errorf("%w: WaitForBlackboard requires predicate", ErrInvalidCommand)
 	}
-	existing, err := r.SelectItems(ctx, runID, filter)
+	r.mu.Lock()
+	sub, err := r.subscribeLocked(runID, filter)
 	if err != nil {
+		r.mu.Unlock()
 		return nil, err
 	}
-	if predicate(existing) {
-		return existing, nil
-	}
-	ch, cancel, err := r.Subscribe(ctx, runID, filter)
+	existing, err := r.selectItemsLocked(ctx, runID, filter)
 	if err != nil {
+		_ = r.unsubscribeLocked(sub)
+		r.mu.Unlock()
 		return nil, err
 	}
+	ch := sub.ch
+	cancel := func() error { return r.unsubscribe(sub) }
+	r.mu.Unlock()
 	defer func() { _ = cancel() }()
 
 	var deadline <-chan time.Time
@@ -127,6 +140,9 @@ func (r *Runtime) WaitForBlackboard(
 		deadline = t.C
 	}
 	acc := append([]BlackboardItem{}, existing...)
+	if predicate(acc) {
+		return acc, nil
+	}
 	for {
 		select {
 		case <-ctx.Done():
