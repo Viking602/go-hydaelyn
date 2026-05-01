@@ -9,32 +9,32 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "producer"})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "consumer"})
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "producer"})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "consumer"})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "share artifact"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "share artifact"})
 	must(err)
 
 	// Producer publishes one Evidence item to the blackboard.
-	must(rt.WriteItem(ctx, orchestrator.BlackboardItem{
+	must(runner.WriteItem(ctx, hydaelyn.BlackboardItem{
 		RunID:      run.ID,
-		Type:       orchestrator.BlackboardItemEvidence,
-		Source:     orchestrator.SourceIdentity{Type: orchestrator.SourceAgent, ID: "producer"},
+		Type:       hydaelyn.BlackboardItemEvidence,
+		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: "producer"},
 		Content:    "p99 latency 320ms over the last hour",
-		Visibility: orchestrator.BlackboardVisibilityAgentVisible,
+		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
 	}))
 	fmt.Println("producer wrote evidence")
 
 	// Consumer queries by source agent and item type, prints what it sees.
-	items, err := rt.SelectItems(ctx, run.ID, orchestrator.BlackboardSelector{
-		ItemTypes:   []orchestrator.BlackboardItemType{orchestrator.BlackboardItemEvidence},
-		SourceTypes: []orchestrator.SourceType{orchestrator.SourceAgent},
+	items, err := runner.SelectItems(ctx, run.ID, hydaelyn.BlackboardSelector{
+		ItemTypes:   []hydaelyn.BlackboardItemType{hydaelyn.BlackboardItemEvidence},
+		SourceTypes: []hydaelyn.SourceType{hydaelyn.SourceAgent},
 		SourceIDs:   []string{"producer"},
 	})
 	must(err)

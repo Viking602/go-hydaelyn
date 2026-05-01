@@ -4,32 +4,97 @@ import (
 	"context"
 	"time"
 
-	runtimeimpl "github.com/Viking602/go-hydaelyn/internal/runtime"
+	core "github.com/Viking602/go-hydaelyn/internal/core"
 )
 
 type Config struct {
+	StoreProvider StoreProvider
 	PolicyEngine  PolicyEngine
 	OutputGateway OutputGateway
 	Pipeline      PipelineComponents
 }
 
-type Runtime struct {
-	inner *runtimeimpl.Runtime
+type Runner struct {
+	inner *core.Runtime
 }
 
-func NewMemoryRuntime() *Runtime {
-	return NewRuntime(Config{})
+// Runtime is kept for source compatibility.
+//
+// Deprecated: use Runner.
+type Runtime = Runner
+
+func DefaultConfig() Config {
+	return Config{}
 }
 
-func NewRuntime(config Config) *Runtime {
-	return &Runtime{inner: runtimeimpl.NewRuntime(runtimeimpl.Config{
+func New(configs ...Config) *Runner {
+	config := resolveConfig(configs...)
+	return &Runner{inner: core.NewRuntime(core.Config{
+		StoreProvider: config.StoreProvider,
 		PolicyEngine:  config.PolicyEngine,
 		OutputGateway: config.OutputGateway,
 		Pipeline:      config.Pipeline,
 	})}
 }
 
-func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task, error) {
+func NewInMemory(configs ...Config) *Runner {
+	return New(configs...)
+}
+
+// NewMemoryRuntime is kept for source compatibility.
+//
+// Deprecated: use New or NewInMemory.
+func NewMemoryRuntime(configs ...Config) *Runner {
+	return New(configs...)
+}
+
+// NewRuntime is kept for source compatibility.
+//
+// Deprecated: use New.
+func NewRuntime(configs ...Config) *Runner {
+	return New(configs...)
+}
+
+func resolveConfig(configs ...Config) Config {
+	config := DefaultConfig()
+	for _, override := range configs {
+		if override.StoreProvider != nil {
+			config.StoreProvider = override.StoreProvider
+		}
+		if override.PolicyEngine != nil {
+			config.PolicyEngine = override.PolicyEngine
+		}
+		if override.OutputGateway != nil {
+			config.OutputGateway = override.OutputGateway
+		}
+		config.Pipeline = mergePipeline(config.Pipeline, override.Pipeline)
+	}
+	return config
+}
+
+func mergePipeline(base, override PipelineComponents) PipelineComponents {
+	if override.IntentAnalyzer != nil {
+		base.IntentAnalyzer = override.IntentAnalyzer
+	}
+	if override.Planner != nil {
+		base.Planner = override.Planner
+	}
+	if override.Validator != nil {
+		base.Validator = override.Validator
+	}
+	if override.Router != nil {
+		base.Router = override.Router
+	}
+	if override.Dispatcher != nil {
+		base.Dispatcher = override.Dispatcher
+	}
+	if override.TaskMonitor != nil {
+		base.TaskMonitor = override.TaskMonitor
+	}
+	return base
+}
+
+func (r *Runner) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return Run{}, Task{}, err
@@ -38,7 +103,7 @@ func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task,
 	return values[0].(Run), values[1].(Task), nil
 }
 
-func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, error) {
+func (r *Runner) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return Task{}, err
@@ -46,43 +111,43 @@ func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, 
 	return result.(Task), nil
 }
 
-func (r *Runtime) Run(ctx context.Context, runID string) (Run, error) {
+func (r *Runner) Run(ctx context.Context, runID string) (Run, error) {
 	return r.inner.Run(ctx, runID)
 }
 
-func (r *Runtime) Task(ctx context.Context, runID, taskID string) (Task, error) {
+func (r *Runner) Task(ctx context.Context, runID, taskID string) (Task, error) {
 	return r.inner.Task(ctx, runID, taskID)
 }
 
-func (r *Runtime) ReadyTasks(runID string) []Task {
+func (r *Runner) ReadyTasks(runID string) []Task {
 	return r.inner.ReadyTasks(runID)
 }
 
-func (r *Runtime) Events(runID string) []Event {
+func (r *Runner) Events(runID string) []Event {
 	return r.inner.Events(runID)
 }
 
-func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]Event, error) {
+func (r *Runner) RunEvents(ctx context.Context, runID string) ([]Event, error) {
 	return r.inner.RunEvents(ctx, runID)
 }
 
-func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
+func (r *Runner) ActiveLeaseCount(runID, taskID string) int {
 	return r.inner.ActiveLeaseCount(runID, taskID)
 }
 
-func (r *Runtime) RegisterTool(tool Tool) {
+func (r *Runner) RegisterTool(tool Tool) {
 	r.inner.RegisterTool(tool)
 }
 
-func (r *Runtime) RegisterAgent(profile AgentProfile) {
+func (r *Runner) RegisterAgent(profile AgentProfile) {
 	r.inner.RegisterAgent(profile)
 }
 
-func (r *Runtime) Agents() []AgentProfile {
+func (r *Runner) Agents() []AgentProfile {
 	return r.inner.Agents()
 }
 
-func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
+func (r *Runner) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -90,54 +155,54 @@ func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTask
 	return result.([]TaskEnvelope), nil
 }
 
-func (r *Runtime) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
+func (r *Runner) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
 	return r.inner.Subscribe(ctx, runID, filter)
 }
 
-func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
+func (r *Runner) WriteItem(ctx context.Context, item BlackboardItem) error {
 	_, err := r.inner.ExecuteCommand(ctx, WriteBlackboardItemCommand{Item: item})
 	return err
 }
 
-func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
+func (r *Runner) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
 	return r.inner.SelectItems(ctx, runID, selector)
 }
 
-func (r *Runtime) WaitForBlackboard(ctx context.Context, runID string, filter BlackboardFilter, predicate func([]BlackboardItem) bool, timeout time.Duration) ([]BlackboardItem, error) {
+func (r *Runner) WaitForBlackboard(ctx context.Context, runID string, filter BlackboardFilter, predicate func([]BlackboardItem) bool, timeout time.Duration) ([]BlackboardItem, error) {
 	return r.inner.WaitForBlackboard(ctx, runID, filter, predicate, timeout)
 }
 
-func (r *Runtime) SetMessagePolicy(policy MessagePolicyChecker) {
+func (r *Runner) SetMessagePolicy(policy MessagePolicyChecker) {
 	r.inner.SetMessagePolicy(policy)
 }
 
-func (r *Runtime) SetPolicyEngine(policy PolicyEngine) {
+func (r *Runner) SetPolicyEngine(policy PolicyEngine) {
 	r.inner.SetPolicyEngine(policy)
 }
 
-func (r *Runtime) SetOutputGateway(gateway OutputGateway) {
+func (r *Runner) SetOutputGateway(gateway OutputGateway) {
 	r.inner.SetOutputGateway(gateway)
 }
 
-func (r *Runtime) SetPipeline(components PipelineComponents) {
+func (r *Runner) SetPipeline(components PipelineComponents) {
 	r.inner.SetPipeline(components)
 }
 
-func (r *Runtime) ExecuteCommand(ctx context.Context, command RuntimeCommand) (any, error) {
+func (r *Runner) ExecuteCommand(ctx context.Context, command Command) (any, error) {
 	return r.inner.ExecuteCommand(ctx, command)
 }
 
-func (r *Runtime) TransitionRun(ctx context.Context, cmd TransitionRunCommand) error {
+func (r *Runner) TransitionRun(ctx context.Context, cmd TransitionRunCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) TransitionTask(ctx context.Context, cmd TransitionTaskCommand) error {
+func (r *Runner) TransitionTask(ctx context.Context, cmd TransitionTaskCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, error) {
+func (r *Runner) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return Run{}, err
@@ -145,7 +210,7 @@ func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, e
 	return result.(Run), nil
 }
 
-func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
+func (r *Runner) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return TaskEnvelope{}, err
@@ -153,7 +218,7 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 	return result.(TaskEnvelope), nil
 }
 
-func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (TaskExecutionLease, bool, error) {
+func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (TaskExecutionLease, bool, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return TaskExecutionLease{}, false, err
@@ -165,37 +230,37 @@ func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecu
 	return acquired.Lease, acquired.Acquired, nil
 }
 
-func (r *Runtime) HeartbeatTaskExecution(ctx context.Context, cmd HeartbeatTaskExecutionCommand) error {
+func (r *Runner) HeartbeatTaskExecution(ctx context.Context, cmd HeartbeatTaskExecutionCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) ReleaseTaskExecution(ctx context.Context, cmd ReleaseTaskExecutionCommand) error {
+func (r *Runner) ReleaseTaskExecution(ctx context.Context, cmd ReleaseTaskExecutionCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) AckEnvelope(ctx context.Context, cmd AckEnvelopeCommand) error {
+func (r *Runner) AckEnvelope(ctx context.Context, cmd AckEnvelopeCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
+func (r *Runner) DeadLetter(ctx context.Context, cmd DeadLetterCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) SubmitTypedReport(ctx context.Context, cmd SubmitTypedReportCommand) error {
+func (r *Runner) SubmitTypedReport(ctx context.Context, cmd SubmitTypedReportCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) SubmitUserInput(ctx context.Context, cmd SubmitUserInputCommand) error {
+func (r *Runner) SubmitUserInput(ctx context.Context, cmd SubmitUserInputCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvocationResult, error) {
+func (r *Runner) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvocationResult, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return ToolInvocationResult{}, err
@@ -203,26 +268,26 @@ func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvoc
 	return result.(ToolInvocationResult), nil
 }
 
-func (r *Runtime) RequestHandoff(ctx context.Context, cmd HandoffCommand) error {
+func (r *Runner) RequestHandoff(ctx context.Context, cmd HandoffCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOutputCommand) error {
+func (r *Runner) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOutputCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
+func (r *Runner) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) ResponseOutbox(runID string) []UserMessage {
+func (r *Runner) ResponseOutbox(runID string) []UserMessage {
 	return r.inner.ResponseOutbox(runID)
 }
 
-func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (Run, error) {
+func (r *Runner) QueueRun(ctx context.Context, cmd StartRunCommand) (Run, error) {
 	run, _, err := r.StartRun(ctx, cmd)
 	if err != nil {
 		return Run{}, err
@@ -230,27 +295,27 @@ func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (Run, error
 	return r.AdvanceRun(ctx, AdvanceRunCommand{RunID: run.ID})
 }
 
-func (r *Runtime) RunTimeline(ctx context.Context, runID string) ([]RunTimelineItem, error) {
+func (r *Runner) RunTimeline(ctx context.Context, runID string) ([]RunTimelineItem, error) {
 	return r.inner.RunTimeline(ctx, runID)
 }
 
-func (r *Runtime) RegisterFlow(flow Flow) error {
+func (r *Runner) RegisterFlow(flow Flow) error {
 	return r.inner.RegisterFlow(flow)
 }
 
-func (r *Runtime) Replay(runID string, mode ReplayMode) (Projection, error) {
+func (r *Runner) Replay(runID string, mode ReplayMode) (Projection, error) {
 	return r.inner.Replay(runID, mode)
 }
 
-func (r *Runtime) ReplayRunState(runID string) (Projection, error) {
+func (r *Runner) ReplayRunState(runID string) (Projection, error) {
 	return r.inner.ReplayRunState(runID)
 }
 
-func (r *Runtime) Recover(ctx context.Context, runID string) (Projection, error) {
+func (r *Runner) Recover(ctx context.Context, runID string) (Projection, error) {
 	return r.inner.Recover(ctx, runID)
 }
 
-func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (ApprovalRequest, ResumeToken, error) {
+func (r *Runner) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (ApprovalRequest, ResumeToken, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return ApprovalRequest{}, ResumeToken{}, err
@@ -259,16 +324,16 @@ func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalComman
 	return values[0].(ApprovalRequest), values[1].(ResumeToken), nil
 }
 
-func (r *Runtime) DecideApproval(ctx context.Context, cmd DecideApprovalCommand) error {
+func (r *Runner) DecideApproval(ctx context.Context, cmd DecideApprovalCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeTokenCommand) (ResumeToken, error) {
+func (r *Runner) RecoverResumeToken(ctx context.Context, cmd RecoverResumeTokenCommand) (ResumeToken, error) {
 	return r.inner.RecoverResumeToken(ctx, cmd)
 }
 
-func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (ActionAttempt, error) {
+func (r *Runner) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (ActionAttempt, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return ActionAttempt{}, err
@@ -276,7 +341,7 @@ func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttempt
 	return result.(ActionAttempt), nil
 }
 
-func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (ActionAttempt, error) {
+func (r *Runner) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (ActionAttempt, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return ActionAttempt{}, err
@@ -284,7 +349,7 @@ func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionA
 	return result.(ActionAttempt), nil
 }
 
-func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (TraceSpan, error) {
+func (r *Runner) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (TraceSpan, error) {
 	result, err := r.inner.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return TraceSpan{}, err
@@ -292,11 +357,11 @@ func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand)
 	return result.(TraceSpan), nil
 }
 
-func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) error {
+func (r *Runner) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) error {
 	_, err := r.inner.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func (r *Runtime) TraceSpans(runID string) []TraceSpan {
+func (r *Runner) TraceSpans(runID string) []TraceSpan {
 	return r.inner.TraceSpans(runID)
 }

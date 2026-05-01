@@ -2,88 +2,92 @@
 
 ## Current Capabilities
 
-Hydaelyn persists enough runtime detail to replay task execution, blackboard exchange flow, and verifier evidence, not only final summaries.
+Hydaelyn persists enough runner detail to replay task execution, blackboard
+exchange flow, user-message outbox state, and action/approval decisions — not
+only final summaries.
 
-Legacy durable surfaces:
+The primary path exposes durability through:
 
+- `Runner` Run/Task commands
+- `StoreProvider -> UnitOfWork`
+- append-only events
+- mailbox outbox
+- response outbox
+- replay projection
+
+Default startup uses the in-memory store:
+
+```go
+runner := hydaelyn.New()
+```
+
+Custom durable storage is injected only when needed:
+
+```go
+runner := hydaelyn.New(hydaelyn.Config{
+	StoreProvider: myStoreProvider,
+})
+```
+
+## Store Contract
+
+The public storage contracts are:
+
+- `StoreProvider`
+- `UnitOfWork`
+- `RunStore`
+- `TaskStore`
 - `EventStore`
-- `ReplayTeamState`
-- `legacy/recipe.Compile(...)`
-- `legacy/recipe.ValidateStrictDataflow(...)`
-- `legacy/eval.Evaluate(...)`
-- `pause / resume / abort`
-- queue-backed `QueueTeam / RunQueueWorker / RecoverQueueLeases`
-- task input/output dataflow events
+- `BlackboardStore`
+- `MailboxOutboxStore`
+- `UserMessageStore`
+- `TraceStore`
 
-The primary Orchestrator path exposes durability through Run/Task commands,
-internal UnitOfWork storage, append-only events, response outbox, and replay
-projection. New code should use `hydaelyn.New` / `orchestrator.Runtime`.
+State-changing commands run behind the `UnitOfWork` boundary so run, task,
+event, mailbox, blackboard, user-message, and trace updates can be committed
+atomically by a durable driver.
 
-## Queue Contract
+## Lease Contract
 
-Queue leases now model a concrete execution attempt:
+Task execution leases model a concrete execution attempt:
 
 - `leaseId`
-- `teamId`
+- `runId`
 - `taskId`
 - `taskVersion`
-- `attempt`
-- `idempotencyKey`
-- `workerId`
-- `state`
+- `holderType`
+- `holderId`
+- `expiresAt`
+- `heartbeatAt`
+- `status`
 
-The in-tree memory queue is still a local implementation, but the contract is version-aware: the same `taskId` on different task versions no longer aliases the same lease.
+A task can only complete through `SubmitTypedReport` accepted under an active,
+matching, version-aware lease.
 
 ## Event Contract
 
-Important team events include:
+Important runner events include:
 
-- `TaskScheduled`
-- `TaskStarted`
-- `TaskInputsMaterialized`
+- `RunStarted`
+- `RunStatusChanged`
+- `TaskCreated`
+- `TaskDispatched`
+- `TaskExecutionAcquired`
+- `TypedReportSubmitted`
 - `TaskCompleted`
-- `TaskOutputsPublished`
+- `TaskFailed`
+- `BlackboardItemWritten`
 - `ApprovalRequested`
-- `TeamCompleted`
+- `UserMessageQueued`
+- `ResponsePublished`
 
-Task lifecycle payloads now record:
-
-- `statusBefore`
-- `statusAfter`
-- `taskVersionBefore`
-- `taskVersionAfter`
-- `idempotencyKey`
-- `workerId`
-- `leaseId` when available
-
-`TaskOutputsPublished` carries exchanges, artifact refs, and claim-level verification deltas needed for replay.
-
-## Replay Invariants
-
-Replay validation now checks more than shape equivalence:
-
-- required event subset exists for completed tasks
-- ordering constraints remain valid
-- task version is monotonic
-- `completed -> running` is illegal
-- each task version has at most one authoritative completion event
-- blackboard exchanges trace back to completed tasks
-- replayed final state still matches the stored authoritative state after normalization
-
-## Dataflow And Verifier Contract
-
-Strict recipe validation is available through:
-
-- `hydaelyn validate --recipe recipe.yaml --strict-dataflow`
-
-Claim-level verifier evidence drives synthesis input eligibility. A finding is only reusable when its backing claims are:
-
-- `supported`
-- confidence-qualified
-- linked to evidence IDs
+Replay rebuilds projections from these events without redelivering mailbox
+messages, republishing user messages, or rerunning action tools.
 
 ## Current Limits
 
-- The default queue is still in-memory.
-- There is still no external production durable backend in-tree.
-- Trace enrichment exists in event payloads, but full OpenTelemetry export remains a follow-up layer.
+- The default store is in-memory.
+- No official production durable backend ships in-tree yet.
+- Distributed worker scheduling remains a follow-up layer.
+- Trace enrichment exists in event payloads, but full OpenTelemetry export
+  remains a follow-up layer.

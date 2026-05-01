@@ -1,79 +1,98 @@
-# Public API Freeze
+# Public API
 
 ## Root Package Default
 
-`hydaelyn.New(hydaelyn.Config{})` now returns the primary orchestrator runtime.
-Legacy Team + Pattern execution is available through
-`hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})` and direct `legacy/host`
-imports.
+`hydaelyn.New()` is the default startup path. It returns a `*hydaelyn.Runner`
+using the default in-memory configuration.
+
+Use `Config` only when overriding defaults:
+
+```go
+runner := hydaelyn.New(hydaelyn.Config{
+	PolicyEngine: customPolicy,
+})
+```
+
+The older zero-config form remains source-compatible but is no longer the
+recommended style; prefer the no-argument constructor.
 
 ## Stable Packages
 
 The major-version public surface includes:
 
+- `hydaelyn` — primary façade and recommended import path
 - `agent`
 - `blackboard`
 - `flow`
-- `orchestrator`
+- `hook`
+- `message`
+- `orchestrator` — advanced façade kept for compatibility and extension work
 - `policy`
 - `provider`
 - `tool`
 - `transport/mcp`
-
-Deprecated Team + Pattern compatibility packages live under `legacy/` and are
-not the primary runtime surface.
+- `worker` — optional glue between `Runner` and `agent.Engine`
 
 These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
 
-## Runtime Contracts
+## Runner Contract
 
-The primary contract is Run/Task orchestration. Legacy planner/team/panel
-contracts remain under `legacy/` and are not the vNext default path.
+The primary contract is Run/Task orchestration:
 
-### Orchestrator Runtime
+- `hydaelyn.New`, `hydaelyn.Runner`, `hydaelyn.Config`
+- `Runner.StartRun`, `QueueRun`, `ExecuteCommand`, `RunEvents`, `RunTimeline`, `ReplayRunState`
+- `Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
+- `PolicyEngine.Authorize(ctx, PolicyRequest)`
+- `ApprovalRequest`, `ResumeToken`, `ActionAttempt`
+- `Flow` as preset metadata, not a state-transition bypass
+- `worker.AgentWorker` as optional task-envelope executor glue
 
-The run-level orchestration contract is the preferred surface for new durable
-adapters:
+`Runtime` and `orchestrator.NewRuntime` remain compatibility aliases. New code
+should use `Runner` and `hydaelyn.New()`.
 
-- `orchestrator.StartRun`, `QueueRun`, `ExecuteCommand`, `RunEvents`, `RunTimeline`, `ReplayRunState`
-- `orchestrator.Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
-- `orchestrator.PolicyEngine.Authorize(ctx, PolicyRequest)`
-- `orchestrator.ApprovalRequest`, `ResumeToken`, `ActionAttempt`
-- `orchestrator.Flow` as preset metadata, not a state-transition bypass
+## Durable Storage Extension
 
-Legacy `legacy/host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
-`ReplayTeamState` stay callable through `NewTeamRuntime` and `legacy/host`
-imports for the current migration window.
+Durable storage contracts are exposed through the public façade:
 
-### Legacy Collaboration
+- `StoreProvider`
+- `UnitOfWork`
+- `RunStore`
+- `TaskStore`
+- `EventStore`
+- `BlackboardStore`
+- `MailboxOutboxStore`
+- `UserMessageStore`
+- `TraceStore`
 
-Panel, deepsearch, recipe, evaluation, queue, storage, mailbox, scheduler, and
-observe packages moved under `legacy/`. They remain available for migration,
-but new orchestration work should not depend on them as primary architecture.
+Example:
+
+```go
+runner := hydaelyn.New(hydaelyn.Config{
+	StoreProvider: myStoreProvider,
+})
+```
 
 ## CLI Surface
 
-`cli validate --recipe ... --strict-dataflow` is a supported additive validation mode. It reports:
+The v2 CLI is intentionally minimal:
 
-- `unused_write`
-- `missing_read`
-- `ambiguous_producer`
-- `synthesis_reads_unknown_key`
-- `verify_task_has_no_claim_source`
-- `blackboard_publish_has_no_schema`
+```text
+hydaelyn version
+hydaelyn inspect-events --events PATH [--task TASKID]
+hydaelyn help
+```
+
+The library is the primary surface.
 
 ## Internal Surface
 
-These packages remain implementation detail:
+These packages remain implementation details:
 
-- `internal/runtime/*`
+- `internal/core/*`
 - runtime storage and UnitOfWork implementations
 - mailbox outbox dispatchers
-- scheduler/observe internals
 - command handlers and transition tables
 - replay/recovery internals
 
-Legacy HTTP control helpers moved under `legacy/transport/http/control`.
 Hydaelyn does not ship endpoint catalogs, a standard-library router, or a
-canonical `net/http` route tree for these operations as part of the primary
-runtime API.
+canonical `net/http` route tree as part of the primary runner API.

@@ -10,26 +10,26 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
+	runner := hydaelyn.New()
 	for _, id := range []string{"a", "b"} {
-		rt.RegisterAgent(orchestrator.AgentProfile{ID: id})
+		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id})
 	}
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "two parallel tasks"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "two parallel tasks"})
 	must(err)
 	for _, id := range []string{"a", "b"} {
 		taskID := "t-" + id
-		_, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{RunID: run.ID, TaskID: taskID, OwnerAgentID: id})
+		_, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{RunID: run.ID, TaskID: taskID, OwnerAgentID: id})
 		must(err)
-		runOnce(ctx, rt, run.ID, taskID, id)
+		runOnce(ctx, runner, run.ID, taskID, id)
 	}
 
-	events, err := rt.RunEvents(ctx, run.ID)
+	events, err := runner.RunEvents(ctx, run.ID)
 	must(err)
 	report := evaluate(events)
 	out, _ := json.MarshalIndent(report, "", "  ")
@@ -43,36 +43,36 @@ type metrics struct {
 	SuccessCount int            `json:"successCount"`
 }
 
-func evaluate(events []orchestrator.Event) metrics {
+func evaluate(events []hydaelyn.Event) metrics {
 	m := metrics{ByEventKind: map[string]int{}}
 	m.TotalEvents = len(events)
 	for _, ev := range events {
 		m.ByEventKind[string(ev.Type)]++
 		switch ev.Type {
-		case orchestrator.EventTaskCreated:
+		case hydaelyn.EventTaskCreated:
 			m.TaskCount++
-		case orchestrator.EventTaskCompleted:
+		case hydaelyn.EventTaskCompleted:
 			m.SuccessCount++
 		}
 	}
 	return m
 }
 
-func runOnce(ctx context.Context, rt *orchestrator.Runtime, runID, taskID, agentID string) {
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
+func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string) {
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID, TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID, TTL: time.Minute,
 	})
 	must(err)
-	task, err := rt.Task(ctx, runID, taskID)
+	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TaskVersion: task.Version,
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "ok"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "ok"},
 	}))
 }
 

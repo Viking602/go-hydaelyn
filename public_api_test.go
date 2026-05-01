@@ -27,9 +27,10 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ tool.Mode
 	_ = Tool{Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true}
 
-	runner := New(Config{})
-	var _ *Runtime = runner
-	run, err := runner.QueueRun(context.Background(), StartRunCommand{Request: "primary runtime smoke"})
+	runner := New()
+	var _ *Runner = runner
+	var _ *Runtime = runner // legacy alias remains source-compatible
+	run, err := runner.QueueRun(context.Background(), StartRunCommand{Request: "primary runner smoke"})
 	if err != nil {
 		t.Fatalf("QueueRun() error = %v", err)
 	}
@@ -39,4 +40,18 @@ func TestPublicAPISmoke(t *testing.T) {
 	if events, err := runner.RunEvents(context.Background(), run.ID); err != nil || len(events) == 0 {
 		t.Fatalf("RunEvents() returned no events for queued run")
 	}
+}
+
+func TestNewAcceptsOptionalConfig(t *testing.T) {
+	legacy := New(Config{})
+	if legacy == nil {
+		t.Fatalf("New(Config{}) returned nil")
+	}
+	custom := New(Config{PolicyEngine: policy.EngineFunc(func(context.Context, policy.Request) (policy.Decision, error) {
+		return policy.Decision{Effect: policy.EffectAllow}, nil
+	})})
+	if custom == nil {
+		t.Fatalf("New(Config{...}) returned nil")
+	}
+	_ = DefaultConfig()
 }

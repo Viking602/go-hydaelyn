@@ -10,24 +10,24 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "triage"})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "specialist"})
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "triage"})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "specialist"})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "investigate error spike"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "investigate error spike"})
 	must(err)
-	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "investigate", OwnerAgentID: "triage",
 	})
 	must(err)
 
 	// Triage decides the task belongs to specialist before doing any work.
-	must(rt.RequestHandoff(ctx, orchestrator.HandoffCommand{
+	must(runner.RequestHandoff(ctx, hydaelyn.HandoffCommand{
 		RunID: run.ID, TaskID: task.ID, TaskVersion: task.Version,
 		FromAgentID: "triage", ToAgentID: "specialist",
 		HandoffContext: "needs deep DB expertise",
@@ -35,22 +35,22 @@ func main() {
 	fmt.Println("handed off: triage → specialist")
 
 	// Specialist receives a freshly-routed envelope and finishes the work.
-	specEnv, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	specEnv, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "specialist",
 	})
 	must(err)
-	specLease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	specLease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: specEnv.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "specialist", TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: "specialist", TTL: time.Minute,
 	})
 	must(err)
-	updated, err := rt.Task(ctx, run.ID, task.ID)
+	updated, err := runner.Task(ctx, run.ID, task.ID)
 	must(err)
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: run.ID, TaskID: task.ID, LeaseID: specLease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "specialist",
+		HolderType: hydaelyn.HolderAgent, HolderID: "specialist",
 		TaskVersion: updated.Version,
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "root cause: missing index"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "root cause: missing index"},
 	}))
 	fmt.Printf("owner chain: %v → final owner=%s\n", updated.OwnerHistory, updated.OwnerAgentID)
 }

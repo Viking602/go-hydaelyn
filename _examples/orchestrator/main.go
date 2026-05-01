@@ -11,7 +11,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New(hydaelyn.Config{})
+	runner := hydaelyn.New()
 
 	run, err := runner.QueueRun(ctx, hydaelyn.StartRunCommand{
 		Request: "prepare a launch checklist",

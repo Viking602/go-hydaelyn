@@ -68,7 +68,7 @@ The following candidates were explicitly kept as-is in this pass:
 
 ### `host/runtime.go`
 
-- kept as the main composition root for `host.Config`, `host.Runtime`, `host.New`, registration, and top-level runtime wiring
+- kept as the main composition root for `hydaelyn.Config`, `hydaelyn.Runner`, `hydaelyn.New`, registration, and top-level runner wiring
 - protected by the repository's explicit runtime exception
 
 ### `host` test files

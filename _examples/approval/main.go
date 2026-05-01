@@ -11,62 +11,62 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 type approvalGate struct{}
 
-func (approvalGate) Authorize(_ context.Context, req orchestrator.PolicyRequest) (orchestrator.PolicyDecision, error) {
-	if req.Operation == orchestrator.PolicyOperationToolCall && req.Tool != nil && req.Tool.RequiresActionTask {
-		return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectRequireApproval, Reason: "needs human ack"}, nil
+func (approvalGate) Authorize(_ context.Context, req hydaelyn.PolicyRequest) (hydaelyn.PolicyDecision, error) {
+	if req.Operation == hydaelyn.PolicyOperationToolCall && req.Tool != nil && req.Tool.RequiresActionTask {
+		return hydaelyn.PolicyDecision{Effect: hydaelyn.PolicyEffectRequireApproval, Reason: "needs human ack"}, nil
 	}
-	return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectAllow}, nil
+	return hydaelyn.PolicyDecision{Effect: hydaelyn.PolicyEffectAllow}, nil
 }
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{PolicyEngine: approvalGate{}})
+	runner := hydaelyn.New(hydaelyn.Config{PolicyEngine: approvalGate{}})
 
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "actuator"})
-	rt.RegisterTool(orchestrator.Tool{
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "actuator"})
+	runner.RegisterTool(hydaelyn.Tool{
 		Name:               "deploy.rollback",
-		EffectType:         orchestrator.ToolEffectWrite,
+		EffectType:         hydaelyn.ToolEffectWrite,
 		RequiresActionTask: true,
 	})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "rollback bad release"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "rollback bad release"})
 	must(err)
-	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "rollback", OwnerAgentID: "actuator", AllowsAction: true,
 	})
 	must(err)
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "actuator",
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		HolderType: hydaelyn.HolderAgent, HolderID: "actuator",
 		TTL: time.Minute,
 	})
 	must(err)
 
 	// First call hits the policy gate and is paused.
-	_, err = rt.InvokeTool(ctx, orchestrator.ToolInvocation{
+	_, err = runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		HolderType: hydaelyn.HolderAgent, HolderID: "actuator",
 		TaskVersion: task.Version, ToolName: "deploy.rollback",
 	})
-	if !errors.Is(err, orchestrator.ErrPolicyDenied) {
+	if !errors.Is(err, hydaelyn.ErrPolicyDenied) {
 		panic(fmt.Errorf("expected ErrPolicyDenied, got %v", err))
 	}
 	fmt.Println("paused: policy demands approval")
 
-	approval, _, err := rt.RequestApproval(ctx, orchestrator.RequestApprovalCommand{
+	approval, _, err := runner.RequestApproval(ctx, hydaelyn.RequestApprovalCommand{
 		RunID: run.ID, TaskID: task.ID, RequesterAgentID: "actuator", Reason: "rollback to last green",
 	})
 	must(err)
-	must(rt.DecideApproval(ctx, orchestrator.DecideApprovalCommand{
+	must(runner.DecideApproval(ctx, hydaelyn.DecideApprovalCommand{
 		RunID: run.ID, ApprovalID: approval.ApprovalID, DecidedBy: "oncall", Decision: "approved",
 	}))
 	fmt.Println("approval granted:", approval.ApprovalID)

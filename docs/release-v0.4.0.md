@@ -7,8 +7,8 @@ single subtree. Downstream code only needs to update import paths and, in
 a handful of cases, package-name identifiers.
 
 If you want the one-liner: **prefer `github.com/Viking602/go-hydaelyn`
-(the root façade) over `host`** for `New`, `Config`, `Runtime`, and
-`StartTeamRequest`. Everything else is a straight rename.
+(the root façade)** and use the root `Runner` API. Everything else is a
+straight rename for that historical release.
 
 ## Why
 
@@ -90,14 +90,14 @@ packages.
 ```go
 import "github.com/Viking602/go-hydaelyn"
 
-runtime := hydaelyn.New(hydaelyn.Config{})
+runner := hydaelyn.New()
 ```
 
 The following identifiers are now available on the root package as
 type aliases — values are fully interchangeable with the subpackage
 types:
 
-- `hydaelyn.Runtime`          (= `host.Runtime`)
+- `hydaelyn.Runner`           (= current root runner API)
 - `hydaelyn.Config`           (= `host.Config`)
 - `hydaelyn.StartTeamRequest` (= `host.StartTeamRequest`)
 - `hydaelyn.Profile`          (= `team.Profile`)

@@ -9,25 +9,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "alice"})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "bob"})
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "alice"})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "bob"})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "ping pong"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "ping pong"})
 	must(err)
 
 	// Alice dispatches a question task to Bob.
-	ask, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	ask, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "ask", OwnerAgentID: "bob",
 		Goal: "verify alpha-cohort effect",
 	})
 	must(err)
-	askEnv, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	askEnv, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: ask.ID, TargetAgentID: "bob",
 		Payload: map[string]any{"from": "alice", "subject": "verify claim"},
 	})
@@ -35,28 +35,28 @@ func main() {
 	fmt.Printf("alice → bob: envelope %s\n", askEnv.ID)
 
 	// Bob acquires the lease, acks the envelope, and submits a typed report.
-	bobLease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	bobLease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: ask.ID, EnvelopeID: askEnv.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "bob", TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: "bob", TTL: time.Minute,
 	})
 	must(err)
-	must(rt.AckEnvelope(ctx, orchestrator.AckEnvelopeCommand{
+	must(runner.AckEnvelope(ctx, hydaelyn.AckEnvelopeCommand{
 		EnvelopeID: askEnv.ID, HolderID: "bob",
 	}))
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: run.ID, TaskID: ask.ID, LeaseID: bobLease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "bob",
+		HolderType: hydaelyn.HolderAgent, HolderID: "bob",
 		TaskVersion: ask.Version,
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "p=0.012, d=0.41"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "p=0.012, d=0.41"},
 	}))
 	fmt.Println("bob acked + reported")
 
 	// Bob replies by dispatching a fresh task back to Alice.
-	reply, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	reply, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "answer", OwnerAgentID: "alice",
 	})
 	must(err)
-	replyEnv, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	replyEnv, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: reply.ID, TargetAgentID: "alice",
 		Payload: map[string]any{"from": "bob", "in_reply_to": askEnv.ID, "summary": "confirmed"},
 	})

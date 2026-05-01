@@ -10,38 +10,38 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "researcher"})
-	rt.RegisterTool(orchestrator.Tool{
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "researcher"})
+	runner.RegisterTool(hydaelyn.Tool{
 		Name:       "web.search",
-		EffectType: orchestrator.ToolEffectReadOnly,
+		EffectType: hydaelyn.ToolEffectReadOnly,
 		RiskLevel:  "low",
 	})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "search the web"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "search the web"})
 	must(err)
-	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "lookup", OwnerAgentID: "researcher",
 	})
 	must(err)
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "researcher",
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "researcher", TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: "researcher", TTL: time.Minute,
 	})
 	must(err)
 
-	result, err := rt.InvokeTool(ctx, orchestrator.ToolInvocation{
+	result, err := runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "researcher",
+		HolderType: hydaelyn.HolderAgent, HolderID: "researcher",
 		TaskVersion: task.Version, ToolName: "web.search",
 		Input: map[string]any{"q": "go-hydaelyn"},
 	})

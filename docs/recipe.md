@@ -1,16 +1,21 @@
-# Legacy Recipe Compiler
+# Recipe Compiler
 
-## Purpose
+The v2 main branch does not ship the old declarative recipe compiler as a
+primary runtime surface. New code should compose `Run`, `Task`, dependencies,
+blackboard selectors, and flows directly through `hydaelyn.Runner`.
 
-The `legacy/recipe` package provides a declarative authoring layer over the
-legacy `planner -> team -> host` runtime.
+For direct orchestration, prefer:
 
-It compiles YAML or JSON into:
+```go
+runner := hydaelyn.New()
+run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "..."})
+```
 
-- `legacy/host.StartTeamRequest`
-- `legacy/planner.Plan`
+Recipe-style authoring can be implemented by applications as a planner layer
+that emits `hydaelyn.CreateTaskCommand` values or a `hydaelyn.TodoPlan` for a
+custom `Planner`.
 
-## Supported Authoring Primitives
+## Suggested Authoring Primitives
 
 - `task`
 - `sequential`
@@ -18,71 +23,5 @@ It compiles YAML or JSON into:
 - `loop`
 - `tool`
 
-These are compile-time sugar only. They do not introduce a second runtime model.
-
-## Step Modes
-
-### `task`
-
-Directly emits one `planner.TaskSpec`.
-
-### `sequential`
-
-Compiles child steps so each child depends on the previous child terminals.
-
-### `parallel`
-
-Compiles child steps with the same incoming dependencies and unions their terminal tasks.
-
-### `loop`
-
-Expands one task template over `for_each`.
-
-Supported placeholders:
-
-- `{{item}}`
-- `{{index}}`
-
-### `tool`
-
-Compiles a tool-like orchestration step into a supervisor-owned task with `required_capabilities`.
-
-## Example
-
-```yaml
-pattern: deepsearch
-supervisor_profile: supervisor
-worker_profiles: [researcher]
-input:
-  query: recipe example
-flow:
-  - mode: parallel
-    steps:
-      - task:
-          id: branch-1
-          kind: research
-          input: architecture
-          required_role: researcher
-          writes: [branch.arch]
-          publish: [shared, blackboard]
-      - task:
-          id: branch-2
-          kind: research
-          input: tooling
-          required_role: researcher
-          writes: [branch.tools]
-          publish: [shared, blackboard]
-  - task:
-      id: synth
-      kind: synthesize
-      assignee_agent_id: supervisor
-      reads: [branch.arch, branch.tools]
-      publish: [shared]
-```
-
-CLI support:
-
-```bash
-hydaelyn validate --recipe recipe.yaml
-hydaelyn compile --recipe recipe.yaml
-```
+These should compile to first-class runner primitives; they should not bypass
+`TaskStore`, `PolicyEngine`, `TaskExecutionLease`, response outbox, or replay.

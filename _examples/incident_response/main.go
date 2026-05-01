@@ -3,10 +3,10 @@
 //
 // This example exercises every primitive that v2.0 promises to ship:
 //
-//   * Address-based fan-out dispatch (DispatchTaskFanOut + AddressKindRole)
-//   * Blackboard wait (WaitForBlackboard) for the aggregator
-//   * AwaitMode=All gating for the reviewer
-//   * RequiresActionTask + RequireApproval for the actuator
+//   - Address-based fan-out dispatch (DispatchTaskFanOut + AddressKindRole)
+//   - Blackboard wait (WaitForBlackboard) for the aggregator
+//   - AwaitMode=All gating for the reviewer
+//   - RequiresActionTask + RequireApproval for the actuator
 //
 // All "business" vocabulary (incident, hazard, monitor) lives in this example
 // — the framework only knows about agents, tasks, blackboard items and tools.
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 const (
@@ -36,45 +36,45 @@ const (
 // effect.
 type approvalGate struct{}
 
-func (approvalGate) Authorize(_ context.Context, req orchestrator.PolicyRequest) (orchestrator.PolicyDecision, error) {
-	if req.Operation == orchestrator.PolicyOperationToolCall && req.Tool != nil && req.Tool.RequiresActionTask {
-		return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectRequireApproval, Reason: "tool requires human approval"}, nil
+func (approvalGate) Authorize(_ context.Context, req hydaelyn.PolicyRequest) (hydaelyn.PolicyDecision, error) {
+	if req.Operation == hydaelyn.PolicyOperationToolCall && req.Tool != nil && req.Tool.RequiresActionTask {
+		return hydaelyn.PolicyDecision{Effect: hydaelyn.PolicyEffectRequireApproval, Reason: "tool requires human approval"}, nil
 	}
-	return orchestrator.PolicyDecision{Effect: orchestrator.PolicyEffectAllow}, nil
+	return hydaelyn.PolicyDecision{Effect: hydaelyn.PolicyEffectAllow}, nil
 }
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{PolicyEngine: approvalGate{}})
+	runner := hydaelyn.New(hydaelyn.Config{PolicyEngine: approvalGate{}})
 
 	// --- topology ----------------------------------------------------------
 	specialists := []string{"monitor", "logreader", "changelog"}
 	for _, id := range specialists {
-		rt.RegisterAgent(orchestrator.AgentProfile{ID: id, Role: roleSpecialist, Groups: []string{"incident"}})
+		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id, Role: roleSpecialist, Groups: []string{"incident"}})
 	}
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "summarizer", Role: roleAggregator})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "reviewer", Role: roleReviewer})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "actuator", Role: roleActuator})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "summarizer", Role: roleAggregator})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "reviewer", Role: roleReviewer})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "actuator", Role: roleActuator})
 
-	rt.RegisterTool(orchestrator.Tool{
+	runner.RegisterTool(hydaelyn.Tool{
 		Name:               toolRollback,
-		EffectType:         orchestrator.ToolEffectWrite,
+		EffectType:         hydaelyn.ToolEffectWrite,
 		RequiresActionTask: true,
 		RiskLevel:          "high",
 	})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "deploy regression — investigate"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "deploy regression — investigate"})
 	must(err)
 
 	// --- 1. fan-out a heads-up envelope to every specialist by role -------
-	notifyTask, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	notifyTask, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "notify", OwnerComponent: "orchestrator",
 	})
 	must(err)
-	envelopes, err := rt.DispatchTaskFanOut(ctx, orchestrator.FanOutDispatchTaskCommand{
+	envelopes, err := runner.DispatchTaskFanOut(ctx, hydaelyn.FanOutDispatchTaskCommand{
 		RunID:   run.ID,
 		TaskID:  notifyTask.ID,
-		To:      orchestrator.Address{Kind: orchestrator.AddressKindRole, Role: roleSpecialist},
+		To:      hydaelyn.Address{Kind: hydaelyn.AddressKindRole, Role: roleSpecialist},
 		Payload: map[string]any{"alert": "5xx spike on checkout"},
 	})
 	must(err)
@@ -86,7 +86,7 @@ func main() {
 	for i, id := range specialists {
 		taskID := fmt.Sprintf("evidence-%s", id)
 		specialistTaskIDs = append(specialistTaskIDs, taskID)
-		_, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+		_, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 			RunID: run.ID, TaskID: taskID, OwnerAgentID: id,
 			Goal: fmt.Sprintf("collect evidence channel #%d", i+1),
 		})
@@ -94,15 +94,15 @@ func main() {
 		wg.Add(1)
 		go func(taskID, agentID string, idx int) {
 			defer wg.Done()
-			runSpecialist(ctx, rt, run.ID, taskID, agentID, idx)
+			runSpecialist(ctx, runner, run.ID, taskID, agentID, idx)
 		}(taskID, id, i)
 	}
 
 	// --- 3. aggregator waits for 3 evidence items via blackboard subscribe
 	want := len(specialists)
-	items, err := rt.WaitForBlackboard(ctx, run.ID,
-		orchestrator.BlackboardFilter{ItemTypes: []orchestrator.BlackboardItemType{orchestrator.BlackboardItemEvidence}},
-		func(items []orchestrator.BlackboardItem) bool { return len(items) >= want },
+	items, err := runner.WaitForBlackboard(ctx, run.ID,
+		hydaelyn.BlackboardFilter{ItemTypes: []hydaelyn.BlackboardItemType{hydaelyn.BlackboardItemEvidence}},
+		func(items []hydaelyn.BlackboardItem) bool { return len(items) >= want },
 		5*time.Second,
 	)
 	must(err)
@@ -110,69 +110,69 @@ func main() {
 
 	// Aggregator writes a Finding synthesising the evidence.
 	finding := fmt.Sprintf("3 specialists corroborate deploy regression (n=%d evidence rows)", len(items))
-	must(rt.WriteItem(ctx, orchestrator.BlackboardItem{
-		RunID: run.ID, Type: orchestrator.BlackboardItemFinding,
-		Source:     orchestrator.SourceIdentity{Type: orchestrator.SourceAgent, ID: "summarizer"},
+	must(runner.WriteItem(ctx, hydaelyn.BlackboardItem{
+		RunID: run.ID, Type: hydaelyn.BlackboardItemFinding,
+		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: "summarizer"},
 		Content:    finding,
-		Visibility: orchestrator.BlackboardVisibilityAgentVisible,
+		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
 	}))
 	fmt.Println("aggregator wrote finding:", finding)
 
 	// --- 4. reviewer task gates on AwaitMode=All over the 3 specialists --
-	reviewTask, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	reviewTask, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "review", OwnerAgentID: "reviewer",
 		DependsOn: specialistTaskIDs,
-		AwaitMode: orchestrator.AwaitModeAll,
+		AwaitMode: hydaelyn.AwaitModeAll,
 	})
 	must(err)
-	runWorker(ctx, rt, run.ID, reviewTask.ID, "reviewer", orchestrator.TypedReport{
-		Status:  orchestrator.ReportStatusSuccess,
+	runWorker(ctx, runner, run.ID, reviewTask.ID, "reviewer", hydaelyn.TypedReport{
+		Status:  hydaelyn.ReportStatusSuccess,
 		Summary: "rollback recommended",
 	})
 
 	// --- 5. action task with AllowsAction=true triggers an approval pause
-	actionTask, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	actionTask, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "rollback", OwnerAgentID: "actuator",
 		DependsOn: []string{reviewTask.ID}, AllowsAction: true,
 	})
 	must(err)
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: actionTask.ID, TargetAgentID: "actuator",
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: actionTask.ID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		HolderType: hydaelyn.HolderAgent, HolderID: "actuator",
 		TTL: time.Minute,
 	})
 	must(err)
 
 	// The first call is rejected by approvalGate → request approval, decide,
 	// then retry. This is the canonical "approval round-trip" pattern.
-	_, err = rt.InvokeTool(ctx, orchestrator.ToolInvocation{
+	_, err = runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
 		RunID: run.ID, TaskID: actionTask.ID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "actuator",
+		HolderType: hydaelyn.HolderAgent, HolderID: "actuator",
 		TaskVersion: actionTask.Version, ToolName: toolRollback,
 	})
 	switch {
-	case errors.Is(err, orchestrator.ErrPolicyDenied):
+	case errors.Is(err, hydaelyn.ErrPolicyDenied):
 		fmt.Println("tool invocation paused — policy demanded approval")
 	case err != nil:
 		panic(fmt.Errorf("unexpected tool error: %w", err))
 	}
-	approval, _, err := rt.RequestApproval(ctx, orchestrator.RequestApprovalCommand{
+	approval, _, err := runner.RequestApproval(ctx, hydaelyn.RequestApprovalCommand{
 		RunID: run.ID, TaskID: actionTask.ID, RequesterAgentID: "actuator",
 		Reason: "rollback to last green deploy",
 	})
 	must(err)
-	must(rt.DecideApproval(ctx, orchestrator.DecideApprovalCommand{
+	must(runner.DecideApproval(ctx, hydaelyn.DecideApprovalCommand{
 		RunID: run.ID, ApprovalID: approval.ApprovalID,
 		DecidedBy: "oncall-human", Decision: "approved",
 	}))
 	fmt.Println("approval granted:", approval.ApprovalID)
 
 	// --- 6. timeline summary --------------------------------------------
-	timeline, err := rt.RunTimeline(ctx, run.ID)
+	timeline, err := runner.RunTimeline(ctx, run.ID)
 	must(err)
 	fmt.Printf("\nfinal timeline: %d items\n", len(timeline))
 	for _, it := range timeline {
@@ -181,48 +181,48 @@ func main() {
 }
 
 // runSpecialist plays one specialist: acquire a lease, write Evidence, submit.
-func runSpecialist(ctx context.Context, rt *orchestrator.Runtime, runID, taskID, agentID string, idx int) {
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+func runSpecialist(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, idx int) {
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: runID, TaskID: taskID, TargetAgentID: agentID,
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TTL: time.Minute,
 	})
 	must(err)
-	must(rt.WriteItem(ctx, orchestrator.BlackboardItem{
-		RunID: runID, TaskID: taskID, Type: orchestrator.BlackboardItemEvidence,
-		Source:     orchestrator.SourceIdentity{Type: orchestrator.SourceAgent, ID: agentID},
+	must(runner.WriteItem(ctx, hydaelyn.BlackboardItem{
+		RunID: runID, TaskID: taskID, Type: hydaelyn.BlackboardItemEvidence,
+		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: agentID},
 		Content:    fmt.Sprintf("signal-%d from %s", idx+1, agentID),
-		Visibility: orchestrator.BlackboardVisibilityAgentVisible,
+		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
 	}))
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TaskVersion: 1, // version after CreateTask
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "evidence collected"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "evidence collected"},
 	}))
 }
 
 // runWorker is a 1-shot dispatch+lease+submit for non-action tasks.
-func runWorker(ctx context.Context, rt *orchestrator.Runtime, runID, taskID, agentID string, report orchestrator.TypedReport) {
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+func runWorker(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, report hydaelyn.TypedReport) {
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: runID, TaskID: taskID, TargetAgentID: agentID,
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TTL: time.Minute,
 	})
 	must(err)
-	task, err := rt.Task(ctx, runID, taskID)
+	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TaskVersion: task.Version, Report: report,
 	}))
 }

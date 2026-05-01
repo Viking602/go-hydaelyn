@@ -1,6 +1,6 @@
 // Package cli implements the hydaelyn binary. v2.0 ships a deliberately
 // minimal CLI: the framework is library-first, so the CLI only exposes
-// utilities for inspecting event logs emitted by an orchestrator.Runtime.
+// utilities for inspecting event logs emitted by a hydaelyn Runner.
 //
 // The richer recipe / eval / pattern-driven CLI from v1 lives on the
 // archive/legacy-v1 branch.

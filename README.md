@@ -8,9 +8,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Viking602/go-hydaelyn/blob/main/LICENSE)
 [![Module](https://img.shields.io/badge/module-github.com%2FViking602%2Fgo--hydaelyn-007d9c?logo=go)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
 
-Hydaelyn is a Run/Task orchestrator for Go.
+Hydaelyn is a Run/Task runner for Go.
 
-Embed it into your application with `hydaelyn` to run durable orchestrator
+Embed it into your application with `hydaelyn.New()` to run durable
 workflows where every state change goes through Run/Task commands, policy,
 leases, typed reports, handoff, response outbox, and replay.
 
@@ -22,8 +22,8 @@ go get github.com/Viking602/go-hydaelyn@latest
 
 ## Quickstart
 
-Start a run, let the orchestrator create the root task, and inspect the
-append-only event stream:
+Start a run with the default in-memory runner and inspect the append-only
+event stream:
 
 ```go
 package main
@@ -36,7 +36,7 @@ import (
 )
 
 func main() {
-	runner := hydaelyn.New(hydaelyn.Config{})
+	runner := hydaelyn.New()
 	run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
 		Request: "compare options for a Go research assistant",
 	})
@@ -53,34 +53,22 @@ func main() {
 
 ## Core Concepts
 
-Hydaelyn centers on embeddable orchestrator primitives. New work should model
-execution as `Run + Task + TaskExecutionLease`. Flow and pattern adapters are
-presets only; they must not bypass `TaskStore`, `PolicyEngine`,
-`TaskExecutionLease`, handoff, `ResponseLayer`, or `OutputGateway`.
+Hydaelyn centers on embeddable runner primitives. New work should model
+execution as `Run + Task + TaskExecutionLease`. The optional `worker` package
+bridges `TaskEnvelope` execution to `agent.Engine`. Flow adapters are presets
+only; they must not bypass `TaskStore`, `PolicyEngine`, `TaskExecutionLease`,
+handoff, `ResponseLayer`, or `OutputGateway`.
 
-Minimal run-level orchestration:
+Use `Config` only when overriding defaults:
 
 ```go
-rt := hydaelyn.New(hydaelyn.Config{})
-run, err := rt.QueueRun(context.Background(), hydaelyn.StartRunCommand{
-	Request: "coordinate a multi-agent run",
+runner := hydaelyn.New(hydaelyn.Config{
+	PolicyEngine: policy.DenySideEffectsByDefault(),
 })
-if err != nil {
-	panic(err)
-}
-events, _ := rt.RunEvents(context.Background(), run.ID)
-fmt.Println(len(events))
 ```
 
-Legacy Team + Pattern code remains available during the migration window:
-
-```go
-teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
-```
-
-Direct imports for the old runtime now live under `legacy/`, for example
-`github.com/Viking602/go-hydaelyn/legacy/host` and
-`github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch`.
+The old Team + Pattern runtime has been removed from the v2 public surface.
+Compose new work around the root `hydaelyn` runner API.
 
 ## Examples + Read Next
 
@@ -107,12 +95,11 @@ by `go build ./...`. Build or run one explicitly with `go run ./_examples/resear
 
 ## Where Hydaelyn Fits
 
-Hydaelyn is designed to live inside your Go application. Compose the
-Orchestrator runtime, register stable provider/tool/policy/flow contracts, and
-drive work through Run/Task commands. Legacy host/team/pattern code remains
-available only through `legacy/` compatibility packages.
+Hydaelyn is designed to live inside your Go application. Compose the root
+`Runner`, register stable provider/tool/policy/flow contracts, and drive work
+through Run/Task commands.
 
-The CLI is useful for inspection and workflow support, but the library is the primary surface. MCP can be plugged in as one integration path, not as the core execution model. V1 stays single-process, and the intended extension model is composition around the runtime rather than subclassing a framework.
+The CLI is useful for inspection and workflow support, but the library is the primary surface. MCP can be plugged in as one integration path, not as the core execution model. V1 stays single-process, and the intended extension model is composition around the runner rather than subclassing a framework.
 
 ## Development
 

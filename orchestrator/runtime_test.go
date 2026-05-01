@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	runtimeimpl "github.com/Viking602/go-hydaelyn/internal/runtime"
+	core "github.com/Viking602/go-hydaelyn/internal/core"
 )
 
 func TestFacadeStateMutationsUseCommandPath(t *testing.T) {
@@ -112,9 +112,9 @@ func TestFacadeWriteItemUsesCommandPath(t *testing.T) {
 	}
 }
 
-func newFacadeRuntimeWithRecordingStore() (*Runtime, *facadeRecordingUnitOfWork) {
-	durable := &facadeRecordingUnitOfWork{store: runtimeimpl.NewMemoryRuntime()}
-	rt := &Runtime{inner: runtimeimpl.NewRuntime(runtimeimpl.Config{StoreProvider: facadeRecordingStoreProvider{uow: durable}})}
+func newFacadeRuntimeWithRecordingStore() (*Runner, *facadeRecordingUnitOfWork) {
+	durable := &facadeRecordingUnitOfWork{store: core.NewMemoryRuntime()}
+	rt := New(Config{StoreProvider: facadeRecordingStoreProvider{uow: durable}})
 	return rt, durable
 }
 
@@ -122,25 +122,25 @@ type facadeRecordingStoreProvider struct {
 	uow *facadeRecordingUnitOfWork
 }
 
-func (p facadeRecordingStoreProvider) Begin(context.Context) (runtimeimpl.UnitOfWork, error) {
+func (p facadeRecordingStoreProvider) Begin(context.Context) (core.UnitOfWork, error) {
 	p.uow.committed = false
 	p.uow.rolledBack = false
 	return p.uow, nil
 }
 
 type facadeRecordingUnitOfWork struct {
-	store      *runtimeimpl.Runtime
+	store      *core.Runtime
 	committed  bool
 	rolledBack bool
 }
 
-func (u *facadeRecordingUnitOfWork) Runs() runtimeimpl.RunStore                    { return u.store }
-func (u *facadeRecordingUnitOfWork) Tasks() runtimeimpl.TaskStore                  { return u.store }
-func (u *facadeRecordingUnitOfWork) Events() runtimeimpl.EventStore                { return u.store }
-func (u *facadeRecordingUnitOfWork) Blackboard() runtimeimpl.BlackboardStore       { return u.store }
-func (u *facadeRecordingUnitOfWork) MailboxOutbox() runtimeimpl.MailboxOutboxStore { return u.store }
-func (u *facadeRecordingUnitOfWork) UserMessages() runtimeimpl.UserMessageStore    { return u.store }
-func (u *facadeRecordingUnitOfWork) Trace() runtimeimpl.TraceStore                 { return u.store }
+func (u *facadeRecordingUnitOfWork) Runs() core.RunStore                    { return u.store }
+func (u *facadeRecordingUnitOfWork) Tasks() core.TaskStore                  { return u.store }
+func (u *facadeRecordingUnitOfWork) Events() core.EventStore                { return u.store }
+func (u *facadeRecordingUnitOfWork) Blackboard() core.BlackboardStore       { return u.store }
+func (u *facadeRecordingUnitOfWork) MailboxOutbox() core.MailboxOutboxStore { return u.store }
+func (u *facadeRecordingUnitOfWork) UserMessages() core.UserMessageStore    { return u.store }
+func (u *facadeRecordingUnitOfWork) Trace() core.TraceStore                 { return u.store }
 func (u *facadeRecordingUnitOfWork) Commit(context.Context) error {
 	u.committed = true
 	return nil

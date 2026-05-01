@@ -2,7 +2,8 @@
 
 ## Plugin Model
 
-Hydaelyn uses `plugin.Registry` with `type/name` keys.
+Hydaelyn uses an internal `plugin.Registry` with `type/name` keys for runtime
+composition experiments and tests.
 
 Supported plugin types:
 
@@ -16,44 +17,48 @@ Supported plugin types:
 - `scheduler`
 - `mcp_gateway`
 
-## Registration
+## Recommended Public Integration
+
+Most application code should integrate through the public runner surface:
 
 ```go
-err := runner.RegisterPlugin(plugin.Spec{
-	Type:      plugin.TypeProvider,
-	Name:      "openai",
-	Component: myProvider,
+runner := hydaelyn.New(hydaelyn.Config{
+	PolicyEngine:  customPolicy,
+	StoreProvider: customStore,
 })
 ```
 
+Use public interfaces for extension work:
+
+- `provider.Driver`
+- `tool.Driver`
+- `policy.Engine`
+- `hydaelyn.Planner`
+- `hydaelyn.StoreProvider`
+- `hydaelyn.OutputGateway`
+
 ## Planner Plugins And Dataflow
 
-Planner plugins can now emit task-level dataflow contracts directly through `planner.TaskSpec`:
+Planner integrations can emit task-level dataflow contracts through
+`hydaelyn.Task` / `hydaelyn.TodoPlan`:
 
-- `Reads`
-- `Writes`
-- `Publish`
+- `ReadSelectors`
+- `WriteTargets`
+- dependencies and await mode
+- task owner / route metadata
 
-This lets a planner describe:
-
-- what a task consumes
-- what it produces
-- whether the output is published to private session, shared session, or blackboard
-
-The planner still compiles into the existing `planner -> team -> host` runtime path. There is no separate orchestration engine in-tree.
-
-For legacy declarative authoring, use the [`legacy/recipe`](recipe.md)
-compiler. It produces `legacy/planner.Plan` plus the matching
-`legacy/host.StartTeamRequest`, and can be wrapped in a static planner plugin
-when needed.
+This lets a planner describe what a task consumes, what it produces, and how
+other tasks should wait for it while still using the standard runner lifecycle.
 
 ## Recommended Integration Order
 
 Prefer integrating cross-cutting behavior through:
 
-- stage middleware
-- capability policy
+- policy engine
 - output guardrails
-- observer plugins
+- hooks
+- provider/tool drivers
+- storage contracts
 
-instead of re-implementing timeout, retry, and permission handling independently inside each plugin.
+instead of re-implementing timeout, retry, approval, and permission handling
+inside each plugin.

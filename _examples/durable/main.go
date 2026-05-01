@@ -11,38 +11,38 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "worker"})
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "worker"})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "recoverable run"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "recoverable run"})
 	must(err)
-	task, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 		RunID: run.ID, TaskID: "step-1", OwnerAgentID: "worker",
 	})
 	must(err)
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "worker",
 	})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "worker", TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: "worker", TTL: time.Minute,
 	})
 	must(err)
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: "worker",
+		HolderType: hydaelyn.HolderAgent, HolderID: "worker",
 		TaskVersion: task.Version,
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "done"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "done"},
 	}))
 
 	// Replay reconstructs the entire run state from events on disk/memory.
-	projection, err := rt.ReplayRunState(run.ID)
+	projection, err := runner.ReplayRunState(run.ID)
 	must(err)
 	out, _ := json.MarshalIndent(projection, "", "  ")
 	fmt.Println(string(out))

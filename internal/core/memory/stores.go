@@ -1,0 +1,481 @@
+package memory
+
+import (
+	"context"
+	"slices"
+	"time"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+)
+
+type runStore UnitOfWork
+
+type taskStore UnitOfWork
+
+type eventStore UnitOfWork
+
+type blackboardStore UnitOfWork
+
+type mailboxStore UnitOfWork
+
+type messageStore UnitOfWork
+
+type traceStore UnitOfWork
+
+type leaseStore UnitOfWork
+
+type approvalStore UnitOfWork
+
+type resumeTokenStore UnitOfWork
+
+type actionAttemptStore UnitOfWork
+
+func (s *runStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *taskStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *eventStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *blackboardStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *mailboxStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *messageStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *traceStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *leaseStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *approvalStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *resumeTokenStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *actionAttemptStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+
+func (s *runStore) SaveRun(_ context.Context, run model.Run) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = time.Now().UTC()
+	}
+	run.UpdatedAt = time.Now().UTC()
+	u.staged.Runs[run.ID] = run
+	return nil
+}
+
+func (s *runStore) LoadRun(_ context.Context, runID string) (model.Run, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.Run{}, err
+	}
+	run, ok := u.staged.Runs[runID]
+	if !ok {
+		return model.Run{}, model.ErrNotFound
+	}
+	return run, nil
+}
+
+func (s *taskStore) SaveTask(_ context.Context, task model.Task) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if u.staged.Tasks[task.RunID] == nil {
+		u.staged.Tasks[task.RunID] = map[string]model.Task{}
+	}
+	task.UpdatedAt = time.Now().UTC()
+	u.staged.Tasks[task.RunID][task.ID] = task
+	return nil
+}
+
+func (s *taskStore) LoadTask(_ context.Context, runID, taskID string) (model.Task, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.Task{}, err
+	}
+	task, ok := u.staged.Tasks[runID][taskID]
+	if !ok {
+		return model.Task{}, model.ErrNotFound
+	}
+	return task, nil
+}
+
+func (s *taskStore) ListTasks(_ context.Context, runID string) ([]model.Task, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	tasks := make([]model.Task, 0, len(u.staged.Tasks[runID]))
+	for _, task := range u.staged.Tasks[runID] {
+		tasks = append(tasks, task)
+	}
+	slices.SortFunc(tasks, func(a, b model.Task) int { return cmpString(a.ID, b.ID) })
+	return tasks, nil
+}
+
+func (s *eventStore) AppendEvent(_ context.Context, event model.Event) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if event.Sequence == 0 {
+		u.staged.Seq[event.RunID]++
+		event.Sequence = u.staged.Seq[event.RunID]
+	}
+	if event.RecordedAt.IsZero() {
+		event.RecordedAt = time.Now().UTC()
+	}
+	u.staged.Events[event.RunID] = append(u.staged.Events[event.RunID], event)
+	return nil
+}
+
+func (s *eventStore) ListEvents(_ context.Context, runID string) ([]model.Event, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	return slices.Clone(u.staged.Events[runID]), nil
+}
+
+func (s *blackboardStore) WriteItem(_ context.Context, item model.BlackboardItem) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if item.ID == "" {
+		item.ID = u.nextID("bb")
+	}
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = time.Now().UTC()
+	}
+	u.staged.Blackboard[item.RunID] = append(u.staged.Blackboard[item.RunID], item)
+	u.pending = append(u.pending, item)
+	return nil
+}
+
+func (s *blackboardStore) SelectItems(_ context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	return selectBlackboardItems(u.staged, runID, selector), nil
+}
+
+func (s *mailboxStore) QueueEnvelope(_ context.Context, env model.TaskEnvelope) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if env.ID == "" {
+		env.ID = u.nextID("env")
+	}
+	if env.CreatedAt.IsZero() {
+		env.CreatedAt = time.Now().UTC()
+	}
+	if env.Status == "" {
+		env.Status = "pending"
+	}
+	if _, exists := u.staged.Envelopes[env.ID]; !exists {
+		u.staged.EnvelopesByRun[env.RunID] = append(u.staged.EnvelopesByRun[env.RunID], env.ID)
+	}
+	u.staged.Envelopes[env.ID] = env
+	return nil
+}
+
+func (s *mailboxStore) LoadEnvelope(_ context.Context, envelopeID string) (model.TaskEnvelope, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.TaskEnvelope{}, err
+	}
+	env, ok := u.staged.Envelopes[envelopeID]
+	if !ok {
+		return model.TaskEnvelope{}, model.ErrNotFound
+	}
+	return env, nil
+}
+
+func (s *mailboxStore) UpdateEnvelope(_ context.Context, env model.TaskEnvelope) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if _, ok := u.staged.Envelopes[env.ID]; !ok {
+		return model.ErrNotFound
+	}
+	u.staged.Envelopes[env.ID] = env
+	return nil
+}
+
+func (s *mailboxStore) ListEnvelopes(_ context.Context, runID string) ([]model.TaskEnvelope, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	ids := slices.Clone(u.staged.EnvelopesByRun[runID])
+	out := make([]model.TaskEnvelope, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, u.staged.Envelopes[id])
+	}
+	return out, nil
+}
+
+func (s *messageStore) QueueMessage(_ context.Context, message model.UserMessage) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if message.ID == "" {
+		message.ID = u.nextID("msg")
+	}
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	message.Status = model.UserMessageQueued
+	message.UpdatedAt = time.Now().UTC()
+	if _, exists := u.staged.Messages[message.ID]; !exists {
+		u.staged.MessagesByRun[message.RunID] = append(u.staged.MessagesByRun[message.RunID], message.ID)
+	}
+	u.staged.Messages[message.ID] = message
+	return nil
+}
+
+func (s *messageStore) LoadMessage(_ context.Context, runID, messageID string) (model.UserMessage, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.UserMessage{}, err
+	}
+	message, ok := u.staged.Messages[messageID]
+	if !ok || message.RunID != runID {
+		return model.UserMessage{}, model.ErrNotFound
+	}
+	return message, nil
+}
+
+func (s *messageStore) UpdateMessage(_ context.Context, message model.UserMessage) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if _, ok := u.staged.Messages[message.ID]; !ok {
+		return model.ErrNotFound
+	}
+	message.UpdatedAt = time.Now().UTC()
+	u.staged.Messages[message.ID] = message
+	return nil
+}
+
+func (s *messageStore) ListMessages(_ context.Context, runID string) ([]model.UserMessage, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	ids := slices.Clone(u.staged.MessagesByRun[runID])
+	out := make([]model.UserMessage, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, u.staged.Messages[id])
+	}
+	return out, nil
+}
+
+func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessage, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	runIDs := make([]string, 0, len(u.staged.MessagesByRun))
+	for runID := range u.staged.MessagesByRun {
+		runIDs = append(runIDs, runID)
+	}
+	slices.Sort(runIDs)
+	out := []model.UserMessage{}
+	for _, runID := range runIDs {
+		for _, id := range u.staged.MessagesByRun[runID] {
+			message, ok := u.staged.Messages[id]
+			if !ok || message.Status != model.UserMessageQueued {
+				continue
+			}
+			out = append(out, message)
+		}
+	}
+	return out, nil
+}
+
+func (s *traceStore) SaveTraceSpan(_ context.Context, span model.TraceSpan) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if span.ID == "" {
+		span.ID = u.nextID("span")
+	}
+	if span.StartedAt.IsZero() {
+		span.StartedAt = time.Now().UTC()
+	}
+	if span.Status == "" {
+		span.Status = model.TraceSpanStarted
+	}
+	u.staged.TraceSpans[span.RunID] = append(u.staged.TraceSpans[span.RunID], span)
+	return nil
+}
+
+func (s *traceStore) ListTraceSpans(_ context.Context, runID string) ([]model.TraceSpan, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	return slices.Clone(u.staged.TraceSpans[runID]), nil
+}
+
+func (s *traceStore) LoadTraceSpan(_ context.Context, spanID string) (model.TraceSpan, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.TraceSpan{}, err
+	}
+	for _, spans := range u.staged.TraceSpans {
+		for _, span := range spans {
+			if span.ID == spanID {
+				return span, nil
+			}
+		}
+	}
+	return model.TraceSpan{}, model.ErrNotFound
+}
+
+func (s *traceStore) UpdateTraceSpan(_ context.Context, span model.TraceSpan) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	for runID, spans := range u.staged.TraceSpans {
+		for idx, current := range spans {
+			if current.ID == span.ID {
+				u.staged.TraceSpans[runID][idx] = span
+				return nil
+			}
+		}
+	}
+	return model.ErrNotFound
+}
+
+func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if lease.ID == "" {
+		lease.ID = u.nextID("lease")
+	}
+	u.staged.Leases[lease.ID] = lease
+	key := activeLeaseKey(lease.RunID, lease.TaskID)
+	if lease.Status == model.LeaseStatusActive {
+		u.staged.ActiveLeaseByTask[key] = lease.ID
+	} else if u.staged.ActiveLeaseByTask[key] == lease.ID {
+		delete(u.staged.ActiveLeaseByTask, key)
+	}
+	return nil
+}
+
+func (s *leaseStore) LoadLease(_ context.Context, leaseID string) (model.TaskExecutionLease, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.TaskExecutionLease{}, err
+	}
+	lease, ok := u.staged.Leases[leaseID]
+	if !ok {
+		return model.TaskExecutionLease{}, model.ErrNotFound
+	}
+	return lease, nil
+}
+
+func (s *leaseStore) ActiveLeaseForTask(_ context.Context, runID, taskID string) (model.TaskExecutionLease, bool, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.TaskExecutionLease{}, false, err
+	}
+	leaseID := u.staged.ActiveLeaseByTask[activeLeaseKey(runID, taskID)]
+	if leaseID == "" {
+		return model.TaskExecutionLease{}, false, nil
+	}
+	lease, ok := u.staged.Leases[leaseID]
+	return lease, ok, nil
+}
+
+func (s *approvalStore) SaveApproval(_ context.Context, approval model.ApprovalRequest) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	u.staged.Approvals[approval.ApprovalID] = approval
+	return nil
+}
+
+func (s *approvalStore) LoadApproval(_ context.Context, approvalID string) (model.ApprovalRequest, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.ApprovalRequest{}, err
+	}
+	approval, ok := u.staged.Approvals[approvalID]
+	if !ok {
+		return model.ApprovalRequest{}, model.ErrNotFound
+	}
+	return approval, nil
+}
+
+func (s *resumeTokenStore) SaveResumeToken(_ context.Context, token model.ResumeToken) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	u.staged.ResumeTokens[token.TokenID] = token
+	return nil
+}
+
+func (s *resumeTokenStore) LoadResumeToken(_ context.Context, tokenID string) (model.ResumeToken, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.ResumeToken{}, err
+	}
+	token, ok := u.staged.ResumeTokens[tokenID]
+	if !ok {
+		return model.ResumeToken{}, model.ErrNotFound
+	}
+	return token, nil
+}
+
+func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.ActionAttempt) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	u.staged.ActionAttempts[attempt.AttemptID] = attempt
+	return nil
+}
+
+func (s *actionAttemptStore) LoadActionAttempt(_ context.Context, attemptID string) (model.ActionAttempt, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.ActionAttempt{}, err
+	}
+	attempt, ok := u.staged.ActionAttempts[attemptID]
+	if !ok {
+		return model.ActionAttempt{}, model.ErrNotFound
+	}
+	return attempt, nil
+}
+
+func cmpString(a, b string) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func activeLeaseKey(runID, taskID string) string {
+	return runID + "\x00" + taskID
+}

@@ -23,8 +23,8 @@ Avoid repeating the package name in file or symbol names. Rely on package contex
 // GOOD: task.go (not deepsearch_task.go)
 // GOOD: registry.go (not deepsearch_registry.go)
 
-// package host
-// GOOD: runtime.go (the package is "host", so "runtime" is descriptive)
+// package worker
+// GOOD: worker.go (the file contains worker execution glue)
 ```
 
 ### Package-Context Naming
@@ -32,8 +32,8 @@ Avoid repeating the package name in file or symbol names. Rely on package contex
 Names should make sense at the call site. When a type or function is used through its package, the combination should read naturally.
 
 ```go
-// GOOD: host.New(), host.Config, host.Runtime
-// The "host" package provides the runtime, not "host.HostRuntime"
+// GOOD: hydaelyn.New(), hydaelyn.Config, hydaelyn.Runner
+// The root package provides the runner, not "hydaelyn.HydaelynRunner"
 
 // GOOD: team.Profile, team.RoleSupervisor
 // "team" context makes "Profile" and "Role" clear
@@ -62,16 +62,15 @@ Split files only when there is a clean responsibility seam. Do not split by size
 // AVOID: Splitting just because a file exceeds N lines
 ```
 
-### Runtime Files
+### Runner/Core Files
 
-Keep `runtime` in filenames only when it disambiguates from other concepts in the same package.
+Prefer `runner` for public entrypoint naming and `core` for internal mechanism.
+Use `runtime` only for historical compatibility aliases or when it is the
+clearest domain term in surrounding context.
 
 ```go
-// package host
-// GOOD: runtime.go (stays as-is - "host/runtime.go" is the main composition root)
-// The "runtime_" prefix is NOT a universal requirement across all packages
-
-// package runtime would use different conventions
+// GOOD: hydaelyn.Runner, worker.AgentWorker, internal/core
+// AVOID: NewRuntime-style names for new public APIs
 ```
 
 ## Verification Commands

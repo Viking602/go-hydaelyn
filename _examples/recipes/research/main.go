@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 const (
@@ -26,74 +26,74 @@ const (
 
 func main() {
 	ctx := context.Background()
-	rt := orchestrator.NewRuntime(orchestrator.Config{})
+	runner := hydaelyn.New()
 
 	researchers := []string{"alpha", "beta", "gamma"}
 	for _, id := range researchers {
-		rt.RegisterAgent(orchestrator.AgentProfile{ID: id, Role: roleResearcher})
+		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id, Role: roleResearcher})
 	}
-	rt.RegisterAgent(orchestrator.AgentProfile{ID: "synth", Role: roleSynthesizer})
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "synth", Role: roleSynthesizer})
 
-	run, _, err := rt.StartRun(ctx, orchestrator.StartRunCommand{Request: "compare Go agent runtimes"})
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "compare Go agent runtimes"})
 	must(err)
 
 	// Each researcher writes one Evidence item to the blackboard.
 	var wg sync.WaitGroup
 	for i, id := range researchers {
 		taskID := "research-" + id
-		_, err := rt.CreateTask(ctx, orchestrator.CreateTaskCommand{
+		_, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
 			RunID: run.ID, TaskID: taskID, OwnerAgentID: id,
 		})
 		must(err)
 		wg.Add(1)
 		go func(taskID, agentID string, idx int) {
 			defer wg.Done()
-			runResearcher(ctx, rt, run.ID, taskID, agentID, idx)
+			runResearcher(ctx, runner, run.ID, taskID, agentID, idx)
 		}(taskID, id, i)
 	}
 
 	// Synthesizer waits until all 3 evidence items land, then writes a Finding.
 	want := len(researchers)
-	items, err := rt.WaitForBlackboard(ctx, run.ID,
-		orchestrator.BlackboardFilter{ItemTypes: []orchestrator.BlackboardItemType{orchestrator.BlackboardItemEvidence}},
-		func(items []orchestrator.BlackboardItem) bool { return len(items) >= want },
+	items, err := runner.WaitForBlackboard(ctx, run.ID,
+		hydaelyn.BlackboardFilter{ItemTypes: []hydaelyn.BlackboardItemType{hydaelyn.BlackboardItemEvidence}},
+		func(items []hydaelyn.BlackboardItem) bool { return len(items) >= want },
 		5*time.Second,
 	)
 	must(err)
 	wg.Wait()
 
-	must(rt.WriteItem(ctx, orchestrator.BlackboardItem{
+	must(runner.WriteItem(ctx, hydaelyn.BlackboardItem{
 		RunID:      run.ID,
-		Type:       orchestrator.BlackboardItemFinding,
-		Source:     orchestrator.SourceIdentity{Type: orchestrator.SourceAgent, ID: "synth"},
+		Type:       hydaelyn.BlackboardItemFinding,
+		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: "synth"},
 		Content:    fmt.Sprintf("synthesised %d evidence items into a recommendation", len(items)),
-		Visibility: orchestrator.BlackboardVisibilityAgentVisible,
+		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
 	}))
 	fmt.Printf("research recipe complete: %d evidence → 1 finding\n", len(items))
 }
 
-func runResearcher(ctx context.Context, rt *orchestrator.Runtime, runID, taskID, agentID string, idx int) {
-	env, err := rt.DispatchTask(ctx, orchestrator.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
+func runResearcher(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, idx int) {
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
-	lease, _, err := rt.AcquireTaskExecution(ctx, orchestrator.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID, TTL: time.Minute,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID, TTL: time.Minute,
 	})
 	must(err)
-	must(rt.WriteItem(ctx, orchestrator.BlackboardItem{
+	must(runner.WriteItem(ctx, hydaelyn.BlackboardItem{
 		RunID: runID, TaskID: taskID,
-		Type:       orchestrator.BlackboardItemEvidence,
-		Source:     orchestrator.SourceIdentity{Type: orchestrator.SourceAgent, ID: agentID},
+		Type:       hydaelyn.BlackboardItemEvidence,
+		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: agentID},
 		Content:    fmt.Sprintf("evidence-%d from %s", idx+1, agentID),
-		Visibility: orchestrator.BlackboardVisibilityAgentVisible,
+		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
 	}))
-	task, err := rt.Task(ctx, runID, taskID)
+	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
-	must(rt.SubmitTypedReport(ctx, orchestrator.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: orchestrator.HolderAgent, HolderID: agentID,
+		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
 		TaskVersion: task.Version,
-		Report:      orchestrator.TypedReport{Status: orchestrator.ReportStatusSuccess, Summary: "evidence shipped"},
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "evidence shipped"},
 	}))
 }
 

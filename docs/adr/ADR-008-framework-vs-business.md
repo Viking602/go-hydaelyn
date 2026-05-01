@@ -8,12 +8,12 @@
 
 Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并发调度任务、协调多 Agent、传递证据、做审批与处置"这套**能力**做厚做正确，让开发者在其上自由定义自己的业务架构（用户给出的事故响应参考架构只是一种可能性）。
 
-但当前 `internal/runtime/types.go` 直接定义了：
+但当前 `internal/core/types.go` 直接定义了：
 
 - `TaskTypeSynthesis` / `TaskTypeReview` / `TaskTypeAction`
 - `BlackboardItemSynthesis` / `BlackboardItemReviewResult` / `BlackboardItemActionResult`
 
-并且 `internal/runtime/report.go` 用 `TaskTypeAction` 来分支判定行为、用 `BlackboardItemActionResult` 写黑板。这把"归因/评审/处置"这一套**业务语义**焊在了框架里。后果：
+并且 `internal/core/report.go` 用 `TaskTypeAction` 来分支判定行为、用 `BlackboardItemActionResult` 写黑板。这把"归因/评审/处置"这一套**业务语义**焊在了框架里。后果：
 
 - 任何不做事故响应的领域被迫要么忽略这些常量、要么被它们语义干扰；
 - 框架想增删一种业务流程都得改核心；
@@ -48,12 +48,12 @@ Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并�
 
 ### 3. 立即生效的硬约束
 
-- 框架代码（`internal/runtime/**`、`orchestrator/**`、`agent/**`、`blackboard/**`、`mailbox/**`、`tool/**`、`flow/**`、`hook/**`、`message/**`、`policy/**`、`provider/**`）**不得**新增以下字面量：
+- 框架代码（`internal/core/**`、`orchestrator/**`、`agent/**`、`blackboard/**`、`mailbox/**`、`tool/**`、`flow/**`、`hook/**`、`message/**`、`policy/**`、`provider/**`）**不得**新增以下字面量：
   `Synthesis` / `Review` / `ReviewResult` / `Action`（作类型词时）/ `ActionResult` / `Hazard` / `Incident`
 - 已有出现位置（M3 清理目标）由 `.sentrux/business-words.baseline` 锁定基线 = 45。CI 校验"实际计数 ≤ 基线"，仅允许下降。
-- 框架代码**不得** import `legacy/**`。`.sentrux/rules.toml` 用 `[[boundaries]]` 对每个干净模块逐条锁定（`internal/runtime`、`orchestrator`、`agent`、`blackboard`、`mailbox`、`tool`、`flow`、`hook`、`message`、`policy`、`provider`），任何 PR 引入新依赖即 CI 失败。
+- 框架代码**不得** import `legacy/**`。`.sentrux/rules.toml` 用 `[[boundaries]]` 对每个干净模块逐条锁定（`internal/core`、`orchestrator`、`agent`、`blackboard`、`mailbox`、`tool`、`flow`、`hook`、`message`、`policy`、`provider`），任何 PR 引入新依赖即 CI 失败。
 - 不使用 sentrux 的 `[[layers]]` + `layer_direction`：在 0.5.7 中该规则太粗，会在过渡期内卡住合理的 façade→runtime 内部调用；用显式 `[[boundaries]]` 可以渐进收紧。
-- `no_god_files` 暂时关闭：`legacy/host/runtime.go`（fan-out=17）是合法残留，等 M6 删除 `legacy/` 后重启该规则。
+- `no_god_files` 暂时关闭：`archive/legacy-v1 host runtime`（fan-out=17）是合法残留，等 M6 删除 `legacy/` 后重启该规则。
 
 ### 4. 范围内的合理例外
 
