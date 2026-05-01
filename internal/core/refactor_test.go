@@ -28,8 +28,12 @@ func TestCommandPipelinePolicyStoreAndTraceContracts(t *testing.T) {
 	if got := result.([]any)[0].(Run); got.Status != RunStatusCreated {
 		t.Fatalf("StartRun command should preserve created state, got %#v", got)
 	}
-	if _, err := rt.Begin(ctx); err != nil {
+	uow, err := rt.Begin(ctx)
+	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
 	}
 
 	advanced := mustAdvanceRun(t, ctx, rt, "run-command")

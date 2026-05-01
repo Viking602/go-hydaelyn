@@ -29,16 +29,6 @@ func (r *Runtime) Agents() []AgentProfile {
 	return out
 }
 
-func (r *Runtime) agentsLocked() []AgentProfile {
-	out := make([]AgentProfile, 0, len(r.agentOrder))
-	for _, id := range r.agentOrder {
-		if profile, ok := r.agents[id]; ok {
-			out = append(out, profile)
-		}
-	}
-	return out
-}
-
 func cloneAgentProfile(profile AgentProfile) AgentProfile {
 	clone := profile
 	clone.Groups = slices.Clone(profile.Groups)

@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"slices"
 
 	"github.com/Viking602/go-hydaelyn/internal/core/memory"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
@@ -40,7 +39,6 @@ func (r *Runtime) SelectItems(ctx context.Context, runID string, selector Blackb
 		return nil, err
 	}
 	defer done()
-	selector = normalizeBlackboardSelector(selector)
 	decision, err := r.currentPolicyEngine().Authorize(ctx, PolicyRequest{Operation: PolicyOperationBlackboardRead, RunID: runID, Selector: &selector})
 	if err != nil {
 		return nil, err
@@ -51,58 +49,6 @@ func (r *Runtime) SelectItems(ctx context.Context, runID string, selector Blackb
 	return uow.Blackboard().SelectItems(ctx, runID, selector)
 }
 
-func normalizeBlackboardSelector(selector BlackboardSelector) BlackboardSelector {
-	if len(selector.SourceAgentIDs) == 0 {
-		return selector
-	}
-	if !slices.Contains(selector.SourceTypes, SourceAgent) {
-		selector.SourceTypes = append(selector.SourceTypes, SourceAgent)
-	}
-	for _, id := range selector.SourceAgentIDs {
-		if !slices.Contains(selector.SourceIDs, id) {
-			selector.SourceIDs = append(selector.SourceIDs, id)
-		}
-	}
-	return selector
-}
-
-func selectBlackboardItems(items []BlackboardItem, selector BlackboardSelector) []BlackboardItem {
-	out := make([]BlackboardItem, 0, len(items))
-	for _, item := range items {
-		if selector.RunID != "" && item.RunID != selector.RunID {
-			continue
-		}
-		if selector.TaskID != "" && item.TaskID != selector.TaskID {
-			continue
-		}
-		if selector.Visibility != "" && item.Visibility != selector.Visibility {
-			continue
-		}
-		if len(selector.ItemTypes) > 0 && !slices.Contains(selector.ItemTypes, item.Type) {
-			continue
-		}
-		if len(selector.SourceIDs) > 0 && !slices.Contains(selector.SourceIDs, item.Source.ID) {
-			continue
-		}
-		if len(selector.SourceTypes) > 0 && !slices.Contains(selector.SourceTypes, item.Source.Type) {
-			continue
-		}
-		if len(selector.SourceAgentIDs) > 0 && (item.Source.Type != SourceAgent || !slices.Contains(selector.SourceAgentIDs, item.Source.ID)) {
-			continue
-		}
-		if selector.SinceVersion > 0 && item.Version <= selector.SinceVersion {
-			continue
-		}
-		if len(selector.Keys) > 0 && !slices.Contains(selector.Keys, item.Key) {
-			continue
-		}
-		out = append(out, item)
-		if selector.Limit > 0 && len(out) >= selector.Limit {
-			break
-		}
-	}
-	return out
-}
 
 // memStoreProvider adapts memProvider to the legacy StoreProvider interface.
 type memStoreProvider struct {

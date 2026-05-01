@@ -68,6 +68,16 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if !acquired {
 		return fmt.Errorf("worker: task %s already has an active lease", req.Envelope.TaskID)
 	}
+	leaseHandled := false
+	defer func() {
+		if leaseHandled {
+			return
+		}
+		_ = w.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), hydaelyn.ReleaseTaskExecutionCommand{
+			LeaseID:  lease.ID,
+			HolderID: w.AgentID,
+		})
+	}()
 	if req.Envelope.ID != "" {
 		if err := w.Runner.AckEnvelope(ctx, hydaelyn.AckEnvelopeCommand{EnvelopeID: req.Envelope.ID, HolderID: w.AgentID}); err != nil {
 			return err
@@ -83,6 +93,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 	inputs, err := w.materializeInputs(ctx, task)
 	if err != nil {
+		leaseHandled = true
 		_ = w.submitFailure(ctx, task, lease, err)
 		return err
 	}
@@ -100,13 +111,19 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			TaskVersion: task.Version,
 		}.ToolBus()
 	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	heartbeatDone := make(chan struct{})
+	go w.heartbeatLoop(heartbeatCtx, lease.ID, ttl, heartbeatDone)
 	result, err := engine.Run(ctx, agent.Input{
 		Model:         w.Model,
 		Messages:      messages,
 		ToolMode:      w.ToolMode,
 		MaxIterations: w.MaxIterations,
 	})
+	stopHeartbeat()
+	<-heartbeatDone
 	if err != nil {
+		leaseHandled = true
 		_ = w.submitFailure(ctx, task, lease, err)
 		return err
 	}
@@ -123,9 +140,11 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
 	}); err != nil {
+		leaseHandled = true
 		_ = w.submitFailure(ctx, task, lease, err)
 		return err
 	}
+	leaseHandled = true
 	return w.Runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
@@ -138,6 +157,27 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			Summary: summary,
 		},
 	})
+}
+
+func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration, done chan<- struct{}) {
+	defer close(done)
+	interval := ttl / 3
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = w.Runner.HeartbeatTaskExecution(ctx, hydaelyn.HeartbeatTaskExecutionCommand{
+				LeaseID: leaseID,
+				TTL:     ttl,
+			})
+		}
+	}
 }
 
 func (w AgentWorker) materializeInputs(ctx context.Context, task hydaelyn.Task) ([]hydaelyn.BlackboardItem, error) {

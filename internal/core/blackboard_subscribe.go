@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"slices"
 )
 
 // ErrSubscriptionClosed is returned by a subscription's cancel func if the
@@ -37,8 +36,7 @@ func (r *Runtime) configuredBlackboardSubscriber() (BlackboardSubscriber, bool) 
 }
 
 func (r *Runtime) subscribeRuntimeHub(ctx context.Context, runID string, filter BlackboardFilter) (<-chan BlackboardItem, func() error, error) {
-	selector := normalizeBlackboardSelector(filter)
-	ch, cancel, err := r.memProvider.Subscribe(ctx, runID, selector)
+	ch, cancel, err := r.memProvider.Subscribe(ctx, runID, filter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -50,37 +48,4 @@ func (r *Runtime) subscribeRuntimeHub(ctx context.Context, runID string, filter 
 		}
 	}
 	return ch, wrapped, nil
-}
-
-// matchesBlackboardSelector mirrors the filter logic used in SelectItems so
-// streamed items match historical reads exactly.
-func matchesBlackboardSelector(item BlackboardItem, selector BlackboardSelector) bool {
-	if selector.RunID != "" && item.RunID != selector.RunID {
-		return false
-	}
-	if selector.TaskID != "" && item.TaskID != selector.TaskID {
-		return false
-	}
-	if selector.Visibility != "" && item.Visibility != selector.Visibility {
-		return false
-	}
-	if len(selector.ItemTypes) > 0 && !slices.Contains(selector.ItemTypes, item.Type) {
-		return false
-	}
-	if len(selector.SourceIDs) > 0 && !slices.Contains(selector.SourceIDs, item.Source.ID) {
-		return false
-	}
-	if len(selector.SourceTypes) > 0 && !slices.Contains(selector.SourceTypes, item.Source.Type) {
-		return false
-	}
-	if len(selector.SourceAgentIDs) > 0 && (item.Source.Type != SourceAgent || !slices.Contains(selector.SourceAgentIDs, item.Source.ID)) {
-		return false
-	}
-	if selector.SinceVersion > 0 && item.Version <= selector.SinceVersion {
-		return false
-	}
-	if len(selector.Keys) > 0 && !slices.Contains(selector.Keys, item.Key) {
-		return false
-	}
-	return true
 }

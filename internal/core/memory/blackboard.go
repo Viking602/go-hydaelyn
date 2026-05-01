@@ -36,7 +36,7 @@ func (h *subscriptionHub) Subscribe(_ context.Context, runID string, filter mode
 	sub := &subscription{
 		id:     h.nextID,
 		runID:  runID,
-		filter: normalizeBlackboardSelector(filter),
+		filter: filter,
 		ch:     make(chan model.BlackboardItem, 32),
 	}
 	h.subs[runID] = append(h.subs[runID], sub)
@@ -84,7 +84,6 @@ func (h *subscriptionHub) Notify(items []model.BlackboardItem) {
 }
 
 func selectBlackboardItems(state *State, runID string, selector model.BlackboardSelector) []model.BlackboardItem {
-	selector = normalizeBlackboardSelector(selector)
 	items := make([]model.BlackboardItem, 0, len(state.Blackboard[runID]))
 	for _, item := range state.Blackboard[runID] {
 		if matchesBlackboardSelector(item, selector) {
@@ -95,21 +94,6 @@ func selectBlackboardItems(state *State, runID string, selector model.Blackboard
 		}
 	}
 	return items
-}
-
-func normalizeBlackboardSelector(selector model.BlackboardSelector) model.BlackboardSelector {
-	if len(selector.SourceAgentIDs) == 0 {
-		return selector
-	}
-	if !slices.Contains(selector.SourceTypes, model.SourceAgent) {
-		selector.SourceTypes = append(selector.SourceTypes, model.SourceAgent)
-	}
-	for _, id := range selector.SourceAgentIDs {
-		if !slices.Contains(selector.SourceIDs, id) {
-			selector.SourceIDs = append(selector.SourceIDs, id)
-		}
-	}
-	return selector
 }
 
 func matchesBlackboardSelector(item model.BlackboardItem, selector model.BlackboardSelector) bool {
@@ -129,9 +113,6 @@ func matchesBlackboardSelector(item model.BlackboardItem, selector model.Blackbo
 		return false
 	}
 	if len(selector.SourceTypes) > 0 && !slices.Contains(selector.SourceTypes, item.Source.Type) {
-		return false
-	}
-	if len(selector.SourceAgentIDs) > 0 && (item.Source.Type != model.SourceAgent || !slices.Contains(selector.SourceAgentIDs, item.Source.ID)) {
 		return false
 	}
 	if selector.SinceVersion > 0 && item.Version <= selector.SinceVersion {

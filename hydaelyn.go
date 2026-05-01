@@ -44,7 +44,7 @@ var (
 type (
 	Runner = orchestrator.Runner
 	// Deprecated: use Runner.
-	Runtime = orchestrator.Runtime
+	Runtime = orchestrator.Runner
 	Config  = orchestrator.Config
 
 	RunStatus            = orchestrator.RunStatus

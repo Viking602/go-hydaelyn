@@ -698,12 +698,13 @@ func TestSelectItemsAppliesCompleteSelector(t *testing.T) {
 	}
 
 	selected, err := rt.SelectItems(ctx, run.ID, BlackboardSelector{
-		TaskID:         "task-a",
-		ItemTypes:      []BlackboardItemType{BlackboardItemClaim},
-		SourceAgentIDs: []string{"agent-a"},
-		Visibility:     BlackboardVisibilityAgentVisible,
-		SinceVersion:   2,
-		Keys:           []string{"wanted"},
+		TaskID:       "task-a",
+		ItemTypes:    []BlackboardItemType{BlackboardItemClaim},
+		SourceTypes:  []SourceType{SourceAgent},
+		SourceIDs:    []string{"agent-a"},
+		Visibility:   BlackboardVisibilityAgentVisible,
+		SinceVersion: 2,
+		Keys:         []string{"wanted"},
 	})
 	if err != nil {
 		t.Fatalf("SelectItems() error = %v", err)

@@ -289,7 +289,7 @@ func (h submitTypedReportHandler) applyHandoffReport(ctx context.Context, uow po
 }
 
 func (h submitTypedReportHandler) applyHandoff(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task, request *HandoffRequest, fallbackContext string) error {
-	result, err := (handoffHandler{runtime: h.runtime}).apply(ctx, uow, task, request, fallbackContext)
+	result, err := handoffHandler(h).apply(ctx, uow, task, request, fallbackContext)
 	if err != nil {
 		return err
 	}

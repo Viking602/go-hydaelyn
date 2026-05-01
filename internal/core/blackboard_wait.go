@@ -23,7 +23,6 @@ func (r *Runtime) WaitForBlackboard(
 	if predicate == nil {
 		return nil, fmt.Errorf("%w: WaitForBlackboard requires predicate", ErrInvalidCommand)
 	}
-	filter = normalizeBlackboardSelector(filter)
 	ch, cancel, err := r.Subscribe(ctx, runID, filter)
 	if err != nil {
 		return nil, err

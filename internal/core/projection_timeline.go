@@ -13,7 +13,3 @@ func (r *Runtime) RunTimeline(ctx context.Context, runID string) ([]RunTimelineI
 	}
 	return proj.Timeline(events), nil
 }
-
-func projectRunTimelineEvent(event Event) (RunTimelineItem, bool) {
-	return proj.TimelineItem(event)
-}
