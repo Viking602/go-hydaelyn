@@ -89,8 +89,8 @@ jobs:
 
       - name: Install Go grammar plugin
         run: |
-          if sentrux plugin list 2>/dev/null | grep -q '^go\b'; then
-            echo "go plugin already installed"
+          if [ -d "$HOME/.sentrux/plugins/go" ]; then
+            echo "go plugin already installed at $HOME/.sentrux/plugins/go"
           else
             sentrux plugin add go
           fi

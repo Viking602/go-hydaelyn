@@ -93,8 +93,9 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 	inputs, err := w.materializeInputs(ctx, task)
 	if err != nil {
-		leaseHandled = true
-		_ = w.submitFailure(ctx, task, lease, err)
+		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
+			leaseHandled = true
+		}
 		return err
 	}
 	messages := w.buildMessages(run, task, inputs, req.Messages)
@@ -123,8 +124,9 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	stopHeartbeat()
 	<-heartbeatDone
 	if err != nil {
-		leaseHandled = true
-		_ = w.submitFailure(ctx, task, lease, err)
+		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
+			leaseHandled = true
+		}
 		return err
 	}
 	summary := finalAssistantText(result.Messages)
@@ -140,12 +142,12 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
 	}); err != nil {
-		leaseHandled = true
-		_ = w.submitFailure(ctx, task, lease, err)
+		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
+			leaseHandled = true
+		}
 		return err
 	}
-	leaseHandled = true
-	return w.Runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	reportErr := w.Runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
 		LeaseID:     lease.ID,
@@ -157,6 +159,10 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			Summary: summary,
 		},
 	})
+	if reportErr == nil {
+		leaseHandled = true
+	}
+	return reportErr
 }
 
 func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration, done chan<- struct{}) {
