@@ -240,6 +240,9 @@ func (h advanceRunHandler) dispatchRouting(ctx context.Context, uow ports.FullUn
 			return err
 		}
 		env = normalizePipelineEnvelope(run.ID, next, env)
+		if env.ID == "" {
+			env.ID = h.runtime.newID("env")
+		}
 		if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
 			return err
 		}

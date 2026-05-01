@@ -779,3 +779,35 @@ func indexEvent(events []Event, typ EventType) int {
 	}
 	return -1
 }
+
+func lastDispatchedEnvelopeID(t *testing.T, events []Event, taskID string) string {
+	t.Helper()
+	for idx := len(events) - 1; idx >= 0; idx-- {
+		event := events[idx]
+		if event.Type != EventTaskDispatched || event.TaskID != taskID {
+			continue
+		}
+		envelope, ok := event.Payload["envelope"].(map[string]any)
+		if !ok {
+			t.Fatalf("TaskDispatched event missing envelope payload: %#v", event)
+		}
+		id, _ := envelope["envelopeId"].(string)
+		return id
+	}
+	t.Fatalf("missing TaskDispatched event for task %s in %#v", taskID, events)
+	return ""
+}
+
+func lastQueuedMessageID(t *testing.T, events []Event) string {
+	t.Helper()
+	for idx := len(events) - 1; idx >= 0; idx-- {
+		event := events[idx]
+		if event.Type != EventUserMessageQueued {
+			continue
+		}
+		id, _ := event.Payload["messageId"].(string)
+		return id
+	}
+	t.Fatalf("missing UserMessageQueued event in %#v", events)
+	return ""
+}

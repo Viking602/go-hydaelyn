@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	core "github.com/Viking602/go-hydaelyn/internal/core"
 )
@@ -112,6 +113,68 @@ func TestFacadeWriteItemUsesCommandPath(t *testing.T) {
 	}
 }
 
+func TestFacadePublishResponseDoesNotHoldTransactionDuringGatewayCall(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-facade-publish", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	response, err := rt.CreateTask(ctx, CreateTaskCommand{
+		RunID:          run.ID,
+		TaskID:         "response",
+		Type:           TaskTypeResponse,
+		OwnerComponent: "response_composer",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(response) error = %v", err)
+	}
+	env, err := rt.DispatchTask(ctx, DispatchTaskCommand{
+		RunID:           run.ID,
+		TaskID:          response.ID,
+		TargetComponent: "response_composer",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask(response) error = %v", err)
+	}
+	lease, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
+		RunID:      run.ID,
+		TaskID:     response.ID,
+		EnvelopeID: env.ID,
+		HolderType: HolderComponent,
+		HolderID:   "response_composer",
+		TTL:        time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
+		RunID:       run.ID,
+		TaskID:      response.ID,
+		LeaseID:     lease.ID,
+		HolderType:  HolderComponent,
+		HolderID:    "response_composer",
+		TaskVersion: response.Version,
+		Payload:     "hello",
+	}); err != nil {
+		t.Fatalf("SubmitResponseOutput() error = %v", err)
+	}
+	rt.SetOutputGateway(facadeReentrantGateway{rt: rt})
+	message := rt.ResponseOutbox(run.ID)[0]
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("PublishResponse() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("PublishResponse held the transaction while gateway re-entered the runner")
+	}
+}
+
 func newFacadeRuntimeWithRecordingStore() (*Runner, *facadeRecordingUnitOfWork) {
 	durable := &facadeRecordingUnitOfWork{store: core.NewMemoryRuntime()}
 	rt := New(Config{StoreProvider: facadeRecordingStoreProvider{uow: durable}})
@@ -147,5 +210,14 @@ func (u *facadeRecordingUnitOfWork) Commit(context.Context) error {
 }
 func (u *facadeRecordingUnitOfWork) Rollback(context.Context) error {
 	u.rolledBack = true
+	return nil
+}
+
+type facadeReentrantGateway struct {
+	rt *Runner
+}
+
+func (g facadeReentrantGateway) Publish(_ context.Context, message UserMessage) error {
+	_ = g.rt.ResponseOutbox(message.RunID)
 	return nil
 }

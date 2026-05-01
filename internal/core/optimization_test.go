@@ -261,6 +261,133 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	}
 }
 
+func TestRetryDispatchEventCarriesAcquirableEnvelopeID(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-retry-envelope-event", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := rt.CreateTask(ctx, CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "retry",
+		Type:         TaskTypeWorker,
+		OwnerAgentID: "agent-a",
+		RetryPolicy:  RetryPolicy{MaxAttempts: 2},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(retry) error = %v", err)
+	}
+	lease := leaseTask(t, ctx, rt, run.ID, task.ID, HolderAgent, "agent-a")
+	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  HolderAgent,
+		HolderID:    "agent-a",
+		TaskVersion: task.Version,
+		Report:      TypedReport{Status: ReportStatusFailed, Summary: "transient"},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport(failed retry) error = %v", err)
+	}
+	envID := lastDispatchedEnvelopeID(t, rt.Events(run.ID), task.ID)
+	if envID == "" {
+		t.Fatalf("retry TaskDispatched event must carry a non-empty envelopeId")
+	}
+	lease, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
+		RunID:      run.ID,
+		TaskID:     task.ID,
+		EnvelopeID: envID,
+		HolderType: HolderAgent,
+		HolderID:   "agent-a",
+		TTL:        time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution(event envelope) lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+}
+
+func TestSubmitResponseOutputEventCarriesReplayableMessageID(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-queued-message-event", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	response, err := rt.CreateTask(ctx, CreateTaskCommand{
+		RunID:          run.ID,
+		TaskID:         "response",
+		Type:           TaskTypeResponse,
+		OwnerComponent: "response_composer",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(response) error = %v", err)
+	}
+	responseLease := leaseTask(t, ctx, rt, run.ID, response.ID, HolderComponent, "response_composer")
+	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
+		RunID:       run.ID,
+		TaskID:      response.ID,
+		LeaseID:     responseLease.ID,
+		HolderType:  HolderComponent,
+		HolderID:    "response_composer",
+		TaskVersion: response.Version,
+		Type:        UserMessageTypeFinalAnswer,
+		Payload:     "final answer",
+	}); err != nil {
+		t.Fatalf("SubmitResponseOutput() error = %v", err)
+	}
+	if id := lastQueuedMessageID(t, rt.Events(run.ID)); id == "" {
+		t.Fatalf("SubmitResponseOutput UserMessageQueued event must carry a non-empty messageId")
+	}
+	projection, err := rt.ReplayRunState(run.ID)
+	if err != nil {
+		t.Fatalf("ReplayRunState(response) error = %v", err)
+	}
+	if len(projection.Messages) != 1 || projection.Messages[0].ID == "" || projection.Messages[0].Status != UserMessageQueued {
+		t.Fatalf("queued response must replay from events, got %#v", projection.Messages)
+	}
+}
+
+func TestSystemResponseEventCarriesReplayableMessageID(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run, _, err := rt.StartRun(ctx, StartRunCommand{RunID: "run-system-message-event", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	clarify, err := rt.CreateTask(ctx, CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "clarify",
+		Type:         TaskTypeWorker,
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(clarify) error = %v", err)
+	}
+	clarifyLease := leaseTask(t, ctx, rt, run.ID, clarify.ID, HolderAgent, "agent-a")
+	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
+		RunID:       run.ID,
+		TaskID:      clarify.ID,
+		LeaseID:     clarifyLease.ID,
+		HolderType:  HolderAgent,
+		HolderID:    "agent-a",
+		TaskVersion: clarify.Version,
+		Report:      TypedReport{Status: ReportStatusNeedsClarification, Summary: "which env?"},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport(needs clarification) error = %v", err)
+	}
+	if id := lastQueuedMessageID(t, rt.Events(run.ID)); id == "" {
+		t.Fatalf("system UserMessageQueued event must carry a non-empty messageId")
+	}
+	projection, err := rt.ReplayRunState(run.ID)
+	if err != nil {
+		t.Fatalf("ReplayRunState(clarification) error = %v", err)
+	}
+	if len(projection.Messages) != 1 || projection.Messages[0].ID == "" || projection.Messages[0].Type != UserMessageTypeClarificationRequest {
+		t.Fatalf("queued system response must replay from events, got %#v", projection.Messages)
+	}
+}
+
 func TestExpiredLeaseLateReportAndTerminalRunCommandsAreRejected(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()

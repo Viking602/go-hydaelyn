@@ -112,7 +112,7 @@ func (h handoffHandler) apply(ctx context.Context, uow ports.FullUnitOfWork, tas
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: next.RunID, TaskID: next.ID, Type: EventHandoffApplied, Payload: map[string]any{"fromAgentId": fromAgentID, "toAgentId": request.ToAgentID}, RecordedAt: time.Now().UTC()}); err != nil {
 		return handoffResult{}, err
 	}
-	env := TaskEnvelope{RunID: next.RunID, TaskID: next.ID, TargetAgentID: request.ToAgentID, Type: "HandoffEnvelope", Status: "pending", TaskVersion: next.Version, Payload: map[string]any{"handoff": true, "reason": request.Reason}, CreatedAt: next.UpdatedAt}
+	env := TaskEnvelope{ID: h.runtime.newID("env"), RunID: next.RunID, TaskID: next.ID, TargetAgentID: request.ToAgentID, Type: "HandoffEnvelope", Status: "pending", TaskVersion: next.Version, Payload: map[string]any{"handoff": true, "reason": request.Reason}, CreatedAt: next.UpdatedAt}
 	if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
 		return handoffResult{}, err
 	}
