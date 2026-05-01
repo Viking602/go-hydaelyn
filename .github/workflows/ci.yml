@@ -88,7 +88,12 @@ jobs:
           sentrux --version
 
       - name: Install Go grammar plugin
-        run: sentrux plugin add go
+        run: |
+          if sentrux plugin list 2>/dev/null | grep -q '^go\b'; then
+            echo "go plugin already installed"
+          else
+            sentrux plugin add go
+          fi
 
       - name: Architectural rules (.sentrux/rules.toml)
         run: sentrux check .
