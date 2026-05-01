@@ -1,5 +1,7 @@
-// Package orchestrator is the public facade for the primary Run/Task runtime.
+// Package orchestrator exposes the advanced Run/Task runner primitives.
 //
-// The package intentionally exposes stable commands, config, and read models
-// only. Runtime implementation details live under internal/runtime.
+// Most applications should import the root hydaelyn package and call
+// hydaelyn.New(). This package remains as a stable advanced surface for
+// commands, config, storage contracts, and read models. Core implementation
+// details live under internal/core.
 package orchestrator

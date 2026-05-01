@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/legacy/tool/kit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	"github.com/Viking602/go-hydaelyn/tool"
 	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
 )

@@ -1,3 +1,9 @@
+// Package cli implements the hydaelyn binary. v2.0 ships a deliberately
+// minimal CLI: the framework is library-first, so the CLI only exposes
+// utilities for inspecting event logs emitted by a hydaelyn Runner.
+//
+// The richer recipe / eval / pattern-driven CLI from v1 lives on the
+// archive/legacy-v1 branch.
 package cli
 
 import (
@@ -7,27 +13,33 @@ import (
 	"io"
 )
 
+// Version is overridden at link time via -ldflags "-X .../cli.Version=v2.0.0".
+var Version = "v2.0.0-dev"
+
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("missing command")
+		return errors.New("missing command — try `hydaelyn help`")
 	}
-	handler, ok := commandHandlers(ctx, stdout)[args[0]]
-	if !ok {
+	switch args[0] {
+	case "help", "-h", "--help":
+		return runHelp(stdout)
+	case "version", "-v", "--version":
+		_, err := fmt.Fprintln(stdout, Version)
+		return err
+	case "inspect-events":
+		return runInspectEvents(ctx, args[1:], stdout)
+	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
-	return handler(args[1:])
 }
 
-func commandHandlers(ctx context.Context, stdout io.Writer) map[string]func([]string) error {
-	return map[string]func([]string) error{
-		"init":              func(args []string) error { return runInit(args, stdout) },
-		"new":               func(args []string) error { return runNew(args, stdout) },
-		"run":               func(args []string) error { return runRun(ctx, args, stdout) },
-		"validate":          func(args []string) error { return runValidate(args, stdout) },
-		"compile":           func(args []string) error { return runCompile(args, stdout) },
-		"inspect":           func(args []string) error { return runInspect(args, stdout) },
-		"evaluate":          func(args []string) error { return runEvaluate(args, stdout) },
-		"replay":            func(args []string) error { return runReplay(args, stdout) },
-		"run-deterministic": func(args []string) error { return runDeterministic(ctx, args, stdout) },
-	}
+func runHelp(stdout io.Writer) error {
+	_, err := fmt.Fprint(stdout, `hydaelyn — multi-agent orchestrator runtime (v2.0)
+
+Usage:
+  hydaelyn version
+  hydaelyn inspect-events --events PATH [--task TASKID]
+  hydaelyn help
+`)
+	return err
 }

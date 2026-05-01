@@ -1,9 +1,9 @@
 # Quickstart
 
-## 1. Minimal Orchestrator Run
+## 1. Minimal Runner
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{})
+runner := hydaelyn.New()
 
 run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
 	Request: "compare options for a Go research assistant",
@@ -15,7 +15,11 @@ if err != nil {
 timeline, err := runner.RunTimeline(context.Background(), run.ID)
 ```
 
-`QueueRun` uses the primary runtime path:
+`hydaelyn.New()` starts the default in-memory runner. Pass `hydaelyn.Config`
+only when overriding defaults, for example a custom policy engine or output
+gateway.
+
+`QueueRun` uses the primary runner path:
 
 1. `StartRun` creates `Run + RootTask`.
 2. `IntentAnalyzer -> Planner -> Validator -> Router -> Dispatcher` advances the run.
@@ -62,46 +66,42 @@ err = runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
 ```
 
 Mailbox ack is not completion. A task can only complete through a typed report
-accepted under an active lease.
+accepted under an active lease. If you want the library to bridge a dispatched
+envelope to `agent.Engine`, use the optional `worker.AgentWorker` package.
 
-## 3. Flow Presets
+## 3. Optional Config
 
-`Flow` replaces `Pattern` as the new preset contract. A flow can select planner,
-router, policy, and projector presets, but it cannot bypass runtime primitives.
+```go
+runner := hydaelyn.New(hydaelyn.Config{
+	PolicyEngine: customPolicy,
+})
+```
+
+The zero config is equivalent to the default config, so prefer `hydaelyn.New()`
+for ordinary startup.
+
+## 4. Flow Presets
+
+`Flow` is the preset contract. A flow can select planner, router, policy, and
+projector presets, but it cannot bypass runner primitives.
 
 ```go
 err := runner.RegisterFlow(hydaelyn.Flow{Name: "deepsearch"})
 ```
 
-## 4. Legacy Team + Pattern
+## 5. CLI
 
-Existing `host.StartTeam` and pattern packages remain callable under
-`legacy/` for compatibility:
-
-```go
-teamRunner := hydaelyn.NewTeamRuntime(hydaelyn.TeamConfig{})
-```
-
-Use this path only for migration. New features should target `Run`, `Task`,
-`TaskExecutionLease`, `TypedReport`, `Handoff`, `ResponseOutbox`, and replay.
-
-## 5. CLI And Legacy Docs
-
-The CLI still accepts Team request files while migration continues:
+The v2 CLI is deliberately small and library-first:
 
 ```bash
-hydaelyn validate --recipe recipe.yaml
-hydaelyn compile --recipe recipe.yaml
-hydaelyn validate --request team.json
-hydaelyn run --request team.json --events events.json
-hydaelyn replay --events events.json
+hydaelyn version
+hydaelyn inspect-events --events events.json
+hydaelyn help
 ```
 
 ## 6. Next Docs
 
-- [Orchestrator Runtime](orchestrator-runtime.md)
+- [Runner Runtime](orchestrator-runtime.md)
 - [Migration Notes](migration.md)
-- [Public API Freeze](public-api.md)
-- Legacy [Task Dataflow](task-dataflow.md)
-- Legacy [Recipe Compiler](recipe.md)
-- Legacy [Evaluation](evaluation.md)
+- [Public API](public-api.md)
+- [Durable Execution](durable-execution.md)

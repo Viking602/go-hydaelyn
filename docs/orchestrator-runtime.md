@@ -1,14 +1,16 @@
-# Orchestrator Runtime
+# Runner Runtime
 
-`orchestrator` is the public facade for the primary Run/Task runtime. It keeps
-business platform semantics and implementation details out of the public
-package; command handlers, state transitions, storage, mailbox, lease,
-blackboard, handoff, approval, action, response, trace, and replay internals
-live under `internal/runtime`.
+The root `hydaelyn` package is the recommended façade for the primary Run/Task
+runner. The `orchestrator` package remains as an advanced compatibility surface
+for users who need direct access to the same commands and storage contracts.
+
+Implementation details live under `internal/core`: command handlers, state
+transitions, storage, mailbox, lease, blackboard, handoff, approval, action,
+response, trace, and replay internals are not public extension points.
 
 ## Execution Chain
 
-The runtime owns this path:
+The runner owns this path:
 
 ```text
 StartRun
@@ -31,11 +33,10 @@ Mailbox delivery is notification only. The execution permission boundary is
 `TaskExecutionLease`, and task completion is `TypedReport` accepted under that
 active lease.
 
-`Runtime.ExecuteCommand(ctx, RuntimeCommand)` is the command-layer entrypoint.
-State-changing commands execute behind the internal `StoreProvider ->
-UnitOfWork` contract so `RunStore + TaskStore + EventStore` updates stay
-atomic. The memory runtime implements the same internal contracts as durable
-drivers; it is no longer a separate semantic path.
+`Runner.ExecuteCommand(ctx, Command)` is the command-layer entrypoint.
+State-changing commands execute behind the `StoreProvider -> UnitOfWork`
+contract so `RunStore + TaskStore + EventStore` updates stay atomic. The
+default in-memory runner implements the same contracts as durable drivers.
 
 ## State Ownership
 
@@ -55,7 +56,7 @@ drivers; it is no longer a separate semantic path.
 The in-memory implementation covers the contract-level primitives:
 
 - Run/task creation, strict run/task state transitions, and dependency readiness.
-- `QueueRun`, `RunEvents`, `RunTimeline`, and `ReplayRunState` as the new run-facing API.
+- `QueueRun`, `RunEvents`, `RunTimeline`, and `ReplayRunState` as the run-facing API.
 - Mailbox outbox dispatch, ack, retry scheduling, dead-letter, and task monitor
   decision events. Dead-letter policy is owned by `TaskMonitor`.
 - Version-aware task execution leases.
@@ -66,7 +67,7 @@ The in-memory implementation covers the contract-level primitives:
   a resumable blocker.
 - Handoff owner transfer with critical `handoff_context` written before owner
   change events.
-- Tool effect metadata and side-effecting tool gating through `ActionTask`.
+- Tool effect metadata and side-effecting tool gating through action-capable tasks.
 - Approval manager, resume-token recovery, action attempt lifecycle, and
   reconcile-required flow.
 - Response policy obligations, redaction, response outbox, user message store,
@@ -74,14 +75,17 @@ The in-memory implementation covers the contract-level primitives:
 - EventStore replay that rebuilds Run/Task/UserMessage projections without
   redelivering mailbox messages, republishing user messages, or rerunning
   action tools.
-- Flow registration as a preset boundary; flows that bypass runtime primitives
+- Flow registration as a preset boundary; flows that bypass runner primitives
   are rejected.
 
-## Adapter Boundary
+## Naming
 
-Existing `host.StartTeam`, `QueueTeam`, `TeamEvents`, `TeamTimeline`, and
-`ReplayTeamState` remain available through `legacy/host` or
-`hydaelyn.NewTeamRuntime` as compatibility entrypoints. New orchestration work
-should wrap existing planners, profiles, tools, and patterns around
-`orchestrator.Runtime` instead of letting a pattern own durable state
-transitions directly.
+New code should use:
+
+```go
+runner := hydaelyn.New()
+```
+
+Use `hydaelyn.Config{...}` only for overrides. `Runtime` and
+`orchestrator.NewRuntime` remain compatibility aliases but are not the
+recommended names for new code.

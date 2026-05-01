@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/legacy/tool/kit"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"

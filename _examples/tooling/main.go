@@ -1,28 +1,56 @@
+// tooling demonstrates the tool registration + invocation primitive: a
+// read-effect tool runs through the policy gate without approval, and the
+// runtime records a ToolInvocationResult on the run timeline.
+//
+//	go run ./_examples/tooling
 package main
 
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/Viking602/go-hydaelyn/legacy/capability"
-	"github.com/Viking602/go-hydaelyn/legacy/host"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
 func main() {
-	runner := host.New(host.Config{})
-	runner.RegisterCapability(capability.TypeSearch, "web", func(ctx context.Context, call capability.Call) (capability.Result, error) {
-		return capability.Result{Output: map[string]any{
-			"query": call.Name,
-			"hits":  []string{"architecture", "tooling", "runtime"},
-		}}, nil
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "researcher"})
+	runner.RegisterTool(hydaelyn.Tool{
+		Name:       "web.search",
+		EffectType: hydaelyn.ToolEffectReadOnly,
+		RiskLevel:  "low",
 	})
 
-	result, err := runner.InvokeCapability(context.Background(), capability.Call{
-		Type: capability.TypeSearch,
-		Name: "web",
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "search the web"})
+	must(err)
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+		RunID: run.ID, TaskID: "lookup", OwnerAgentID: "researcher",
 	})
+	must(err)
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "researcher",
+	})
+	must(err)
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
+		HolderType: hydaelyn.HolderAgent, HolderID: "researcher", TTL: time.Minute,
+	})
+	must(err)
+
+	result, err := runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
+		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
+		HolderType: hydaelyn.HolderAgent, HolderID: "researcher",
+		TaskVersion: task.Version, ToolName: "web.search",
+		Input: map[string]any{"q": "go-hydaelyn"},
+	})
+	must(err)
+	fmt.Printf("invoked tool=%s output=%v\n", result.ToolName, result.Output)
+}
+
+func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%v\n", result.Output)
 }

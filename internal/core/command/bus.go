@@ -1,0 +1,66 @@
+package command
+
+import (
+	"context"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+)
+
+type TypedHandler[C ports.Command] interface {
+	Name() string
+	Handle(context.Context, ports.FullUnitOfWork, C) (any, error)
+}
+
+type erasedHandler interface {
+	Name() string
+	HandleAny(context.Context, ports.FullUnitOfWork, ports.Command) (any, error)
+}
+
+type Bus struct {
+	handlers map[string]erasedHandler
+}
+
+func NewBus() *Bus {
+	return &Bus{handlers: map[string]erasedHandler{}}
+}
+
+func Register[C ports.Command](bus *Bus, handler TypedHandler[C]) {
+	if bus.handlers == nil {
+		bus.handlers = map[string]erasedHandler{}
+	}
+	bus.handlers[handler.Name()] = erased[C]{handler: handler}
+}
+
+func (b *Bus) HasHandler(name string) bool {
+	if b == nil {
+		return false
+	}
+	_, ok := b.handlers[name]
+	return ok
+}
+
+func (b *Bus) Execute(ctx context.Context, uow ports.FullUnitOfWork, cmd ports.Command) (any, error) {
+	if b == nil || cmd == nil {
+		return nil, model.ErrInvalidCommand
+	}
+	handler, ok := b.handlers[cmd.CommandName()]
+	if !ok {
+		return nil, model.ErrInvalidCommand
+	}
+	return handler.HandleAny(ctx, uow, cmd)
+}
+
+type erased[C ports.Command] struct {
+	handler TypedHandler[C]
+}
+
+func (e erased[C]) Name() string { return e.handler.Name() }
+
+func (e erased[C]) HandleAny(ctx context.Context, uow ports.FullUnitOfWork, cmd ports.Command) (any, error) {
+	typed, ok := any(cmd).(C)
+	if !ok {
+		return nil, model.ErrInvalidCommand
+	}
+	return e.handler.Handle(ctx, uow, typed)
+}

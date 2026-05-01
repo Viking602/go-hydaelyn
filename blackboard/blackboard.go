@@ -26,9 +26,6 @@ const (
 	ItemContext        = orchestrator.BlackboardItemContext
 	ItemTaskOutput     = orchestrator.BlackboardItemTaskOutput
 	ItemHandoffContext = orchestrator.BlackboardItemHandoffContext
-	ItemSynthesis      = orchestrator.BlackboardItemSynthesis
-	ItemReviewResult   = orchestrator.BlackboardItemReviewResult
-	ItemActionResult   = orchestrator.BlackboardItemActionResult
 
 	SourceAgent     = orchestrator.SourceAgent
 	SourceComponent = orchestrator.SourceComponent

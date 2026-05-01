@@ -1,49 +1,55 @@
+// durable demonstrates event-sourced replay: after a run completes,
+// ReplayRunState rebuilds the full projection from the event log alone.
+// This is the foundation for crash recovery and audit.
+//
+//	go run ./_examples/durable
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
-	"github.com/Viking602/go-hydaelyn/legacy/host"
-	"github.com/Viking602/go-hydaelyn/legacy/pattern/deepsearch"
-	"github.com/Viking602/go-hydaelyn/legacy/team"
-	"github.com/Viking602/go-hydaelyn/provider"
+	hydaelyn "github.com/Viking602/go-hydaelyn"
 )
 
-type echoProvider struct{}
-
-func (echoProvider) Metadata() provider.Metadata {
-	return provider.Metadata{Name: "echo"}
-}
-
-func (echoProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
-	last := request.Messages[len(request.Messages)-1]
-	return provider.NewSliceStream([]provider.Event{
-		{Kind: provider.EventTextDelta, Text: last.Text},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-	}), nil
-}
-
 func main() {
-	runner := host.New(host.Config{})
-	runner.RegisterProvider("echo", echoProvider{})
-	runner.RegisterPattern(deepsearch.New())
-	runner.RegisterProfile(team.Profile{Name: "supervisor", Role: team.RoleSupervisor, Provider: "echo", Model: "test"})
-	runner.RegisterProfile(team.Profile{Name: "researcher", Role: team.RoleResearcher, Provider: "echo", Model: "test"})
-	state, err := runner.StartTeam(context.Background(), host.StartTeamRequest{
-		Pattern:           "deepsearch",
-		SupervisorProfile: "supervisor",
-		WorkerProfiles:    []string{"researcher"},
-		Input:             map[string]any{"query": "replay a previous research run"},
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "worker"})
+
+	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "recoverable run"})
+	must(err)
+	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+		RunID: run.ID, TaskID: "step-1", OwnerAgentID: "worker",
 	})
+	must(err)
+	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "worker",
+	})
+	must(err)
+	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
+		HolderType: hydaelyn.HolderAgent, HolderID: "worker", TTL: time.Minute,
+	})
+	must(err)
+	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
+		HolderType: hydaelyn.HolderAgent, HolderID: "worker",
+		TaskVersion: task.Version,
+		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "done"},
+	}))
+
+	// Replay reconstructs the entire run state from events on disk/memory.
+	projection, err := runner.ReplayRunState(run.ID)
+	must(err)
+	out, _ := json.MarshalIndent(projection, "", "  ")
+	fmt.Println(string(out))
+}
+
+func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-	replayed, err := runner.ReplayTeamState(context.Background(), state.ID)
-	if err != nil {
-		panic(err)
-	}
-	payload, _ := json.MarshalIndent(replayed, "", "  ")
-	fmt.Println(string(payload))
 }

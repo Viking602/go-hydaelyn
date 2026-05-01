@@ -70,41 +70,36 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
-  eval-gates:
+  architecture-gate:
     runs-on: ubuntu-latest
+
+    env:
+      SENTRUX_VERSION: v0.5.7
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
+      - name: Install sentrux binary
+        run: |
+          curl -fsSL -o /usr/local/bin/sentrux \
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/sentrux-linux-x86_64"
+          chmod +x /usr/local/bin/sentrux
+          sentrux --version
 
-      - name: Run deterministic eval suite
-        run: go test ./legacy/eval/... -run 'TestDeterministicEval' -count=1 -v
+      - name: Install Go grammar plugin
+        run: |
+          if [ -d "$HOME/.sentrux/plugins/go" ]; then
+            echo "go plugin already installed at $HOME/.sentrux/plugins/go"
+          else
+            sentrux plugin add go
+          fi
 
-      - name: Run safety critical tests
-        run: go test ./legacy/eval/... -run 'TestSafetyCritical' -count=1 -v
+      - name: Architectural rules (.sentrux/rules.toml)
+        run: sentrux check .
 
-      - name: Run replay invariant tests
-        run: go test ./legacy/eval/... -run 'TestReplayInvariant' -count=1 -v
-
-      - name: Run release gate tests
-        run: go test ./legacy/eval/... -run 'TestReleaseGate' -count=1 -v
-
-      - name: Upload eval artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: eval-artifacts
-          path: |
-            **/score.json
-            **/summary.md
-            **/evaluation_report.json
-            **/policy_outcomes.json
-          if-no-files-found: ignore
-          retention-days: 90
+      - name: Framework business-word boundary (ADR-008)
+        run: ./scripts/check-business-words.sh
 
   release-soak:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
