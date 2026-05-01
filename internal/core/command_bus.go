@@ -3,6 +3,9 @@ package core
 import "context"
 
 func (r *Runtime) ExecuteCommand(ctx context.Context, command RuntimeCommand) (any, error) {
+	if cmd, ok := command.(PublishResponseCommand); ok {
+		return nil, r.PublishResponse(ctx, cmd)
+	}
 	if r.commandBus == nil || !r.commandBus.HasHandler(command.CommandName()) {
 		return nil, ErrInvalidCommand
 	}

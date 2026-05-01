@@ -189,7 +189,7 @@ func (h submitTypedReportHandler) applyFailedReport(ctx context.Context, uow por
 		if _, err := h.releaseLease(ctx, uow, m, lease); err != nil {
 			return err
 		}
-		env := TaskEnvelope{RunID: next.RunID, TaskID: next.ID, TargetAgentID: next.OwnerAgentID, TargetComponent: next.OwnerComponent, Type: "TaskEnvelope", Status: "pending", TaskVersion: next.Version, RetryPolicy: next.RetryPolicy, CreatedAt: time.Now().UTC()}
+		env := TaskEnvelope{ID: h.runtime.newID("env"), RunID: next.RunID, TaskID: next.ID, TargetAgentID: next.OwnerAgentID, TargetComponent: next.OwnerComponent, Type: "TaskEnvelope", Status: "pending", TaskVersion: next.Version, RetryPolicy: next.RetryPolicy, CreatedAt: time.Now().UTC()}
 		return h.queueEnvelope(ctx, uow, m, env, EventTaskDispatched)
 	}
 	next, err := transitionTaskPure(task, TaskStatusFailed, true)
@@ -314,7 +314,7 @@ func (h submitTypedReportHandler) queueSystemResponse(ctx context.Context, uow p
 	if err := h.emit(ctx, uow, m, Event{RunID: runID, TaskID: task.ID, Type: EventSystemResponseBypassAudited, Payload: map[string]any{"sourceTaskId": sourceTaskID, "messageType": string(messageType), "reason": "system_response_queued_without_component_lease"}, RecordedAt: now}); err != nil {
 		return err
 	}
-	message := UserMessage{RunID: runID, TaskID: task.ID, Type: messageType, Title: title, Payload: redactUserPayload(payload), Status: UserMessageQueued, IdempotencyKey: runID + ":" + sourceTaskID + ":" + string(messageType), CreatedAt: now, UpdatedAt: now}
+	message := UserMessage{ID: h.runtime.newID("msg"), RunID: runID, TaskID: task.ID, Type: messageType, Title: title, Payload: redactUserPayload(payload), Status: UserMessageQueued, IdempotencyKey: runID + ":" + sourceTaskID + ":" + string(messageType), CreatedAt: now, UpdatedAt: now}
 	if err := uow.UserMessages().QueueMessage(ctx, message); err != nil {
 		return err
 	}

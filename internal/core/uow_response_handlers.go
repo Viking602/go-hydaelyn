@@ -47,7 +47,7 @@ func (h submitResponseOutputHandler) Handle(ctx context.Context, uow ports.FullU
 		return nil, err
 	}
 	now := time.Now().UTC()
-	message := UserMessage{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: cmd.Type, Title: cmd.Title, Payload: cmd.Payload, Status: UserMessageComposed, IdempotencyKey: cmd.IdempotencyKey, CreatedAt: now, UpdatedAt: now}
+	message := UserMessage{ID: h.runtime.newID("msg"), RunID: cmd.RunID, TaskID: cmd.TaskID, Type: cmd.Type, Title: cmd.Title, Payload: cmd.Payload, Status: UserMessageComposed, IdempotencyKey: cmd.IdempotencyKey, CreatedAt: now, UpdatedAt: now}
 	if message.Type == "" {
 		message.Type = UserMessageTypeFinalAnswer
 	}

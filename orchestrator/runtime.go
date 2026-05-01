@@ -279,8 +279,7 @@ func (r *Runner) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOut
 }
 
 func (r *Runner) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
-	_, err := r.inner.ExecuteCommand(ctx, cmd)
-	return err
+	return r.inner.PublishResponse(ctx, cmd)
 }
 
 func (r *Runner) ResponseOutbox(runID string) []UserMessage {
