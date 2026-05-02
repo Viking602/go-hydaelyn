@@ -295,6 +295,10 @@ type openAIStream struct {
 	state streamState
 }
 
+// Recv pulls the next provider.Event from the underlying SSE stream. The
+// inner work is delegated to small helpers (handleDoneMarker / consumeChunk /
+// processChoiceDelta) to keep this top-level method's cyclomatic complexity
+// manageable for reviewers.
 func (s *openAIStream) Recv() (provider.Event, error) {
 	for {
 		if len(s.state.pending) > 0 {
@@ -313,81 +317,98 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 			continue
 		}
 		if current.Data == "[DONE]" {
-			s.state.finished = true
-			if text, thinking := s.state.splitter.flush(); text != "" || thinking != "" {
-				if thinking != "" {
-					s.state.pending = append(s.state.pending, provider.Event{
-						Kind:     provider.EventThinkingDelta,
-						Thinking: thinking,
-					})
-				}
-				if text != "" {
-					s.state.pending = append(s.state.pending, provider.Event{
-						Kind: provider.EventTextDelta,
-						Text: text,
-					})
-				}
-			}
-			s.state.pending = append(s.state.pending, provider.Event{
-				Kind:       provider.EventDone,
-				Usage:      s.state.usage,
-				StopReason: s.state.stopReason,
-			})
+			s.handleDoneMarker()
 			continue
 		}
 		var parsed chunk
 		if err := json.Unmarshal([]byte(current.Data), &parsed); err != nil {
 			return provider.Event{}, err
 		}
-		if parsed.Usage.TotalTokens > 0 {
-			s.state.usage = provider.Usage{
-				InputTokens:  parsed.Usage.PromptTokens,
-				OutputTokens: parsed.Usage.CompletionTokens,
-				TotalTokens:  parsed.Usage.TotalTokens,
-			}
+		s.consumeChunk(parsed)
+	}
+}
+
+// handleDoneMarker flushes any buffered text/thinking from the splitter and
+// emits the terminal Done event when the upstream sends `data: [DONE]`.
+func (s *openAIStream) handleDoneMarker() {
+	s.state.finished = true
+	if text, thinking := s.state.splitter.flush(); text != "" || thinking != "" {
+		if thinking != "" {
+			s.state.pending = append(s.state.pending, provider.Event{
+				Kind:     provider.EventThinkingDelta,
+				Thinking: thinking,
+			})
 		}
-		for _, choice := range parsed.Choices {
-			if reasoning := choice.Delta.ReasoningContent; reasoning != "" {
-				s.state.pending = append(s.state.pending, provider.Event{
-					Kind:     provider.EventThinkingDelta,
-					Thinking: reasoning,
-				})
-			} else if reasoning := choice.Delta.Reasoning; reasoning != "" {
-				s.state.pending = append(s.state.pending, provider.Event{
-					Kind:     provider.EventThinkingDelta,
-					Thinking: reasoning,
-				})
-			}
-			if choice.Delta.Content != "" {
-				text, thinking := s.state.splitter.process(choice.Delta.Content)
-				if thinking != "" {
-					s.state.pending = append(s.state.pending, provider.Event{
-						Kind:     provider.EventThinkingDelta,
-						Thinking: thinking,
-					})
-				}
-				if text != "" {
-					s.state.pending = append(s.state.pending, provider.Event{
-						Kind: provider.EventTextDelta,
-						Text: text,
-					})
-				}
-			}
-			for _, item := range choice.Delta.ToolCalls {
-				s.state.pending = append(s.state.pending, provider.Event{
-					Kind: provider.EventToolCallDelta,
-					ToolCallDelta: &provider.ToolCallDelta{
-						Index:          item.Index,
-						ID:             item.ID,
-						Name:           item.Function.Name,
-						ArgumentsDelta: item.Function.Arguments,
-					},
-				})
-			}
-			if choice.FinishReason != "" {
-				s.state.stopReason = mapOpenAIStopReason(choice.FinishReason)
-			}
+		if text != "" {
+			s.state.pending = append(s.state.pending, provider.Event{
+				Kind: provider.EventTextDelta,
+				Text: text,
+			})
 		}
+	}
+	s.state.pending = append(s.state.pending, provider.Event{
+		Kind:       provider.EventDone,
+		Usage:      s.state.usage,
+		StopReason: s.state.stopReason,
+	})
+}
+
+// consumeChunk records usage tokens and dispatches each choice's delta.
+func (s *openAIStream) consumeChunk(parsed chunk) {
+	if parsed.Usage.TotalTokens > 0 {
+		s.state.usage = provider.Usage{
+			InputTokens:  parsed.Usage.PromptTokens,
+			OutputTokens: parsed.Usage.CompletionTokens,
+			TotalTokens:  parsed.Usage.TotalTokens,
+		}
+	}
+	for _, choice := range parsed.Choices {
+		s.processChoiceDelta(choice)
+	}
+}
+
+// processChoiceDelta turns a single choice delta into queued provider.Events
+// (thinking, text, tool-call) and updates the recorded stop reason.
+func (s *openAIStream) processChoiceDelta(choice choiceChunk) {
+	if reasoning := choice.Delta.ReasoningContent; reasoning != "" {
+		s.state.pending = append(s.state.pending, provider.Event{
+			Kind:     provider.EventThinkingDelta,
+			Thinking: reasoning,
+		})
+	} else if reasoning := choice.Delta.Reasoning; reasoning != "" {
+		s.state.pending = append(s.state.pending, provider.Event{
+			Kind:     provider.EventThinkingDelta,
+			Thinking: reasoning,
+		})
+	}
+	if choice.Delta.Content != "" {
+		text, thinking := s.state.splitter.process(choice.Delta.Content)
+		if thinking != "" {
+			s.state.pending = append(s.state.pending, provider.Event{
+				Kind:     provider.EventThinkingDelta,
+				Thinking: thinking,
+			})
+		}
+		if text != "" {
+			s.state.pending = append(s.state.pending, provider.Event{
+				Kind: provider.EventTextDelta,
+				Text: text,
+			})
+		}
+	}
+	for _, item := range choice.Delta.ToolCalls {
+		s.state.pending = append(s.state.pending, provider.Event{
+			Kind: provider.EventToolCallDelta,
+			ToolCallDelta: &provider.ToolCallDelta{
+				Index:          item.Index,
+				ID:             item.ID,
+				Name:           item.Function.Name,
+				ArgumentsDelta: item.Function.Arguments,
+			},
+		})
+	}
+	if choice.FinishReason != "" {
+		s.state.stopReason = mapOpenAIStopReason(choice.FinishReason)
 	}
 }
 

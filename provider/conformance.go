@@ -19,6 +19,13 @@ type NormalizedResponse struct {
 	StopReason StopReason         `json:"stopReason,omitempty"`
 }
 
+// NormalizeEvents replays a stream of provider Events into a single
+// NormalizedResponse, accumulating text/thinking deltas and reconciling
+// tool-call deltas into well-formed ToolCalls.
+//
+// The body is intentionally a thin dispatcher; per-case work lives in
+// applyToolCallEvent / applyToolCallDeltaEvent / finalizeToolCalls so this
+// function stays under revive's gocyclo threshold.
 func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 	response := NormalizedResponse{}
 	builders := map[string]*toolCallBuilder{}
@@ -35,41 +42,11 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 		case EventThinkingDelta:
 			response.Thinking += event.Thinking
 		case EventToolCall:
-			if event.ToolCall == nil {
-				continue
+			if err := applyToolCallEvent(event.ToolCall, builders, &order, idKeys, indexKeys, &syntheticSeq); err != nil {
+				return NormalizedResponse{}, err
 			}
-			key, builder := ensureToolCallBuilder(builders, &order, idKeys, indexKeys, event.ToolCall.ID, nil, &syntheticSeq)
-			if builder.fullSeen {
-				return NormalizedResponse{}, fmt.Errorf("%w: %s", ErrDuplicateToolCallID, builder.ID)
-			}
-			builder.fullSeen = true
-			if event.ToolCall.ID != "" {
-				builder.ID = event.ToolCall.ID
-			}
-			if event.ToolCall.Name != "" {
-				builder.Name = event.ToolCall.Name
-			}
-			if len(event.ToolCall.Arguments) > 0 {
-				builder.Arguments = string(event.ToolCall.Arguments)
-			}
-			builders[key] = builder
 		case EventToolCallDelta:
-			if event.ToolCallDelta == nil {
-				continue
-			}
-			key, builder := ensureToolCallBuilder(builders, &order, idKeys, indexKeys, event.ToolCallDelta.ID, event.ToolCallDelta.Index, &syntheticSeq)
-			if event.ToolCallDelta.ID != "" {
-				builder.ID = event.ToolCallDelta.ID
-			}
-			if event.ToolCallDelta.Index != nil {
-				idx := *event.ToolCallDelta.Index
-				builder.Index = &idx
-			}
-			if event.ToolCallDelta.Name != "" {
-				builder.Name = event.ToolCallDelta.Name
-			}
-			builder.Arguments += event.ToolCallDelta.ArgumentsDelta
-			builders[key] = builder
+			applyToolCallDeltaEvent(event.ToolCallDelta, builders, &order, idKeys, indexKeys, &syntheticSeq)
 		case EventError:
 			if event.Err != nil {
 				return NormalizedResponse{}, event.Err
@@ -83,6 +60,56 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 		}
 	}
 
+	return finalizeToolCalls(response, order, builders)
+}
+
+// applyToolCallEvent records a complete tool call. Returns an error when the
+// builder for the same id has already been finalized (duplicate id case).
+func applyToolCallEvent(call *message.ToolCall, builders map[string]*toolCallBuilder, order *[]string, idKeys map[string]string, indexKeys map[int]string, syntheticSeq *int) error {
+	if call == nil {
+		return nil
+	}
+	key, builder := ensureToolCallBuilder(builders, order, idKeys, indexKeys, call.ID, nil, syntheticSeq)
+	if builder.fullSeen {
+		return fmt.Errorf("%w: %s", ErrDuplicateToolCallID, builder.ID)
+	}
+	builder.fullSeen = true
+	if call.ID != "" {
+		builder.ID = call.ID
+	}
+	if call.Name != "" {
+		builder.Name = call.Name
+	}
+	if len(call.Arguments) > 0 {
+		builder.Arguments = string(call.Arguments)
+	}
+	builders[key] = builder
+	return nil
+}
+
+// applyToolCallDeltaEvent merges a partial tool-call delta into its builder.
+func applyToolCallDeltaEvent(delta *ToolCallDelta, builders map[string]*toolCallBuilder, order *[]string, idKeys map[string]string, indexKeys map[int]string, syntheticSeq *int) {
+	if delta == nil {
+		return
+	}
+	key, builder := ensureToolCallBuilder(builders, order, idKeys, indexKeys, delta.ID, delta.Index, syntheticSeq)
+	if delta.ID != "" {
+		builder.ID = delta.ID
+	}
+	if delta.Index != nil {
+		idx := *delta.Index
+		builder.Index = &idx
+	}
+	if delta.Name != "" {
+		builder.Name = delta.Name
+	}
+	builder.Arguments += delta.ArgumentsDelta
+	builders[key] = builder
+}
+
+// finalizeToolCalls walks the accumulated builders in arrival order, validates
+// the JSON arguments, and appends them to response.ToolCalls.
+func finalizeToolCalls(response NormalizedResponse, order []string, builders map[string]*toolCallBuilder) (NormalizedResponse, error) {
 	for _, key := range order {
 		builder := builders[key]
 		if builder == nil {

@@ -107,47 +107,20 @@ func (s State) SelectExchanges(sel ExchangeSelector) []Exchange {
 // SelectFindings returns findings that satisfy the selector. When
 // RequireVerified is set, every claim backing the finding must have a
 // verification result that passes SupportsClaim at the effective threshold.
+//
+// The match logic is delegated to findingMatchesSelector so this top-level
+// method remains a small loop driver — easier to scan and below revive's
+// gocyclo threshold.
 func (s State) SelectFindings(sel ExchangeSelector) []Finding {
 	threshold := sel.MinConfidence
 	if threshold <= 0 && sel.RequireVerified {
 		threshold = DefaultVerificationConfidence
 	}
-	supported := map[string]struct{}{}
-	if sel.RequireVerified {
-		for _, result := range s.Verifications {
-			if result.SupportsClaim(threshold) {
-				supported[result.ClaimID] = struct{}{}
-			}
-		}
-	}
+	supported := s.collectSupportedClaims(sel.RequireVerified, threshold)
 	items := make([]Finding, 0, len(s.Findings))
 	for _, finding := range s.Findings {
-		if len(sel.TaskIDs) > 0 && !containsString(sel.TaskIDs, finding.TaskID) {
+		if !findingMatchesSelector(finding, sel, supported) {
 			continue
-		}
-		if len(sel.FindingIDs) > 0 && !containsString(sel.FindingIDs, finding.ID) {
-			continue
-		}
-		if len(sel.ClaimIDs) > 0 && !overlapString(sel.ClaimIDs, finding.ClaimIDs) {
-			continue
-		}
-		if sel.MinConfidence > 0 && finding.Confidence < sel.MinConfidence {
-			continue
-		}
-		if sel.RequireVerified {
-			if len(finding.ClaimIDs) == 0 {
-				continue
-			}
-			allSupported := true
-			for _, claimID := range finding.ClaimIDs {
-				if _, ok := supported[claimID]; !ok {
-					allSupported = false
-					break
-				}
-			}
-			if !allSupported {
-				continue
-			}
 		}
 		items = append(items, cloneFinding(finding))
 		if sel.Limit > 0 && len(items) >= sel.Limit {
@@ -155,6 +128,50 @@ func (s State) SelectFindings(sel ExchangeSelector) []Finding {
 		}
 	}
 	return items
+}
+
+// collectSupportedClaims builds the set of claim IDs that have at least one
+// verification result clearing threshold. Returns nil when verification is
+// not required (callers should treat nil and empty equivalently).
+func (s State) collectSupportedClaims(required bool, threshold float64) map[string]struct{} {
+	if !required {
+		return nil
+	}
+	supported := make(map[string]struct{})
+	for _, result := range s.Verifications {
+		if result.SupportsClaim(threshold) {
+			supported[result.ClaimID] = struct{}{}
+		}
+	}
+	return supported
+}
+
+// findingMatchesSelector returns true if finding satisfies every active
+// filter in sel. supported is consulted only when sel.RequireVerified is on.
+func findingMatchesSelector(finding Finding, sel ExchangeSelector, supported map[string]struct{}) bool {
+	if len(sel.TaskIDs) > 0 && !containsString(sel.TaskIDs, finding.TaskID) {
+		return false
+	}
+	if len(sel.FindingIDs) > 0 && !containsString(sel.FindingIDs, finding.ID) {
+		return false
+	}
+	if len(sel.ClaimIDs) > 0 && !overlapString(sel.ClaimIDs, finding.ClaimIDs) {
+		return false
+	}
+	if sel.MinConfidence > 0 && finding.Confidence < sel.MinConfidence {
+		return false
+	}
+	if sel.RequireVerified {
+		if len(finding.ClaimIDs) == 0 {
+			return false
+		}
+		for _, claimID := range finding.ClaimIDs {
+			if _, ok := supported[claimID]; !ok {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func exchangeClearsConfidence(exchange Exchange, threshold float64) bool {

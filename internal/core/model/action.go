@@ -1,8 +1,9 @@
 package model
 
 import (
-	"github.com/Viking602/go-hydaelyn/message"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/message"
 )
 
 type ToolEffectType = message.ToolEffectType
