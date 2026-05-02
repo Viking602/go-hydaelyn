@@ -3,50 +3,27 @@ package core
 import (
 	"context"
 
+	approvalsvc "github.com/Viking602/go-hydaelyn/internal/approval"
 	lifecycle "github.com/Viking602/go-hydaelyn/internal/lifecycle"
 )
 
-type RequestApprovalCommand struct {
-	RunID            string
-	TaskID           string
-	ActionID         string
-	RequesterAgentID string
-	Reason           string
-	RiskSummary      string
-	RequestedAction  string
-}
-
-type DecideApprovalCommand struct {
-	RunID      string
-	ApprovalID string
-	DecidedBy  string
-	Decision   string
-	Reason     string
-}
-
-type RecoverResumeTokenCommand struct {
-	TokenID string
-}
-
-func (RequestApprovalCommand) CommandName() string    { return "approval.request" }
-func (DecideApprovalCommand) CommandName() string     { return "approval.decide" }
-func (RecoverResumeTokenCommand) CommandName() string { return "resume_token.recover" }
+type (
+	RequestApprovalCommand    = approvalsvc.RequestApprovalCommand
+	DecideApprovalCommand     = approvalsvc.DecideApprovalCommand
+	RecoverResumeTokenCommand = approvalsvc.RecoverResumeTokenCommand
+	RequestApprovalResult     = approvalsvc.RequestApprovalResult
+)
 
 func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (ApprovalRequest, ResumeToken, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return ApprovalRequest{}, ResumeToken{}, err
 	}
-	items, ok := result.([]any)
-	if !ok || len(items) < 2 {
+	requested, ok := result.(RequestApprovalResult)
+	if !ok {
 		return ApprovalRequest{}, ResumeToken{}, ErrInvalidCommand
 	}
-	approval, okApproval := items[0].(ApprovalRequest)
-	token, okToken := items[1].(ResumeToken)
-	if !okApproval || !okToken {
-		return ApprovalRequest{}, ResumeToken{}, ErrInvalidCommand
-	}
-	return approval, token, nil
+	return requested.Approval, requested.Token, nil
 }
 
 func (r *Runtime) DecideApproval(ctx context.Context, cmd DecideApprovalCommand) error {
@@ -66,8 +43,14 @@ func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeToken
 	return token, nil
 }
 
+func registerApprovalUoWCommandHandlers(runtime *Runtime) {
+	approvalsvc.RegisterHandlers(runtime.commandBus, approvalsvc.HandlerOptions{
+		NewApproval: runtime.newApprovalForTask,
+	})
+}
+
 // newApprovalForTask creates a new ApprovalRequest and ResumeToken for the
-// given task. Used by uow_approval_handlers.go (requestApprovalHandler).
+// given task. Domain handlers receive it as an injected ApprovalFactory.
 func (r *Runtime) newApprovalForTask(task Task, reason, requester string) (ApprovalRequest, ResumeToken) {
 	return lifecycle.NewApprovalPair(r.newID, task, reason, requester)
 }

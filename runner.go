@@ -501,16 +501,11 @@ func commandResultFromCore(command api.Command, result any) any {
 func runTaskResultFromCore(command api.Command, result any) (any, bool) {
 	switch command.(type) {
 	case api.StartRunCommand:
-		items, ok := result.([]any)
-		if !ok || len(items) < 2 {
+		started, ok := result.(core.StartRunResult)
+		if !ok {
 			return result, true
 		}
-		run, okRun := items[0].(core.Run)
-		task, okTask := items[1].(core.Task)
-		if !okRun || !okTask {
-			return result, true
-		}
-		return []any{adapter.RunFromModel(run), adapter.TaskFromModel(task)}, true
+		return []any{adapter.RunFromModel(started.Run), adapter.TaskFromModel(started.Root)}, true
 	case api.CreateTaskCommand:
 		if task, ok := result.(core.Task); ok {
 			return adapter.TaskFromModel(task), true
@@ -559,16 +554,11 @@ func governanceResultFromCore(command api.Command, result any) (any, bool) {
 		}
 		return result, true
 	case api.RequestApprovalCommand:
-		items, ok := result.([]any)
-		if !ok || len(items) < 2 {
+		requested, ok := result.(core.RequestApprovalResult)
+		if !ok {
 			return result, true
 		}
-		approval, okApproval := items[0].(core.ApprovalRequest)
-		token, okToken := items[1].(core.ResumeToken)
-		if !okApproval || !okToken {
-			return result, true
-		}
-		return []any{adapter.ApprovalRequestFromModel(approval), adapter.ResumeTokenFromModel(token)}, true
+		return []any{adapter.ApprovalRequestFromModel(requested.Approval), adapter.ResumeTokenFromModel(requested.Token)}, true
 	case api.RecoverResumeTokenCommand:
 		if token, ok := result.(core.ResumeToken); ok {
 			return adapter.ResumeTokenFromModel(token), true
