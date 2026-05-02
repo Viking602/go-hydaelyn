@@ -36,6 +36,14 @@ linters:
       min-complexity: 20
     misspell:
       locale: US
+      # `cancelled` is the spelling baked into our public enum identifiers
+      # (RunStatusCancelled, TaskStatusCancelled, …) and their string values;
+      # changing them would be a breaking API change. `behaviour` appears in
+      # a couple of legacy comments — both are valid British English and not
+      # really typos, so silence them rather than churn unrelated docs.
+      ignore-rules:
+        - cancelled
+        - behaviour
     revive:
       severity: warning
       rules:

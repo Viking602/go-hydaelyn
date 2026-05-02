@@ -41,11 +41,11 @@ func (r *Runtime) subscribeRuntimeHub(ctx context.Context, runID string, filter 
 		return nil, nil, err
 	}
 	wrapped := func() error {
-		if err := cancel(); errors.Is(err, ErrNotFound) {
+		err := cancel()
+		if errors.Is(err, ErrNotFound) {
 			return ErrSubscriptionClosed
-		} else {
-			return err
 		}
+		return err
 	}
 	return ch, wrapped, nil
 }

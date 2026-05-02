@@ -164,11 +164,12 @@ func (t *thinkSplitter) flush() (text string, thinking string) {
 // start of target. The suffix that is withheld may complete into target on
 // the next chunk.
 func safeEmitLen(s, target string) int {
-	max := len(target) - 1
-	if max > len(s) {
-		max = len(s)
+	// Renamed from `max` to `maxLen` to avoid shadowing Go 1.21+ builtin.
+	maxLen := len(target) - 1
+	if maxLen > len(s) {
+		maxLen = len(s)
 	}
-	for k := max; k >= 1; k-- {
+	for k := maxLen; k >= 1; k-- {
 		if strings.HasPrefix(target, s[len(s)-k:]) {
 			return len(s) - k
 		}
