@@ -105,6 +105,13 @@ jobs:
           # ship a patched 2.12.1 that doesn't exist on GitHub).
           version: v2.12.0
           args: --timeout=5m
+          # only-new-issues=true makes the gate fail ONLY on issues
+          # introduced by this PR vs. the merge-base with main. Existing
+          # baseline (~40 issues at the time this gate was added) is
+          # tracked separately and cleaned up in follow-up PRs. This avoids
+          # the classic chicken-and-egg where adding the gate would block
+          # itself on pre-existing debt.
+          only-new-issues: true
 
   architecture-gate:
     runs-on: ubuntu-latest

@@ -6,9 +6,14 @@
 # CI also runs `staticcheck` and `govulncheck` as standalone steps in
 # .github/workflows/ci.yml — keep them out of this file to avoid double work.
 #
+# Baseline policy: at the time this config was introduced, main HEAD already
+# had ~40 lint issues (revive 20 / misspell 11 / gocyclo 8 / goimports 1).
+# CI uses `only-new-issues: true` so the gate only fails on issues NEW to a
+# PR; existing debt is tracked and cleaned up in dedicated follow-up PRs.
+#
 # Local usage:
 #   make lint                  # runs `golangci-lint run --timeout=5m`
-#   golangci-lint run
+#   golangci-lint run          # WILL still report baseline locally — by design
 #   golangci-lint fmt          # apply formatters (gofmt + goimports)
 #   golangci-lint config verify
 
