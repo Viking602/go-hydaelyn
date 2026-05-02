@@ -24,16 +24,16 @@ type LLMCompactor struct {
 }
 
 func (c *LLMCompactor) Compact(ctx context.Context, messages []message.Message) ([]message.Message, error) {
-	max := c.MaxMessages
-	if max <= 2 {
-		max = 4
+	maxMessages := c.MaxMessages
+	if maxMessages <= 2 {
+		maxMessages = 4
 	}
-	if len(messages) <= max {
+	if len(messages) <= maxMessages {
 		return messages, nil
 	}
 
 	keepFirst := 1
-	keepLast := max - keepFirst - 1
+	keepLast := maxMessages - keepFirst - 1
 	if keepLast < 1 {
 		keepLast = 1
 	}
@@ -47,7 +47,7 @@ func (c *LLMCompactor) Compact(ctx context.Context, messages []message.Message) 
 		summary = placeholder
 	}
 
-	compacted := make([]message.Message, 0, max)
+	compacted := make([]message.Message, 0, maxMessages)
 	compacted = append(compacted, messages[:keepFirst]...)
 	compacted = append(compacted, message.Message{
 		Role:       message.RoleSystem,
