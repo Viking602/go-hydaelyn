@@ -11,6 +11,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -32,7 +33,7 @@ type AgentWorker struct {
 }
 
 type ExecuteEnvelopeRequest struct {
-	Envelope hydaelyn.TaskEnvelope
+	Envelope api.TaskEnvelope
 	TTL      time.Duration
 	Messages []message.Message
 }
@@ -54,11 +55,11 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if ttl <= 0 {
 		ttl = time.Minute
 	}
-	lease, acquired, err := w.Runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	lease, acquired, err := w.Runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID:      req.Envelope.RunID,
 		TaskID:     req.Envelope.TaskID,
 		EnvelopeID: req.Envelope.ID,
-		HolderType: hydaelyn.HolderAgent,
+		HolderType: api.HolderAgent,
 		HolderID:   w.AgentID,
 		TTL:        ttl,
 	})
@@ -73,13 +74,13 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		if leaseHandled {
 			return
 		}
-		_ = w.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), hydaelyn.ReleaseTaskExecutionCommand{
+		_ = w.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
 			LeaseID:  lease.ID,
 			HolderID: w.AgentID,
 		})
 	}()
 	if req.Envelope.ID != "" {
-		if err := w.Runner.AckEnvelope(ctx, hydaelyn.AckEnvelopeCommand{EnvelopeID: req.Envelope.ID, HolderID: w.AgentID}); err != nil {
+		if err := w.Runner.AckEnvelope(ctx, api.AckEnvelopeCommand{EnvelopeID: req.Envelope.ID, HolderID: w.AgentID}); err != nil {
 			return err
 		}
 	}
@@ -107,7 +108,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			RunID:       task.RunID,
 			TaskID:      task.ID,
 			LeaseID:     lease.ID,
-			HolderType:  hydaelyn.HolderAgent,
+			HolderType:  api.HolderAgent,
 			HolderID:    w.AgentID,
 			TaskVersion: task.Version,
 		}.ToolBus()
@@ -133,12 +134,12 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if strings.TrimSpace(summary) == "" {
 		summary = "completed"
 	}
-	if err := w.Runner.WriteItem(ctx, hydaelyn.BlackboardItem{
+	if err := w.Runner.WriteItem(ctx, api.BlackboardItem{
 		RunID:      task.RunID,
 		TaskID:     task.ID,
-		Type:       hydaelyn.BlackboardItemTaskOutput,
-		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceAgent, ID: w.AgentID},
-		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
+		Type:       api.BlackboardItemTaskOutput,
+		Source:     api.SourceIdentity{Type: api.SourceAgent, ID: w.AgentID},
+		Visibility: api.BlackboardVisibilityAgentVisible,
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
 	}); err != nil {
@@ -147,15 +148,15 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		}
 		return err
 	}
-	reportErr := w.Runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	reportErr := w.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
 		LeaseID:     lease.ID,
-		HolderType:  hydaelyn.HolderAgent,
+		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: hydaelyn.TypedReport{
-			Status:  hydaelyn.ReportStatusSuccess,
+		Report: api.TypedReport{
+			Status:  api.ReportStatusSuccess,
 			Summary: summary,
 		},
 	})
@@ -178,7 +179,7 @@ func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = w.Runner.HeartbeatTaskExecution(ctx, hydaelyn.HeartbeatTaskExecutionCommand{
+			_ = w.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
 				LeaseID: leaseID,
 				TTL:     ttl,
 			})
@@ -186,9 +187,9 @@ func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time
 	}
 }
 
-func (w AgentWorker) materializeInputs(ctx context.Context, task hydaelyn.Task) ([]hydaelyn.BlackboardItem, error) {
+func (w AgentWorker) materializeInputs(ctx context.Context, task api.Task) ([]api.BlackboardItem, error) {
 	selectors := task.ReadSelectors
-	items := make([]hydaelyn.BlackboardItem, 0)
+	items := make([]api.BlackboardItem, 0)
 	for _, selector := range selectors {
 		selected, err := w.Runner.SelectItems(ctx, task.RunID, selector)
 		if err != nil {
@@ -199,7 +200,7 @@ func (w AgentWorker) materializeInputs(ctx context.Context, task hydaelyn.Task) 
 	return items, nil
 }
 
-func (w AgentWorker) buildMessages(run hydaelyn.Run, task hydaelyn.Task, inputs []hydaelyn.BlackboardItem, extra []message.Message) []message.Message {
+func (w AgentWorker) buildMessages(run api.Run, task api.Task, inputs []api.BlackboardItem, extra []message.Message) []message.Message {
 	messages := make([]message.Message, 0, len(extra)+2)
 	messages = append(messages, message.NewText(message.RoleSystem, "You are Hydaelyn agent "+w.AgentID+". Complete the assigned task and return a concise result."))
 	prompt := task.Goal
@@ -229,19 +230,19 @@ func (w AgentWorker) buildMessages(run hydaelyn.Run, task hydaelyn.Task, inputs 
 	return messages
 }
 
-func (w AgentWorker) submitFailure(ctx context.Context, task hydaelyn.Task, lease hydaelyn.TaskExecutionLease, cause error) error {
+func (w AgentWorker) submitFailure(ctx context.Context, task api.Task, lease api.TaskExecutionLease, cause error) error {
 	if cause == nil {
 		return nil
 	}
-	return w.Runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	return w.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
 		LeaseID:     lease.ID,
-		HolderType:  hydaelyn.HolderAgent,
+		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: hydaelyn.TypedReport{
-			Status:  hydaelyn.ReportStatusFailed,
+		Report: api.TypedReport{
+			Status:  api.ReportStatusFailed,
 			Summary: cause.Error(),
 		},
 	})
@@ -256,7 +257,7 @@ func finalAssistantText(messages []message.Message) string {
 	return ""
 }
 
-func firstWriteTarget(task hydaelyn.Task) string {
+func firstWriteTarget(task api.Task) string {
 	if len(task.WriteTargets) > 0 {
 		return task.WriteTargets[0]
 	}

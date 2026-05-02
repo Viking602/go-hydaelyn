@@ -10,7 +10,7 @@ import (
 // All mutations go through a single-use transaction; reads use a snapshot.
 
 func (r *Runtime) SaveRun(ctx context.Context, run Run) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -31,7 +31,7 @@ func (r *Runtime) LoadRun(ctx context.Context, runID string) (Run, error) {
 }
 
 func (r *Runtime) SaveTask(ctx context.Context, task Task) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (r *Runtime) ListTasks(ctx context.Context, runID string) ([]Task, error) {
 }
 
 func (r *Runtime) AppendEvent(ctx context.Context, event Event) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (r *Runtime) ListEvents(ctx context.Context, runID string) ([]Event, error)
 }
 
 func (r *Runtime) SaveTraceSpan(ctx context.Context, span TraceSpan) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (r *Runtime) ListTraceSpans(ctx context.Context, runID string) ([]TraceSpan
 }
 
 func (r *Runtime) QueueMessage(ctx context.Context, message UserMessage) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (r *Runtime) LoadMessage(ctx context.Context, runID, messageID string) (Use
 }
 
 func (r *Runtime) UpdateMessage(ctx context.Context, message UserMessage) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (r *Runtime) ListQueuedMessages(ctx context.Context) ([]UserMessage, error)
 }
 
 func (r *Runtime) QueueEnvelope(ctx context.Context, env TaskEnvelope) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func (r *Runtime) LoadEnvelope(ctx context.Context, envelopeID string) (TaskEnve
 }
 
 func (r *Runtime) UpdateEnvelope(ctx context.Context, env TaskEnvelope) error {
-	uow, err := r.memProvider.BeginFull(ctx)
+	uow, err := r.memProvider.Begin(ctx)
 	if err != nil {
 		return err
 	}

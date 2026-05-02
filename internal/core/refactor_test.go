@@ -491,7 +491,12 @@ type recordingStoreProvider struct {
 	uow *recordingUnitOfWork
 }
 
-func (p recordingStoreProvider) Begin(context.Context) (UnitOfWork, error) {
+func (p recordingStoreProvider) Begin(ctx context.Context) (UnitOfWork, error) {
+	tx, err := p.uow.store.memProvider.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.uow.tx = tx
 	p.uow.begun = true
 	p.uow.committed = false
 	p.uow.rolledBack = false
@@ -500,25 +505,37 @@ func (p recordingStoreProvider) Begin(context.Context) (UnitOfWork, error) {
 
 type recordingUnitOfWork struct {
 	store      *Runtime
+	tx         UnitOfWork
 	begun      bool
 	committed  bool
 	rolledBack bool
 }
 
-func (u *recordingUnitOfWork) Runs() RunStore                    { return u.store }
-func (u *recordingUnitOfWork) Tasks() TaskStore                  { return u.store }
-func (u *recordingUnitOfWork) Events() EventStore                { return u.store }
-func (u *recordingUnitOfWork) Blackboard() BlackboardStore       { return u.store }
-func (u *recordingUnitOfWork) MailboxOutbox() MailboxOutboxStore { return u.store }
-func (u *recordingUnitOfWork) UserMessages() UserMessageStore    { return u.store }
-func (u *recordingUnitOfWork) Trace() TraceStore                 { return u.store }
-func (u *recordingUnitOfWork) Commit(context.Context) error {
-	u.committed = true
-	return nil
+func (u *recordingUnitOfWork) Runs() RunStore                    { return u.tx.Runs() }
+func (u *recordingUnitOfWork) Tasks() TaskStore                  { return u.tx.Tasks() }
+func (u *recordingUnitOfWork) Events() EventStore                { return u.tx.Events() }
+func (u *recordingUnitOfWork) Blackboard() BlackboardStore       { return u.tx.Blackboard() }
+func (u *recordingUnitOfWork) MailboxOutbox() MailboxOutboxStore { return u.tx.MailboxOutbox() }
+func (u *recordingUnitOfWork) UserMessages() UserMessageStore    { return u.tx.UserMessages() }
+func (u *recordingUnitOfWork) Trace() TraceStore                 { return u.tx.Trace() }
+func (u *recordingUnitOfWork) Leases() LeaseStore                { return u.tx.Leases() }
+func (u *recordingUnitOfWork) Approvals() ApprovalStore          { return u.tx.Approvals() }
+func (u *recordingUnitOfWork) ResumeTokens() ResumeTokenStore    { return u.tx.ResumeTokens() }
+func (u *recordingUnitOfWork) ActionAttempts() ActionAttemptStore {
+	return u.tx.ActionAttempts()
 }
-func (u *recordingUnitOfWork) Rollback(context.Context) error {
+
+func (u *recordingUnitOfWork) Commit(ctx context.Context) error {
+	u.committed = true
+	return u.tx.Commit(ctx)
+}
+
+func (u *recordingUnitOfWork) Rollback(ctx context.Context) error {
 	u.rolledBack = true
-	return nil
+	if u.tx == nil {
+		return nil
+	}
+	return u.tx.Rollback(ctx)
 }
 
 type reentrantGateway struct {
@@ -578,7 +595,7 @@ func (m *recordingMonitor) Advance(context.Context, Run) error {
 }
 
 func (m *recordingMonitor) DecideDeadLetter(_ context.Context, env TaskEnvelope, reason string) (TaskMonitorDecision, error) {
-	return defaultTaskMonitor{}.DecideDeadLetter(context.Background(), env, reason)
+	return defaultPipeline(PipelineComponents{}).TaskMonitor.DecideDeadLetter(context.Background(), env, reason)
 }
 
 func containsSpan(spans []TraceSpan, name string) bool {

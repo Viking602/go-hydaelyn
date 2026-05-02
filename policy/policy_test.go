@@ -4,14 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/orchestrator"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func TestDenySideEffectsByDefault(t *testing.T) {
 	engine := DenySideEffectsByDefault()
 	decision, err := engine.Authorize(context.Background(), Request{
 		Operation: OperationToolCall,
-		Tool:      &orchestrator.Tool{Name: "write", EffectType: orchestrator.ToolEffectWrite},
+		Tool:      &api.Tool{Name: "write", EffectType: api.ToolEffectWrite},
 	})
 	if err != nil {
 		t.Fatalf("Authorize() error = %v", err)
@@ -21,7 +21,7 @@ func TestDenySideEffectsByDefault(t *testing.T) {
 	}
 	decision, err = engine.Authorize(context.Background(), Request{
 		Operation: OperationToolCall,
-		Tool:      &orchestrator.Tool{Name: "read", EffectType: orchestrator.ToolEffectReadOnly},
+		Tool:      &api.Tool{Name: "read", EffectType: api.ToolEffectReadOnly},
 	})
 	if err != nil {
 		t.Fatalf("Authorize(read) error = %v", err)

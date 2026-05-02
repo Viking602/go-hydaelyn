@@ -12,7 +12,7 @@ import (
 // ValidateSubmission loads and validates run, task, and lease for a submission
 // operation. It checks terminal state, task version staleness, lease ownership,
 // and lease expiry.
-func ValidateSubmission(ctx context.Context, uow ports.FullUnitOfWork, runID, taskID, leaseID string, holderType model.HolderType, holderID string, taskVersion int) (model.Run, model.Task, model.TaskExecutionLease, error) {
+func ValidateSubmission(ctx context.Context, uow ports.UnitOfWork, runID, taskID, leaseID string, holderType model.HolderType, holderID string, taskVersion int) (model.Run, model.Task, model.TaskExecutionLease, error) {
 	run, err := uow.Runs().LoadRun(ctx, runID)
 	if err != nil {
 		return model.Run{}, model.Task{}, model.TaskExecutionLease{}, err

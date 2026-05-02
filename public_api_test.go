@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/blackboard"
 	"github.com/Viking602/go-hydaelyn/flow"
 	"github.com/Viking602/go-hydaelyn/policy"
@@ -12,6 +13,12 @@ import (
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
+
+type allowAPIEngine struct{}
+
+func (allowAPIEngine) Authorize(context.Context, api.PolicyRequest) (api.PolicyDecision, error) {
+	return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
+}
 
 func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.Engine
@@ -25,12 +32,11 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ provider.Driver
 	var _ mcp.Gateway
 	var _ tool.Mode
-	_ = Tool{Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true}
+	_ = api.Tool{Name: "write", EffectType: api.ToolEffectWrite, RequiresActionTask: true}
 
 	runner := New()
 	var _ *Runner = runner
-	var _ *Runtime = runner // legacy alias remains source-compatible
-	run, err := runner.QueueRun(context.Background(), StartRunCommand{Request: "primary runner smoke"})
+	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{Request: "primary runner smoke"})
 	if err != nil {
 		t.Fatalf("QueueRun() error = %v", err)
 	}
@@ -43,15 +49,13 @@ func TestPublicAPISmoke(t *testing.T) {
 }
 
 func TestNewAcceptsOptionalConfig(t *testing.T) {
-	legacy := New(Config{})
+	legacy := New(api.Config{})
 	if legacy == nil {
-		t.Fatalf("New(Config{}) returned nil")
+		t.Fatalf("New(api.Config{}) returned nil")
 	}
-	custom := New(Config{PolicyEngine: policy.EngineFunc(func(context.Context, policy.Request) (policy.Decision, error) {
-		return policy.Decision{Effect: policy.EffectAllow}, nil
-	})})
+	custom := New(api.Config{PolicyEngine: allowAPIEngine{}})
 	if custom == nil {
-		t.Fatalf("New(Config{...}) returned nil")
+		t.Fatalf("New(api.Config{...}) returned nil")
 	}
 	_ = DefaultConfig()
 }

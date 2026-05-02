@@ -1,9 +1,6 @@
 package core
 
-import (
-	"context"
-	"maps"
-)
+import "context"
 
 type StartTraceSpanCommand struct {
 	RunID     string
@@ -52,21 +49,4 @@ func (r *Runtime) TraceSpans(runID string) []TraceSpan {
 		return nil
 	}
 	return append([]TraceSpan{}, spans...)
-}
-
-func traceSpanPayload(span TraceSpan) map[string]any {
-	return map[string]any{
-		"spanId":    span.ID,
-		"runId":     span.RunID,
-		"taskId":    span.TaskID,
-		"traceId":   span.TraceID,
-		"parentId":  span.ParentID,
-		"name":      span.Name,
-		"component": span.Component,
-		"status":    string(span.Status),
-		"startedAt": span.StartedAt,
-		"endedAt":   span.EndedAt,
-		"error":     span.Error,
-		"metadata":  maps.Clone(span.Metadata),
-	}
 }

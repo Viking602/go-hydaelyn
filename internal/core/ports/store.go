@@ -68,22 +68,6 @@ type MailboxOutboxStore interface {
 	ListEnvelopes(context.Context, string) ([]model.TaskEnvelope, error)
 }
 
-type UnitOfWork interface {
-	Runs() RunStore
-	Tasks() TaskStore
-	Events() EventStore
-	Blackboard() BlackboardReadWriter
-	MailboxOutbox() MailboxOutboxStore
-	UserMessages() UserMessageStore
-	Trace() TraceStore
-	Commit(context.Context) error
-	Rollback(context.Context) error
-}
-
-type StoreProvider interface {
-	Begin(context.Context) (UnitOfWork, error)
-}
-
 type LeaseStore interface {
 	SaveLease(context.Context, model.TaskExecutionLease) error
 	LoadLease(context.Context, string) (model.TaskExecutionLease, error)
@@ -105,38 +89,14 @@ type ActionAttemptStore interface {
 	LoadActionAttempt(context.Context, string) (model.ActionAttempt, error)
 }
 
-type LeaseAwareUnitOfWork interface {
-	UnitOfWork
-	Leases() LeaseStore
-}
-
-type ApprovalAwareUnitOfWork interface {
-	UnitOfWork
-	Approvals() ApprovalStore
-	ResumeTokens() ResumeTokenStore
-}
-
-type ActionAwareUnitOfWork interface {
-	UnitOfWork
-	ActionAttempts() ActionAttemptStore
-}
-
-type FullUnitOfWork interface {
-	UnitOfWork
-	Leases() LeaseStore
-	Approvals() ApprovalStore
-	ResumeTokens() ResumeTokenStore
-	ActionAttempts() ActionAttemptStore
-}
-
-type MissingOptionalStores struct {
-	Leases         bool
-	Approvals      bool
-	ResumeTokens   bool
-	ActionAttempts bool
-}
-
-type FallbackTx interface {
+type UnitOfWork interface {
+	Runs() RunStore
+	Tasks() TaskStore
+	Events() EventStore
+	Blackboard() BlackboardReadWriter
+	MailboxOutbox() MailboxOutboxStore
+	UserMessages() UserMessageStore
+	Trace() TraceStore
 	Leases() LeaseStore
 	Approvals() ApprovalStore
 	ResumeTokens() ResumeTokenStore
@@ -145,6 +105,6 @@ type FallbackTx interface {
 	Rollback(context.Context) error
 }
 
-type FallbackProvider interface {
-	BeginFallback(context.Context, MissingOptionalStores) (FallbackTx, error)
+type StoreProvider interface {
+	Begin(context.Context) (UnitOfWork, error)
 }

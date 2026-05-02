@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	lifecycle "github.com/Viking602/go-hydaelyn/internal/core/lifecycle"
+	lifecycle "github.com/Viking602/go-hydaelyn/internal/lifecycle"
 )
 
 type RequestApprovalCommand struct {

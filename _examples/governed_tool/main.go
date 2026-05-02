@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/policy"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/worker"
@@ -16,25 +17,25 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New(hydaelyn.Config{PolicyEngine: policy.DenySideEffectsByDefault()})
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "agent-a"})
+	runner := hydaelyn.New(api.Config{PolicyEngine: policy.DenySideEffectsByDefault()})
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "try a write tool"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "try a write tool"})
 	must(err)
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID: run.ID, TaskID: "write-task", OwnerAgentID: "agent-a", AllowsAction: true,
 	})
 	must(err)
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
 	must(err)
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
-		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID, HolderType: hydaelyn.HolderAgent, HolderID: "agent-a",
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID, HolderType: api.HolderAgent, HolderID: "agent-a",
 	})
 	must(err)
 
 	bus := worker.GovernedToolBus{
 		Runner: runner, Bus: tool.NewBus(writeTool{}), RunID: run.ID, TaskID: task.ID,
-		LeaseID: lease.ID, HolderType: hydaelyn.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
+		LeaseID: lease.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
 	}
 	_, err = bus.Execute(ctx, tool.Call{Name: "write_file"}, nil)
 	if errors.Is(err, hydaelyn.ErrPolicyDenied) {

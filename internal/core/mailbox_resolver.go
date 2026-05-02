@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/Viking602/go-hydaelyn/internal/core/mailbox"
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/go-hydaelyn/internal/mailbox"
 )
 
 var (
@@ -10,9 +10,11 @@ var (
 	ErrNoRecipients   = model.ErrNoRecipients
 )
 
-type AddressKind = model.AddressKind
-type Address = model.Address
-type AgentProfile = model.AgentProfile
+type (
+	AddressKind  = model.AddressKind
+	Address      = model.Address
+	AgentProfile = model.AgentProfile
+)
 
 const (
 	AddressKindAgent AddressKind = model.AddressKindAgent

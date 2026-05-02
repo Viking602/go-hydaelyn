@@ -94,7 +94,7 @@ func TestNewToolResult(t *testing.T) {
 	}
 }
 
-func TestMessage_StructFields(t *testing.T) {
+func TestMessageStructFields(t *testing.T) {
 	toolCalls := []ToolCall{
 		{ID: "call-1", Name: "tool1", Arguments: json.RawMessage(`{"arg":"value"}`)},
 	}
@@ -142,7 +142,7 @@ func TestMessage_StructFields(t *testing.T) {
 	}
 }
 
-func TestToolDefinition_Struct(t *testing.T) {
+func TestToolDefinitionStruct(t *testing.T) {
 	schema := JSONSchema{
 		Type:        "object",
 		Description: "Test schema",
@@ -188,7 +188,7 @@ func TestToolDefinition_Struct(t *testing.T) {
 	}
 }
 
-func TestJSONSchema_Struct(t *testing.T) {
+func TestJSONSchemaStruct(t *testing.T) {
 	schema := JSONSchema{
 		Type:        "object",
 		Description: "Root schema",
@@ -213,7 +213,7 @@ func TestJSONSchema_Struct(t *testing.T) {
 	}
 }
 
-func TestToolCall_Struct(t *testing.T) {
+func TestToolCallStruct(t *testing.T) {
 	call := ToolCall{
 		ID:        "call-123",
 		Name:      "search",
@@ -231,7 +231,7 @@ func TestToolCall_Struct(t *testing.T) {
 	}
 }
 
-func TestToolResult_Struct(t *testing.T) {
+func TestToolResultStruct(t *testing.T) {
 	result := ToolResult{
 		ToolCallID: "call-123",
 		Name:       "search",
@@ -248,7 +248,7 @@ func TestToolResult_Struct(t *testing.T) {
 	}
 }
 
-func TestRole_Constants(t *testing.T) {
+func TestRoleConstants(t *testing.T) {
 	roles := []Role{RoleSystem, RoleUser, RoleAssistant, RoleTool, RoleCustom}
 	expected := []string{"system", "user", "assistant", "tool", "custom"}
 
@@ -259,7 +259,7 @@ func TestRole_Constants(t *testing.T) {
 	}
 }
 
-func TestKind_Constants(t *testing.T) {
+func TestKindConstants(t *testing.T) {
 	kinds := []Kind{KindStandard, KindBranchSummary, KindCompactionSummary, KindCommandOutput, KindCustom}
 	expected := []string{"standard", "branch_summary", "compaction_summary", "command_output", "custom"}
 
@@ -270,7 +270,7 @@ func TestKind_Constants(t *testing.T) {
 	}
 }
 
-func TestVisibility_Constants(t *testing.T) {
+func TestVisibilityConstants(t *testing.T) {
 	visibilities := []Visibility{VisibilityShared, VisibilityPrivate}
 	expected := []string{"shared", "private"}
 

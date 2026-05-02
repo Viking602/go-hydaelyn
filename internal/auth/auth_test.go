@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestStaticDriver_ResolveProviderCredentials(t *testing.T) {
+func TestStaticDriverResolveProviderCredentials(t *testing.T) {
 	tests := []struct {
 		name         string
 		driver       StaticDriver
@@ -59,7 +59,7 @@ func TestStaticDriver_ResolveProviderCredentials(t *testing.T) {
 	}
 }
 
-func TestStaticDriver_ResolveRuntimeIdentity(t *testing.T) {
+func TestStaticDriverResolveRuntimeIdentity(t *testing.T) {
 	tests := []struct {
 		name   string
 		driver StaticDriver
@@ -103,7 +103,7 @@ func TestStaticDriver_ResolveRuntimeIdentity(t *testing.T) {
 	}
 }
 
-func TestIdentity_Struct(t *testing.T) {
+func TestIdentityStruct(t *testing.T) {
 	identity := Identity{
 		Subject: "test-subject",
 		Claims: map[string]string{
@@ -121,7 +121,7 @@ func TestIdentity_Struct(t *testing.T) {
 	}
 }
 
-func TestCredentials_Struct(t *testing.T) {
+func TestCredentialsStruct(t *testing.T) {
 	creds := Credentials{
 		APIKey: "test-api-key",
 		Headers: map[string]string{

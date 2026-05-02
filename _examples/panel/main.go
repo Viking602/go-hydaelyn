@@ -12,6 +12,7 @@ import (
 	"time"
 
 	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func main() {
@@ -19,11 +20,11 @@ func main() {
 	runner := hydaelyn.New()
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {
-		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id, Role: "panel.expert"})
+		runner.RegisterAgent(api.AgentProfile{ID: id, Role: "panel.expert"})
 	}
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "synth", Role: "panel.synthesizer"})
+	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "panel.synthesizer"})
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "feature launch panel"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "feature launch panel"})
 	must(err)
 
 	expertTaskIDs := make([]string, 0, len(experts))
@@ -31,47 +32,47 @@ func main() {
 	for _, id := range experts {
 		taskID := "review-" + id
 		expertTaskIDs = append(expertTaskIDs, taskID)
-		_, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+		_, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 			RunID: run.ID, TaskID: taskID, OwnerAgentID: id,
 		})
 		must(err)
 		wg.Add(1)
 		go func(taskID, agentID string) {
 			defer wg.Done()
-			runOnce(ctx, runner, run.ID, taskID, agentID, hydaelyn.ReportStatusSuccess)
+			runOnce(ctx, runner, run.ID, taskID, agentID, api.ReportStatusSuccess)
 		}(taskID, id)
 	}
 
 	// Synthesizer needs only quorum (>= ceil(N/2)) of panel members to ship.
-	synth, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	synth, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID: run.ID, TaskID: "synthesize", OwnerAgentID: "synth",
 		DependsOn:          expertTaskIDs,
-		AwaitMode:          hydaelyn.AwaitModeQuorum,
+		AwaitMode:          api.AwaitModeQuorum,
 		AwaitQuorum:        2,
-		OnDependencyFailed: hydaelyn.OnDependencyFailedContinue,
+		OnDependencyFailed: api.OnDependencyFailedContinue,
 	})
 	must(err)
 	wg.Wait()
 
-	runOnce(ctx, runner, run.ID, synth.ID, "synth", hydaelyn.ReportStatusSuccess)
+	runOnce(ctx, runner, run.ID, synth.ID, "synth", api.ReportStatusSuccess)
 	fmt.Println("quorum reached — synthesizer ran")
 }
 
-func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, status hydaelyn.ReportStatus) {
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
+func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, status api.ReportStatus) {
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: agentID, TTL: time.Minute,
+		HolderType: api.HolderAgent, HolderID: agentID, TTL: time.Minute,
 	})
 	must(err)
 	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
-	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
+		HolderType: api.HolderAgent, HolderID: agentID,
 		TaskVersion: task.Version,
-		Report:      hydaelyn.TypedReport{Status: status, Summary: "panel review " + agentID},
+		Report:      api.TypedReport{Status: status, Summary: "panel review " + agentID},
 	}))
 }
 

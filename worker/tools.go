@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
@@ -15,7 +15,7 @@ type GovernedToolBus struct {
 	RunID       string
 	TaskID      string
 	LeaseID     string
-	HolderType  hydaelyn.HolderType
+	HolderType  api.HolderType
 	HolderID    string
 	TaskVersion int
 }
@@ -65,7 +65,7 @@ func (d governedToolDriver) Definition() tool.Definition {
 
 func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
 	if d.bus.Runner != nil {
-		_, err := d.bus.Runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
+		_, err := d.bus.Runner.InvokeTool(ctx, api.ToolInvocation{
 			RunID:       d.bus.RunID,
 			TaskID:      d.bus.TaskID,
 			LeaseID:     d.bus.LeaseID,
@@ -82,20 +82,20 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 	return d.driver.Execute(ctx, call, sink)
 }
 
-func toolDefinitionToRunnerTool(def tool.Definition) hydaelyn.Tool {
+func toolDefinitionToRunnerTool(def tool.Definition) api.Tool {
 	requiresApproval := def.RequiresApproval || def.Security.RequiresApproval
 	effect := def.EffectType
 	if effect == "" && requiresApproval {
-		effect = message.ToolEffectExternalSideEffect
+		effect = tool.EffectExternalSideEffect
 	}
-	return hydaelyn.Tool{
+	return api.Tool{
 		Name:               def.Name,
-		EffectType:         effect,
+		EffectType:         api.ToolEffectType(effect),
 		RequiresActionTask: def.RequiresActionTask || requiresApproval,
 		RiskLevel:          firstNonEmpty(def.RiskLevel, def.Security.RiskLevel),
 		Idempotent:         def.Idempotent || def.Security.Idempotent,
 		Timeout:            def.Timeout,
-		RetryPolicy: hydaelyn.RetryPolicy{
+		RetryPolicy: api.RetryPolicy{
 			MaxAttempts: def.RetryPolicy.MaxAttempts,
 			Backoff:     def.RetryPolicy.Backoff,
 		},

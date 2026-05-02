@@ -143,7 +143,7 @@ func TestStateUpsertExchangeDedupesAndSupportsDeterministicKeyReads(t *testing.T
 	}
 }
 
-func TestCollaborationBlackboard_RejectsStaleExchangeWrite(t *testing.T) {
+func TestCollaborationBlackboardRejectsStaleExchangeWrite(t *testing.T) {
 	state := &State{}
 
 	current, err := state.UpsertExchangeCAS(Exchange{
@@ -265,7 +265,7 @@ func TestUpsertVerificationMergesReviewerVerdictsConservatively(t *testing.T) {
 	}
 }
 
-func TestInferVerificationStatus_ConservativeDefault(t *testing.T) {
+func TestInferVerificationStatusConservativeDefault(t *testing.T) {
 	cases := []struct {
 		text string
 		want VerificationStatus

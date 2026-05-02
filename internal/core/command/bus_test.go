@@ -21,7 +21,7 @@ type testHandler struct{}
 
 func (testHandler) Name() string { return "test.command" }
 
-func (testHandler) Handle(_ context.Context, _ ports.FullUnitOfWork, cmd testCommand) (any, error) {
+func (testHandler) Handle(_ context.Context, _ ports.UnitOfWork, cmd testCommand) (any, error) {
 	return cmd.Value, nil
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/provider/scripted"
 	"github.com/Viking602/go-hydaelyn/worker"
@@ -17,11 +18,11 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := hydaelyn.New()
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "agent-a"})
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "summarize a task"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "summarize a task"})
 	must(err)
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "summary",
 		Goal:         "produce a concise summary",
@@ -29,7 +30,7 @@ func main() {
 		WriteTargets: []string{"summary"},
 	})
 	must(err)
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
 	})
 	must(err)

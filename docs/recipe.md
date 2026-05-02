@@ -1,19 +1,20 @@
 # Recipe Compiler
 
 The v2 main branch does not ship the old declarative recipe compiler as a
-primary runtime surface. New code should compose `Run`, `Task`, dependencies,
-blackboard selectors, and flows directly through `hydaelyn.Runner`.
+primary runtime surface. New code should compose `api.Run`, `api.Task`,
+dependencies, blackboard selectors, and flows directly through
+`hydaelyn.Runner`.
 
 For direct orchestration, prefer:
 
 ```go
 runner := hydaelyn.New()
-run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "..."})
+run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "..."})
 ```
 
 Recipe-style authoring can be implemented by applications as a planner layer
-that emits `hydaelyn.CreateTaskCommand` values or a `hydaelyn.TodoPlan` for a
-custom `Planner`.
+that emits `api.CreateTaskCommand` values or a `api.TodoPlan` for a custom
+`api.Planner`.
 
 ## Suggested Authoring Primitives
 

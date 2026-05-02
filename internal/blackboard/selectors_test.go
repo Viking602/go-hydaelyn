@@ -2,7 +2,7 @@ package blackboard
 
 import "testing"
 
-func TestLegacyReadKeyToSelector_PreservesPermissivePayload(t *testing.T) {
+func TestLegacyReadKeyToSelectorPreservesPermissivePayload(t *testing.T) {
 	sel := LegacyReadKeyToSelector("research.notes")
 	if len(sel.Keys) != 1 || sel.Keys[0] != "research.notes" {
 		t.Fatalf("expected key research.notes, got %v", sel.Keys)
@@ -15,7 +15,7 @@ func TestLegacyReadKeyToSelector_PreservesPermissivePayload(t *testing.T) {
 	}
 }
 
-func TestSelectExchanges_RequireVerifiedFiltersUnsupportedClaims(t *testing.T) {
+func TestSelectExchangesRequireVerifiedFiltersUnsupportedClaims(t *testing.T) {
 	state := State{
 		Claims: []Claim{{ID: "claim-1"}, {ID: "claim-2"}},
 		Verifications: []VerificationResult{
@@ -37,7 +37,7 @@ func TestSelectExchanges_RequireVerifiedFiltersUnsupportedClaims(t *testing.T) {
 	}
 }
 
-func TestSelectExchanges_MinConfidenceGatesStructuredConfidence(t *testing.T) {
+func TestSelectExchangesMinConfidenceGatesStructuredConfidence(t *testing.T) {
 	state := State{
 		Exchanges: []Exchange{
 			{Key: "summary", Structured: map[string]any{"confidence": 0.3}},
@@ -53,7 +53,7 @@ func TestSelectExchanges_MinConfidenceGatesStructuredConfidence(t *testing.T) {
 	}
 }
 
-func TestSelectFindings_ContradictedClaimPoisonsFinding(t *testing.T) {
+func TestSelectFindingsContradictedClaimPoisonsFinding(t *testing.T) {
 	// A finding backed by two claims — one supported, one contradicted — must
 	// not be returned under RequireVerified because partial support cannot
 	// protect downstream synthesis from the contradicted claim.
@@ -73,7 +73,7 @@ func TestSelectFindings_ContradictedClaimPoisonsFinding(t *testing.T) {
 	}
 }
 
-func TestSelectFindings_MinConfidenceDropsWeakClaims(t *testing.T) {
+func TestSelectFindingsMinConfidenceDropsWeakClaims(t *testing.T) {
 	state := State{
 		Findings: []Finding{
 			{ID: "finding-weak", Confidence: 0.4},
@@ -86,7 +86,7 @@ func TestSelectFindings_MinConfidenceDropsWeakClaims(t *testing.T) {
 	}
 }
 
-func TestSelectExchanges_ValueTypeAndLimitHonored(t *testing.T) {
+func TestSelectExchangesValueTypeAndLimitHonored(t *testing.T) {
 	state := State{
 		Exchanges: []Exchange{
 			{Key: "notes", ValueType: ExchangeValueTypeText},

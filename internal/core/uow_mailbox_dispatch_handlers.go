@@ -2,13 +2,11 @@ package core
 
 import (
 	"context"
-	"slices"
 	"strings"
-	"time"
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/core/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/mailbox"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/go-hydaelyn/internal/mailbox"
 )
 
 func registerMailboxDispatchUoWCommandHandlers(runtime *Runtime) {
@@ -20,8 +18,8 @@ type dispatchTaskHandler struct{ runtime *Runtime }
 
 func (dispatchTaskHandler) Name() string { return DispatchTaskCommand{}.CommandName() }
 
-func (h dispatchTaskHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd DispatchTaskCommand) (any, error) {
-	run, task, err := mailbox.LoadDispatchTarget(ctx, uow, cmd.RunID, cmd.TaskID)
+func (h dispatchTaskHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd DispatchTaskCommand) (any, error) {
+	_, task, err := mailbox.LoadDispatchTarget(ctx, uow, cmd.RunID, cmd.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -34,30 +32,21 @@ func (h dispatchTaskHandler) Handle(ctx context.Context, uow ports.FullUnitOfWor
 	if err := h.runtime.recordEndedTraceUoW(ctx, uow, cmd.RunID, cmd.TaskID, "mailbox.dispatch", "mailbox"); err != nil {
 		return nil, err
 	}
-	next, err := transitionTaskPure(task, TaskStatusDispatched, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := uow.Tasks().SaveTask(ctx, next); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	env := TaskEnvelope{ID: h.runtime.newID("env"), RunID: run.ID, TaskID: task.ID, TargetAgentID: cmd.TargetAgentID, TargetComponent: cmd.TargetComponent, Payload: cloneAnyMap(cmd.Payload), Status: "pending", TaskVersion: next.Version, ReadSelectors: slices.Clone(next.ReadSelectors), WriteTargets: slices.Clone(next.WriteTargets), RetryPolicy: next.RetryPolicy, CreatedAt: now}
-	if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
-		return nil, err
-	}
-	if err := uow.Events().AppendEvent(ctx, Event{RunID: env.RunID, TaskID: env.TaskID, Type: EventTaskDispatched, Payload: map[string]any{"envelope": envPayload(env)}, RecordedAt: now}); err != nil {
-		return nil, err
-	}
-	return env, nil
+	return mailbox.Dispatch(ctx, uow, h.runtime.newID, mailbox.DispatchInput{
+		RunID:           cmd.RunID,
+		TaskID:          cmd.TaskID,
+		TargetAgentID:   cmd.TargetAgentID,
+		TargetComponent: cmd.TargetComponent,
+		Payload:         cmd.Payload,
+	})
 }
 
 type fanOutDispatchTaskHandler struct{ runtime *Runtime }
 
 func (fanOutDispatchTaskHandler) Name() string { return FanOutDispatchTaskCommand{}.CommandName() }
 
-func (h fanOutDispatchTaskHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd FanOutDispatchTaskCommand) (any, error) {
-	run, task, err := mailbox.LoadDispatchTarget(ctx, uow, cmd.RunID, cmd.TaskID)
+func (h fanOutDispatchTaskHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd FanOutDispatchTaskCommand) (any, error) {
+	_, task, err := mailbox.LoadDispatchTarget(ctx, uow, cmd.RunID, cmd.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,24 +63,5 @@ func (h fanOutDispatchTaskHandler) Handle(ctx context.Context, uow ports.FullUni
 	if err := h.runtime.recordEndedTraceUoW(ctx, uow, cmd.RunID, cmd.TaskID, "mailbox.dispatch_fanout", "mailbox"); err != nil {
 		return nil, err
 	}
-	next, err := transitionTaskPure(task, TaskStatusDispatched, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := uow.Tasks().SaveTask(ctx, next); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	out := make([]TaskEnvelope, 0, len(recipients))
-	for _, agentID := range recipients {
-		env := TaskEnvelope{ID: h.runtime.newID("env"), RunID: run.ID, TaskID: task.ID, TargetAgentID: agentID, Payload: cloneAnyMap(cmd.Payload), Status: "pending", TaskVersion: next.Version, ReadSelectors: slices.Clone(next.ReadSelectors), WriteTargets: slices.Clone(next.WriteTargets), RetryPolicy: next.RetryPolicy, CreatedAt: now}
-		if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
-			return nil, err
-		}
-		if err := uow.Events().AppendEvent(ctx, Event{RunID: env.RunID, TaskID: env.TaskID, Type: EventTaskDispatched, Payload: map[string]any{"envelope": envPayload(env)}, RecordedAt: now}); err != nil {
-			return nil, err
-		}
-		out = append(out, env)
-	}
-	return out, nil
+	return mailbox.FanOut(ctx, uow, h.runtime.newID, cmd.RunID, cmd.TaskID, recipients, cmd.Payload)
 }

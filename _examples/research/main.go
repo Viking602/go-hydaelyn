@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 const groupResearchers = "researchers"
@@ -20,19 +21,19 @@ func main() {
 
 	pool := []string{"r1", "r2", "r3"}
 	for _, id := range pool {
-		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id, Groups: []string{groupResearchers}})
+		runner.RegisterAgent(api.AgentProfile{ID: id, Groups: []string{groupResearchers}})
 	}
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "compare Go agent runtimes"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "compare Go agent runtimes"})
 	must(err)
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID: run.ID, TaskID: "investigate", OwnerComponent: "orchestrator",
 	})
 	must(err)
 
-	envelopes, err := runner.DispatchTaskFanOut(ctx, hydaelyn.FanOutDispatchTaskCommand{
+	envelopes, err := runner.DispatchTaskFanOut(ctx, api.FanOutDispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID,
-		To:      hydaelyn.Address{Kind: hydaelyn.AddressKindGroup, Group: groupResearchers},
+		To:      api.Address{Kind: api.AddressKindGroup, Group: groupResearchers},
 		Payload: map[string]any{"query": "compare Go agent runtimes"},
 	})
 	must(err)

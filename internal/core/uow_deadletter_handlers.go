@@ -29,7 +29,7 @@ type deadLetterHandler struct{ runtime *Runtime }
 
 func (deadLetterHandler) Name() string { return DeadLetterCommand{}.CommandName() }
 
-func (h deadLetterHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd DeadLetterCommand) (any, error) {
+func (h deadLetterHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd DeadLetterCommand) (any, error) {
 	env, err := uow.MailboxOutbox().LoadEnvelope(ctx, cmd.EnvelopeID)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (h deadLetterHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork,
 	return h.dead(ctx, uow, env, cmd.Reason, decision)
 }
 
-func (h deadLetterHandler) retry(ctx context.Context, uow ports.FullUnitOfWork, env TaskEnvelope, reason string, decision TaskMonitorDecision) (deadLetterResult, error) {
+func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env TaskEnvelope, reason string, decision TaskMonitorDecision) (deadLetterResult, error) {
 	env.Status = "pending"
 	env.Attempts++
 	backoff := env.RetryPolicy.Backoff
@@ -103,7 +103,7 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.FullUnitOfWork, 
 	return result, nil
 }
 
-func (h deadLetterHandler) dead(ctx context.Context, uow ports.FullUnitOfWork, env TaskEnvelope, reason string, decision TaskMonitorDecision) (deadLetterResult, error) {
+func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env TaskEnvelope, reason string, decision TaskMonitorDecision) (deadLetterResult, error) {
 	env.Status = "dead"
 	if err := uow.MailboxOutbox().UpdateEnvelope(ctx, env); err != nil {
 		return deadLetterResult{}, err

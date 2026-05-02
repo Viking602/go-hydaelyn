@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	proj "github.com/Viking602/go-hydaelyn/internal/core/projection"
+	proj "github.com/Viking602/go-hydaelyn/internal/projection"
 )
 
 func (r *Runtime) RunTimeline(ctx context.Context, runID string) ([]RunTimelineItem, error) {

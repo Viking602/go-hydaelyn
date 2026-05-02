@@ -12,13 +12,13 @@
 
 - `hydaelyn.New()` 创建默认 `Runner`。
 - `Runner.StartRun` 创建 `Run + RootTask`。
-- `Runner.ExecuteCommand` 作为命令层入口，状态变更走 `StoreProvider + UnitOfWork`。
-- planner/router adapter 创建一等 `Task`。
+- `Runner.ExecuteCommand` 作为命令层入口，状态变更走 `api.StoreProvider + api.UnitOfWork`。
+- planner/router adapter 创建一等 `api.Task`。
 - `DispatchTask` 只写任务信封，不能授予执行权限。
 - agent/component 必须 `AcquireTaskExecution` 后才能执行。
 - `SubmitTypedReport` 是唯一正式任务提交协议。
 - `ResponseTask` 和 `OutputGateway` 是唯一用户消息链路。
-- `PolicyEngine.Authorize(ctx, PolicyRequest)` 统一覆盖 dispatch、blackboard、
+- `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)` 统一覆盖 dispatch、blackboard、
   handoff、tool call、action、response publish。
 - `needs_clarification` 进入 `waiting_user_input`，并通过 resume token 或用户输入恢复。
 
@@ -33,13 +33,13 @@ runner := hydaelyn.New()
 自定义配置：
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
 
-旧的空配置构造器和 `NewRuntime` 构造器仍保留为兼容别名；新代码应使用
-`Runner` / `New`，并只在覆盖默认配置时传入 `Config`。
+内部 `Runtime` 仍存在于实现层，但新代码应通过 `Runner` + `api` 契约扩展，
+不要直接 import `internal/core`。
 
 ## API 映射
 
@@ -47,8 +47,8 @@ runner := hydaelyn.New(hydaelyn.Config{
 - team events -> `Runner.RunEvents`
 - team timeline -> `Runner.RunTimeline`
 - replay team state -> `Runner.ReplayRunState`
-- pattern -> `Flow`
-- message-only policy -> `PolicyEngine.Authorize(ctx, PolicyRequest)`
+- pattern -> `api.Flow`
+- message-only policy -> `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)`
 - direct user message write/publish -> `ResponseTask + ResponseOutbox + OutputGateway`
 
 ## Tool 与治理迁移
@@ -69,7 +69,7 @@ agent 直接创建或发布用户可见消息。
 
 - append-only events
 - replay
-- StoreProvider / UnitOfWork runtime contract
+- `api.StoreProvider / api.UnitOfWork` runtime contract
 - durable mailbox and response outbox contracts
 - approval / resume token / action attempt lifecycle
 
