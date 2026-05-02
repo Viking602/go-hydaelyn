@@ -1,22 +1,10 @@
 package core
 
-import "time"
+import executionsvc "github.com/Viking602/go-hydaelyn/internal/execution"
 
-type AcquireTaskExecutionCommand struct {
-	RunID      string
-	TaskID     string
-	EnvelopeID string
-	HolderType HolderType
-	HolderID   string
-	TTL        time.Duration
-}
-
-type HeartbeatTaskExecutionCommand struct {
-	LeaseID string
-	TTL     time.Duration
-}
-
-type ReleaseTaskExecutionCommand struct {
-	LeaseID  string
-	HolderID string
-}
+type (
+	AcquireTaskExecutionCommand   = executionsvc.AcquireTaskExecutionCommand
+	HeartbeatTaskExecutionCommand = executionsvc.HeartbeatTaskExecutionCommand
+	ReleaseTaskExecutionCommand   = executionsvc.ReleaseTaskExecutionCommand
+	AcquireTaskExecutionResult    = executionsvc.AcquireResult
+)

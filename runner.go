@@ -546,10 +546,7 @@ func mailboxResultFromCore(command api.Command, result any) (any, bool) {
 func governanceResultFromCore(command api.Command, result any) (any, bool) {
 	switch command.(type) {
 	case api.AcquireTaskExecutionCommand:
-		if acquired, ok := result.(struct {
-			Lease    core.TaskExecutionLease
-			Acquired bool
-		}); ok {
+		if acquired, ok := result.(core.AcquireTaskExecutionResult); ok {
 			return struct {
 				Lease    api.TaskExecutionLease
 				Acquired bool
