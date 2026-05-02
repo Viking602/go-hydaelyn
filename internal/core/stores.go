@@ -1,6 +1,10 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
+)
 
 func (r *Runtime) StoreProvider() StoreProvider {
 	if r.storeProvider != nil {
@@ -23,7 +27,14 @@ func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
 	return err
 }
 
-// SelectItems is the public BlackboardStore API backed by memProvider.
+func registerBlackboardUoWCommandHandlers(runtime *Runtime) {
+	blackboardsvc.RegisterHandlers(runtime.commandBus, blackboardsvc.HandlerOptions{
+		NewID:     runtime.newID,
+		Authorize: runtime.authorizeUoW,
+	})
+}
+
+// SelectItems is the public BlackboardStore read API backed by the configured store provider.
 func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {

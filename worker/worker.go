@@ -39,35 +39,13 @@ type ExecuteEnvelopeRequest struct {
 }
 
 func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) error {
-	if w.Runner == nil {
-		return ErrRunnerMissing
-	}
-	if w.Engine.Provider == nil {
-		return ErrProviderMissing
-	}
-	if strings.TrimSpace(w.AgentID) == "" {
-		return ErrAgentIDMissing
-	}
-	ttl := req.TTL
-	if ttl <= 0 {
-		ttl = w.TTL
-	}
-	if ttl <= 0 {
-		ttl = time.Minute
-	}
-	lease, acquired, err := w.Runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
-		RunID:      req.Envelope.RunID,
-		TaskID:     req.Envelope.TaskID,
-		EnvelopeID: req.Envelope.ID,
-		HolderType: api.HolderAgent,
-		HolderID:   w.AgentID,
-		TTL:        ttl,
-	})
-	if err != nil {
+	if err := w.validateExecuteEnvelope(); err != nil {
 		return err
 	}
-	if !acquired {
-		return fmt.Errorf("worker: task %s already has an active lease", req.Envelope.TaskID)
+	ttl := w.executeEnvelopeTTL(req)
+	lease, err := w.acquireEnvelopeLease(ctx, req, ttl)
+	if err != nil {
+		return err
 	}
 	leaseHandled := false
 	defer func() {
@@ -79,43 +57,115 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			HolderID: w.AgentID,
 		})
 	}()
-	if req.Envelope.ID != "" {
-		if err := w.Runner.AckEnvelope(ctx, api.AckEnvelopeCommand{EnvelopeID: req.Envelope.ID, HolderID: w.AgentID}); err != nil {
-			return err
-		}
-	}
-	task, err := w.Runner.Task(ctx, req.Envelope.RunID, req.Envelope.TaskID)
-	if err != nil {
+
+	if err := w.ackEnvelope(ctx, req.Envelope); err != nil {
 		return err
 	}
-	run, err := w.Runner.Run(ctx, req.Envelope.RunID)
+	task, run, err := w.loadEnvelopeTaskRun(ctx, req.Envelope)
 	if err != nil {
 		return err
 	}
 	inputs, err := w.materializeInputs(ctx, task)
 	if err != nil {
-		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
-			leaseHandled = true
-		}
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
 		return err
 	}
+
 	messages := w.buildMessages(run, task, inputs, req.Messages)
-	engine := w.Engine
-	if engine.Tools != nil {
-		engine.Tools = GovernedToolBus{
-			Runner:      w.Runner,
-			Bus:         engine.Tools,
-			RunID:       task.RunID,
-			TaskID:      task.ID,
-			LeaseID:     lease.ID,
-			HolderType:  api.HolderAgent,
-			HolderID:    w.AgentID,
-			TaskVersion: task.Version,
-		}.ToolBus()
+	engine := w.governedEngine(task, lease)
+	result, err := w.runEngineWithHeartbeat(ctx, engine, messages, lease.ID, ttl)
+	if err != nil {
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
+		return err
 	}
+
+	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
+	return err
+}
+
+func (w AgentWorker) validateExecuteEnvelope() error {
+	if w.Runner == nil {
+		return ErrRunnerMissing
+	}
+	if w.Engine.Provider == nil {
+		return ErrProviderMissing
+	}
+	if strings.TrimSpace(w.AgentID) == "" {
+		return ErrAgentIDMissing
+	}
+	return nil
+}
+
+func (w AgentWorker) executeEnvelopeTTL(req ExecuteEnvelopeRequest) time.Duration {
+	ttl := req.TTL
+	if ttl <= 0 {
+		ttl = w.TTL
+	}
+	if ttl <= 0 {
+		ttl = time.Minute
+	}
+	return ttl
+}
+
+func (w AgentWorker) acquireEnvelopeLease(ctx context.Context, req ExecuteEnvelopeRequest, ttl time.Duration) (api.TaskExecutionLease, error) {
+	lease, acquired, err := w.Runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID:      req.Envelope.RunID,
+		TaskID:     req.Envelope.TaskID,
+		EnvelopeID: req.Envelope.ID,
+		HolderType: api.HolderAgent,
+		HolderID:   w.AgentID,
+		TTL:        ttl,
+	})
+	if err != nil {
+		return api.TaskExecutionLease{}, err
+	}
+	if !acquired {
+		return api.TaskExecutionLease{}, fmt.Errorf("worker: task %s already has an active lease", req.Envelope.TaskID)
+	}
+	return lease, nil
+}
+
+func (w AgentWorker) ackEnvelope(ctx context.Context, envelope api.TaskEnvelope) error {
+	if envelope.ID == "" {
+		return nil
+	}
+	return w.Runner.AckEnvelope(ctx, api.AckEnvelopeCommand{EnvelopeID: envelope.ID, HolderID: w.AgentID})
+}
+
+func (w AgentWorker) loadEnvelopeTaskRun(ctx context.Context, envelope api.TaskEnvelope) (api.Task, api.Run, error) {
+	task, err := w.Runner.Task(ctx, envelope.RunID, envelope.TaskID)
+	if err != nil {
+		return api.Task{}, api.Run{}, err
+	}
+	run, err := w.Runner.Run(ctx, envelope.RunID)
+	if err != nil {
+		return api.Task{}, api.Run{}, err
+	}
+	return task, run, nil
+}
+
+func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease) agent.Engine {
+	engine := w.Engine
+	if engine.Tools == nil {
+		return engine
+	}
+	engine.Tools = GovernedToolBus{
+		Runner:      w.Runner,
+		Bus:         engine.Tools,
+		RunID:       task.RunID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  api.HolderAgent,
+		HolderID:    w.AgentID,
+		TaskVersion: task.Version,
+	}.ToolBus()
+	return engine
+}
+
+func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, messages []message.Message, leaseID string, ttl time.Duration) (agent.Result, error) {
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
-	go w.heartbeatLoop(heartbeatCtx, lease.ID, ttl, heartbeatDone)
+	go w.heartbeatLoop(heartbeatCtx, leaseID, ttl, heartbeatDone)
 	result, err := engine.Run(ctx, agent.Input{
 		Model:         w.Model,
 		Messages:      messages,
@@ -124,12 +174,14 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	})
 	stopHeartbeat()
 	<-heartbeatDone
-	if err != nil {
-		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
-			leaseHandled = true
-		}
-		return err
-	}
+	return result, err
+}
+
+func (w AgentWorker) submitFailureReportHandled(ctx context.Context, task api.Task, lease api.TaskExecutionLease, cause error) bool {
+	return w.submitFailure(ctx, task, lease, cause) == nil
+}
+
+func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lease api.TaskExecutionLease, result agent.Result) (bool, error) {
 	summary := finalAssistantText(result.Messages)
 	if strings.TrimSpace(summary) == "" {
 		summary = "completed"
@@ -143,10 +195,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
 	}); err != nil {
-		if reportErr := w.submitFailure(ctx, task, lease, err); reportErr == nil {
-			leaseHandled = true
-		}
-		return err
+		return w.submitFailureReportHandled(ctx, task, lease, err), err
 	}
 	reportErr := w.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID:       task.RunID,
@@ -160,10 +209,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			Summary: summary,
 		},
 	})
-	if reportErr == nil {
-		leaseHandled = true
-	}
-	return reportErr
+	return reportErr == nil, reportErr
 }
 
 func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration, done chan<- struct{}) {

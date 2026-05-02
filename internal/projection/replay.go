@@ -9,81 +9,114 @@ func Project(events []model.Event) (model.Projection, error) {
 	if len(events) == 0 {
 		return model.Projection{}, model.ErrNotFound
 	}
-	projection := model.Projection{
-		Tasks: map[string]model.Task{},
-		SideEffects: model.ReplaySideEffects{
-			MailboxDeliveries:       0,
-			UserMessagePublications: 0,
-			ActionExecutions:        0,
-		},
-	}
-	messages := map[string]model.UserMessage{}
-	messageOrder := []string{}
+
+	state := newReplayState()
 	for _, event := range events {
-		switch event.Type {
-		case model.EventRunStarted:
-			projection.Run = runFromPayload(event.Payload["run"])
-		case model.EventRunStatusChanged:
-			run := runFromPayload(event.Payload["run"])
-			if run.ID != "" {
-				projection.Run = run
-			} else if to := stringFromPayload(event.Payload["to"]); to != "" {
-				projection.Run.Status = model.RunStatus(to)
-			}
-		case model.EventTaskCreated, model.EventResponseTaskCreated:
-			task := taskFromPayload(event.Payload)
-			if task.ID != "" {
-				projection.Tasks[task.ID] = task
-			}
-		case model.EventTaskDispatched:
-			env := mapFromPayload(event.Payload["envelope"])
-			taskID := stringFromPayload(env["taskId"])
-			task := projection.Tasks[taskID]
-			if task.ID == "" {
-				task = model.Task{ID: taskID, RunID: stringFromPayload(env["runId"])}
-			}
-			task.Status = model.TaskStatusDispatched
-			task.Version = intFromPayload(env["taskVersion"])
-			projection.Tasks[task.ID] = task
-		case model.EventTaskExecutionAcquired:
-			taskID := event.TaskID
-			task := projection.Tasks[taskID]
-			if task.ID != "" {
-				task.Status = model.TaskStatusRunning
-				task.Attempts++
-				projection.Tasks[task.ID] = task
-			}
-		case model.EventTaskCompleted, model.EventTaskFailed, model.EventTaskBlocked, model.EventTaskPaused, model.EventTaskOwnerChanged, model.EventUserMessageQueued:
-			if taskPayload := mapFromPayload(event.Payload["task"]); len(taskPayload) > 0 {
-				task := taskFromPayload(taskPayload)
-				if task.ID != "" {
-					projection.Tasks[task.ID] = task
-				}
-			}
-			if messagePayload := mapFromPayload(event.Payload["message"]); len(messagePayload) > 0 {
-				message := userMessageFromPayload(messagePayload)
-				if message.ID != "" {
-					if _, exists := messages[message.ID]; !exists {
-						messageOrder = append(messageOrder, message.ID)
-					}
-					messages[message.ID] = message
-				}
-			}
-		case model.EventResponsePublished:
-			message := userMessageFromPayload(mapFromPayload(event.Payload["message"]))
-			if message.ID != "" {
-				if _, exists := messages[message.ID]; !exists {
-					messageOrder = append(messageOrder, message.ID)
-				}
-				messages[message.ID] = message
-			}
-		}
+		state.applyEvent(event)
 	}
-	if projection.Run.ID == "" {
+	if state.projection.Run.ID == "" {
 		return model.Projection{}, model.ErrNotFound
 	}
-	for _, id := range messageOrder {
-		projection.Messages = append(projection.Messages, messages[id])
+	return state.projectionWithMessages(), nil
+}
+
+type replayState struct {
+	projection   model.Projection
+	messages     map[string]model.UserMessage
+	messageOrder []string
+}
+
+func newReplayState() replayState {
+	return replayState{
+		projection: model.Projection{
+			Tasks: map[string]model.Task{},
+			SideEffects: model.ReplaySideEffects{
+				MailboxDeliveries:       0,
+				UserMessagePublications: 0,
+				ActionExecutions:        0,
+			},
+		},
+		messages: map[string]model.UserMessage{},
 	}
-	return projection, nil
+}
+
+func (state *replayState) applyEvent(event model.Event) {
+	switch event.Type {
+	case model.EventRunStarted:
+		state.projection.Run = runFromPayload(event.Payload["run"])
+	case model.EventRunStatusChanged:
+		state.applyRunStatusChanged(event)
+	case model.EventTaskCreated, model.EventResponseTaskCreated:
+		state.upsertTask(taskFromPayload(event.Payload))
+	case model.EventTaskDispatched:
+		state.applyTaskDispatched(event)
+	case model.EventTaskExecutionAcquired:
+		state.applyTaskExecutionAcquired(event)
+	case model.EventTaskCompleted, model.EventTaskFailed, model.EventTaskBlocked, model.EventTaskPaused, model.EventTaskOwnerChanged, model.EventUserMessageQueued:
+		state.applyTaskAndMessagePayload(event)
+	case model.EventResponsePublished:
+		state.upsertMessage(userMessageFromPayload(mapFromPayload(event.Payload["message"])))
+	}
+}
+
+func (state *replayState) applyRunStatusChanged(event model.Event) {
+	run := runFromPayload(event.Payload["run"])
+	if run.ID != "" {
+		state.projection.Run = run
+		return
+	}
+	if to := stringFromPayload(event.Payload["to"]); to != "" {
+		state.projection.Run.Status = model.RunStatus(to)
+	}
+}
+
+func (state *replayState) applyTaskDispatched(event model.Event) {
+	env := mapFromPayload(event.Payload["envelope"])
+	taskID := stringFromPayload(env["taskId"])
+	task := state.projection.Tasks[taskID]
+	if task.ID == "" {
+		task = model.Task{ID: taskID, RunID: stringFromPayload(env["runId"])}
+	}
+	task.Status = model.TaskStatusDispatched
+	task.Version = intFromPayload(env["taskVersion"])
+	state.projection.Tasks[task.ID] = task
+}
+
+func (state *replayState) applyTaskExecutionAcquired(event model.Event) {
+	task := state.projection.Tasks[event.TaskID]
+	if task.ID == "" {
+		return
+	}
+	task.Status = model.TaskStatusRunning
+	task.Attempts++
+	state.projection.Tasks[task.ID] = task
+}
+
+func (state *replayState) applyTaskAndMessagePayload(event model.Event) {
+	state.upsertTask(taskFromPayload(mapFromPayload(event.Payload["task"])))
+	state.upsertMessage(userMessageFromPayload(mapFromPayload(event.Payload["message"])))
+}
+
+func (state *replayState) upsertTask(task model.Task) {
+	if task.ID == "" {
+		return
+	}
+	state.projection.Tasks[task.ID] = task
+}
+
+func (state *replayState) upsertMessage(message model.UserMessage) {
+	if message.ID == "" {
+		return
+	}
+	if _, exists := state.messages[message.ID]; !exists {
+		state.messageOrder = append(state.messageOrder, message.ID)
+	}
+	state.messages[message.ID] = message
+}
+
+func (state *replayState) projectionWithMessages() model.Projection {
+	for _, id := range state.messageOrder {
+		state.projection.Messages = append(state.projection.Messages, state.messages[id])
+	}
+	return state.projection
 }

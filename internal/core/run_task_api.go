@@ -3,52 +3,26 @@ package core
 import (
 	"context"
 	"slices"
+
+	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
 )
 
-type StartRunCommand struct {
-	RunID      string
-	RootTaskID string
-	Request    string
-	Metadata   map[string]string
-}
-
-type CreateTaskCommand struct {
-	RunID              string
-	TaskID             string
-	ParentTaskID       string
-	Type               TaskType
-	Goal               string
-	AssignedAgentID    string
-	OwnerAgentID       string
-	OwnerComponent     string
-	AllowsAction       bool
-	Tags               []string
-	CompletionCriteria []string
-	DependsOn          []string
-	AwaitMode          AwaitMode
-	AwaitQuorum        int
-	OnDependencyFailed OnDependencyFailed
-	ReadSelectors      []BlackboardSelector
-	WriteTargets       []string
-	RetryPolicy        RetryPolicy
-	PolicyDecisions    []PolicyDecision
-}
+type (
+	StartRunCommand   = runsvc.StartRunCommand
+	CreateTaskCommand = runsvc.CreateTaskCommand
+	StartRunResult    = runsvc.StartRunResult
+)
 
 func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return Run{}, Task{}, err
 	}
-	items, ok := result.([]any)
-	if !ok || len(items) < 2 {
+	started, ok := result.(StartRunResult)
+	if !ok {
 		return Run{}, Task{}, ErrInvalidCommand
 	}
-	run, okRun := items[0].(Run)
-	root, okTask := items[1].(Task)
-	if !okRun || !okTask {
-		return Run{}, Task{}, ErrInvalidCommand
-	}
-	return run, root, nil
+	return started.Run, started.Root, nil
 }
 
 func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, error) {

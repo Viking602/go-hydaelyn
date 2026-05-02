@@ -7,10 +7,13 @@ func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (Run, error
 	if err != nil {
 		return Run{}, err
 	}
-	run := result.([]any)[0].(Run)
-	result, err = r.ExecuteCommand(ctx, AdvanceRunCommand{RunID: run.ID})
+	started, ok := result.(StartRunResult)
+	if !ok {
+		return Run{}, ErrInvalidCommand
+	}
+	advanced, err := r.ExecuteCommand(ctx, AdvanceRunCommand{RunID: started.Run.ID})
 	if err != nil {
 		return Run{}, err
 	}
-	return result.(Run), nil
+	return advanced.(Run), nil
 }

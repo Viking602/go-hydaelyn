@@ -106,6 +106,49 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	}
 }
 
+func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-failure", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-worker-failure",
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+
+	errBoom := errors.New("provider boom")
+	err = (AgentWorker{
+		Runner:  runner,
+		Engine:  agent.Engine{Provider: failingProvider{err: errBoom}},
+		AgentID: "agent-a",
+		Model:   "scripted",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env})
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("ExecuteEnvelope() error = %v, want %v", err, errBoom)
+	}
+
+	failed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if failed.Status != api.TaskStatusFailed || failed.Error != errBoom.Error() {
+		t.Fatalf("engine failure should submit failed report, got %#v", failed)
+	}
+	if active := runner.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+		t.Fatalf("engine failure should release active lease, got %d", active)
+	}
+}
+
 type recordingTool struct {
 	definition tool.Definition
 	called     bool
@@ -116,4 +159,16 @@ func (d *recordingTool) Definition() tool.Definition { return d.definition }
 func (d *recordingTool) Execute(context.Context, tool.Call, tool.UpdateSink) (tool.Result, error) {
 	d.called = true
 	return tool.Result{Name: d.definition.Name, Content: "ok"}, nil
+}
+
+type failingProvider struct {
+	err error
+}
+
+func (p failingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "failing"}
+}
+
+func (p failingProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
+	return nil, p.err
 }

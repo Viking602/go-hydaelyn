@@ -50,8 +50,8 @@ func TestDispatchTaskFanOutWritesEnvelopePerRecipient(t *testing.T) {
 	rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
 	rt.RegisterAgent(AgentProfile{ID: "reviewer-a", Role: "reviewer"})
 
-	run := mustStartRun(t, ctx, rt, "run-fanout")
-	task := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-fanout")
+	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "broadcast",
 		OwnerAgentID: "monitor-a",
@@ -79,7 +79,7 @@ func TestDispatchTaskFanOutWritesEnvelopePerRecipient(t *testing.T) {
 		t.Fatalf("expected both monitor recipients, seen=%v", seen)
 	}
 
-	after := mustLoadTask(t, ctx, rt, run.ID, task.ID)
+	after := mustLoadTask(ctx, t, rt, run.ID, task.ID)
 	if after.Status != TaskStatusDispatched {
 		t.Fatalf("fan-out should transition task to Dispatched, got %s", after.Status)
 	}
@@ -91,8 +91,8 @@ func TestDispatchTaskFanOutRecipientCanAcquireAndSubmit(t *testing.T) {
 	rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
 	rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
 
-	run := mustStartRun(t, ctx, rt, "run-fanout-claim")
-	task := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-fanout-claim")
+	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:          run.ID,
 		TaskID:         "broadcast",
 		OwnerComponent: "dispatcher",
@@ -130,7 +130,7 @@ func TestDispatchTaskFanOutRecipientCanAcquireAndSubmit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("fan-out recipient should submit through acquired lease: %v", err)
 	}
-	after := mustLoadTask(t, ctx, rt, run.ID, task.ID)
+	after := mustLoadTask(ctx, t, rt, run.ID, task.ID)
 	if after.Status != TaskStatusCompleted {
 		t.Fatalf("fan-out recipient submit should complete task, got %s", after.Status)
 	}
@@ -162,8 +162,8 @@ func TestDispatchTaskFanOutNoRecipients(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
 	rt.RegisterAgent(AgentProfile{ID: "lone", Role: "x"})
-	run := mustStartRun(t, ctx, rt, "run-fanout-empty")
-	task := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-fanout-empty")
+	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "broadcast",
 		OwnerAgentID: "lone",

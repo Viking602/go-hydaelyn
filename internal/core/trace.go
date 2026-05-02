@@ -1,24 +1,15 @@
 package core
 
-import "context"
+import (
+	"context"
 
-type StartTraceSpanCommand struct {
-	RunID     string
-	TaskID    string
-	TraceID   string
-	ParentID  string
-	Name      string
-	Component string
-	Metadata  map[string]string
-}
+	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
+)
 
-type EndTraceSpanCommand struct {
-	SpanID string
-	Error  string
-}
-
-func (StartTraceSpanCommand) CommandName() string { return "trace.start" }
-func (EndTraceSpanCommand) CommandName() string   { return "trace.end" }
+type (
+	StartTraceSpanCommand = tracesvc.StartTraceSpanCommand
+	EndTraceSpanCommand   = tracesvc.EndTraceSpanCommand
+)
 
 func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (TraceSpan, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
@@ -49,4 +40,8 @@ func (r *Runtime) TraceSpans(runID string) []TraceSpan {
 		return nil
 	}
 	return append([]TraceSpan{}, spans...)
+}
+
+func registerTraceUoWCommandHandlers(runtime *Runtime) {
+	tracesvc.RegisterHandlers(runtime.commandBus, runtime.newID)
 }

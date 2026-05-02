@@ -6,3 +6,4 @@
 !.sentrux/business-words.baseline
 benchmarks/_external/
 benchmarks/results/
+.idea/

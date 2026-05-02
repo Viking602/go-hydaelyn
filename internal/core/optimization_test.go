@@ -73,7 +73,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateTask(criteria) error = %v", err)
 	}
-	criteriaLease := leaseTask(t, ctx, rt, run.ID, criteria.ID, HolderAgent, "agent-a")
+	criteriaLease := leaseTask(ctx, t, rt, run.ID, criteria.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      criteria.ID,
@@ -103,7 +103,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateTask(retry) error = %v", err)
 	}
-	retryLease := leaseTask(t, ctx, rt, run.ID, retryTask.ID, HolderAgent, "agent-a")
+	retryLease := leaseTask(ctx, t, rt, run.ID, retryTask.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      retryTask.ID,
@@ -132,7 +132,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateTask(handoff) error = %v", err)
 	}
-	handoffLease := leaseTask(t, ctx, rt, run.ID, handoffTask.ID, HolderAgent, "agent-a")
+	handoffLease := leaseTask(ctx, t, rt, run.ID, handoffTask.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      handoffTask.ID,
@@ -165,7 +165,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateTask(clarify) error = %v", err)
 	}
-	clarificationLease := leaseTask(t, ctx, rt, run.ID, clarificationTask.ID, HolderAgent, "agent-a")
+	clarificationLease := leaseTask(ctx, t, rt, run.ID, clarificationTask.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      clarificationTask.ID,
@@ -206,7 +206,7 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	if err != nil {
 		t.Fatalf("CreateTask(response) error = %v", err)
 	}
-	lease := leaseTask(t, ctx, rt, run.ID, task.ID, HolderComponent, "response_composer")
+	lease := leaseTask(ctx, t, rt, run.ID, task.ID, HolderComponent, "response_composer")
 	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
 		RunID:       run.ID,
 		TaskID:      task.ID,
@@ -278,7 +278,7 @@ func TestRetryDispatchEventCarriesAcquirableEnvelopeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(retry) error = %v", err)
 	}
-	lease := leaseTask(t, ctx, rt, run.ID, task.ID, HolderAgent, "agent-a")
+	lease := leaseTask(ctx, t, rt, run.ID, task.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      task.ID,
@@ -323,7 +323,7 @@ func TestSubmitResponseOutputEventCarriesReplayableMessageID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(response) error = %v", err)
 	}
-	responseLease := leaseTask(t, ctx, rt, run.ID, response.ID, HolderComponent, "response_composer")
+	responseLease := leaseTask(ctx, t, rt, run.ID, response.ID, HolderComponent, "response_composer")
 	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
 		RunID:       run.ID,
 		TaskID:      response.ID,
@@ -364,7 +364,7 @@ func TestSystemResponseEventCarriesReplayableMessageID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(clarify) error = %v", err)
 	}
-	clarifyLease := leaseTask(t, ctx, rt, run.ID, clarify.ID, HolderAgent, "agent-a")
+	clarifyLease := leaseTask(ctx, t, rt, run.ID, clarify.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      clarify.ID,

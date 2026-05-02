@@ -4,9 +4,12 @@ The root `hydaelyn` package is the recommended façade for the primary Run/Task
 runner. The `orchestrator` package remains as an advanced compatibility surface
 for users who need direct access to the same commands and storage contracts.
 
-Implementation details live under `internal/core`: command handlers, state
-transitions, storage, mailbox, lease, blackboard, handoff, approval, action,
-response, trace, and replay internals are not public extension points.
+Implementation details now live across focused `internal/*` packages. `internal/core`
+keeps the Runtime façade, command registration, configuration, compatibility
+aliases, and policy/trace glue; domain behavior lives in `internal/{run,task,
+mailbox,execution,blackboard,response,report,approval,action,handoff,toolgate,
+trace,memory,store,command}`. These packages remain implementation details, not
+public extension points.
 
 ## Execution Chain
 

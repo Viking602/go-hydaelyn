@@ -2,7 +2,8 @@ package core
 
 import (
 	"context"
-	"time"
+
+	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
 )
 
 func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, error) {
@@ -17,19 +18,12 @@ func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (Run, e
 	return run, nil
 }
 
-func normalizePlannedTask(runID string, task Task) Task {
-	if task.RunID == "" {
-		task.RunID = runID
-	}
-	if task.Status == "" {
-		task.Status = TaskStatusPlanned
-	}
-	if task.Version == 0 {
-		task.Version = 1
-	}
-	if task.CreatedAt.IsZero() {
-		task.CreatedAt = time.Now().UTC()
-	}
-	task.UpdatedAt = task.CreatedAt
-	return task
+type advanceRunResult = runsvc.AdvanceResult
+
+func registerAdvanceRunUoWCommandHandlers(runtime *Runtime) {
+	runsvc.RegisterAdvanceHandler(runtime.commandBus, runsvc.AdvanceHandlerOptions{
+		NewID:     runtime.newID,
+		Pipeline:  runtime.currentPipeline,
+		Authorize: runtime.authorizeUoW,
+	})
 }

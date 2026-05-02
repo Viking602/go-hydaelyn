@@ -10,7 +10,7 @@ import (
 func TestSubscribeStreamsMatchingItems(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-sub")
+	run := mustStartRun(ctx, t, rt, "run-sub")
 
 	ch, cancel, err := rt.Subscribe(ctx, run.ID, BlackboardFilter{ItemTypes: []BlackboardItemType{BlackboardItemEvidence}})
 	if err != nil {
@@ -70,7 +70,7 @@ func TestSubscribeStreamsUoWCommandItemsWithExternalStore(t *testing.T) {
 	ctx := context.Background()
 	durable := &recordingUnitOfWork{store: NewMemoryRuntime()}
 	rt := NewRuntime(Config{StoreProvider: recordingStoreProvider{uow: durable}})
-	run := mustStartRun(t, ctx, rt, "run-sub-store")
+	run := mustStartRun(ctx, t, rt, "run-sub-store")
 
 	ch, cancel, err := rt.Subscribe(ctx, run.ID, BlackboardFilter{Keys: []string{"external-store"}})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestSubscribeStreamsUoWCommandItemsWithExternalStore(t *testing.T) {
 func TestSubscribeCancelClosesChannel(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-sub-cancel")
+	run := mustStartRun(ctx, t, rt, "run-sub-cancel")
 	ch, cancel, err := rt.Subscribe(ctx, run.ID, BlackboardFilter{})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
@@ -115,7 +115,7 @@ func TestWaitForBlackboardReplaysExternalStoreItems(t *testing.T) {
 	ctx := context.Background()
 	durable := &recordingUnitOfWork{store: NewMemoryRuntime()}
 	rt := NewRuntime(Config{StoreProvider: recordingStoreProvider{uow: durable}})
-	run := mustStartRun(t, ctx, rt, "run-wait-store")
+	run := mustStartRun(ctx, t, rt, "run-wait-store")
 	if err := durable.store.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: "t", Type: BlackboardItemEvidence, Source: SourceIdentity{Type: SourceAgent, ID: "a"}, Visibility: BlackboardVisibilityAgentVisible, Key: "external-wait", Payload: "ready"}); err != nil {
 		t.Fatalf("seed WriteItem() error = %v", err)
 	}
@@ -132,7 +132,7 @@ func TestWaitForBlackboardReplaysExternalStoreItems(t *testing.T) {
 func TestWaitForBlackboardReplaysAndStreams(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-wait")
+	run := mustStartRun(ctx, t, rt, "run-wait")
 
 	// Existing item before Wait — should be replayed
 	if err := rt.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: "t1", Type: BlackboardItemEvidence, Source: SourceIdentity{Type: SourceAgent, ID: "a"}, Visibility: BlackboardVisibilityAgentVisible, Payload: "p1"}); err != nil {
@@ -161,7 +161,7 @@ func TestWaitForBlackboardReplaysAndStreams(t *testing.T) {
 func TestWaitForBlackboardDoesNotMissWriteBetweenReplayAndPredicate(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-wait-window")
+	run := mustStartRun(ctx, t, rt, "run-wait-window")
 
 	calls := 0
 	got, err := rt.WaitForBlackboard(ctx, run.ID,
@@ -189,7 +189,7 @@ func TestWaitForBlackboardDoesNotMissWriteBetweenReplayAndPredicate(t *testing.T
 func TestWaitForBlackboardTimeout(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-wait-timeout")
+	run := mustStartRun(ctx, t, rt, "run-wait-timeout")
 	_, err := rt.WaitForBlackboard(ctx, run.ID, BlackboardFilter{}, func([]BlackboardItem) bool { return false }, 30*time.Millisecond)
 	if !errors.Is(err, ErrWaitTimeout) {
 		t.Fatalf("expected ErrWaitTimeout, got %v", err)
@@ -199,7 +199,7 @@ func TestWaitForBlackboardTimeout(t *testing.T) {
 func TestWaitForBlackboardSatisfiedByExisting(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-wait-existing")
+	run := mustStartRun(ctx, t, rt, "run-wait-existing")
 	if err := rt.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: "t", Type: BlackboardItemClaim, Source: SourceIdentity{Type: SourceAgent, ID: "a"}, Visibility: BlackboardVisibilityAgentVisible, Payload: "ready"}); err != nil {
 		t.Fatalf("WriteItem() error = %v", err)
 	}
