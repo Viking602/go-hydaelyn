@@ -1,0 +1,102 @@
+# golangci-lint configuration for go-hydaelyn (schema v2)
+#
+# Tuned for Go 1.25 / Standard Project Layout.
+# We deliberately set linters.default=none so the enabled set is explicit and stable.
+#
+# CI also runs `staticcheck` and `govulncheck` as standalone steps in
+# .github/workflows/ci.yml — keep them out of this file to avoid double work.
+#
+# Baseline policy: at the time this config was introduced, main HEAD already
+# had ~40 lint issues (revive 20 / misspell 11 / gocyclo 8 / goimports 1).
+# CI uses `only-new-issues: true` so the gate only fails on issues NEW to a
+# PR; existing debt is tracked and cleaned up in dedicated follow-up PRs.
+#
+# Local usage:
+#   make lint                  # runs `golangci-lint run --timeout=5m`
+#   golangci-lint run          # WILL still report baseline locally — by design
+#   golangci-lint fmt          # apply formatters (gofmt + goimports)
+#   golangci-lint config verify
+
+version: "2"
+run:
+  go: "1.25"
+  tests: true
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gocyclo
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - unused
+  settings:
+    gocyclo:
+      min-complexity: 20
+    misspell:
+      locale: US
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: if-return
+        - name: increment-decrement
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+          disabled: true
+        - name: unreachable-code
+        - name: redefines-builtin-id
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocyclo
+        path: _test\.go
+      - linters:
+          - all
+        path: \.pb\.go$
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Viking602/go-hydaelyn
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

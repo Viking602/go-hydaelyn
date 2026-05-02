@@ -9,11 +9,12 @@ import (
 )
 
 // PublishResponse drives the multi-phase response publication flow:
-//   Phase 1: load + validate + authorize, then commit so the runtime lock
-//            is released before the gateway call.
-//   Phase 2: invoke the configured output gateway without holding any lock,
-//            so gateway implementations may re-enter the runtime.
-//   Phase 3: persist the success/failure outcome in a fresh UoW.
+//
+//	Phase 1: load + validate + authorize, then commit so the runtime lock
+//	         is released before the gateway call.
+//	Phase 2: invoke the configured output gateway without holding any lock,
+//	         so gateway implementations may re-enter the runtime.
+//	Phase 3: persist the success/failure outcome in a fresh UoW.
 func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
 	message, err := r.publishResponsePrepare(ctx, cmd)
 	if err != nil {
