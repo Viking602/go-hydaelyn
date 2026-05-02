@@ -22,7 +22,7 @@ func (m *mockDriver) Execute(ctx context.Context, call tool.Call, sink tool.Upda
 	return m.result, m.err
 }
 
-func TestMustCall_Success(t *testing.T) {
+func TestMustCallSuccess(t *testing.T) {
 	driver := &mockDriver{
 		definition: tool.Definition{
 			Name:        "test-tool",
@@ -42,7 +42,7 @@ func TestMustCall_Success(t *testing.T) {
 	}
 }
 
-func TestMustSchema_Success(t *testing.T) {
+func TestMustSchemaSuccess(t *testing.T) {
 	driver := &mockDriver{
 		definition: tool.Definition{
 			Name:        "test-tool",
@@ -63,7 +63,7 @@ func TestMustSchema_Success(t *testing.T) {
 	}
 }
 
-func TestMustCall_WithComplexPayload(t *testing.T) {
+func TestMustCallWithComplexPayload(t *testing.T) {
 	driver := &mockDriver{
 		definition: tool.Definition{
 			Name: "complex-tool",
@@ -89,7 +89,7 @@ func TestMustCall_WithComplexPayload(t *testing.T) {
 	}
 }
 
-func TestMustCall_ResultFields(t *testing.T) {
+func TestMustCallResultFields(t *testing.T) {
 	driver := &mockDriver{
 		definition: tool.Definition{Name: "test"},
 		result: tool.Result{

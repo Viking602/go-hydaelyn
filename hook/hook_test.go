@@ -70,7 +70,7 @@ func TestNewChain(t *testing.T) {
 	}
 }
 
-func TestChain_Append(t *testing.T) {
+func TestChainAppend(t *testing.T) {
 	handler1 := &mockHandler{}
 	handler2 := &mockHandler{}
 	handler3 := &mockHandler{}
@@ -95,7 +95,7 @@ func TestChain_Append(t *testing.T) {
 	}
 }
 
-func TestChain_TransformContext(t *testing.T) {
+func TestChainTransformContext(t *testing.T) {
 	tests := []struct {
 		name       string
 		handlers   []Handler
@@ -172,7 +172,7 @@ func TestChain_TransformContext(t *testing.T) {
 	}
 }
 
-func TestChain_BeforeModelCall(t *testing.T) {
+func TestChainBeforeModelCall(t *testing.T) {
 	tests := []struct {
 		name     string
 		handlers []Handler
@@ -217,7 +217,7 @@ func TestChain_BeforeModelCall(t *testing.T) {
 	}
 }
 
-func TestChain_BeforeToolCall(t *testing.T) {
+func TestChainBeforeToolCall(t *testing.T) {
 	tests := []struct {
 		name     string
 		handlers []Handler
@@ -262,7 +262,7 @@ func TestChain_BeforeToolCall(t *testing.T) {
 	}
 }
 
-func TestChain_AfterToolCall(t *testing.T) {
+func TestChainAfterToolCall(t *testing.T) {
 	tests := []struct {
 		name     string
 		handlers []Handler
@@ -307,7 +307,7 @@ func TestChain_AfterToolCall(t *testing.T) {
 	}
 }
 
-func TestChain_OnEvent(t *testing.T) {
+func TestChainOnEvent(t *testing.T) {
 	tests := []struct {
 		name     string
 		handlers []Handler

@@ -2,7 +2,7 @@ package blackboard
 
 import "testing"
 
-func TestDetectConflicts_NoConflictOnSingleWriter(t *testing.T) {
+func TestDetectConflictsNoConflictOnSingleWriter(t *testing.T) {
 	state := &State{
 		Exchanges: []Exchange{
 			{ID: "ex-1", Key: "design.doc", TaskID: "impl-1", Version: 1, Text: "alpha"},
@@ -14,7 +14,7 @@ func TestDetectConflicts_NoConflictOnSingleWriter(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_MatchingTextAcrossWritersIsNotConflict(t *testing.T) {
+func TestDetectConflictsMatchingTextAcrossWritersIsNotConflict(t *testing.T) {
 	// Two tasks both publish the same payload under the same key —
 	// redundant but consistent. Flagging this as a conflict would be
 	// noise, so the detector must look at text divergence, not just
@@ -30,7 +30,7 @@ func TestDetectConflicts_MatchingTextAcrossWritersIsNotConflict(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_DivergentTextAcrossTasksFlags(t *testing.T) {
+func TestDetectConflictsDivergentTextAcrossTasksFlags(t *testing.T) {
 	state := &State{
 		Exchanges: []Exchange{
 			{ID: "ex-1", Key: "design.doc", TaskID: "impl-1", Namespace: "shared.design", Version: 1, Text: "alpha"},
@@ -56,7 +56,7 @@ func TestDetectConflicts_DivergentTextAcrossTasksFlags(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_DifferentNamespacesDoNotConflict(t *testing.T) {
+func TestDetectConflictsDifferentNamespacesDoNotConflict(t *testing.T) {
 	state := &State{
 		Exchanges: []Exchange{
 			{ID: "ex-1", Key: "verify.gate", TaskID: "verify-1", Namespace: "verify.impl-1", Text: "alpha"},
@@ -68,7 +68,7 @@ func TestDetectConflicts_DifferentNamespacesDoNotConflict(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_DeterministicOrder(t *testing.T) {
+func TestDetectConflictsDeterministicOrder(t *testing.T) {
 	// Conflicts and their exchange lists must be sorted so replaying the
 	// same blackboard produces identical digests — otherwise the
 	// supervisor would see ordering churn that looks like progress.
@@ -92,7 +92,7 @@ func TestDetectConflicts_DeterministicOrder(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_IgnoresEmptyBoard(t *testing.T) {
+func TestDetectConflictsIgnoresEmptyBoard(t *testing.T) {
 	if conflicts := (&State{}).DetectConflicts(); len(conflicts) != 0 {
 		t.Fatalf("empty board has no conflicts, got %#v", conflicts)
 	}
@@ -102,7 +102,7 @@ func TestDetectConflicts_IgnoresEmptyBoard(t *testing.T) {
 	}
 }
 
-func TestDetectConflicts_ExcerptTruncation(t *testing.T) {
+func TestDetectConflictsExcerptTruncation(t *testing.T) {
 	longText := make([]rune, conflictExcerptMaxRunes+50)
 	for i := range longText {
 		longText[i] = 'x'

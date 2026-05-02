@@ -9,7 +9,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/message"
 )
 
-func TestUsage_Add(t *testing.T) {
+func TestUsageAdd(t *testing.T) {
 	tests := []struct {
 		name       string
 		u1         Usage
@@ -84,7 +84,7 @@ func TestNewSliceStream(t *testing.T) {
 	}
 }
 
-func TestNewSliceStream_Empty(t *testing.T) {
+func TestNewSliceStreamEmpty(t *testing.T) {
 	stream := NewSliceStream([]Event{})
 
 	_, err := stream.Recv()
@@ -93,7 +93,7 @@ func TestNewSliceStream_Empty(t *testing.T) {
 	}
 }
 
-func TestEvent_Struct(t *testing.T) {
+func TestEventStruct(t *testing.T) {
 	toolCall := &message.ToolCall{
 		ID:   "call-1",
 		Name: "search",
@@ -133,7 +133,7 @@ func TestEvent_Struct(t *testing.T) {
 	}
 }
 
-func TestRequest_Struct(t *testing.T) {
+func TestRequestStruct(t *testing.T) {
 	tools := []message.ToolDefinition{
 		{Name: "search"},
 	}
@@ -167,7 +167,7 @@ func TestRequest_Struct(t *testing.T) {
 	}
 }
 
-func TestMetadata_Struct(t *testing.T) {
+func TestMetadataStruct(t *testing.T) {
 	meta := Metadata{
 		Name:    "openai",
 		Models:  []string{"gpt-4", "gpt-3.5-turbo"},
@@ -185,7 +185,7 @@ func TestMetadata_Struct(t *testing.T) {
 	}
 }
 
-func TestStopReason_Constants(t *testing.T) {
+func TestStopReasonConstants(t *testing.T) {
 	reasons := []StopReason{
 		StopReasonUnknown,
 		StopReasonComplete,
@@ -203,7 +203,7 @@ func TestStopReason_Constants(t *testing.T) {
 	}
 }
 
-func TestEventKind_Constants(t *testing.T) {
+func TestEventKindConstants(t *testing.T) {
 	kinds := []EventKind{
 		EventTextDelta,
 		EventThinkingDelta,
@@ -228,7 +228,7 @@ func TestEventKind_Constants(t *testing.T) {
 	}
 }
 
-func TestToolCallDelta_Struct(t *testing.T) {
+func TestToolCallDeltaStruct(t *testing.T) {
 	delta := ToolCallDelta{
 		ID:             "call-1",
 		Name:           "search",
@@ -265,7 +265,7 @@ func (m *MockDriver) Stream(ctx context.Context, request Request) (Stream, error
 	return NewSliceStream(m.events), nil
 }
 
-func TestDriver_Interface(t *testing.T) {
+func TestDriverInterface(t *testing.T) {
 	driver := &MockDriver{
 		metadata: Metadata{Name: "test"},
 		events:   []Event{{Kind: EventDone}},

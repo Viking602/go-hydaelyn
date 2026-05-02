@@ -20,7 +20,7 @@ func TestNewGateway(t *testing.T) {
 	}
 }
 
-func TestClientGateway_ImportTools_NilClient(t *testing.T) {
+func TestClientGatewayImportToolsNilClient(t *testing.T) {
 	gateway := ClientGateway{}
 
 	ctx := context.Background()
@@ -41,12 +41,12 @@ func TestClientGateway_ImportTools_NilClient(t *testing.T) {
 	}
 }
 
-func TestGateway_Interface(t *testing.T) {
+func TestGatewayInterface(t *testing.T) {
 	// Test that ClientGateway implements Gateway interface
 	var _ Gateway = (*ClientGateway)(nil)
 }
 
-func TestNewGateway_ReturnsClientGateway(t *testing.T) {
+func TestNewGatewayReturnsClientGateway(t *testing.T) {
 	var client *mcpclient.Client
 	gateway := NewGateway(client)
 
@@ -65,7 +65,7 @@ func (s *simpleGateway) ImportTools(ctx context.Context) ([]tool.Driver, error) 
 	return s.tools, nil
 }
 
-func TestGateway_Implementation(t *testing.T) {
+func TestGatewayImplementation(t *testing.T) {
 	// Test that a custom implementation works
 	g := &simpleGateway{tools: []tool.Driver{}}
 

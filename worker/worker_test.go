@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/provider/scripted"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -17,33 +18,33 @@ import (
 func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.New()
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "agent-a"})
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{RunID: "run-worker", RootTaskID: "root", Request: "do work"})
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker", RootTaskID: "root", Request: "do work"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID:         run.ID,
 		TaskID:        "task-worker",
 		Goal:          "summarize",
 		OwnerAgentID:  "agent-a",
 		WriteTargets:  []string{"summary"},
-		ReadSelectors: []hydaelyn.BlackboardSelector{{Keys: []string{"input"}}},
+		ReadSelectors: []api.BlackboardSelector{{Keys: []string{"input"}}},
 	})
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
-	if err := runner.WriteItem(ctx, hydaelyn.BlackboardItem{
+	if err := runner.WriteItem(ctx, api.BlackboardItem{
 		RunID:      run.ID,
-		Type:       hydaelyn.BlackboardItemContext,
-		Source:     hydaelyn.SourceIdentity{Type: hydaelyn.SourceSystem, ID: "test"},
-		Visibility: hydaelyn.BlackboardVisibilityAgentVisible,
+		Type:       api.BlackboardItemContext,
+		Source:     api.SourceIdentity{Type: api.SourceSystem, ID: "test"},
+		Visibility: api.BlackboardVisibilityAgentVisible,
 		Key:        "input",
 		Payload:    "source material",
 	}); err != nil {
 		t.Fatalf("WriteItem() error = %v", err)
 	}
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
 	if err != nil {
 		t.Fatalf("DispatchTask() error = %v", err)
 	}
@@ -58,10 +59,10 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Task() error = %v", err)
 	}
-	if completed.Status != hydaelyn.TaskStatusCompleted {
+	if completed.Status != api.TaskStatusCompleted {
 		t.Fatalf("expected completed task, got %#v", completed.Status)
 	}
-	items, err := runner.SelectItems(ctx, run.ID, hydaelyn.BlackboardSelector{Keys: []string{"summary"}})
+	items, err := runner.SelectItems(ctx, run.ID, api.BlackboardSelector{Keys: []string{"summary"}})
 	if err != nil {
 		t.Fatalf("SelectItems() error = %v", err)
 	}
@@ -73,20 +74,20 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.New()
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{RunID: "run-tool", RootTaskID: "root"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-tool", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{RunID: run.ID, TaskID: "tool-task", OwnerAgentID: "agent-a"})
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{RunID: run.ID, TaskID: "tool-task", OwnerAgentID: "agent-a"})
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
 	if err != nil {
 		t.Fatalf("DispatchTask() error = %v", err)
 	}
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
-		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID, HolderType: hydaelyn.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("AcquireTaskExecution() error = %v", err)
@@ -94,7 +95,7 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	driver := &recordingTool{definition: tool.Definition{Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true}}
 	bus := GovernedToolBus{
 		Runner: runner, Bus: tool.NewBus(driver), RunID: run.ID, TaskID: task.ID,
-		LeaseID: lease.ID, HolderType: hydaelyn.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
+		LeaseID: lease.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
 	}
 	_, err = bus.Execute(ctx, tool.Call{ID: "call-1", Name: "write", Arguments: json.RawMessage(`{"value":1}`)}, nil)
 	if !errors.Is(err, hydaelyn.ErrActionTaskRequired) {

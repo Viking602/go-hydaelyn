@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestMemoryLoader_Load(t *testing.T) {
+func TestMemoryLoaderLoad(t *testing.T) {
 	tests := []struct {
 		name    string
 		loader  MemoryLoader
@@ -85,7 +85,7 @@ func TestMemoryLoader_Load(t *testing.T) {
 	}
 }
 
-func TestMemoryLoader_Load_ErrorCase(t *testing.T) {
+func TestMemoryLoaderLoadErrorCase(t *testing.T) {
 	loader := MemoryLoader{
 		Documents: map[string]Document{
 			"exists": {Name: "exists", Body: "body"},
@@ -100,7 +100,7 @@ func TestMemoryLoader_Load_ErrorCase(t *testing.T) {
 	}
 }
 
-func TestFSLoader_Load(t *testing.T) {
+func TestFSLoaderLoad(t *testing.T) {
 	// Create temporary directory
 	tempDir := t.TempDir()
 
@@ -172,7 +172,7 @@ func TestFSLoader_Load(t *testing.T) {
 	}
 }
 
-func TestFSLoader_Load_Content(t *testing.T) {
+func TestFSLoaderLoadContent(t *testing.T) {
 	tempDir := t.TempDir()
 	testContent := "hello world program"
 	testFile := filepath.Join(tempDir, "hello.txt")
@@ -195,7 +195,7 @@ func TestFSLoader_Load_Content(t *testing.T) {
 	}
 }
 
-func TestDocument_Struct(t *testing.T) {
+func TestDocumentStruct(t *testing.T) {
 	doc := Document{
 		Name:     "test-doc",
 		Body:     "test body content",

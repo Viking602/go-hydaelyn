@@ -33,11 +33,12 @@ import (
 	"fmt"
 
 	"github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func main() {
 	runner := hydaelyn.New()
-	run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
+	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 		Request: "compare options for a Go research assistant",
 	})
 	if err != nil {
@@ -59,10 +60,10 @@ bridges `TaskEnvelope` execution to `agent.Engine`. Flow adapters are presets
 only; they must not bypass `TaskStore`, `PolicyEngine`, `TaskExecutionLease`,
 handoff, `ResponseLayer`, or `OutputGateway`.
 
-Use `Config` only when overriding defaults:
+Use `api.Config` only when overriding defaults:
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	PolicyEngine: policy.DenySideEffectsByDefault(),
 })
 ```

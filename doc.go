@@ -1,14 +1,15 @@
-// Package hydaelyn is the root facade for the go-hydaelyn runner. It
-// re-exports the primary Run/Task entry points so simple programs can write:
+// Package hydaelyn is the root facade for the go-hydaelyn runner. It owns
+// construction and the Runner wrapper:
 //
 //	runner := hydaelyn.New()
 //
-// without importing any subpackage. Pass Config only when overriding the
-// default in-memory configuration.
+// Import [api] for public contracts such as Config, commands, store
+// interfaces, policy requests, and Run/Task value types.
 //
 // Public packages are grouped by stable extension concern:
 //
-//   - [orchestrator] — advanced run/task primitives, leases, handoff, response
+//   - hydaelyn       — Runner construction, methods, and error re-exports
+//   - [api]          — Config, commands, interfaces, Run/Task data contracts
 //   - [agent]        — agent engine and profile contracts
 //   - [tool]         — tool contract, effect types, and tooltest helpers
 //   - [flow]         — flow preset contracts
@@ -22,5 +23,5 @@
 //
 // Types under internal/ are implementation details. Core storage, mailbox,
 // transition, command-handler, and replay internals are not public extension
-// points.
+// points and cannot be imported by consumers.
 package hydaelyn
