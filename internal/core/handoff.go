@@ -1,26 +1,23 @@
 package core
 
-import "context"
+import (
+	"context"
 
-type HandoffCommand struct {
-	RunID          string
-	TaskID         string
-	FromAgentID    string
-	ToAgentID      string
-	TaskVersion    int
-	HandoffContext string
-}
+	handoffsvc "github.com/Viking602/go-hydaelyn/internal/handoff"
+)
+
+type HandoffCommand = handoffsvc.HandoffCommand
 
 func (r *Runtime) RequestHandoff(ctx context.Context, cmd HandoffCommand) error {
 	_, err := r.ExecuteCommand(ctx, cmd)
 	return err
 }
 
-func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+func registerHandoffUoWCommandHandlers(runtime *Runtime) {
+	handoffsvc.RegisterHandlers(runtime.commandBus, handoffsvc.HandlerOptions{
+		NewID:       runtime.newID,
+		Authorize:   runtime.authorizeUoW,
+		RecordTrace: runtime.recordEndedTraceUoW,
+		MaxDepth:    maxHandoffDepth,
+	})
 }

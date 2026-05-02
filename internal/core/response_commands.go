@@ -1,19 +1,8 @@
 package core
 
-type SubmitResponseOutputCommand struct {
-	RunID          string
-	TaskID         string
-	LeaseID        string
-	HolderType     HolderType
-	HolderID       string
-	TaskVersion    int
-	Type           UserMessageType
-	Title          string
-	Payload        string
-	IdempotencyKey string
-}
+import responsesvc "github.com/Viking602/go-hydaelyn/internal/response"
 
-type PublishResponseCommand struct {
-	RunID     string
-	MessageID string
-}
+type (
+	SubmitResponseOutputCommand = responsesvc.SubmitOutputCommand
+	PublishResponseCommand      = responsesvc.PublishCommand
+)
