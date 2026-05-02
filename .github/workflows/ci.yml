@@ -97,9 +97,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # v8 action supports golangci-lint v2; v6 only ships v1 binaries
+          # built with go 1.24 which can't load configs targeting go 1.25.
+          version: v2.12.1
           args: --timeout=5m
 
   architecture-gate:

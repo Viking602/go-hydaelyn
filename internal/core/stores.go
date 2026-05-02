@@ -49,7 +49,6 @@ func (r *Runtime) SelectItems(ctx context.Context, runID string, selector Blackb
 	return uow.Blackboard().SelectItems(ctx, runID, selector)
 }
 
-
 // memStoreProvider adapts memProvider to the legacy StoreProvider interface.
 type memStoreProvider struct {
 	runtime *Runtime
@@ -73,10 +72,10 @@ func (a memUnitOfWorkAdapter) Events() EventStore { return a.full.Events() }
 func (a memUnitOfWorkAdapter) Blackboard() BlackboardStore {
 	return memBlackboardStoreAdapter{rw: a.full.Blackboard(), provider: a.provider}
 }
-func (a memUnitOfWorkAdapter) MailboxOutbox() MailboxOutboxStore { return a.full.MailboxOutbox() }
-func (a memUnitOfWorkAdapter) UserMessages() UserMessageStore    { return a.full.UserMessages() }
-func (a memUnitOfWorkAdapter) Trace() TraceStore                 { return a.full.Trace() }
-func (a memUnitOfWorkAdapter) Commit(ctx context.Context) error  { return a.full.Commit(ctx) }
+func (a memUnitOfWorkAdapter) MailboxOutbox() MailboxOutboxStore  { return a.full.MailboxOutbox() }
+func (a memUnitOfWorkAdapter) UserMessages() UserMessageStore     { return a.full.UserMessages() }
+func (a memUnitOfWorkAdapter) Trace() TraceStore                  { return a.full.Trace() }
+func (a memUnitOfWorkAdapter) Commit(ctx context.Context) error   { return a.full.Commit(ctx) }
 func (a memUnitOfWorkAdapter) Rollback(ctx context.Context) error { return a.full.Rollback(ctx) }
 
 // memBlackboardStoreAdapter adds Subscribe() on top of ports.BlackboardReadWriter.
