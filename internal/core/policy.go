@@ -54,14 +54,3 @@ func requestTaskID(request PolicyRequest) string {
 	}
 	return ""
 }
-
-func actorFromHolder(holderType HolderType, holderID string) SourceIdentity {
-	switch holderType {
-	case HolderAgent:
-		return SourceIdentity{Type: SourceAgent, ID: holderID}
-	case HolderComponent:
-		return SourceIdentity{Type: SourceComponent, ID: holderID}
-	default:
-		return SourceIdentity{}
-	}
-}

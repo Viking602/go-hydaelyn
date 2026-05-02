@@ -144,3 +144,7 @@ func transitionRunForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, runID 
 	}
 	return uow.Events().AppendEvent(ctx, Event{RunID: next.ID, TaskID: next.RootTaskID, Type: EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(next.Status), "run": runPayload(next)}, RecordedAt: time.Now().UTC()})
 }
+
+func appendResumeTokenCreatedEventUoW(ctx context.Context, uow ports.UnitOfWork, token ResumeToken) error {
+	return uow.Events().AppendEvent(ctx, Event{RunID: token.RunID, TaskID: token.TaskID, Type: EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
+}

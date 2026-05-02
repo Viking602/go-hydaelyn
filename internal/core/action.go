@@ -1,37 +1,16 @@
 package core
 
-import "context"
+import (
+	"context"
 
-type StartActionAttemptCommand struct {
-	AttemptID      string
-	ActionID       string
-	RunID          string
-	TaskID         string
-	LeaseID        string
-	HolderType     HolderType
-	HolderID       string
-	TaskVersion    int
-	ToolName       string
-	IdempotencyKey string
-	InputHash      string
-}
+	actionsvc "github.com/Viking602/go-hydaelyn/internal/action"
+)
 
-type CompleteActionAttemptCommand struct {
-	RunID             string
-	TaskID            string
-	LeaseID           string
-	HolderType        HolderType
-	HolderID          string
-	TaskVersion       int
-	AttemptID         string
-	Status            ActionAttemptStatus
-	ExternalRequestID string
-	ExternalResultRef string
-	RequiresReconcile bool
-}
-
-func (StartActionAttemptCommand) CommandName() string    { return "action_attempt.start" }
-func (CompleteActionAttemptCommand) CommandName() string { return "action_attempt.complete" }
+type (
+	StartActionAttemptCommand    = actionsvc.StartActionAttemptCommand
+	CompleteActionAttemptCommand = actionsvc.CompleteActionAttemptCommand
+	completeActionAttemptResult  = actionsvc.CompleteAttemptResult
+)
 
 func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
@@ -55,4 +34,11 @@ func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionA
 		return ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
+}
+
+func registerActionUoWCommandHandlers(runtime *Runtime) {
+	actionsvc.RegisterHandlers(runtime.commandBus, actionsvc.HandlerOptions{
+		NewID:     runtime.newID,
+		Authorize: runtime.authorizeUoW,
+	})
 }

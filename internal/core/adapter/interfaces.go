@@ -3,7 +3,6 @@ package adapter
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
 	core "github.com/Viking602/go-hydaelyn/internal/core"
@@ -811,23 +810,4 @@ func (a coreActionAttemptStoreAdapter) LoadActionAttempt(ctx context.Context, at
 		return api.ActionAttempt{}, ErrorToAPI(err)
 	}
 	return ActionAttemptFromModel(attempt), nil
-}
-
-func WaiterFromCore(inner core.BlackboardWaiter) api.BlackboardWaiter {
-	if inner == nil {
-		return nil
-	}
-	return coreBlackboardWaiterAdapter{inner: inner}
-}
-
-type coreBlackboardWaiterAdapter struct{ inner core.BlackboardWaiter }
-
-func (a coreBlackboardWaiterAdapter) WaitForBlackboard(ctx context.Context, runID string, selector api.BlackboardSelector, predicate func([]api.BlackboardItem) bool, timeout time.Duration) ([]api.BlackboardItem, error) {
-	items, err := a.inner.WaitForBlackboard(ctx, runID, BlackboardSelectorToModel(selector), func(items []model.BlackboardItem) bool {
-		return predicate(BlackboardItemsFromModel(items))
-	}, timeout)
-	if err != nil {
-		return nil, ErrorToAPI(err)
-	}
-	return BlackboardItemsFromModel(items), nil
 }

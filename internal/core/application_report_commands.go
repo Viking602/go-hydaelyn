@@ -1,17 +1,10 @@
 package core
 
-type SubmitTypedReportCommand struct {
-	RunID       string
-	TaskID      string
-	LeaseID     string
-	HolderType  HolderType
-	HolderID    string
-	TaskVersion int
-	Report      TypedReport
-}
+import (
+	reportsvc "github.com/Viking602/go-hydaelyn/internal/report"
+	userinputsvc "github.com/Viking602/go-hydaelyn/internal/userinput"
+)
 
-type SubmitUserInputCommand struct {
-	RunID  string
-	TaskID string
-	Input  string
-}
+type SubmitTypedReportCommand = reportsvc.SubmitTypedCommand
+
+type SubmitUserInputCommand = userinputsvc.SubmitUserInputCommand

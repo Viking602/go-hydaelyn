@@ -300,7 +300,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 		t.Fatalf("expected side-effecting worker tool to be blocked, got %v", err)
 	}
 
-	clarificationLease := leaseTask(t, ctx, rt, run.ID, worker.ID, HolderAgent, "agent-a")
+	clarificationLease := leaseTask(ctx, t, rt, run.ID, worker.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      worker.ID,
@@ -357,7 +357,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(action) error = %v", err)
 	}
-	actionLease := leaseTask(t, ctx, rt, run.ID, action.ID, HolderAgent, "agent-a")
+	actionLease := leaseTask(ctx, t, rt, run.ID, action.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      action.ID,
@@ -391,7 +391,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(action failed) error = %v", err)
 	}
-	failedLease := leaseTask(t, ctx, rt, run.ID, failedAction.ID, HolderAgent, "agent-a")
+	failedLease := leaseTask(ctx, t, rt, run.ID, failedAction.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      failedAction.ID,
@@ -425,7 +425,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(action unknown) error = %v", err)
 	}
-	unknownLease := leaseTask(t, ctx, rt, run.ID, unknownAction.ID, HolderAgent, "agent-a")
+	unknownLease := leaseTask(ctx, t, rt, run.ID, unknownAction.ID, HolderAgent, "agent-a")
 	if err := rt.SubmitTypedReport(ctx, SubmitTypedReportCommand{
 		RunID:       run.ID,
 		TaskID:      unknownAction.ID,
@@ -539,7 +539,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	}); !errors.Is(err, ErrResponseTaskRequired) {
 		t.Fatalf("expected only response tasks to compose output, got %v", err)
 	}
-	responseLease := leaseTask(t, ctx, rt, run.ID, response.ID, HolderComponent, "response_composer")
+	responseLease := leaseTask(ctx, t, rt, run.ID, response.ID, HolderComponent, "response_composer")
 	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
 		RunID:       run.ID,
 		TaskID:      response.ID,
@@ -596,7 +596,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(failing response) error = %v", err)
 	}
-	failingLease := leaseTask(t, ctx, rt, run.ID, failing.ID, HolderComponent, "response_composer")
+	failingLease := leaseTask(ctx, t, rt, run.ID, failing.ID, HolderComponent, "response_composer")
 	if err := rt.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{
 		RunID:       run.ID,
 		TaskID:      failing.ID,
@@ -723,7 +723,7 @@ func containsTask(tasks []Task, id string) bool {
 	return false
 }
 
-func leaseTask(t *testing.T, ctx context.Context, rt *Runtime, runID, taskID string, holderType HolderType, holderID string) TaskExecutionLease {
+func leaseTask(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID string, holderType HolderType, holderID string) TaskExecutionLease {
 	t.Helper()
 	task, err := rt.Task(ctx, runID, taskID)
 	if err != nil {

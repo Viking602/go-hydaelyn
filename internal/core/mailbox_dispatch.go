@@ -1,6 +1,10 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	mailboxsvc "github.com/Viking602/go-hydaelyn/internal/mailbox"
+)
 
 func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
@@ -27,4 +31,13 @@ func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTask
 		return nil, ErrInvalidCommand
 	}
 	return envs, nil
+}
+
+func registerMailboxDispatchUoWCommandHandlers(runtime *Runtime) {
+	mailboxsvc.RegisterDispatchHandlers(runtime.commandBus, mailboxsvc.DispatchHandlerOptions{
+		NewID:       runtime.newID,
+		Agents:      runtime.Agents,
+		Authorize:   runtime.authorizeUoW,
+		RecordTrace: runtime.recordEndedTraceUoW,
+	})
 }

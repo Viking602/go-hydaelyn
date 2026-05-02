@@ -65,17 +65,6 @@ func RunFromModel(in model.Run) api.Run {
 	}
 }
 
-func RunsFromModel(in []model.Run) []api.Run {
-	if in == nil {
-		return nil
-	}
-	out := make([]api.Run, len(in))
-	for i, item := range in {
-		out[i] = RunFromModel(item)
-	}
-	return out
-}
-
 func TaskToModel(in api.Task) model.Task {
 	return model.Task{
 		ID:                 in.ID,
@@ -492,22 +481,6 @@ func FlowToModel(in api.Flow) model.Flow {
 	}
 }
 
-func FlowFromModel(in model.Flow) api.Flow {
-	return api.Flow{
-		Name:                     in.Name,
-		PlannerPreset:            in.PlannerPreset,
-		RouterPreset:             in.RouterPreset,
-		PolicyPreset:             in.PolicyPreset,
-		ProjectorPreset:          in.ProjectorPreset,
-		BypassTaskStore:          in.BypassTaskStore,
-		BypassPolicyEngine:       in.BypassPolicyEngine,
-		BypassTaskExecutionLease: in.BypassTaskExecutionLease,
-		BypassHandoff:            in.BypassHandoff,
-		BypassResponseLayer:      in.BypassResponseLayer,
-		BypassOutputGateway:      in.BypassOutputGateway,
-	}
-}
-
 func TaskExecutionLeaseToModel(in api.TaskExecutionLease) model.TaskExecutionLease {
 	return model.TaskExecutionLease{
 		ID:          in.ID,
@@ -645,14 +618,6 @@ func ApprovalRequestFromModel(in model.ApprovalRequest) api.ApprovalRequest {
 		PayloadRef:       in.PayloadRef,
 		Metadata:         stringMapFromModel(in.Metadata),
 	}
-}
-
-func ApprovalDecisionToModel(in api.ApprovalDecision) model.ApprovalDecision {
-	return model.ApprovalDecision{ApprovalID: in.ApprovalID, DecidedBy: in.DecidedBy, Decision: in.Decision, Reason: in.Reason, DecidedAt: in.DecidedAt}
-}
-
-func ApprovalDecisionFromModel(in model.ApprovalDecision) api.ApprovalDecision {
-	return api.ApprovalDecision{ApprovalID: in.ApprovalID, DecidedBy: in.DecidedBy, Decision: in.Decision, Reason: in.Reason, DecidedAt: in.DecidedAt}
 }
 
 func IntentToModel(in api.Intent) model.Intent {
@@ -827,23 +792,8 @@ func PolicyRequestFromModel(in model.PolicyRequest) api.PolicyRequest {
 	}
 }
 
-func ProjectionToModel(in api.Projection) model.Projection {
-	return model.Projection{Run: RunToModel(in.Run), Tasks: TasksToModelMap(in.Tasks), Messages: UserMessagesToModel(in.Messages), SideEffects: ReplaySideEffectsToModel(in.SideEffects)}
-}
-
 func ProjectionFromModel(in model.Projection) api.Projection {
 	return api.Projection{Run: RunFromModel(in.Run), Tasks: TasksFromModelMap(in.Tasks), Messages: UserMessagesFromModel(in.Messages), SideEffects: ReplaySideEffectsFromModel(in.SideEffects)}
-}
-
-func TasksToModelMap(in map[string]api.Task) map[string]model.Task {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]model.Task, len(in))
-	for k, v := range in {
-		out[k] = TaskToModel(v)
-	}
-	return out
 }
 
 func TasksFromModelMap(in map[string]model.Task) map[string]api.Task {
@@ -855,10 +805,6 @@ func TasksFromModelMap(in map[string]model.Task) map[string]api.Task {
 		out[k] = TaskFromModel(v)
 	}
 	return out
-}
-
-func ReplaySideEffectsToModel(in api.ReplaySideEffects) model.ReplaySideEffects {
-	return model.ReplaySideEffects{MailboxDeliveries: in.MailboxDeliveries, UserMessagePublications: in.UserMessagePublications, ActionExecutions: in.ActionExecutions}
 }
 
 func ReplaySideEffectsFromModel(in model.ReplaySideEffects) api.ReplaySideEffects {

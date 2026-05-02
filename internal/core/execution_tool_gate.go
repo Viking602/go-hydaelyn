@@ -1,22 +1,15 @@
 package core
 
-import "context"
+import (
+	"context"
 
-type ToolInvocation struct {
-	RunID       string
-	TaskID      string
-	LeaseID     string
-	HolderType  HolderType
-	HolderID    string
-	TaskVersion int
-	ToolName    string
-	Input       any
-}
+	toolgatesvc "github.com/Viking602/go-hydaelyn/internal/toolgate"
+)
 
-type ToolInvocationResult struct {
-	ToolName string
-	Output   any
-}
+type (
+	ToolInvocation       = toolgatesvc.Invocation
+	ToolInvocationResult = toolgatesvc.InvocationResult
+)
 
 func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvocationResult, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
@@ -28,4 +21,12 @@ func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvoc
 		return ToolInvocationResult{}, ErrInvalidCommand
 	}
 	return toolResult, nil
+}
+
+func registerToolUoWCommandHandlers(runtime *Runtime) {
+	toolgatesvc.RegisterHandlers(runtime.commandBus, toolgatesvc.HandlerOptions{
+		Tool:        runtime.tool,
+		Authorize:   runtime.authorizeUoW,
+		RecordTrace: runtime.recordEndedTraceUoW,
+	})
 }

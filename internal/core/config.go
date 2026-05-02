@@ -4,8 +4,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/core/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/memory"
+	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
+	"github.com/Viking602/go-hydaelyn/internal/memory"
+	storedel "github.com/Viking602/go-hydaelyn/internal/store"
 )
 
 const maxHandoffDepth = 8
@@ -18,6 +19,7 @@ type Runtime struct {
 	memProvider   *memory.Provider
 	storeProvider StoreProvider // non-nil only for external Config.StoreProvider
 	commandBus    *commandbus.Bus
+	*storedel.Delegates
 
 	tools      map[string]Tool
 	agents     map[string]AgentProfile
@@ -60,6 +62,18 @@ func NewRuntime(config Config) *Runtime {
 	if config.OutputGateway != nil {
 		rt.outputGateway = config.OutputGateway
 	}
+	rt.Delegates = storedel.NewDelegates(storedel.Options{
+		BeginWrite: rt.beginWriteUoW,
+		BeginRead:  rt.beginReadUoW,
+		ResumeTokens: func() map[string]ResumeToken {
+			snap := rt.memProvider.CommittedSnapshot()
+			result := make(map[string]ResumeToken, len(snap.ResumeTokens))
+			for k, v := range snap.ResumeTokens {
+				result[k] = v
+			}
+			return result
+		},
+	})
 	rt.pipeline = defaultPipeline(config.Pipeline)
 	rt.registerUoWCommandHandlers()
 	return rt

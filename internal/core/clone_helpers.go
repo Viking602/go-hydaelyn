@@ -9,7 +9,3 @@ func taskEventPayload(task Task) map[string]any {
 func runPayload(run Run) map[string]any {
 	return eventpayload.Run(run)
 }
-
-func envPayload(env TaskEnvelope) map[string]any {
-	return eventpayload.Envelope(env)
-}

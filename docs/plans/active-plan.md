@@ -106,6 +106,12 @@
   - distributed scheduler 跨节点真实演示
   - 外置生态仓库（go-hydaelyn-observe-otel、go-hydaelyn-storage-postgres 等）实际拆分
   - 复杂函数数相对基线增加，需要作为后续结构收敛项跟踪
+- 2026-05-02 结构收敛计划：
+  - [x] `internal/core` 拆分按“端口接口不动、行为测试先行、逐包迁移”的顺序执行，避免一次性重排破坏运行时语义。
+  - [x] 第一阶段提取 UOW handler：approval、report、execution、mailbox/dispatch、blackboard、response、action、handoff、toolgate、trace、run/task 处理器已迁入各自领域包，由 core 注入 runtime 能力。
+  - [x] 第二阶段提取 store 代理：`internal/command`、`internal/memory`、`internal/store` 已建立，`ports.UnitOfWork` 继续作为稳定契约。
+  - [x] 第三阶段收敛 projection：本轮未移动 `internal/projection` 契约，core replay/timeline 仍保留为 Runtime façade，避免引入额外依赖边界。
+  - [x] 每阶段验收已运行对应包测试、`sentrux rescan`、`sentrux check_rules`；阶段质量信号保持稳定或提升（最终阶段执行完整门禁）。
 
 ## 里程碑验收基线
 

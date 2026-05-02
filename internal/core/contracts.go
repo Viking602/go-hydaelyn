@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 
+	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
@@ -31,9 +32,7 @@ type RuntimeCommand interface {
 	CommandName() string
 }
 
-type WriteBlackboardItemCommand struct {
-	Item BlackboardItem
-}
+type WriteBlackboardItemCommand = blackboardsvc.WriteItemCommand
 
 type (
 	PolicyEngine  = ports.PolicyEngine

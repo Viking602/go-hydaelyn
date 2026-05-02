@@ -1,16 +1,12 @@
 package core
 
-type TransitionRunCommand struct {
-	RunID string
-	To    RunStatus
-}
+import (
+	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
+	tasksvc "github.com/Viking602/go-hydaelyn/internal/task"
+)
 
-type TransitionTaskCommand struct {
-	RunID  string
-	TaskID string
-	To     TaskStatus
-}
-
-type AdvanceRunCommand struct {
-	RunID string
-}
+type (
+	TransitionRunCommand  = tasksvc.TransitionRunCommand
+	TransitionTaskCommand = tasksvc.TransitionTaskCommand
+	AdvanceRunCommand     = runsvc.AdvanceRunCommand
+)

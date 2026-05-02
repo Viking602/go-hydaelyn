@@ -15,7 +15,7 @@ import (
 // updated in a follow-up PR.
 func completeTask(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID string) {
 	t.Helper()
-	task := mustLoadTask(t, ctx, rt, runID, taskID)
+	task := mustLoadTask(ctx, t, rt, runID, taskID)
 	if _, err := mustExecuteWalkToCompleted(ctx, t, rt, task); err != nil {
 		t.Fatalf("complete %s: %v", taskID, err)
 	}
@@ -32,7 +32,7 @@ func mustExecuteWalkToCompleted(ctx context.Context, t *testing.T, rt *Runtime, 
 	if err := rt.TransitionTask(ctx, TransitionTaskCommand{RunID: task.RunID, TaskID: task.ID, To: TaskStatusCompleted}); err != nil {
 		return task, err
 	}
-	return mustLoadTask(t, ctx, rt, task.RunID, task.ID), nil
+	return mustLoadTask(ctx, t, rt, task.RunID, task.ID), nil
 }
 
 func failTask(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID string) {
@@ -51,10 +51,10 @@ func failTask(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID stri
 func TestDependencyGateAwaitModeAny(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-any")
-	dep1 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
-	mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
-	child := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-any")
+	dep1 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
+	mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
+	child := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "child",
 		OwnerAgentID: "a",
@@ -74,11 +74,11 @@ func TestDependencyGateAwaitModeAny(t *testing.T) {
 func TestDependencyGateAwaitModeQuorum(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-quorum")
-	d1 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
-	d2 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
-	mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d3", OwnerAgentID: "a"})
-	child := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-quorum")
+	d1 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
+	d2 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
+	mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d3", OwnerAgentID: "a"})
+	child := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "child",
 		OwnerAgentID: "a",
@@ -100,9 +100,9 @@ func TestDependencyGateAwaitModeQuorum(t *testing.T) {
 func TestDependencyGateOnDependencyFailedFail(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-fail")
-	mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
-	child := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-fail")
+	mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
+	child := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:              run.ID,
 		TaskID:             "child",
 		OwnerAgentID:       "a",
@@ -119,10 +119,10 @@ func TestDependencyGateOnDependencyFailedFail(t *testing.T) {
 func TestDependencyGateOnDependencyFailedSkip(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-skip")
-	mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
-	d2 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
-	child := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-skip")
+	mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
+	d2 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
+	child := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:              run.ID,
 		TaskID:             "child",
 		OwnerAgentID:       "a",
@@ -140,10 +140,10 @@ func TestDependencyGateOnDependencyFailedSkip(t *testing.T) {
 func TestDependencyGateBackwardCompatAllMode(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	run := mustStartRun(t, ctx, rt, "run-all")
-	d1 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
-	d2 := mustCreateTask(t, ctx, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
-	child := mustCreateTask(t, ctx, rt, CreateTaskCommand{
+	run := mustStartRun(ctx, t, rt, "run-all")
+	d1 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d1", OwnerAgentID: "a"})
+	d2 := mustCreateTask(ctx, t, rt, CreateTaskCommand{RunID: run.ID, TaskID: "d2", OwnerAgentID: "a"})
+	child := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,
 		TaskID:       "child",
 		OwnerAgentID: "a",

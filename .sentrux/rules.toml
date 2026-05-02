@@ -13,17 +13,17 @@
 #
 #   internal/core/model      — stdlib only; no internal/core/* imports
 #   internal/core/ports      — model only
-#   internal/core/memory     — model + ports only; no service packages
+#   internal/memory          — model + ports only; no service packages
 #   internal/core/state      — model only; pure functions
-#   internal/core/command    — model + ports only
-#   internal/core/blackboard — model + ports (service struct injection)
-#   service packages         — model, ports, state, other services
+#   internal/command         — model + ports only
+#   internal/blackboard      — model + ports (service struct injection)
+#   service/domain packages  — model, ports, state, other services
 #                              NO root internal/core import
 #                              NO hydaelyn / orchestrator / worker import
 #                              NO internal/core/application import
-#   internal/core/application — may import service packages; is the top of
-#                               the internal domain stack
-#   internal/core (root)     — composition root only; wires everything
+#   internal/core            — Runtime façade/composition root; wires domain
+#                              packages and keeps public compatibility aliases
+#   internal/{run,report,...} — domain behavior packages
 #
 # Grep-based gates run in CI (see Makefile or scripts/check-boundaries.sh):
 #   grep -R "Locked(" internal/core/{mailbox,blackboard,execution,...}
