@@ -12,33 +12,34 @@ import (
 	"time"
 
 	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func main() {
 	ctx := context.Background()
 	runner := hydaelyn.New()
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "worker"})
+	runner.RegisterAgent(api.AgentProfile{ID: "worker"})
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "recoverable run"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "recoverable run"})
 	must(err)
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID: run.ID, TaskID: "step-1", OwnerAgentID: "worker",
 	})
 	must(err)
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "worker",
 	})
 	must(err)
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: "worker", TTL: time.Minute,
+		HolderType: api.HolderAgent, HolderID: "worker", TTL: time.Minute,
 	})
 	must(err)
-	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: "worker",
+		HolderType: api.HolderAgent, HolderID: "worker",
 		TaskVersion: task.Version,
-		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "done"},
+		Report:      api.TypedReport{Status: api.ReportStatusSuccess, Summary: "done"},
 	}))
 
 	// Replay reconstructs the entire run state from events on disk/memory.

@@ -8,8 +8,8 @@ only final summaries.
 
 The primary path exposes durability through:
 
-- `Runner` Run/Task commands
-- `StoreProvider -> UnitOfWork`
+- `hydaelyn.Runner` methods using `api.*Command` inputs
+- `api.StoreProvider -> api.UnitOfWork`
 - append-only events
 - mailbox outbox
 - response outbox
@@ -24,7 +24,7 @@ runner := hydaelyn.New()
 Custom durable storage is injected only when needed:
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	StoreProvider: myStoreProvider,
 })
 ```
@@ -33,16 +33,15 @@ runner := hydaelyn.New(hydaelyn.Config{
 
 The public storage contracts are:
 
-- `StoreProvider`
-- `UnitOfWork`
-- `RunStore`
-- `TaskStore`
-- `EventStore`
-- `BlackboardStore`
-- `MailboxOutboxStore`
-- `UserMessageStore`
-- `TraceStore`
-
+- `api.StoreProvider`
+- `api.UnitOfWork`
+- `api.RunStore`
+- `api.TaskStore`
+- `api.EventStore`
+- `api.BlackboardReadWriter`
+- `api.MailboxOutboxStore`
+- `api.UserMessageStore`
+- `api.TraceStore`
 State-changing commands run behind the `UnitOfWork` boundary so run, task,
 event, mailbox, blackboard, user-message, and trace updates can be committed
 atomically by a durable driver.

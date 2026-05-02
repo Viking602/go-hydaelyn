@@ -5,7 +5,7 @@
 ```go
 runner := hydaelyn.New()
 
-run, err := runner.QueueRun(context.Background(), hydaelyn.StartRunCommand{
+run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 	Request: "compare options for a Go research assistant",
 })
 if err != nil {
@@ -15,8 +15,8 @@ if err != nil {
 timeline, err := runner.RunTimeline(context.Background(), run.ID)
 ```
 
-`hydaelyn.New()` starts the default in-memory runner. Pass `hydaelyn.Config`
-only when overriding defaults, for example a custom policy engine or output
+`hydaelyn.New()` starts the default in-memory runner. Pass `api.Config` only
+when overriding defaults, for example a custom policy engine or output
 gateway.
 
 `QueueRun` uses the primary runner path:
@@ -33,35 +33,35 @@ gateway.
 ## 2. Executing A Task
 
 ```go
-task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 	RunID:        run.ID,
 	TaskID:       "research-1",
 	OwnerAgentID: "agent-a",
 })
 
-env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 	RunID:         run.ID,
 	TaskID:        task.ID,
 	TargetAgentID: "agent-a",
 })
 
-lease, acquired, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 	RunID:      run.ID,
 	TaskID:     task.ID,
 	EnvelopeID: env.ID,
-	HolderType: hydaelyn.HolderAgent,
+	HolderType: api.HolderAgent,
 	HolderID:   "agent-a",
 	TTL:        time.Minute,
 })
 
-err = runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+err = runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 	RunID:       run.ID,
 	TaskID:      task.ID,
 	LeaseID:     lease.ID,
-	HolderType:  hydaelyn.HolderAgent,
+	HolderType:  api.HolderAgent,
 	HolderID:    "agent-a",
 	TaskVersion: task.Version,
-	Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "done"},
+	Report:      api.TypedReport{Status: api.ReportStatusSuccess, Summary: "done"},
 })
 ```
 
@@ -72,7 +72,7 @@ envelope to `agent.Engine`, use the optional `worker.AgentWorker` package.
 ## 3. Optional Config
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
@@ -82,11 +82,11 @@ for ordinary startup.
 
 ## 4. Flow Presets
 
-`Flow` is the preset contract. A flow can select planner, router, policy, and
-projector presets, but it cannot bypass runner primitives.
+`api.Flow` is the preset contract. A flow can select planner, router, policy,
+and projector presets, but it cannot bypass runner primitives.
 
 ```go
-err := runner.RegisterFlow(hydaelyn.Flow{Name: "deepsearch"})
+err := runner.RegisterFlow(api.Flow{Name: "deepsearch"})
 ```
 
 ## 5. CLI

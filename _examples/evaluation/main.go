@@ -11,20 +11,21 @@ import (
 	"time"
 
 	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func main() {
 	ctx := context.Background()
 	runner := hydaelyn.New()
 	for _, id := range []string{"a", "b"} {
-		runner.RegisterAgent(hydaelyn.AgentProfile{ID: id})
+		runner.RegisterAgent(api.AgentProfile{ID: id})
 	}
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "two parallel tasks"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "two parallel tasks"})
 	must(err)
 	for _, id := range []string{"a", "b"} {
 		taskID := "t-" + id
-		_, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{RunID: run.ID, TaskID: taskID, OwnerAgentID: id})
+		_, err := runner.CreateTask(ctx, api.CreateTaskCommand{RunID: run.ID, TaskID: taskID, OwnerAgentID: id})
 		must(err)
 		runOnce(ctx, runner, run.ID, taskID, id)
 	}
@@ -43,15 +44,15 @@ type metrics struct {
 	SuccessCount int            `json:"successCount"`
 }
 
-func evaluate(events []hydaelyn.Event) metrics {
+func evaluate(events []api.Event) metrics {
 	m := metrics{ByEventKind: map[string]int{}}
 	m.TotalEvents = len(events)
 	for _, ev := range events {
 		m.ByEventKind[string(ev.Type)]++
 		switch ev.Type {
-		case hydaelyn.EventTaskCreated:
+		case api.EventTaskCreated:
 			m.TaskCount++
-		case hydaelyn.EventTaskCompleted:
+		case api.EventTaskCompleted:
 			m.SuccessCount++
 		}
 	}
@@ -59,20 +60,20 @@ func evaluate(events []hydaelyn.Event) metrics {
 }
 
 func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string) {
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID: runID, TaskID: taskID, EnvelopeID: env.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: agentID, TTL: time.Minute,
+		HolderType: api.HolderAgent, HolderID: agentID, TTL: time.Minute,
 	})
 	must(err)
 	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
-	must(runner.SubmitTypedReport(ctx, hydaelyn.SubmitTypedReportCommand{
+	must(runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID: runID, TaskID: taskID, LeaseID: lease.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: agentID,
+		HolderType: api.HolderAgent, HolderID: agentID,
 		TaskVersion: task.Version,
-		Report:      hydaelyn.TypedReport{Status: hydaelyn.ReportStatusSuccess, Summary: "ok"},
+		Report:      api.TypedReport{Status: api.ReportStatusSuccess, Summary: "ok"},
 	}))
 }
 

@@ -86,6 +86,5 @@ New code should use:
 runner := hydaelyn.New()
 ```
 
-Use `hydaelyn.Config{...}` only for overrides. `Runtime` and
-`orchestrator.NewRuntime` remain compatibility aliases but are not the
-recommended names for new code.
+Use `api.Config{...}` only for overrides. The internal runtime remains an
+implementation detail behind the root `Runner` facade.

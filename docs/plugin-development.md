@@ -22,7 +22,7 @@ Supported plugin types:
 Most application code should integrate through the public runner surface:
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	PolicyEngine:  customPolicy,
 	StoreProvider: customStore,
 })
@@ -33,14 +33,14 @@ Use public interfaces for extension work:
 - `provider.Driver`
 - `tool.Driver`
 - `policy.Engine`
-- `hydaelyn.Planner`
-- `hydaelyn.StoreProvider`
-- `hydaelyn.OutputGateway`
+- `api.Planner`
+- `api.StoreProvider`
+- `api.OutputGateway`
 
 ## Planner Plugins And Dataflow
 
 Planner integrations can emit task-level dataflow contracts through
-`hydaelyn.Task` / `hydaelyn.TodoPlan`:
+`api.Task` / `api.TodoPlan`:
 
 - `ReadSelectors`
 - `WriteTargets`

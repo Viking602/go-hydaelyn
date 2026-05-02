@@ -11,37 +11,38 @@ import (
 	"time"
 
 	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn/api"
 )
 
 func main() {
 	ctx := context.Background()
 	runner := hydaelyn.New()
-	runner.RegisterAgent(hydaelyn.AgentProfile{ID: "researcher"})
-	runner.RegisterTool(hydaelyn.Tool{
+	runner.RegisterAgent(api.AgentProfile{ID: "researcher"})
+	runner.RegisterTool(api.Tool{
 		Name:       "web.search",
-		EffectType: hydaelyn.ToolEffectReadOnly,
+		EffectType: api.ToolEffectReadOnly,
 		RiskLevel:  "low",
 	})
 
-	run, _, err := runner.StartRun(ctx, hydaelyn.StartRunCommand{Request: "search the web"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "search the web"})
 	must(err)
-	task, err := runner.CreateTask(ctx, hydaelyn.CreateTaskCommand{
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID: run.ID, TaskID: "lookup", OwnerAgentID: "researcher",
 	})
 	must(err)
-	env, err := runner.DispatchTask(ctx, hydaelyn.DispatchTaskCommand{
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "researcher",
 	})
 	must(err)
-	lease, _, err := runner.AcquireTaskExecution(ctx, hydaelyn.AcquireTaskExecutionCommand{
+	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: "researcher", TTL: time.Minute,
+		HolderType: api.HolderAgent, HolderID: "researcher", TTL: time.Minute,
 	})
 	must(err)
 
-	result, err := runner.InvokeTool(ctx, hydaelyn.ToolInvocation{
+	result, err := runner.InvokeTool(ctx, api.ToolInvocation{
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
-		HolderType: hydaelyn.HolderAgent, HolderID: "researcher",
+		HolderType: api.HolderAgent, HolderID: "researcher",
 		TaskVersion: task.Version, ToolName: "web.search",
 		Input: map[string]any{"q": "go-hydaelyn"},
 	})

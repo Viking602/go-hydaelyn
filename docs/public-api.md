@@ -5,22 +5,23 @@
 `hydaelyn.New()` is the default startup path. It returns a `*hydaelyn.Runner`
 using the default in-memory configuration.
 
-Use `Config` only when overriding defaults:
+Import `github.com/Viking602/go-hydaelyn/api` for all public contracts:
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
 
-The older zero-config form remains source-compatible but is no longer the
-recommended style; prefer the no-argument constructor.
+The zero-config form remains the preferred startup path when you do not need
+to override storage, policy, output, or pipeline dependencies.
 
 ## Stable Packages
 
 The major-version public surface includes:
 
-- `hydaelyn` — primary façade and recommended import path
+- `hydaelyn` — primary façade and recommended import path for construction
+- `api` — Config, commands, interfaces, Run/Task value contracts, constants, errors
 - `agent`
 - `blackboard`
 - `flow`
@@ -37,37 +38,37 @@ These packages follow the compatibility rules in [SemVer And Compatibility](semv
 
 ## Runner Contract
 
-The primary contract is Run/Task orchestration:
+The primary contract is split across the root facade and the api package:
 
-- `hydaelyn.New`, `hydaelyn.Runner`, `hydaelyn.Config`
-- `Runner.StartRun`, `QueueRun`, `ExecuteCommand`, `RunEvents`, `RunTimeline`, `ReplayRunState`
-- `Run`, `Task`, `TaskEnvelope`, `TaskExecutionLease`, `TypedReport`
-- `PolicyEngine.Authorize(ctx, PolicyRequest)`
-- `ApprovalRequest`, `ResumeToken`, `ActionAttempt`
-- `Flow` as preset metadata, not a state-transition bypass
+- `hydaelyn.New`, `hydaelyn.Runner`
+- `api.Config`
+- `api.StartRunCommand`, `api.CreateTaskCommand`, other `api.*Command` values
+- `api.Run`, `api.Task`, `api.TaskEnvelope`, `api.TaskExecutionLease`, `api.TypedReport`
+- `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)`
+- `api.ApprovalRequest`, `api.ResumeToken`, `api.ActionAttempt`
+- `api.Flow` as preset metadata, not a state-transition bypass
 - `worker.AgentWorker` as optional task-envelope executor glue
 
-`Runtime` and `orchestrator.NewRuntime` remain compatibility aliases. New code
-should use `Runner` and `hydaelyn.New()`.
+`internal/core` remains implementation detail. New code should not import it.
 
 ## Durable Storage Extension
 
-Durable storage contracts are exposed through the public façade:
+Durable storage contracts are exposed through `api`:
 
-- `StoreProvider`
-- `UnitOfWork`
-- `RunStore`
-- `TaskStore`
-- `EventStore`
-- `BlackboardStore`
-- `MailboxOutboxStore`
-- `UserMessageStore`
-- `TraceStore`
+- `api.StoreProvider`
+- `api.UnitOfWork`
+- `api.RunStore`
+- `api.TaskStore`
+- `api.EventStore`
+- `api.BlackboardReadWriter`
+- `api.MailboxOutboxStore`
+- `api.UserMessageStore`
+- `api.TraceStore`
 
 Example:
 
 ```go
-runner := hydaelyn.New(hydaelyn.Config{
+runner := hydaelyn.New(api.Config{
 	StoreProvider: myStoreProvider,
 })
 ```
