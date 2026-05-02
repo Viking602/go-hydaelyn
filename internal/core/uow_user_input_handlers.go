@@ -30,7 +30,7 @@ type submitUserInputHandler struct{ runtime *Runtime }
 
 func (submitUserInputHandler) Name() string { return SubmitUserInputCommand{}.CommandName() }
 
-func (h submitUserInputHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd SubmitUserInputCommand) (any, error) {
+func (h submitUserInputHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd SubmitUserInputCommand) (any, error) {
 	run, err := uow.Runs().LoadRun(ctx, cmd.RunID)
 	if err != nil {
 		return nil, err

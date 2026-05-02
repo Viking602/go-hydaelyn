@@ -9,12 +9,12 @@ import (
 
 type TypedHandler[C ports.Command] interface {
 	Name() string
-	Handle(context.Context, ports.FullUnitOfWork, C) (any, error)
+	Handle(context.Context, ports.UnitOfWork, C) (any, error)
 }
 
 type erasedHandler interface {
 	Name() string
-	HandleAny(context.Context, ports.FullUnitOfWork, ports.Command) (any, error)
+	HandleAny(context.Context, ports.UnitOfWork, ports.Command) (any, error)
 }
 
 type Bus struct {
@@ -40,7 +40,7 @@ func (b *Bus) HasHandler(name string) bool {
 	return ok
 }
 
-func (b *Bus) Execute(ctx context.Context, uow ports.FullUnitOfWork, cmd ports.Command) (any, error) {
+func (b *Bus) Execute(ctx context.Context, uow ports.UnitOfWork, cmd ports.Command) (any, error) {
 	if b == nil || cmd == nil {
 		return nil, model.ErrInvalidCommand
 	}
@@ -57,7 +57,7 @@ type erased[C ports.Command] struct {
 
 func (e erased[C]) Name() string { return e.handler.Name() }
 
-func (e erased[C]) HandleAny(ctx context.Context, uow ports.FullUnitOfWork, cmd ports.Command) (any, error) {
+func (e erased[C]) HandleAny(ctx context.Context, uow ports.UnitOfWork, cmd ports.Command) (any, error) {
 	typed, ok := any(cmd).(C)
 	if !ok {
 		return nil, model.ErrInvalidCommand

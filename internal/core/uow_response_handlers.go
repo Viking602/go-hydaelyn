@@ -3,12 +3,12 @@ package core
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/core/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/execution"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/go-hydaelyn/internal/execution"
+	responsesvc "github.com/Viking602/go-hydaelyn/internal/response"
 )
 
 func registerResponseUoWCommandHandlers(runtime *Runtime) {
@@ -34,7 +34,7 @@ type submitResponseOutputHandler struct{ runtime *Runtime }
 
 func (submitResponseOutputHandler) Name() string { return SubmitResponseOutputCommand{}.CommandName() }
 
-func (h submitResponseOutputHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd SubmitResponseOutputCommand) (any, error) {
+func (h submitResponseOutputHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd SubmitResponseOutputCommand) (any, error) {
 	task, err := uow.Tasks().LoadTask(ctx, cmd.RunID, cmd.TaskID)
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ type publishResponseHandler struct{ runtime *Runtime }
 
 func (publishResponseHandler) Name() string { return PublishResponseCommand{}.CommandName() }
 
-func (h publishResponseHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd PublishResponseCommand) (any, error) {
+func (h publishResponseHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd PublishResponseCommand) (any, error) {
 	message, err := uow.UserMessages().LoadMessage(ctx, cmd.RunID, cmd.MessageID)
 	if err != nil {
 		return nil, err
@@ -161,41 +161,18 @@ func (h publishResponseHandler) Handle(ctx context.Context, uow ports.FullUnitOf
 	return publishResponseResult{Message: message}, nil
 }
 
-func validateSubmissionUoW(ctx context.Context, uow ports.FullUnitOfWork, runID, taskID, leaseID string, holderType HolderType, holderID string, taskVersion int) (Run, Task, TaskExecutionLease, error) {
+func validateSubmissionUoW(ctx context.Context, uow ports.UnitOfWork, runID, taskID, leaseID string, holderType HolderType, holderID string, taskVersion int) (Run, Task, TaskExecutionLease, error) {
 	return execution.ValidateSubmission(ctx, uow, runID, taskID, leaseID, holderType, holderID, taskVersion)
 }
 
-func applyResponseObligationsUoW(ctx context.Context, uow ports.FullUnitOfWork, message UserMessage, decision PolicyDecision) (UserMessage, error) {
-	out := message
-	for _, obligation := range decision.Obligations {
-		switch obligation.Kind {
-		case ObligationRedactFields:
-			out.Payload = redactUserPayload(out.Payload)
-		case ObligationHideInternalTrace:
-			out.Payload = hideInternalTrace(out.Payload)
-		case ObligationMaskToolOutput:
-			out.Payload = strings.ReplaceAll(out.Payload, "tool output:", "tool output: [masked]")
-		case ObligationSelectorOnly, ObligationRequireHumanApproval, ObligationRestrictHandoffContext:
-		default:
-			if err := uow.Events().AppendEvent(ctx, Event{RunID: message.RunID, TaskID: message.TaskID, Type: EventPolicyObligationFailed, Payload: map[string]any{"decisionId": decision.DecisionID, "obligation": string(obligation.Kind), "target": obligation.Target, "reason": "unsupported obligation", "effectiveEffect": string(PolicyEffectDeny)}, RecordedAt: time.Now().UTC()}); err != nil {
-				return UserMessage{}, err
-			}
-			return UserMessage{}, ErrPolicyObligationFailed
-		}
-	}
-	if containsString(decision.Redactions, "email") {
-		out.Payload = redactEmail(out.Payload)
-	}
-	return out, nil
+func applyResponseObligationsUoW(ctx context.Context, uow ports.UnitOfWork, message UserMessage, decision PolicyDecision) (UserMessage, error) {
+	return responsesvc.ApplyObligations(ctx, uow, message, decision)
 }
 
 func criticalContextItem(id, runID, taskID string, source SourceIdentity, key, payload string) BlackboardItem {
-	if source.Type == "" {
-		source = SourceIdentity{Type: SourceSystem, ID: "orchestrator"}
-	}
-	return BlackboardItem{ID: id, RunID: runID, TaskID: taskID, Type: BlackboardItemContext, Source: source, Visibility: BlackboardVisibilityAgentVisible, Key: key, Content: payload, Payload: payload, CreatedAt: time.Now().UTC()}
+	return responsesvc.CriticalContextItem(id, runID, taskID, source, key, payload)
 }
 
-func appendBlackboardWrittenEventUoW(ctx context.Context, uow ports.FullUnitOfWork, item BlackboardItem) error {
-	return uow.Events().AppendEvent(ctx, Event{RunID: item.RunID, TaskID: item.TaskID, Type: EventBlackboardItemWritten, Payload: map[string]any{"itemId": item.ID, "sourceType": string(item.Source.Type), "sourceId": item.Source.ID, "visibility": string(item.Visibility), "key": item.Key}, RecordedAt: time.Now().UTC()})
+func appendBlackboardWrittenEventUoW(ctx context.Context, uow ports.UnitOfWork, item BlackboardItem) error {
+	return responsesvc.AppendBlackboardWrittenEvent(ctx, uow, item)
 }

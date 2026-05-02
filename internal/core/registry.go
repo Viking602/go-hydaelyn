@@ -111,7 +111,7 @@ func (r *Runtime) currentTaskMonitor() TaskMonitor {
 	r.configMu.RLock()
 	defer r.configMu.RUnlock()
 	if r.pipeline.TaskMonitor == nil {
-		return defaultTaskMonitor{}
+		return defaultPipeline(PipelineComponents{}).TaskMonitor
 	}
 	return r.pipeline.TaskMonitor
 }

@@ -113,7 +113,7 @@ func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishRespon
 	return nil
 }
 
-func (r *Runtime) applyPublishedTransition(ctx context.Context, uow ports.FullUnitOfWork, cmd PublishResponseCommand, _ UserMessage) error {
+func (r *Runtime) applyPublishedTransition(ctx context.Context, uow ports.UnitOfWork, cmd PublishResponseCommand, _ UserMessage) error {
 	current, err := uow.UserMessages().LoadMessage(ctx, cmd.RunID, cmd.MessageID)
 	if err != nil {
 		return err

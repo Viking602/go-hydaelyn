@@ -2,7 +2,8 @@ package core
 
 import (
 	"context"
-	"maps"
+
+	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
 )
 
 type StartTraceSpanCommand struct {
@@ -55,18 +56,5 @@ func (r *Runtime) TraceSpans(runID string) []TraceSpan {
 }
 
 func traceSpanPayload(span TraceSpan) map[string]any {
-	return map[string]any{
-		"spanId":    span.ID,
-		"runId":     span.RunID,
-		"taskId":    span.TaskID,
-		"traceId":   span.TraceID,
-		"parentId":  span.ParentID,
-		"name":      span.Name,
-		"component": span.Component,
-		"status":    string(span.Status),
-		"startedAt": span.StartedAt,
-		"endedAt":   span.EndedAt,
-		"error":     span.Error,
-		"metadata":  maps.Clone(span.Metadata),
-	}
+	return tracesvc.Payload(span)
 }

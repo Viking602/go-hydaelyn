@@ -9,7 +9,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
-func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.FullUnitOfWork, request PolicyRequest) (PolicyDecision, error) {
+func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest) (PolicyDecision, error) {
 	if request.RunID == "" {
 		request.RunID = requestRunID(request)
 	}
@@ -44,7 +44,7 @@ func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.FullUnitOfWork, re
 	}
 }
 
-func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.FullUnitOfWork, request PolicyRequest, decision PolicyDecision) error {
+func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest, decision PolicyDecision) error {
 	task, ok, err := policyEffectTaskUoW(ctx, uow, request)
 	if err != nil || !ok {
 		return err
@@ -73,7 +73,7 @@ func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.Fu
 	return uow.Events().AppendEvent(ctx, Event{RunID: task.RunID, TaskID: task.ID, Type: EventApprovalRequested, Payload: map[string]any{"approvalId": approval.ApprovalID, "resumeToken": token.TokenID, "reason": reason, "decisionId": decision.DecisionID, "operation": string(request.Operation)}, RecordedAt: time.Now().UTC()})
 }
 
-func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.FullUnitOfWork, request PolicyRequest, decision PolicyDecision) error {
+func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest, decision PolicyDecision) error {
 	task, ok, err := policyEffectTaskUoW(ctx, uow, request)
 	if err != nil || !ok {
 		return err
@@ -85,7 +85,7 @@ func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.FullU
 	return transitionRunForPolicyUoW(ctx, uow, task.RunID, RunStatusBlocked)
 }
 
-func policyEffectTaskUoW(ctx context.Context, uow ports.FullUnitOfWork, request PolicyRequest) (Task, bool, error) {
+func policyEffectTaskUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest) (Task, bool, error) {
 	if request.RunID == "" || request.TaskID == "" {
 		return Task{}, false, nil
 	}
@@ -99,7 +99,7 @@ func policyEffectTaskUoW(ctx context.Context, uow ports.FullUnitOfWork, request 
 	return task, true, nil
 }
 
-func pauseTaskForPolicyUoW(ctx context.Context, uow ports.FullUnitOfWork, task Task, reason string) error {
+func pauseTaskForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, task Task, reason string) error {
 	if isTerminalTask(task.Status) {
 		return nil
 	}
@@ -124,7 +124,7 @@ func pauseTaskForPolicyUoW(ctx context.Context, uow ports.FullUnitOfWork, task T
 	return uow.Events().AppendEvent(ctx, Event{RunID: paused.RunID, TaskID: paused.ID, Type: EventTaskPaused, Payload: map[string]any{"reason": reason, "task": taskEventPayload(paused)}, RecordedAt: time.Now().UTC()})
 }
 
-func transitionRunForPolicyUoW(ctx context.Context, uow ports.FullUnitOfWork, runID string, status RunStatus) error {
+func transitionRunForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, runID string, status RunStatus) error {
 	run, err := uow.Runs().LoadRun(ctx, runID)
 	if errors.Is(err, ErrNotFound) || isTerminalRun(run.Status) {
 		return nil

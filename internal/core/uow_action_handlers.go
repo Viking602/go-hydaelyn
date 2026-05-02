@@ -26,7 +26,7 @@ type startActionAttemptHandler struct{ runtime *Runtime }
 
 func (startActionAttemptHandler) Name() string { return StartActionAttemptCommand{}.CommandName() }
 
-func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd StartActionAttemptCommand) (any, error) {
+func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd StartActionAttemptCommand) (any, error) {
 	_, task, _, err := validateSubmissionUoW(ctx, uow, cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion)
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (completeActionAttemptHandler) Name() string {
 	return CompleteActionAttemptCommand{}.CommandName()
 }
 
-func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd CompleteActionAttemptCommand) (any, error) {
+func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd CompleteActionAttemptCommand) (any, error) {
 	if cmd.LeaseID == "" {
 		return nil, ErrLeaseNotActive
 	}

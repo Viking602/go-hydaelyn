@@ -32,7 +32,7 @@ type submitTypedReportResult struct {
 	CommitError  error
 }
 
-func (h submitTypedReportHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd SubmitTypedReportCommand) (any, error) {
+func (h submitTypedReportHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd SubmitTypedReportCommand) (any, error) {
 	run, task, lease, err := validateSubmissionUoW(ctx, uow, cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (h submitTypedReportHandler) Handle(ctx context.Context, uow ports.FullUnit
 	return *m, nil
 }
 
-func (h submitTypedReportHandler) applyActionOutcome(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) (Task, Run, TaskExecutionLease, TypedReport, error) {
+func (h submitTypedReportHandler) applyActionOutcome(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) (Task, Run, TaskExecutionLease, TypedReport, error) {
 	if report.ActionOutcome == nil {
 		return task, run, lease, report, nil
 	}
@@ -122,7 +122,7 @@ func (h submitTypedReportHandler) applyActionOutcome(ctx context.Context, uow po
 	return task, run, lease, report, nil
 }
 
-func (h submitTypedReportHandler) applyReportStatus(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
+func (h submitTypedReportHandler) applyReportStatus(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
 	switch report.Status {
 	case ReportStatusSuccess:
 		return h.applySuccessfulReport(ctx, uow, m, task, lease, report)
@@ -156,7 +156,7 @@ func (h submitTypedReportHandler) applyReportStatus(ctx context.Context, uow por
 	}
 }
 
-func (h submitTypedReportHandler) applySuccessfulReport(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, report TypedReport) error {
+func (h submitTypedReportHandler) applySuccessfulReport(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, report TypedReport) error {
 	if !completionCriteriaSatisfied(task, report) {
 		return ErrCompletionCriteriaUnmet
 	}
@@ -174,7 +174,7 @@ func (h submitTypedReportHandler) applySuccessfulReport(ctx context.Context, uow
 	return h.emit(ctx, uow, m, Event{RunID: task.RunID, TaskID: task.ID, Type: EventTaskCompleted, Payload: map[string]any{"summary": report.Summary, "task": taskEventPayload(next)}, RecordedAt: time.Now().UTC()})
 }
 
-func (h submitTypedReportHandler) applyFailedReport(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, report TypedReport) error {
+func (h submitTypedReportHandler) applyFailedReport(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, report TypedReport) error {
 	reason := reportFailureReason(report)
 	if canRetryTask(task) {
 		next, err := transitionTaskPure(task, TaskStatusDispatched, true)
@@ -207,7 +207,7 @@ func (h submitTypedReportHandler) applyFailedReport(ctx context.Context, uow por
 	return h.emit(ctx, uow, m, Event{RunID: task.RunID, TaskID: task.ID, Type: EventTaskFailed, Payload: map[string]any{"reason": reason, "task": taskEventPayload(next)}, RecordedAt: time.Now().UTC()})
 }
 
-func (h submitTypedReportHandler) applyApprovalReport(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
+func (h submitTypedReportHandler) applyApprovalReport(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
 	approval, token := h.runtime.newApprovalForTask(task, report.Summary, cmd.HolderID)
 	if err := uow.Approvals().SaveApproval(ctx, approval); err != nil {
 		return err
@@ -248,7 +248,7 @@ func (h submitTypedReportHandler) applyApprovalReport(ctx context.Context, uow p
 	return h.emit(ctx, uow, m, Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: EventTaskPaused, Payload: map[string]any{"reason": report.Summary, "task": taskEventPayload(next)}, RecordedAt: time.Now().UTC()})
 }
 
-func (h submitTypedReportHandler) applyClarificationReport(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, report TypedReport) error {
+func (h submitTypedReportHandler) applyClarificationReport(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, run Run, task Task, lease TaskExecutionLease, report TypedReport) error {
 	next, err := transitionTaskPure(task, TaskStatusWaitingUserInput, true)
 	if err != nil {
 		return err
@@ -274,7 +274,7 @@ func (h submitTypedReportHandler) applyClarificationReport(ctx context.Context, 
 	return h.queueSystemResponse(ctx, uow, m, next.RunID, next.ID, UserMessageTypeClarificationRequest, "Clarification requested", report.Summary)
 }
 
-func (h submitTypedReportHandler) applyHandoffReport(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
+func (h submitTypedReportHandler) applyHandoffReport(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, task Task, lease TaskExecutionLease, cmd SubmitTypedReportCommand, report TypedReport) error {
 	if report.Handoff == nil || report.Handoff.ToAgentID == "" {
 		return ErrInvalidCommand
 	}
@@ -288,7 +288,7 @@ func (h submitTypedReportHandler) applyHandoffReport(ctx context.Context, uow po
 	return err
 }
 
-func (h submitTypedReportHandler) applyHandoff(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task, request *HandoffRequest, fallbackContext string) error {
+func (h submitTypedReportHandler) applyHandoff(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, task Task, request *HandoffRequest, fallbackContext string) error {
 	result, err := handoffHandler(h).apply(ctx, uow, task, request, fallbackContext)
 	if err != nil {
 		return err
@@ -302,7 +302,7 @@ func (h submitTypedReportHandler) applyHandoff(ctx context.Context, uow ports.Fu
 	return nil
 }
 
-func (h submitTypedReportHandler) queueSystemResponse(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, runID, sourceTaskID string, messageType UserMessageType, title, payload string) error {
+func (h submitTypedReportHandler) queueSystemResponse(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, runID, sourceTaskID string, messageType UserMessageType, title, payload string) error {
 	now := time.Now().UTC()
 	task := Task{ID: h.runtime.newID("response"), RunID: runID, ParentTaskID: sourceTaskID, Type: TaskTypeResponse, Goal: string(messageType), OwnerComponent: "response_composer", Status: TaskStatusCompleted, Version: 1, CreatedAt: now, UpdatedAt: now, Result: &TypedReport{Status: ReportStatusSuccess, Summary: payload}}
 	if err := h.saveTask(ctx, uow, m, task); err != nil {
@@ -322,7 +322,7 @@ func (h submitTypedReportHandler) queueSystemResponse(ctx context.Context, uow p
 	return h.emit(ctx, uow, m, Event{RunID: runID, TaskID: task.ID, Type: EventUserMessageQueued, Payload: map[string]any{"messageId": message.ID, "message": userMessagePayload(message), "task": taskEventPayload(task)}, RecordedAt: now})
 }
 
-func (h submitTypedReportHandler) saveTask(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, task Task) error {
+func (h submitTypedReportHandler) saveTask(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, task Task) error {
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func (h submitTypedReportHandler) saveTask(ctx context.Context, uow ports.FullUn
 	return nil
 }
 
-func (h submitTypedReportHandler) saveRun(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, previous Run, run Run) error {
+func (h submitTypedReportHandler) saveRun(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, previous Run, run Run) error {
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
 		return err
 	}
@@ -341,7 +341,7 @@ func (h submitTypedReportHandler) saveRun(ctx context.Context, uow ports.FullUni
 	return nil
 }
 
-func (h submitTypedReportHandler) releaseLease(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, lease TaskExecutionLease) (TaskExecutionLease, error) {
+func (h submitTypedReportHandler) releaseLease(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, lease TaskExecutionLease) (TaskExecutionLease, error) {
 	lease.Status = LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		return TaskExecutionLease{}, err
@@ -353,7 +353,7 @@ func (h submitTypedReportHandler) releaseLease(ctx context.Context, uow ports.Fu
 	return lease, nil
 }
 
-func (h submitTypedReportHandler) queueEnvelope(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, env TaskEnvelope, eventType EventType) error {
+func (h submitTypedReportHandler) queueEnvelope(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, env TaskEnvelope, eventType EventType) error {
 	if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
 		return err
 	}
@@ -361,7 +361,7 @@ func (h submitTypedReportHandler) queueEnvelope(ctx context.Context, uow ports.F
 	return h.emit(ctx, uow, m, Event{RunID: env.RunID, TaskID: env.TaskID, Type: eventType, Payload: map[string]any{"envelope": envPayload(env)}, RecordedAt: time.Now().UTC()})
 }
 
-func (h submitTypedReportHandler) writeBlackboard(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, item BlackboardItem) error {
+func (h submitTypedReportHandler) writeBlackboard(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, item BlackboardItem) error {
 	if err := uow.Blackboard().WriteItem(ctx, item); err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func (h submitTypedReportHandler) writeBlackboard(ctx context.Context, uow ports
 	return h.emit(ctx, uow, m, Event{RunID: item.RunID, TaskID: item.TaskID, Type: EventBlackboardItemWritten, Payload: map[string]any{"itemId": item.ID, "sourceType": string(item.Source.Type), "sourceId": item.Source.ID, "visibility": string(item.Visibility), "key": item.Key}, RecordedAt: time.Now().UTC()})
 }
 
-func (h submitTypedReportHandler) emit(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, event Event) error {
+func (h submitTypedReportHandler) emit(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, event Event) error {
 	if event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
 	}
@@ -384,7 +384,7 @@ func (h submitTypedReportHandler) emit(ctx context.Context, uow ports.FullUnitOf
 	return nil
 }
 
-func (h submitTypedReportHandler) recordTrace(ctx context.Context, uow ports.FullUnitOfWork, m *submitTypedReportResult, runID, taskID, name, component string) error {
+func (h submitTypedReportHandler) recordTrace(ctx context.Context, uow ports.UnitOfWork, m *submitTypedReportResult, runID, taskID, name, component string) error {
 	now := time.Now().UTC()
 	span := TraceSpan{RunID: runID, TaskID: taskID, Name: name, Component: component, Status: TraceSpanEnded, StartedAt: now, EndedAt: now}
 	if err := uow.Trace().SaveTraceSpan(ctx, span); err != nil {

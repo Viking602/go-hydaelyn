@@ -27,7 +27,7 @@ type advanceRunResult struct {
 	TraceSpans []TraceSpan
 }
 
-func (h advanceRunHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd AdvanceRunCommand) (any, error) {
+func (h advanceRunHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd AdvanceRunCommand) (any, error) {
 	run, err := uow.Runs().LoadRun(ctx, cmd.RunID)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func (h advanceRunHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork,
 	return *m, nil
 }
 
-func (h advanceRunHandler) createPipelinePlan(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run) (Run, TodoPlan, error) {
+func (h advanceRunHandler) createPipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run) (Run, TodoPlan, error) {
 	run, err := h.transitionRun(ctx, uow, m, run, RunStatusPlanning)
 	if err != nil {
 		return Run{}, TodoPlan{}, err
@@ -105,7 +105,7 @@ func (h advanceRunHandler) createPipelinePlan(ctx context.Context, uow ports.Ful
 	return run, plan, nil
 }
 
-func (h advanceRunHandler) preparePlanTasks(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, run Run, plan TodoPlan) error {
+func (h advanceRunHandler) preparePlanTasks(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, run Run, plan TodoPlan) error {
 	for _, planned := range plan.Tasks {
 		if planned.ID == "" || planned.ID == run.RootTaskID {
 			continue
@@ -126,7 +126,7 @@ func (h advanceRunHandler) preparePlanTasks(ctx context.Context, uow ports.FullU
 	return nil
 }
 
-func (h advanceRunHandler) validatePipelinePlan(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, plan TodoPlan) (Run, error) {
+func (h advanceRunHandler) validatePipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, plan TodoPlan) (Run, error) {
 	run, err := h.transitionRun(ctx, uow, m, run, RunStatusValidating)
 	if err != nil {
 		return Run{}, err
@@ -158,7 +158,7 @@ func (h advanceRunHandler) validatePipelinePlan(ctx context.Context, uow ports.F
 	return run, nil
 }
 
-func (h advanceRunHandler) routePipelinePlan(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, plan TodoPlan) (Run, RoutingPlan, error) {
+func (h advanceRunHandler) routePipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, plan TodoPlan) (Run, RoutingPlan, error) {
 	run, err := h.transitionRun(ctx, uow, m, run, RunStatusRouting)
 	if err != nil {
 		return Run{}, RoutingPlan{}, err
@@ -199,7 +199,7 @@ func (h advanceRunHandler) routePipelinePlan(ctx context.Context, uow ports.Full
 	return run, routing, nil
 }
 
-func (h advanceRunHandler) dispatchRouting(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, routing RoutingPlan) error {
+func (h advanceRunHandler) dispatchRouting(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, pipeline PipelineComponents, run Run, routing RoutingPlan) error {
 	envelopes, err := pipeline.Dispatcher.Dispatch(ctx, routing)
 	if err != nil {
 		return err
@@ -275,7 +275,7 @@ func normalizePipelineEnvelope(runID string, task Task, env TaskEnvelope) TaskEn
 	return env
 }
 
-func (h advanceRunHandler) transitionRun(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, run Run, status RunStatus) (Run, error) {
+func (h advanceRunHandler) transitionRun(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, run Run, status RunStatus) (Run, error) {
 	next, err := transitionRunPure(run, status)
 	if err != nil {
 		return Run{}, err
@@ -292,7 +292,7 @@ func (h advanceRunHandler) transitionRun(ctx context.Context, uow ports.FullUnit
 	return next, nil
 }
 
-func (h advanceRunHandler) saveTask(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, task Task) error {
+func (h advanceRunHandler) saveTask(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, task Task) error {
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (h advanceRunHandler) saveTask(ctx context.Context, uow ports.FullUnitOfWor
 	return nil
 }
 
-func (h advanceRunHandler) emit(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, event Event) error {
+func (h advanceRunHandler) emit(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, event Event) error {
 	if event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
 	}
@@ -311,7 +311,7 @@ func (h advanceRunHandler) emit(ctx context.Context, uow ports.FullUnitOfWork, m
 	return nil
 }
 
-func (h advanceRunHandler) recordTrace(ctx context.Context, uow ports.FullUnitOfWork, m *advanceRunResult, runID, taskID, name, component string) error {
+func (h advanceRunHandler) recordTrace(ctx context.Context, uow ports.UnitOfWork, m *advanceRunResult, runID, taskID, name, component string) error {
 	now := time.Now().UTC()
 	span := TraceSpan{RunID: runID, TaskID: taskID, Name: name, Component: component, Status: TraceSpanEnded, StartedAt: now, EndedAt: now}
 	if err := uow.Trace().SaveTraceSpan(ctx, span); err != nil {

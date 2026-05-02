@@ -59,14 +59,6 @@ func (p *Provider) Begin(ctx context.Context) (ports.UnitOfWork, error) {
 	return &UnitOfWork{provider: p, staged: staged}, nil
 }
 
-func (p *Provider) BeginFull(ctx context.Context) (ports.FullUnitOfWork, error) {
-	uow, err := p.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return uow.(ports.FullUnitOfWork), nil
-}
-
 func (p *Provider) SelectItems(ctx context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
@@ -96,7 +88,7 @@ type UnitOfWork struct {
 	closed   bool
 }
 
-var _ ports.FullUnitOfWork = (*UnitOfWork)(nil)
+var _ ports.UnitOfWork = (*UnitOfWork)(nil)
 
 func (u *UnitOfWork) Runs() ports.RunStore                     { return (*runStore)(u) }
 func (u *UnitOfWork) Tasks() ports.TaskStore                   { return (*taskStore)(u) }

@@ -27,7 +27,7 @@ type handoffHandler struct{ runtime *Runtime }
 
 func (handoffHandler) Name() string { return HandoffCommand{}.CommandName() }
 
-func (h handoffHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd HandoffCommand) (any, error) {
+func (h handoffHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd HandoffCommand) (any, error) {
 	run, err := uow.Runs().LoadRun(ctx, cmd.RunID)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func (h handoffHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cm
 	return h.apply(ctx, uow, task, request, cmd.HandoffContext)
 }
 
-func (h handoffHandler) apply(ctx context.Context, uow ports.FullUnitOfWork, task Task, request *HandoffRequest, fallbackContext string) (handoffResult, error) {
+func (h handoffHandler) apply(ctx context.Context, uow ports.UnitOfWork, task Task, request *HandoffRequest, fallbackContext string) (handoffResult, error) {
 	if isTerminalTask(task.Status) {
 		return handoffResult{}, ErrTerminalState
 	}

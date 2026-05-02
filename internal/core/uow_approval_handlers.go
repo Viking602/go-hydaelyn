@@ -26,7 +26,7 @@ type requestApprovalHandler struct{ runtime *Runtime }
 
 func (requestApprovalHandler) Name() string { return RequestApprovalCommand{}.CommandName() }
 
-func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd RequestApprovalCommand) (any, error) {
+func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd RequestApprovalCommand) (any, error) {
 	task, err := uow.Tasks().LoadTask(ctx, cmd.RunID, cmd.TaskID)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ type decideApprovalHandler struct{}
 
 func (decideApprovalHandler) Name() string { return DecideApprovalCommand{}.CommandName() }
 
-func (decideApprovalHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd DecideApprovalCommand) (any, error) {
+func (decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd DecideApprovalCommand) (any, error) {
 	approval, err := uow.Approvals().LoadApproval(ctx, cmd.ApprovalID)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ type recoverResumeTokenHandler struct{}
 
 func (recoverResumeTokenHandler) Name() string { return RecoverResumeTokenCommand{}.CommandName() }
 
-func (recoverResumeTokenHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd RecoverResumeTokenCommand) (any, error) {
+func (recoverResumeTokenHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd RecoverResumeTokenCommand) (any, error) {
 	token, err := uow.ResumeTokens().LoadResumeToken(ctx, cmd.TokenID)
 	if err != nil {
 		return nil, err
@@ -120,6 +120,6 @@ func (recoverResumeTokenHandler) Handle(ctx context.Context, uow ports.FullUnitO
 	return token, nil
 }
 
-func appendResumeTokenCreatedEventUoW(ctx context.Context, uow ports.FullUnitOfWork, token ResumeToken) error {
+func appendResumeTokenCreatedEventUoW(ctx context.Context, uow ports.UnitOfWork, token ResumeToken) error {
 	return uow.Events().AppendEvent(ctx, Event{RunID: token.RunID, TaskID: token.TaskID, Type: EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
 }

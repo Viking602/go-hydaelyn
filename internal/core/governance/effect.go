@@ -1,5 +1,5 @@
 // Package governance provides pure policy-effect helpers that operate only
-// through ports.FullUnitOfWork. Handlers in the composition root call these
+// through ports.UnitOfWork. Handlers in the composition root call these
 // functions after receiving a policy decision; governance itself never mutates
 // committed state directly.
 package governance
@@ -15,7 +15,7 @@ import (
 
 // EffectTaskFromRequest loads the task identified by request if both RunID
 // and TaskID are set. Returns (task, false, nil) when no task context exists.
-func EffectTaskFromRequest(ctx context.Context, uow ports.FullUnitOfWork, request model.PolicyRequest) (model.Task, bool, error) {
+func EffectTaskFromRequest(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest) (model.Task, bool, error) {
 	if request.RunID == "" || request.TaskID == "" {
 		return model.Task{}, false, nil
 	}
@@ -31,7 +31,7 @@ func EffectTaskFromRequest(ctx context.Context, uow ports.FullUnitOfWork, reques
 
 // PauseTaskForPolicy transitions the task to Paused and releases its active
 // lease. Idempotent: silently skips terminal or already-paused tasks.
-func PauseTaskForPolicy(ctx context.Context, uow ports.FullUnitOfWork, task model.Task, reason string) error {
+func PauseTaskForPolicy(ctx context.Context, uow ports.UnitOfWork, task model.Task, reason string) error {
 	if corestate.IsTerminalTask(task.Status) {
 		return nil
 	}
@@ -65,7 +65,7 @@ func PauseTaskForPolicy(ctx context.Context, uow ports.FullUnitOfWork, task mode
 
 // TransitionRunForPolicy transitions the run to the given status. Idempotent:
 // silently skips terminal runs and invalid transitions.
-func TransitionRunForPolicy(ctx context.Context, uow ports.FullUnitOfWork, runID string, status model.RunStatus) error {
+func TransitionRunForPolicy(ctx context.Context, uow ports.UnitOfWork, runID string, status model.RunStatus) error {
 	run, err := uow.Runs().LoadRun(ctx, runID)
 	if errors.Is(err, model.ErrNotFound) || corestate.IsTerminalRun(run.Status) {
 		return nil

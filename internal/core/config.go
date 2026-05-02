@@ -6,7 +6,6 @@ import (
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/core/command"
 	"github.com/Viking602/go-hydaelyn/internal/core/memory"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
 const maxHandoffDepth = 8
@@ -16,10 +15,9 @@ type Runtime struct {
 	mu       sync.Mutex   // guards agents, tools, flows
 	idSeq    atomic.Int64
 
-	memProvider      *memory.Provider
-	storeProvider    StoreProvider // non-nil only for external Config.StoreProvider
-	fallbackProvider ports.FallbackProvider
-	commandBus       *commandbus.Bus
+	memProvider   *memory.Provider
+	storeProvider StoreProvider // non-nil only for external Config.StoreProvider
+	commandBus    *commandbus.Bus
 
 	tools      map[string]Tool
 	agents     map[string]AgentProfile
@@ -44,15 +42,14 @@ func NewMemoryRuntime() *Runtime {
 
 func NewRuntime(config Config) *Runtime {
 	rt := &Runtime{
-		tools:            map[string]Tool{},
-		agents:           map[string]AgentProfile{},
-		agentOrder:       []string{},
-		flows:            map[string]Flow{},
-		policy:           allowPolicyEngine{},
-		outputGateway:    memoryOutputGateway{},
-		memProvider:      memory.NewProvider(),
-		fallbackProvider: memory.NewFallbackProvider(),
-		commandBus:       commandbus.NewBus(),
+		tools:         map[string]Tool{},
+		agents:        map[string]AgentProfile{},
+		agentOrder:    []string{},
+		flows:         map[string]Flow{},
+		policy:        allowPolicyEngine{},
+		outputGateway: memoryOutputGateway{},
+		memProvider:   memory.NewProvider(),
+		commandBus:    commandbus.NewBus(),
 	}
 	if config.StoreProvider != nil {
 		rt.storeProvider = config.StoreProvider

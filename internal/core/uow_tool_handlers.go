@@ -15,7 +15,7 @@ type toolInvocationHandler struct{ runtime *Runtime }
 
 func (toolInvocationHandler) Name() string { return ToolInvocation{}.CommandName() }
 
-func (h toolInvocationHandler) Handle(ctx context.Context, uow ports.FullUnitOfWork, cmd ToolInvocation) (any, error) {
+func (h toolInvocationHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd ToolInvocation) (any, error) {
 	tool, ok := h.runtime.tool(cmd.ToolName)
 	if !ok {
 		return nil, ErrNotFound
