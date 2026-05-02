@@ -1,4 +1,9 @@
-package client
+// Package mcpclient implements a Model Context Protocol (MCP) client over
+// JSON-RPC, supporting both HTTP and stdio transports for talking to MCP
+// servers. Although the package lives at transport/mcp/client/, the package
+// name is `mcpclient` because `client` is too generic to be useful in error
+// messages, stack traces, or unaliased imports.
+package mcpclient
 
 import (
 	"bufio"
