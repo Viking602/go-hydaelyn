@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"slices"
+
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
@@ -311,35 +313,57 @@ func BlackboardItemsFromModel(in []model.BlackboardItem) []api.BlackboardItem {
 }
 
 func BlackboardSelectorToModel(in api.BlackboardSelector) model.BlackboardSelector {
+	sourceTypes, sourceIDs := selectorSourceToModel(in)
 	return model.BlackboardSelector{
-		RunID:          in.RunID,
-		TaskID:         in.TaskID,
-		ItemTypes:      BlackboardItemTypesToModel(in.ItemTypes),
-		SourceTypes:    SourceTypesToModel(in.SourceTypes),
-		SourceIDs:      cloneStrings(in.SourceIDs),
-		SourceAgentIDs: cloneStrings(in.SourceAgentIDs),
-		Visibility:     model.BlackboardVisibility(in.Visibility),
-		Tags:           cloneStrings(in.Tags),
-		SinceVersion:   in.SinceVersion,
-		Limit:          in.Limit,
-		Keys:           cloneStrings(in.Keys),
+		RunID:        in.RunID,
+		TaskID:       in.TaskID,
+		ItemTypes:    BlackboardItemTypesToModel(in.ItemTypes),
+		SourceTypes:  sourceTypes,
+		SourceIDs:    sourceIDs,
+		Visibility:   model.BlackboardVisibility(in.Visibility),
+		Tags:         cloneStrings(in.Tags),
+		SinceVersion: in.SinceVersion,
+		Limit:        in.Limit,
+		Keys:         cloneStrings(in.Keys),
 	}
 }
 
 func BlackboardSelectorFromModel(in model.BlackboardSelector) api.BlackboardSelector {
 	return api.BlackboardSelector{
-		RunID:          in.RunID,
-		TaskID:         in.TaskID,
-		ItemTypes:      BlackboardItemTypesFromModel(in.ItemTypes),
-		SourceTypes:    SourceTypesFromModel(in.SourceTypes),
-		SourceIDs:      cloneStrings(in.SourceIDs),
-		SourceAgentIDs: cloneStrings(in.SourceAgentIDs),
-		Visibility:     api.BlackboardVisibility(in.Visibility),
-		Tags:           cloneStrings(in.Tags),
-		SinceVersion:   in.SinceVersion,
-		Limit:          in.Limit,
-		Keys:           cloneStrings(in.Keys),
+		RunID:        in.RunID,
+		TaskID:       in.TaskID,
+		ItemTypes:    BlackboardItemTypesFromModel(in.ItemTypes),
+		SourceTypes:  SourceTypesFromModel(in.SourceTypes),
+		SourceIDs:    cloneStrings(in.SourceIDs),
+		Visibility:   api.BlackboardVisibility(in.Visibility),
+		Tags:         cloneStrings(in.Tags),
+		SinceVersion: in.SinceVersion,
+		Limit:        in.Limit,
+		Keys:         cloneStrings(in.Keys),
 	}
+}
+
+func selectorSourceToModel(in api.BlackboardSelector) ([]model.SourceType, []string) {
+	sourceTypes := SourceTypesToModel(in.SourceTypes)
+	sourceIDs := cloneStrings(in.SourceIDs)
+	legacyAgentIDs := deprecatedSelectorSourceAgentIDs(in)
+	if len(legacyAgentIDs) == 0 {
+		return sourceTypes, sourceIDs
+	}
+	if !slices.Contains(sourceTypes, model.SourceAgent) {
+		sourceTypes = append(sourceTypes, model.SourceAgent)
+	}
+	for _, id := range legacyAgentIDs {
+		if !slices.Contains(sourceIDs, id) {
+			sourceIDs = append(sourceIDs, id)
+		}
+	}
+	return sourceTypes, sourceIDs
+}
+
+func deprecatedSelectorSourceAgentIDs(in api.BlackboardSelector) []string {
+	//lint:ignore SA1019 SourceAgentIDs is accepted at the public boundary for backward compatibility.
+	return cloneStrings(in.SourceAgentIDs)
 }
 
 func BlackboardSelectorsToModel(in []api.BlackboardSelector) []model.BlackboardSelector {

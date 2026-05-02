@@ -35,18 +35,38 @@ type submitResponseOutputHandler struct{ runtime *Runtime }
 func (submitResponseOutputHandler) Name() string { return SubmitResponseOutputCommand{}.CommandName() }
 
 func (h submitResponseOutputHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd SubmitResponseOutputCommand) (any, error) {
-	task, err := uow.Tasks().LoadTask(ctx, cmd.RunID, cmd.TaskID)
-	if err != nil {
+	if err := ensureResponseSubmissionTask(ctx, uow, cmd); err != nil {
 		return nil, err
-	}
-	if task.Type != TaskTypeResponse {
-		return nil, ErrResponseTaskRequired
 	}
 	_, task, lease, err := validateSubmissionUoW(ctx, uow, cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
+	message := h.newResponseMessage(cmd, now)
+	composed, queued, contextItem, decision, err := h.composeAndQueueResponse(ctx, uow, cmd, message, now)
+	if err != nil {
+		return nil, err
+	}
+	task, lease, err = h.completeResponseSubmission(ctx, uow, cmd, task, lease, queued)
+	if err != nil {
+		return nil, err
+	}
+	return submitResponseOutputResult{ComposedMessage: composed, Message: queued, Task: task, Lease: lease, BlackboardItem: contextItem, Decision: decision}, nil
+}
+
+func ensureResponseSubmissionTask(ctx context.Context, uow ports.UnitOfWork, cmd SubmitResponseOutputCommand) error {
+	task, err := uow.Tasks().LoadTask(ctx, cmd.RunID, cmd.TaskID)
+	if err != nil {
+		return err
+	}
+	if task.Type != TaskTypeResponse {
+		return ErrResponseTaskRequired
+	}
+	return nil
+}
+
+func (h submitResponseOutputHandler) newResponseMessage(cmd SubmitResponseOutputCommand, now time.Time) UserMessage {
 	message := UserMessage{ID: h.runtime.newID("msg"), RunID: cmd.RunID, TaskID: cmd.TaskID, Type: cmd.Type, Title: cmd.Title, Payload: cmd.Payload, Status: UserMessageComposed, IdempotencyKey: cmd.IdempotencyKey, CreatedAt: now, UpdatedAt: now}
 	if message.Type == "" {
 		message.Type = UserMessageTypeFinalAnswer
@@ -54,61 +74,69 @@ func (h submitResponseOutputHandler) Handle(ctx context.Context, uow ports.UnitO
 	if message.IdempotencyKey == "" {
 		message.IdempotencyKey = cmd.RunID + ":" + cmd.TaskID + ":" + string(message.Type)
 	}
+	return message
+}
+
+func (h submitResponseOutputHandler) composeAndQueueResponse(ctx context.Context, uow ports.UnitOfWork, cmd SubmitResponseOutputCommand, message UserMessage, now time.Time) (UserMessage, UserMessage, BlackboardItem, PolicyDecision, error) {
 	decision, err := h.runtime.authorizeUoW(ctx, uow, PolicyRequest{Operation: PolicyOperationResponseCompose, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: actorFromHolder(cmd.HolderType, cmd.HolderID), Message: &message})
 	if err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	sanitized, err := applyResponseObligationsUoW(ctx, uow, message, decision)
 	if err != nil {
 		if errors.Is(err, ErrPolicyObligationFailed) {
-			return nil, commitWithError(err)
+			return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, commitWithError(err)
 		}
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	if err := h.runtime.recordEndedTraceUoW(ctx, uow, cmd.RunID, cmd.TaskID, "response.compose", "response"); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	contextItem := criticalContextItem("", cmd.RunID, cmd.TaskID, actorFromHolder(cmd.HolderType, cmd.HolderID), "response_payload", sanitized.Payload)
 	if err := uow.Blackboard().WriteItem(ctx, contextItem); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	if err := h.runtime.recordEndedTraceUoW(ctx, uow, cmd.RunID, cmd.TaskID, "blackboard.write", "blackboard"); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	if err := appendBlackboardWrittenEventUoW(ctx, uow, contextItem); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	composed := sanitized
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: EventUserMessageComposed, Payload: map[string]any{"message": userMessagePayload(composed)}, RecordedAt: now}); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: EventUserMessagePolicyChecked, Payload: map[string]any{"decisionId": decision.DecisionID, "effect": string(decision.Effect)}, RecordedAt: now}); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
 	sanitized.Status = UserMessageQueued
 	sanitized.UpdatedAt = time.Now().UTC()
 	if err := uow.UserMessages().QueueMessage(ctx, sanitized); err != nil {
-		return nil, err
+		return UserMessage{}, UserMessage{}, BlackboardItem{}, PolicyDecision{}, err
 	}
-	task, err = transitionTaskPure(task, TaskStatusCompleted, true)
+	return composed, sanitized, contextItem, decision, nil
+}
+
+func (h submitResponseOutputHandler) completeResponseSubmission(ctx context.Context, uow ports.UnitOfWork, cmd SubmitResponseOutputCommand, task Task, lease TaskExecutionLease, message UserMessage) (Task, TaskExecutionLease, error) {
+	task, err := transitionTaskPure(task, TaskStatusCompleted, true)
 	if err != nil {
-		return nil, err
+		return Task{}, TaskExecutionLease{}, err
 	}
 	task.Result = &TypedReport{Status: ReportStatusSuccess, Summary: "response queued"}
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
-		return nil, err
+		return Task{}, TaskExecutionLease{}, err
 	}
 	lease.Status = LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
-		return nil, err
+		return Task{}, TaskExecutionLease{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {
-		return nil, err
+		return Task{}, TaskExecutionLease{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: EventUserMessageQueued, Payload: map[string]any{"messageId": sanitized.ID, "message": userMessagePayload(sanitized), "task": taskEventPayload(task)}, RecordedAt: time.Now().UTC()}); err != nil {
-		return nil, err
+	if err := uow.Events().AppendEvent(ctx, Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: EventUserMessageQueued, Payload: map[string]any{"messageId": message.ID, "message": userMessagePayload(message), "task": taskEventPayload(task)}, RecordedAt: time.Now().UTC()}); err != nil {
+		return Task{}, TaskExecutionLease{}, err
 	}
-	return submitResponseOutputResult{ComposedMessage: composed, Message: sanitized, Task: task, Lease: lease, BlackboardItem: contextItem, Decision: decision}, nil
+	return task, lease, nil
 }
 
 type publishResponseHandler struct{ runtime *Runtime }

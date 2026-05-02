@@ -50,76 +50,119 @@ func (h handoffHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd Ha
 }
 
 func (h handoffHandler) apply(ctx context.Context, uow ports.UnitOfWork, task Task, request *HandoffRequest, fallbackContext string) (handoffResult, error) {
+	fromAgentID, err := validateHandoffTask(task, request)
+	if err != nil {
+		return handoffResult{}, err
+	}
+	contextSummary := handoffContextSummary(request.ContextSummary, fallbackContext)
+	now := time.Now().UTC()
+	if err := appendHandoffRequestedEventUoW(ctx, uow, task, request, fromAgentID, now); err != nil {
+		return handoffResult{}, err
+	}
+	result := handoffResult{FromAgentID: fromAgentID, ToAgentID: request.ToAgentID, Reason: request.Reason}
+	contextItem, hasContext, err := h.writeHandoffContext(ctx, uow, task, fromAgentID, contextSummary, now)
+	if err != nil {
+		return handoffResult{}, err
+	}
+	if hasContext {
+		result.BlackboardItem = contextItem
+		result.HasContext = true
+	}
+	next, err := h.transferHandoffOwnership(ctx, uow, task, request, fromAgentID, now)
+	if err != nil {
+		return handoffResult{}, err
+	}
+	env, err := h.queueHandoffEnvelope(ctx, uow, next, request)
+	if err != nil {
+		return handoffResult{}, err
+	}
+	result.Task = next
+	result.Envelope = env
+	return result, nil
+}
+
+func validateHandoffTask(task Task, request *HandoffRequest) (string, error) {
 	if isTerminalTask(task.Status) {
-		return handoffResult{}, ErrTerminalState
+		return "", ErrTerminalState
 	}
 	if request.TaskVersion != 0 && request.TaskVersion != task.Version {
-		return handoffResult{}, ErrStaleTaskVersion
+		return "", ErrStaleTaskVersion
 	}
 	fromAgentID := request.FromAgentID
 	if fromAgentID == "" {
 		fromAgentID = task.OwnerAgentID
 	}
 	if task.OwnerAgentID != fromAgentID {
-		return handoffResult{}, ErrOwnerMismatch
+		return "", ErrOwnerMismatch
 	}
 	if request.ToAgentID == "" {
-		return handoffResult{}, ErrInvalidCommand
+		return "", ErrInvalidCommand
 	}
 	if task.HandoffCount >= maxHandoffDepth {
-		return handoffResult{}, ErrHandoffDepthExceeded
+		return "", ErrHandoffDepthExceeded
 	}
 	if containsString(task.OwnerHistory, request.ToAgentID) {
-		return handoffResult{}, ErrHandoffCycle
+		return "", ErrHandoffCycle
 	}
-	contextSummary := request.ContextSummary
+	return fromAgentID, nil
+}
+
+func handoffContextSummary(contextSummary, fallbackContext string) string {
 	if contextSummary == "" {
 		contextSummary = fallbackContext
 	}
-	now := time.Now().UTC()
-	if err := uow.Events().AppendEvent(ctx, Event{RunID: task.RunID, TaskID: task.ID, Type: EventHandoffRequested, Payload: map[string]any{"fromAgentId": fromAgentID, "toAgentId": request.ToAgentID, "reason": request.Reason}, RecordedAt: now}); err != nil {
-		return handoffResult{}, err
+	return contextSummary
+}
+
+func appendHandoffRequestedEventUoW(ctx context.Context, uow ports.UnitOfWork, task Task, request *HandoffRequest, fromAgentID string, now time.Time) error {
+	return uow.Events().AppendEvent(ctx, Event{RunID: task.RunID, TaskID: task.ID, Type: EventHandoffRequested, Payload: map[string]any{"fromAgentId": fromAgentID, "toAgentId": request.ToAgentID, "reason": request.Reason}, RecordedAt: now})
+}
+
+func (h handoffHandler) writeHandoffContext(ctx context.Context, uow ports.UnitOfWork, task Task, fromAgentID, contextSummary string, now time.Time) (BlackboardItem, bool, error) {
+	if contextSummary == "" {
+		return BlackboardItem{}, false, nil
 	}
-	result := handoffResult{FromAgentID: fromAgentID, ToAgentID: request.ToAgentID, Reason: request.Reason}
-	if contextSummary != "" {
-		item := BlackboardItem{RunID: task.RunID, TaskID: task.ID, Type: BlackboardItemHandoffContext, Source: SourceIdentity{Type: SourceAgent, ID: fromAgentID}, Visibility: BlackboardVisibilityAgentVisible, Key: "handoff_context", Content: contextSummary, Payload: contextSummary, Version: task.Version, CreatedAt: now}
-		if err := uow.Blackboard().WriteItem(ctx, item); err != nil {
-			return handoffResult{}, err
-		}
-		if err := h.runtime.recordEndedTraceUoW(ctx, uow, item.RunID, item.TaskID, "blackboard.write", "blackboard"); err != nil {
-			return handoffResult{}, err
-		}
-		if err := appendBlackboardWrittenEventUoW(ctx, uow, item); err != nil {
-			return handoffResult{}, err
-		}
-		result.BlackboardItem = item
-		result.HasContext = true
+	item := BlackboardItem{RunID: task.RunID, TaskID: task.ID, Type: BlackboardItemHandoffContext, Source: SourceIdentity{Type: SourceAgent, ID: fromAgentID}, Visibility: BlackboardVisibilityAgentVisible, Key: "handoff_context", Content: contextSummary, Payload: contextSummary, Version: task.Version, CreatedAt: now}
+	if err := uow.Blackboard().WriteItem(ctx, item); err != nil {
+		return BlackboardItem{}, false, err
 	}
+	if err := h.runtime.recordEndedTraceUoW(ctx, uow, item.RunID, item.TaskID, "blackboard.write", "blackboard"); err != nil {
+		return BlackboardItem{}, false, err
+	}
+	if err := appendBlackboardWrittenEventUoW(ctx, uow, item); err != nil {
+		return BlackboardItem{}, false, err
+	}
+	return item, true, nil
+}
+
+func (h handoffHandler) transferHandoffOwnership(ctx context.Context, uow ports.UnitOfWork, task Task, request *HandoffRequest, fromAgentID string, now time.Time) (Task, error) {
 	task.OwnerAgentID = request.ToAgentID
 	task.OwnerComponent = ""
 	task.HandoffCount++
 	task.OwnerHistory = append(slices.Clone(task.OwnerHistory), request.ToAgentID)
 	next, err := transitionTaskPure(task, TaskStatusDispatched, true)
 	if err != nil {
-		return handoffResult{}, err
+		return Task{}, err
 	}
 	if err := uow.Tasks().SaveTask(ctx, next); err != nil {
-		return handoffResult{}, err
+		return Task{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, Event{RunID: next.RunID, TaskID: next.ID, Type: EventTaskOwnerChanged, Payload: map[string]any{"ownerAgentId": request.ToAgentID, "version": next.Version, "task": taskEventPayload(next)}, RecordedAt: time.Now().UTC()}); err != nil {
-		return handoffResult{}, err
+	if err := uow.Events().AppendEvent(ctx, Event{RunID: next.RunID, TaskID: next.ID, Type: EventTaskOwnerChanged, Payload: map[string]any{"ownerAgentId": request.ToAgentID, "version": next.Version, "task": taskEventPayload(next)}, RecordedAt: now}); err != nil {
+		return Task{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: next.RunID, TaskID: next.ID, Type: EventHandoffApplied, Payload: map[string]any{"fromAgentId": fromAgentID, "toAgentId": request.ToAgentID}, RecordedAt: time.Now().UTC()}); err != nil {
-		return handoffResult{}, err
+		return Task{}, err
 	}
+	return next, nil
+}
+
+func (h handoffHandler) queueHandoffEnvelope(ctx context.Context, uow ports.UnitOfWork, next Task, request *HandoffRequest) (TaskEnvelope, error) {
 	env := TaskEnvelope{ID: h.runtime.newID("env"), RunID: next.RunID, TaskID: next.ID, TargetAgentID: request.ToAgentID, Type: "HandoffEnvelope", Status: "pending", TaskVersion: next.Version, Payload: map[string]any{"handoff": true, "reason": request.Reason}, CreatedAt: next.UpdatedAt}
 	if err := uow.MailboxOutbox().QueueEnvelope(ctx, env); err != nil {
-		return handoffResult{}, err
+		return TaskEnvelope{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, Event{RunID: env.RunID, TaskID: env.TaskID, Type: EventHandoffEnvelopeQueued, Payload: map[string]any{"envelope": envPayload(env)}, RecordedAt: time.Now().UTC()}); err != nil {
-		return handoffResult{}, err
+		return TaskEnvelope{}, err
 	}
-	result.Task = next
-	result.Envelope = env
-	return result, nil
+	return env, nil
 }

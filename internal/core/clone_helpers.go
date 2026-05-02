@@ -13,11 +13,3 @@ func runPayload(run Run) map[string]any {
 func envPayload(env TaskEnvelope) map[string]any {
 	return eventpayload.Envelope(env)
 }
-
-func retryPolicyPayload(policy RetryPolicy) map[string]any {
-	return eventpayload.RetryPolicy(policy)
-}
-
-func cloneAnyMap(in map[string]any) map[string]any {
-	return eventpayload.CloneAnyMap(in)
-}

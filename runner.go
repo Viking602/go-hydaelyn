@@ -486,34 +486,65 @@ func (r *Runner) ExecuteCommand(ctx context.Context, command api.Command) (any, 
 }
 
 func commandResultFromCore(command api.Command, result any) any {
+	if converted, ok := runTaskResultFromCore(command, result); ok {
+		return converted
+	}
+	if converted, ok := mailboxResultFromCore(command, result); ok {
+		return converted
+	}
+	if converted, ok := governanceResultFromCore(command, result); ok {
+		return converted
+	}
+	return result
+}
+
+func runTaskResultFromCore(command api.Command, result any) (any, bool) {
 	switch command.(type) {
 	case api.StartRunCommand:
 		items, ok := result.([]any)
 		if !ok || len(items) < 2 {
-			return result
+			return result, true
 		}
 		run, okRun := items[0].(core.Run)
 		task, okTask := items[1].(core.Task)
 		if !okRun || !okTask {
-			return result
+			return result, true
 		}
-		return []any{adapter.RunFromModel(run), adapter.TaskFromModel(task)}
+		return []any{adapter.RunFromModel(run), adapter.TaskFromModel(task)}, true
 	case api.CreateTaskCommand:
 		if task, ok := result.(core.Task); ok {
-			return adapter.TaskFromModel(task)
+			return adapter.TaskFromModel(task), true
 		}
+		return result, true
 	case api.AdvanceRunCommand:
 		if run, ok := result.(core.Run); ok {
-			return adapter.RunFromModel(run)
+			return adapter.RunFromModel(run), true
 		}
+		return result, true
+	default:
+		return nil, false
+	}
+}
+
+func mailboxResultFromCore(command api.Command, result any) (any, bool) {
+	switch command.(type) {
 	case api.DispatchTaskCommand:
 		if envelope, ok := result.(core.TaskEnvelope); ok {
-			return adapter.TaskEnvelopeFromModel(envelope)
+			return adapter.TaskEnvelopeFromModel(envelope), true
 		}
+		return result, true
 	case api.FanOutDispatchTaskCommand:
 		if envelopes, ok := result.([]core.TaskEnvelope); ok {
-			return adapter.TaskEnvelopesFromModel(envelopes)
+			return adapter.TaskEnvelopesFromModel(envelopes), true
 		}
+		return result, true
+	default:
+		return nil, false
+	}
+}
+
+func governanceResultFromCore(command api.Command, result any) (any, bool) {
+	switch command.(type) {
 	case api.AcquireTaskExecutionCommand:
 		if acquired, ok := result.(struct {
 			Lease    core.TaskExecutionLease
@@ -522,37 +553,43 @@ func commandResultFromCore(command api.Command, result any) any {
 			return struct {
 				Lease    api.TaskExecutionLease
 				Acquired bool
-			}{Lease: adapter.TaskExecutionLeaseFromModel(acquired.Lease), Acquired: acquired.Acquired}
+			}{Lease: adapter.TaskExecutionLeaseFromModel(acquired.Lease), Acquired: acquired.Acquired}, true
 		}
+		return result, true
 	case api.ToolInvocation:
 		if toolResult, ok := result.(core.ToolInvocationResult); ok {
-			return adapter.ToolInvocationResultFromCore(toolResult)
+			return adapter.ToolInvocationResultFromCore(toolResult), true
 		}
+		return result, true
 	case api.RequestApprovalCommand:
 		items, ok := result.([]any)
 		if !ok || len(items) < 2 {
-			return result
+			return result, true
 		}
 		approval, okApproval := items[0].(core.ApprovalRequest)
 		token, okToken := items[1].(core.ResumeToken)
 		if !okApproval || !okToken {
-			return result
+			return result, true
 		}
-		return []any{adapter.ApprovalRequestFromModel(approval), adapter.ResumeTokenFromModel(token)}
+		return []any{adapter.ApprovalRequestFromModel(approval), adapter.ResumeTokenFromModel(token)}, true
 	case api.RecoverResumeTokenCommand:
 		if token, ok := result.(core.ResumeToken); ok {
-			return adapter.ResumeTokenFromModel(token)
+			return adapter.ResumeTokenFromModel(token), true
 		}
+		return result, true
 	case api.StartActionAttemptCommand, api.CompleteActionAttemptCommand:
 		if attempt, ok := result.(core.ActionAttempt); ok {
-			return adapter.ActionAttemptFromModel(attempt)
+			return adapter.ActionAttemptFromModel(attempt), true
 		}
+		return result, true
 	case api.StartTraceSpanCommand:
 		if span, ok := result.(core.TraceSpan); ok {
-			return adapter.TraceSpanFromModel(span)
+			return adapter.TraceSpanFromModel(span), true
 		}
+		return result, true
+	default:
+		return nil, false
 	}
-	return result
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {

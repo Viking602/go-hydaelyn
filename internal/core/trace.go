@@ -1,10 +1,6 @@
 package core
 
-import (
-	"context"
-
-	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
-)
+import "context"
 
 type StartTraceSpanCommand struct {
 	RunID     string
@@ -53,8 +49,4 @@ func (r *Runtime) TraceSpans(runID string) []TraceSpan {
 		return nil
 	}
 	return append([]TraceSpan{}, spans...)
-}
-
-func traceSpanPayload(span TraceSpan) map[string]any {
-	return tracesvc.Payload(span)
 }
