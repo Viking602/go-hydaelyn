@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	executionsvc "github.com/Viking602/go-hydaelyn/internal/execution"
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	executionsvc "github.com/Viking602/go-hydaelyn/internal/execution"
 )
 
 func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (model.TaskExecutionLease, bool, error) {

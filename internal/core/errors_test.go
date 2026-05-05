@@ -12,9 +12,9 @@ import (
 // sentinel as the corresponding model error.
 func TestErrorVarsMatchModel(t *testing.T) {
 	cases := []struct {
-		name      string
-		coreErr   error
-		modelErr  error
+		name     string
+		coreErr  error
+		modelErr error
 	}{
 		{"ErrNotFound", core.ErrNotFound, model.ErrNotFound},
 		{"ErrTerminalState", core.ErrTerminalState, model.ErrTerminalState},

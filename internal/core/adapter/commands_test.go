@@ -77,9 +77,9 @@ func TestCommandToCore_RequestApproval(t *testing.T) {
 
 func TestCommandToCore_StartTraceSpan(t *testing.T) {
 	cmd := api.StartTraceSpanCommand{
-		RunID:   "r1",
-		TaskID:  "t1",
-		Name:    "my-span",
+		RunID:     "r1",
+		TaskID:    "t1",
+		Name:      "my-span",
 		Component: "worker",
 	}
 	result, ok := adapter.CommandToCore(cmd)
@@ -112,11 +112,11 @@ func TestStartRunCommandToCore(t *testing.T) {
 
 func TestCreateTaskCommandToCore(t *testing.T) {
 	cmd := api.CreateTaskCommand{
-		RunID:      "r1",
-		TaskID:     "t1",
-		Type:       api.TaskType(model.TaskTypeWorker),
-		AwaitMode:  api.AwaitMode(model.AwaitModeAll),
-		DependsOn:  []string{"dep1", "dep2"},
+		RunID:     "r1",
+		TaskID:    "t1",
+		Type:      api.TaskType(model.TaskTypeWorker),
+		AwaitMode: api.AwaitMode(model.AwaitModeAll),
+		DependsOn: []string{"dep1", "dep2"},
 	}
 	core := adapter.CreateTaskCommandToCore(cmd)
 	if core.RunID != "r1" {
