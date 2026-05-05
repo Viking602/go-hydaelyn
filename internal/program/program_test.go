@@ -2,6 +2,7 @@ package program
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,7 +96,7 @@ func TestMemoryLoaderLoadErrorCase(t *testing.T) {
 	ctx := context.Background()
 	_, err := loader.Load(ctx, "missing")
 
-	if err != ErrProgramNotFound {
+	if !errors.Is(err, ErrProgramNotFound) {
 		t.Errorf("Load() error = %v, want ErrProgramNotFound", err)
 	}
 }

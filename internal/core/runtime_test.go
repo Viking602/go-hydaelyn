@@ -210,8 +210,12 @@ func TestAcquireRejectsMismatchedEnvelopeWithoutMutatingTaskOrEnvelope(t *testin
 	if afterTaskA.Status != taskA.Status || afterTaskA.Attempts != taskA.Attempts {
 		t.Fatalf("mismatched envelope mutated task: before=%#v after=%#v", taskA, afterTaskA)
 	}
-	if envBAfter, err := rt.LoadEnvelope(ctx, envB.ID); err != nil || envBAfter.Status != "pending" {
-		t.Fatalf("mismatched acquire delivered another task's envelope, status=%q err=%v", envBAfter.Status, err)
+	envBAfter, err := rt.LoadEnvelope(ctx, envB.ID)
+	if err != nil {
+		t.Fatalf("LoadEnvelope(env-b) error = %v", err)
+	}
+	if envBAfter.Status != "pending" {
+		t.Fatalf("mismatched acquire delivered another task's envelope, status=%q", envBAfter.Status)
 	}
 
 	if _, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{

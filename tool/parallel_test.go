@@ -57,7 +57,7 @@ func (d *latencyDriver) Definition() Definition {
 	return Definition{Name: d.name, InputSchema: Schema{Type: "object"}}
 }
 
-func (d *latencyDriver) Execute(ctx context.Context, call Call, sink UpdateSink) (Result, error) {
+func (d *latencyDriver) Execute(ctx context.Context, call Call, _ UpdateSink) (Result, error) {
 	current := atomic.AddInt64(&d.active, 1)
 	for {
 		maxCurrent := atomic.LoadInt64(&d.max)

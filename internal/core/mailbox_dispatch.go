@@ -3,17 +3,18 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	mailboxsvc "github.com/Viking602/go-hydaelyn/internal/mailbox"
 )
 
-func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (TaskEnvelope, error) {
+func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (model.TaskEnvelope, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return TaskEnvelope{}, err
+		return model.TaskEnvelope{}, err
 	}
-	env, ok := result.(TaskEnvelope)
+	env, ok := result.(model.TaskEnvelope)
 	if !ok {
-		return TaskEnvelope{}, ErrInvalidCommand
+		return model.TaskEnvelope{}, ErrInvalidCommand
 	}
 	return env, nil
 }
@@ -21,12 +22,12 @@ func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (Ta
 // DispatchTaskFanOut resolves cmd.To against the registered agent profiles
 // and writes one envelope per recipient. The task transitions to Dispatched
 // once (the receivers compete for the lease via AcquireTaskExecution).
-func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]TaskEnvelope, error) {
+func (r *Runtime) DispatchTaskFanOut(ctx context.Context, cmd FanOutDispatchTaskCommand) ([]model.TaskEnvelope, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
-	envs, ok := result.([]TaskEnvelope)
+	envs, ok := result.([]model.TaskEnvelope)
 	if !ok {
 		return nil, ErrInvalidCommand
 	}

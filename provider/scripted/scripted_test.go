@@ -28,7 +28,7 @@ func TestLoadScriptAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var replayed []provider.Event
 	for {

@@ -4,7 +4,8 @@ import (
 	"context"
 
 	approvalsvc "github.com/Viking602/go-hydaelyn/internal/approval"
-	lifecycle "github.com/Viking602/go-hydaelyn/internal/lifecycle"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/go-hydaelyn/internal/lifecycle"
 )
 
 type (
@@ -14,14 +15,14 @@ type (
 	RequestApprovalResult     = approvalsvc.RequestApprovalResult
 )
 
-func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (ApprovalRequest, ResumeToken, error) {
+func (r *Runtime) RequestApproval(ctx context.Context, cmd RequestApprovalCommand) (model.ApprovalRequest, model.ResumeToken, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return ApprovalRequest{}, ResumeToken{}, err
+		return model.ApprovalRequest{}, model.ResumeToken{}, err
 	}
 	requested, ok := result.(RequestApprovalResult)
 	if !ok {
-		return ApprovalRequest{}, ResumeToken{}, ErrInvalidCommand
+		return model.ApprovalRequest{}, model.ResumeToken{}, ErrInvalidCommand
 	}
 	return requested.Approval, requested.Token, nil
 }
@@ -31,14 +32,14 @@ func (r *Runtime) DecideApproval(ctx context.Context, cmd DecideApprovalCommand)
 	return err
 }
 
-func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeTokenCommand) (ResumeToken, error) {
+func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeTokenCommand) (model.ResumeToken, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return ResumeToken{}, err
+		return model.ResumeToken{}, err
 	}
-	token, ok := result.(ResumeToken)
+	token, ok := result.(model.ResumeToken)
 	if !ok {
-		return ResumeToken{}, ErrInvalidCommand
+		return model.ResumeToken{}, ErrInvalidCommand
 	}
 	return token, nil
 }
@@ -51,6 +52,6 @@ func registerApprovalUoWCommandHandlers(runtime *Runtime) {
 
 // newApprovalForTask creates a new ApprovalRequest and ResumeToken for the
 // given task. Domain handlers receive it as an injected ApprovalFactory.
-func (r *Runtime) newApprovalForTask(task Task, reason, requester string) (ApprovalRequest, ResumeToken) {
+func (r *Runtime) newApprovalForTask(task model.Task, reason, requester string) (model.ApprovalRequest, model.ResumeToken) {
 	return lifecycle.NewApprovalPair(r.newID, task, reason, requester)
 }

@@ -16,7 +16,7 @@ import (
 // Version is overridden at link time via -ldflags "-X .../cli.Version=v2.0.0".
 var Version = "v2.0.0-dev"
 
-func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func Execute(ctx context.Context, args []string, stdout io.Writer, _ io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("missing command — try `hydaelyn help`")
 	}

@@ -6,12 +6,12 @@ import (
 	"flag"
 	"io"
 
-	core "github.com/Viking602/go-hydaelyn/internal/core"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("inspect-events", flag.ContinueOnError)
-	eventsPath := flags.String("events", "", "path to JSON-encoded []core.Event")
+	eventsPath := flags.String("events", "", "path to JSON-encoded []model.Event")
 	taskFilter := flags.String("task", "", "only show events for this task id")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -19,13 +19,13 @@ func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error 
 	if *eventsPath == "" {
 		return errors.New("inspect-events requires --events")
 	}
-	var events []core.Event
+	var events []model.Event
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
 	out := events
 	if *taskFilter != "" {
-		filtered := make([]core.Event, 0, len(events))
+		filtered := make([]model.Event, 0, len(events))
 		for _, ev := range events {
 			if ev.TaskID == *taskFilter {
 				filtered = append(filtered, ev)
@@ -40,7 +40,7 @@ func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error 
 	})
 }
 
-func firstRunID(events []core.Event) string {
+func firstRunID(events []model.Event) string {
 	if len(events) == 0 {
 		return ""
 	}

@@ -111,7 +111,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		payload, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("anthropic api error: %s", strings.TrimSpace(string(payload)))
 	}

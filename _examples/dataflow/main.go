@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
 )
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
 )
 
@@ -11,14 +12,14 @@ type (
 	EndTraceSpanCommand   = tracesvc.EndTraceSpanCommand
 )
 
-func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (TraceSpan, error) {
+func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (model.TraceSpan, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return TraceSpan{}, err
+		return model.TraceSpan{}, err
 	}
-	span, ok := result.(TraceSpan)
+	span, ok := result.(model.TraceSpan)
 	if !ok {
-		return TraceSpan{}, ErrInvalidCommand
+		return model.TraceSpan{}, ErrInvalidCommand
 	}
 	return span, nil
 }
@@ -28,7 +29,7 @@ func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) err
 	return err
 }
 
-func (r *Runtime) TraceSpans(runID string) []TraceSpan {
+func (r *Runtime) TraceSpans(runID string) []model.TraceSpan {
 	ctx := context.Background()
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
@@ -39,7 +40,7 @@ func (r *Runtime) TraceSpans(runID string) []TraceSpan {
 	if err != nil {
 		return nil
 	}
-	return append([]TraceSpan{}, spans...)
+	return append([]model.TraceSpan{}, spans...)
 }
 
 func registerTraceUoWCommandHandlers(runtime *Runtime) {

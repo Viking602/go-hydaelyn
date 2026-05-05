@@ -19,7 +19,7 @@ type mockHandler struct {
 	returnError       bool
 }
 
-func (m *mockHandler) TransformContext(ctx context.Context, messages []message.Message) ([]message.Message, error) {
+func (m *mockHandler) TransformContext(_ context.Context, messages []message.Message) ([]message.Message, error) {
 	m.transformCalled = true
 	if m.returnError {
 		return nil, errors.New("transform error")
@@ -27,7 +27,7 @@ func (m *mockHandler) TransformContext(ctx context.Context, messages []message.M
 	return append(messages, message.Message{Role: message.RoleSystem, Text: "transformed"}), nil
 }
 
-func (m *mockHandler) BeforeModelCall(ctx context.Context, request *provider.Request) error {
+func (m *mockHandler) BeforeModelCall(_ context.Context, _ *provider.Request) error {
 	m.beforeModelCalled = true
 	if m.returnError {
 		return errors.New("before model error")
@@ -35,7 +35,7 @@ func (m *mockHandler) BeforeModelCall(ctx context.Context, request *provider.Req
 	return nil
 }
 
-func (m *mockHandler) BeforeToolCall(ctx context.Context, call *tool.Call) error {
+func (m *mockHandler) BeforeToolCall(_ context.Context, _ *tool.Call) error {
 	m.beforeToolCalled = true
 	if m.returnError {
 		return errors.New("before tool error")
@@ -43,7 +43,7 @@ func (m *mockHandler) BeforeToolCall(ctx context.Context, call *tool.Call) error
 	return nil
 }
 
-func (m *mockHandler) AfterToolCall(ctx context.Context, result *tool.Result) error {
+func (m *mockHandler) AfterToolCall(_ context.Context, _ *tool.Result) error {
 	m.afterToolCalled = true
 	if m.returnError {
 		return errors.New("after tool error")
@@ -51,7 +51,7 @@ func (m *mockHandler) AfterToolCall(ctx context.Context, result *tool.Result) er
 	return nil
 }
 
-func (m *mockHandler) OnEvent(ctx context.Context, event provider.Event) error {
+func (m *mockHandler) OnEvent(_ context.Context, _ provider.Event) error {
 	m.onEventCalled = true
 	if m.returnError {
 		return errors.New("on event error")

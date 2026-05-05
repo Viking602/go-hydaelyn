@@ -43,7 +43,7 @@ func TestToError(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 	base := errors.New("base")
-	if err := ToError(base); err != base {
+	if err := ToError(base); !errors.Is(err, base) {
 		t.Error("expected same error instance")
 	}
 	if err := ToError("panic string"); err.Error() != "panic string" {

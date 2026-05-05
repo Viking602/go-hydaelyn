@@ -1,6 +1,7 @@
 # Docs Index
 
 - [North Star Runtime](architecture/north-star-runtime.md)
+- [GoLand Go Format Standard](architecture/goland-format-standard.md)
 - [Active Plan](plans/active-plan.md)
 - [Quickstart](quickstart.md)
 - [Runner Runtime](orchestrator-runtime.md)

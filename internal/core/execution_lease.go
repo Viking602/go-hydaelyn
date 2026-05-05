@@ -4,16 +4,17 @@ import (
 	"context"
 
 	executionsvc "github.com/Viking602/go-hydaelyn/internal/execution"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
-func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (TaskExecutionLease, bool, error) {
+func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (model.TaskExecutionLease, bool, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return TaskExecutionLease{}, false, err
+		return model.TaskExecutionLease{}, false, err
 	}
 	acquired, ok := result.(AcquireTaskExecutionResult)
 	if !ok {
-		return TaskExecutionLease{}, false, ErrInvalidCommand
+		return model.TaskExecutionLease{}, false, ErrInvalidCommand
 	}
 	return acquired.Lease, acquired.Acquired, nil
 }

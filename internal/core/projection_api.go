@@ -1,19 +1,23 @@
 package core
 
-import "context"
+import (
+	"context"
 
-func (r *Runtime) Replay(runID string, mode ReplayMode) (Projection, error) {
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+)
+
+func (r *Runtime) Replay(runID string, _ model.ReplayMode) (model.Projection, error) {
 	events, err := r.RunEvents(context.Background(), runID)
 	if err != nil {
-		return Projection{}, err
+		return model.Projection{}, err
 	}
 	return replayProjection(events)
 }
 
-func (r *Runtime) ReplayRunState(runID string) (Projection, error) {
-	return r.Replay(runID, ReplayModeAudit)
+func (r *Runtime) ReplayRunState(runID string) (model.Projection, error) {
+	return r.Replay(runID, model.ReplayModeAudit)
 }
 
-func (r *Runtime) Recover(_ context.Context, runID string) (Projection, error) {
-	return r.Replay(runID, ReplayModeRecovery)
+func (r *Runtime) Recover(_ context.Context, runID string) (model.Projection, error) {
+	return r.Replay(runID, model.ReplayModeRecovery)
 }

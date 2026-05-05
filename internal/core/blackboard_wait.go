@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 // WaitForBlackboard blocks until predicate returns true for the accumulated
@@ -17,9 +19,9 @@ func (r *Runtime) WaitForBlackboard(
 	ctx context.Context,
 	runID string,
 	filter BlackboardFilter,
-	predicate func([]BlackboardItem) bool,
+	predicate func([]model.BlackboardItem) bool,
 	timeout time.Duration,
-) ([]BlackboardItem, error) {
+) ([]model.BlackboardItem, error) {
 	if predicate == nil {
 		return nil, fmt.Errorf("%w: WaitForBlackboard requires predicate", ErrInvalidCommand)
 	}
@@ -64,7 +66,7 @@ func (r *Runtime) WaitForBlackboard(
 	}
 }
 
-func appendUniqueBlackboardItems(acc []BlackboardItem, seen map[string]struct{}, items ...BlackboardItem) []BlackboardItem {
+func appendUniqueBlackboardItems(acc []model.BlackboardItem, seen map[string]struct{}, items ...model.BlackboardItem) []model.BlackboardItem {
 	for _, item := range items {
 		if item.ID != "" {
 			if _, ok := seen[item.ID]; ok {

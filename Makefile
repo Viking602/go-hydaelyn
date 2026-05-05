@@ -10,7 +10,8 @@
 #   make test         - run `go test ./...`
 #   make test-race    - run race tests with 10m timeout
 #   make build        - build all packages
-#   make verify       - fmt-check + vet + tidy-check + lint + test (CI parity)
+#   make verify       - fmt-check + vet + tidy-check + lint + test
+#   make ci-local     - local CI parity gate including race, static analysis, vuln, and architecture checks
 #
 # All targets are .PHONY because we don't produce real files.
 
@@ -18,6 +19,10 @@ GO            ?= go
 GOFMT         ?= gofmt
 GOIMPORTS     ?= goimports
 GOLANGCI_LINT ?= golangci-lint
+GOPATH_BIN    := $(shell $(GO) env GOPATH)/bin
+STATICCHECK   ?= $(GOPATH_BIN)/staticcheck
+GOVULNCHECK   ?= $(GOPATH_BIN)/govulncheck
+SENTRUX       ?= sentrux
 
 GO_FILES := $(shell find . -type f -name '*.go' -not -path './.git/*')
 
@@ -51,6 +56,19 @@ vet: ## Run go vet
 lint: ## Run golangci-lint (install: brew install golangci-lint)
 	$(GOLANGCI_LINT) run --timeout=5m
 
+.PHONY: staticcheck
+staticcheck: ## Run staticcheck (install: go install honnef.co/go/tools/cmd/staticcheck@latest)
+	$(STATICCHECK) ./...
+
+.PHONY: vulncheck
+vulncheck: ## Run govulncheck (install: go install golang.org/x/vuln/cmd/govulncheck@latest)
+	$(GOVULNCHECK) ./...
+
+.PHONY: architecture-check
+architecture-check: ## Run Sentrux and framework boundary checks
+	$(SENTRUX) check .
+	./scripts/check-business-words.sh
+
 .PHONY: tidy
 tidy: ## Run go mod tidy
 	$(GO) mod tidy
@@ -78,4 +96,7 @@ build: ## go build ./...
 	$(GO) build ./...
 
 .PHONY: verify
-verify: fmt-check vet tidy-check lint test ## CI-parity local gate
+verify: fmt-check vet tidy-check lint test ## Fast local gate
+
+.PHONY: ci-local
+ci-local: fmt-check tidy-check vet staticcheck vulncheck lint test test-race architecture-check ## Local CI parity gate

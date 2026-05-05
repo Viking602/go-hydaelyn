@@ -3,6 +3,8 @@ package core
 import (
 	"maps"
 	"slices"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func (r *Runtime) RegisterAgent(profile AgentProfile) {
@@ -36,33 +38,33 @@ func cloneAgentProfile(profile AgentProfile) AgentProfile {
 	return clone
 }
 
-func (r *Runtime) RegisterTool(tool Tool) {
+func (r *Runtime) RegisterTool(tool model.Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if tool.Name == "" {
 		return
 	}
 	if tool.EffectType == "" {
-		tool.EffectType = ToolEffectReadOnly
+		tool.EffectType = model.ToolEffectReadOnly
 	}
 	r.tools[tool.Name] = cloneTool(tool)
 }
 
-func (r *Runtime) tool(name string) (Tool, bool) {
+func (r *Runtime) tool(name string) (model.Tool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tool, ok := r.tools[name]
 	return cloneTool(tool), ok
 }
 
-func cloneTool(tool Tool) Tool {
+func cloneTool(tool model.Tool) model.Tool {
 	clone := tool
 	clone.PolicyTags = slices.Clone(tool.PolicyTags)
 	clone.Metadata = maps.Clone(tool.Metadata)
 	return clone
 }
 
-func (r *Runtime) SetMessagePolicy(policy MessagePolicyChecker) {
+func (r *Runtime) SetMessagePolicy(policy model.MessagePolicyChecker) {
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
 	if policy == nil {

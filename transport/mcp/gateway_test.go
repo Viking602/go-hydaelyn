@@ -61,7 +61,7 @@ type simpleGateway struct {
 	tools []tool.Driver
 }
 
-func (s *simpleGateway) ImportTools(ctx context.Context) ([]tool.Driver, error) {
+func (s *simpleGateway) ImportTools(_ context.Context) ([]tool.Driver, error) {
 	return s.tools, nil
 }
 

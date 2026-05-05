@@ -13,52 +13,53 @@ The runtime now models:
 
 ## Public Fields
 
-### Planner
+### Planner Output
 
-`planner.TaskSpec` now supports:
+Planner output is exposed through `api.TodoPlan` and `api.TodoItem`. A todo
+item can describe what a runtime task should read and write:
 
 - `Reads []string`
 - `Writes []string`
-- `Publish []team.OutputVisibility`
 
-### Runtime Task
+### Runtime Task Command
 
-`team.Task` mirrors the same fields:
+`api.CreateTaskCommand` maps dataflow intent onto the Run/Task runtime:
 
-- `Reads`
-- `Writes`
-- `Publish`
+- `ReadSelectors []api.BlackboardSelector`
+- `WriteTargets []string`
 
-### Task Result
+The persisted `api.Task` mirrors those fields so dispatch and replay can see
+the same contract.
 
-`team.Result` now includes:
+### Task Report
 
-- `Structured map[string]any`
-- `ArtifactIDs []string`
+`api.TypedReport` carries the worker result. Reports can include summary text,
+structured blackboard items, action outcomes, handoff context, and status values
+such as `success`, `blocked`, `needs_approval`, or `needs_clarification`.
 
 ## Output Visibility
 
-Supported publish targets:
+Runtime output is represented by explicit stores instead of the old
+`private/shared/blackboard` publish enum:
 
-- `private`
-- `shared`
-- `blackboard`
-
-If `Publish` is omitted, runtime preserves the old compatibility path and still emits a shared summary message.
+- private execution context lives in task state, leases, traces, and events
+- shared agent facts are written as `api.BlackboardItem`
+- user-visible output is queued as `api.UserMessage` through the response outbox
 
 ## Blackboard Exchanges
 
-`blackboard.State.Exchanges` is the generic task exchange surface.
+`api.BlackboardItem` is the generic task exchange surface.
 
-Each exchange records:
+Each item records:
 
 - `key`
 - `taskId`
-- `valueType`
-- `text`
-- optional structured payload
+- `type`
+- `content`
+- optional payload
 - optional artifact refs
-- optional claim/finding refs
+- optional evidence refs
+- visibility
 
 This does not replace the research evidence model. Claims, findings, evidence, and verifications still exist and remain the verification-native surface.
 
@@ -70,7 +71,7 @@ For a task with explicit dataflow:
 2. the materialized inputs are appended to the private task session
 3. the task runs normally
 4. runtime extracts structured output and artifact refs
-5. runtime publishes outputs to requested destinations
+5. runtime writes blackboard items or queues response output through commands
 6. events are recorded for replay
 
 ## Replay
@@ -79,7 +80,7 @@ Replay now reconstructs:
 
 - task outputs
 - artifact refs
-- named exchanges
+- blackboard items
 - verification results
 
 This makes task-level synthesis and inspection deterministic over the event log.

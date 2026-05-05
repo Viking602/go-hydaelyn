@@ -36,7 +36,7 @@ func Example() {
 	defer server.Close()
 
 	c := mcpclient.New(mcpclient.NewHTTPTransport(server.URL, nil))
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	tools, err := c.ListTools(context.Background())
 	if err != nil {

@@ -214,12 +214,12 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return nil, fmt.Errorf("openai api returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
 	}
 	if !isEventStreamContentType(resp.Header.Get("Content-Type")) {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return nil, fmt.Errorf("openai api returned unexpected content type %q: %s", resp.Header.Get("Content-Type"), strings.TrimSpace(string(payload)))
 	}

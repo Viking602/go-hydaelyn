@@ -27,7 +27,6 @@ The major-version public surface includes:
 - `flow`
 - `hook`
 - `message`
-- `orchestrator` — advanced façade kept for compatibility and extension work
 - `policy`
 - `provider`
 - `tool`
@@ -94,6 +93,10 @@ These packages remain implementation details:
 - mailbox outbox dispatchers
 - command handlers and transition tables
 - replay/recovery internals
+
+Archived v1 package names such as `host`, `team`, `planner`, `scheduler`,
+`capability`, and `orchestrator` are not part of the current public import
+surface. Use `hydaelyn.New()` plus `api` contracts for new code.
 
 Hydaelyn does not ship endpoint catalogs, a standard-library router, or a
 canonical `net/http` route tree as part of the primary runner API.

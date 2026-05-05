@@ -319,7 +319,7 @@ func (s *State) UpsertExchangeCAS(exchange Exchange) (Exchange, error) {
 	return s.appendExchange(exchange), nil
 }
 
-func (s State) ClaimsForTask(taskID string) []Claim {
+func (s *State) ClaimsForTask(taskID string) []Claim {
 	items := make([]Claim, 0, len(s.Claims))
 	for _, claim := range s.Claims {
 		if claim.TaskID == taskID {
@@ -329,7 +329,7 @@ func (s State) ClaimsForTask(taskID string) []Claim {
 	return items
 }
 
-func (s State) ExchangesForKey(key string) []Exchange {
+func (s *State) ExchangesForKey(key string) []Exchange {
 	items := make([]Exchange, 0, len(s.Exchanges))
 	for _, exchange := range s.Exchanges {
 		if exchange.Key == key {
@@ -339,7 +339,7 @@ func (s State) ExchangesForKey(key string) []Exchange {
 	return items
 }
 
-func (s State) ExchangesForTask(taskID string) []Exchange {
+func (s *State) ExchangesForTask(taskID string) []Exchange {
 	items := make([]Exchange, 0, len(s.Exchanges))
 	for _, exchange := range s.Exchanges {
 		if exchange.TaskID == taskID {
@@ -349,7 +349,7 @@ func (s State) ExchangesForTask(taskID string) []Exchange {
 	return items
 }
 
-func (s State) FindingsForClaim(claimID string) []Finding {
+func (s *State) FindingsForClaim(claimID string) []Finding {
 	items := make([]Finding, 0, len(s.Findings))
 	for _, finding := range s.Findings {
 		for _, current := range finding.ClaimIDs {
@@ -362,7 +362,7 @@ func (s State) FindingsForClaim(claimID string) []Finding {
 	return items
 }
 
-func (s State) SupportedFindings() []Finding {
+func (s *State) SupportedFindings() []Finding {
 	supported := map[string]struct{}{}
 	for _, verification := range s.Verifications {
 		if verification.SupportsClaim(DefaultVerificationConfidence) {

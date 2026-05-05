@@ -1,29 +1,33 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+)
 
 type allowPolicyEngine struct{}
 
-func (allowPolicyEngine) Authorize(context.Context, PolicyRequest) (PolicyDecision, error) {
-	return PolicyDecision{Effect: PolicyEffectAllow}, nil
+func (allowPolicyEngine) Authorize(context.Context, model.PolicyRequest) (model.PolicyDecision, error) {
+	return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
 }
 
 type messagePolicyAdapter struct {
-	check MessagePolicyChecker
+	check model.MessagePolicyChecker
 }
 
-func (p messagePolicyAdapter) Authorize(_ context.Context, request PolicyRequest) (PolicyDecision, error) {
+func (p messagePolicyAdapter) Authorize(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
 	if p.check == nil || request.Message == nil {
-		return PolicyDecision{Effect: PolicyEffectAllow}, nil
+		return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
 	}
 	decision := p.check(*request.Message)
 	if decision.Effect == "" {
-		decision.Effect = PolicyEffectAllow
+		decision.Effect = model.PolicyEffectAllow
 	}
 	return decision, nil
 }
 
-func requestRunID(request PolicyRequest) string {
+func requestRunID(request model.PolicyRequest) string {
 	if request.Message != nil {
 		return request.Message.RunID
 	}
@@ -39,7 +43,7 @@ func requestRunID(request PolicyRequest) string {
 	return ""
 }
 
-func requestTaskID(request PolicyRequest) string {
+func requestTaskID(request model.PolicyRequest) string {
 	if request.Message != nil {
 		return request.Message.TaskID
 	}

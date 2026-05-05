@@ -254,7 +254,7 @@ func requireCapturedField(t *testing.T, captured map[string]any, key string, wan
 
 func collectEvents(t *testing.T, stream provider.Stream) []provider.Event {
 	t.Helper()
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	events := make([]provider.Event, 0, 8)
 	for {
 		event, err := stream.Recv()

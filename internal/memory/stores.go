@@ -289,7 +289,7 @@ func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessag
 		runIDs = append(runIDs, runID)
 	}
 	slices.Sort(runIDs)
-	out := []model.UserMessage{}
+	var out []model.UserMessage
 	for _, runID := range runIDs {
 		for _, id := range u.staged.MessagesByRun[runID] {
 			message, ok := u.staged.Messages[id]

@@ -1,6 +1,8 @@
 package core
 
-func userMessagePayload(message UserMessage) map[string]any {
+import "github.com/Viking602/go-hydaelyn/internal/core/model"
+
+func userMessagePayload(message model.UserMessage) map[string]any {
 	return map[string]any{
 		"messageId":      message.ID,
 		"runId":          message.RunID,

@@ -59,7 +59,7 @@ func (p *Provider) Begin(ctx context.Context) (ports.UnitOfWork, error) {
 	return &UnitOfWork{provider: p, staged: staged}, nil
 }
 
-func (p *Provider) SelectItems(ctx context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
+func (p *Provider) SelectItems(_ context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
 	return selectBlackboardItems(p.committed, runID, selector), nil

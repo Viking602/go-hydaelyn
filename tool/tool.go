@@ -17,9 +17,9 @@ type EffectType = message.ToolEffectType
 type RetryPolicy = message.ToolRetryPolicy
 
 const (
-	EffectReadOnly           EffectType = message.ToolEffectReadOnly
-	EffectWrite              EffectType = message.ToolEffectWrite
-	EffectExternalSideEffect EffectType = message.ToolEffectExternalSideEffect
+	EffectReadOnly           = message.ToolEffectReadOnly
+	EffectWrite              = message.ToolEffectWrite
+	EffectExternalSideEffect = message.ToolEffectExternalSideEffect
 )
 
 type Mode string

@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
 )
 
@@ -109,7 +109,7 @@ func main() {
 	must(err)
 	wg.Wait()
 
-	// Aggregator writes a Finding synthesising the evidence.
+	// Aggregator writes a Finding synthesizing the evidence.
 	finding := fmt.Sprintf("3 specialists corroborate deploy regression (n=%d evidence rows)", len(items))
 	must(runner.WriteItem(ctx, api.BlackboardItem{
 		RunID:      run.ID,

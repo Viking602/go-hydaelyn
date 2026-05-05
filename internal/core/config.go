@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	"github.com/Viking602/go-hydaelyn/internal/memory"
 	storedel "github.com/Viking602/go-hydaelyn/internal/store"
 )
@@ -21,10 +22,10 @@ type Runtime struct {
 	commandBus    *commandbus.Bus
 	*storedel.Delegates
 
-	tools      map[string]Tool
+	tools      map[string]model.Tool
 	agents     map[string]AgentProfile
 	agentOrder []string
-	flows      map[string]Flow
+	flows      map[string]model.Flow
 
 	policy        PolicyEngine
 	outputGateway OutputGateway
@@ -44,10 +45,10 @@ func NewMemoryRuntime() *Runtime {
 
 func NewRuntime(config Config) *Runtime {
 	rt := &Runtime{
-		tools:         map[string]Tool{},
+		tools:         map[string]model.Tool{},
 		agents:        map[string]AgentProfile{},
 		agentOrder:    []string{},
-		flows:         map[string]Flow{},
+		flows:         map[string]model.Flow{},
 		policy:        allowPolicyEngine{},
 		outputGateway: memoryOutputGateway{},
 		memProvider:   memory.NewProvider(),
@@ -65,9 +66,9 @@ func NewRuntime(config Config) *Runtime {
 	rt.Delegates = storedel.NewDelegates(storedel.Options{
 		BeginWrite: rt.beginWriteUoW,
 		BeginRead:  rt.beginReadUoW,
-		ResumeTokens: func() map[string]ResumeToken {
+		ResumeTokens: func() map[string]model.ResumeToken {
 			snap := rt.memProvider.CommittedSnapshot()
-			result := make(map[string]ResumeToken, len(snap.ResumeTokens))
+			result := make(map[string]model.ResumeToken, len(snap.ResumeTokens))
 			for k, v := range snap.ResumeTokens {
 				result[k] = v
 			}

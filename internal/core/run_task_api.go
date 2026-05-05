@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
 )
 
@@ -13,49 +14,49 @@ type (
 	StartRunResult    = runsvc.StartRunResult
 )
 
-func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (Run, Task, error) {
+func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (model.Run, model.Task, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return Run{}, Task{}, err
+		return model.Run{}, model.Task{}, err
 	}
 	started, ok := result.(StartRunResult)
 	if !ok {
-		return Run{}, Task{}, ErrInvalidCommand
+		return model.Run{}, model.Task{}, ErrInvalidCommand
 	}
 	return started.Run, started.Root, nil
 }
 
-func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (Task, error) {
+func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (model.Task, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return Task{}, err
+		return model.Task{}, err
 	}
-	task, ok := result.(Task)
+	task, ok := result.(model.Task)
 	if !ok {
-		return Task{}, ErrInvalidCommand
+		return model.Task{}, ErrInvalidCommand
 	}
 	return task, nil
 }
 
-func (r *Runtime) Run(ctx context.Context, runID string) (Run, error) {
+func (r *Runtime) Run(ctx context.Context, runID string) (model.Run, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return Run{}, err
+		return model.Run{}, err
 	}
 	defer done()
 	return uow.Runs().LoadRun(ctx, runID)
 }
 
-func (r *Runtime) Task(ctx context.Context, runID, taskID string) (Task, error) {
+func (r *Runtime) Task(ctx context.Context, runID, taskID string) (model.Task, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return Task{}, err
+		return model.Task{}, err
 	}
 	defer done()
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
 }
 
-func (r *Runtime) ReadyTasks(runID string) []Task {
+func (r *Runtime) ReadyTasks(runID string) []model.Task {
 	ctx := context.Background()
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
@@ -66,11 +67,11 @@ func (r *Runtime) ReadyTasks(runID string) []Task {
 	if err != nil {
 		return nil
 	}
-	byID := make(map[string]Task, len(tasks))
+	byID := make(map[string]model.Task, len(tasks))
 	for _, task := range tasks {
 		byID[task.ID] = task
 	}
-	out := make([]Task, 0, len(tasks))
+	out := make([]model.Task, 0, len(tasks))
 	for _, task := range tasks {
 		ready, _ := dependencyGate(task, byID)
 		if !taskCanBecomeReady(task.Status) || !ready {
@@ -78,18 +79,18 @@ func (r *Runtime) ReadyTasks(runID string) []Task {
 		}
 		out = append(out, task)
 	}
-	slices.SortFunc(out, func(a, b Task) int {
+	slices.SortFunc(out, func(a, b model.Task) int {
 		return stringsCompare(a.ID, b.ID)
 	})
 	return out
 }
 
-func (r *Runtime) Events(runID string) []Event {
+func (r *Runtime) Events(runID string) []model.Event {
 	events, _ := r.RunEvents(context.Background(), runID)
 	return events
 }
 
-func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]Event, error) {
+func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]model.Event, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -115,7 +116,7 @@ func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
 	}
 	defer done()
 	lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, runID, taskID)
-	if err != nil || !ok || lease.Status != LeaseStatusActive {
+	if err != nil || !ok || lease.Status != model.LeaseStatusActive {
 		return 0
 	}
 	return 1

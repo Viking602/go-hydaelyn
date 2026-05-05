@@ -1,53 +1,76 @@
 # Runtime Extension Points
 
-Hydaelyn exposes four extension layers:
+Hydaelyn currently exposes extension points at two levels:
 
-1. `Stage Middleware`
-2. `Capability Policy`
-3. `Output Guardrail`
-4. `Engine Hook`
+1. `hydaelyn.Runner` runtime contracts configured through `api.Config`
+2. `agent.Engine` model/tool turn hooks configured through `agent.Input` and
+   `hook.Chain`
 
 ## Which One Should I Use?
 
 | Need | Use |
-| --- | --- |
-| Observe team / task / planner / synthesize lifecycle | `Stage Middleware` |
-| Enforce permission / approval / retry / rate limit / budget | `Capability Policy` |
-| Validate or block the final assistant answer | `Output Guardrail` |
-| Mutate provider request or tool call structs directly | `Engine Hook` |
+| ---- | --- |
+| Override durable storage | `api.Config.StoreProvider` |
+| Enforce dispatch, blackboard, handoff, tool, action, or response policy | `api.Config.PolicyEngine` |
+| Deliver queued user messages | `api.Config.OutputGateway` |
+| Replace intent / planner / validator / router / dispatcher / monitor stages | `api.Config.Pipeline` |
+| Run a single agent model/tool loop | `agent.Engine` |
+| Mutate provider requests or tool calls directly | `hook.Chain` on `agent.Engine` |
+| Validate or block final assistant output | `agent.Input.OutputGuardrails` |
 
-## Recommended API
+## Runtime Configuration
 
 ```go
-runner.UseStageMiddleware(observe.RuntimeMiddleware(observer))
+runner := hydaelyn.New(api.Config{
+	StoreProvider: durableStore,
+	PolicyEngine:  policyEngine,
+	OutputGateway: outputGateway,
+	Pipeline: api.PipelineComponents{
+		IntentAnalyzer: analyzer,
+		Planner:        planner,
+		Validator:      validator,
+		Router:         router,
+		Dispatcher:     dispatcher,
+		TaskMonitor:    monitor,
+	},
+})
+```
 
-runner.UseCapabilityPolicy(capability.RequirePermissions())
-runner.UseCapabilityPolicy(capability.RequireApproval())
-runner.UseCapabilityPolicy(capability.BudgetEnforcer())
+Runtime state changes should go through `Runner.ExecuteCommand(ctx, api.Command)`
+or the typed `Runner` methods. The store interfaces remain available for
+durable driver integration and inspection, but they are lower-level than the
+Run/Task command contract.
 
-runner.RegisterOutputGuardrail("safe-json", safeJSON)
-runner.UseOutputGuardrail(noSecrets)
+## Agent Engine Hooks
 
-runner.RegisterHook(customHook) // advanced / low-level
+```go
+engine := agent.Engine{
+	Provider: providerDriver,
+	Tools:    tools,
+	Hooks:    hook.NewChain(customHook),
+}
+
+result, err := engine.Run(ctx, agent.Input{
+	Model:            "model-name",
+	Messages:         messages,
+	ExtraBody:        extraBody,
+	OutputGuardrails: []agent.OutputGuardrail{guardrail},
+})
 ```
 
 ## Provider Body Extras
 
-Business callers can pass provider-specific request body fields through
-`AgentOptions.ExtraBody`. This is intended for OpenAI-compatible extensions
-such as `chat_template_kwargs` or sampling fields not modeled by Hydaelyn yet:
+Callers can pass provider-specific request body fields through
+`agent.Input.ExtraBody`. This is intended for OpenAI-compatible extensions such
+as `chat_template_kwargs` or sampling fields not modeled by Hydaelyn yet:
 
 ```go
-response, err := runner.Prompt(ctx, host.PromptRequest{
-	SessionID: sessionID,
-	Provider:  "openai",
-	Model:     "qwen",
-	Messages:  messages,
-	Agent: host.AgentOptions{
-		ExtraBody: map[string]any{
-			"chat_template_kwargs": map[string]any{
-				"thinking": true,
-			},
+result, err := engine.Run(ctx, agent.Input{
+	Model:    "qwen",
+	Messages: messages,
+	ExtraBody: map[string]any{
+		"chat_template_kwargs": map[string]any{
+			"thinking": true,
 		},
 	},
 })
@@ -58,19 +81,16 @@ its managed request. Managed fields such as `model`, `messages`, `tools`,
 `stream`, `stream_options`, `stop`, `reasoning`, and `response_format` are not
 overridden by `ExtraBody`.
 
-## Execution Order
+## Agent Turn Order
 
-For a prompt or task turn, Hydaelyn now runs:
+For an `agent.Engine` turn, Hydaelyn runs:
 
-1. Outer runtime stage middleware (`team` / `task` / `agent`)
-2. `Stage Middleware` for `llm.transform_context`
-3. `Engine Hook.TransformContext`
-4. `Stage Middleware` for `llm.before`
-5. `Engine Hook.BeforeModelCall`
-6. `Capability Policy` for the LLM call
-7. Provider event callback
-8. `Stage Middleware` for `llm.event`
-9. `Engine Hook.OnEvent`
-10. Provider event normalization
-11. Tool turns: `Stage Middleware` -> `Engine Hook` -> `Capability Policy` -> tool handler -> `Stage Middleware` -> `Engine Hook`
-12. `Output Guardrail` on terminal assistant output
+1. `hook.Chain.TransformContext`
+2. `hook.Chain.BeforeModelCall`
+3. provider stream
+4. provider event callback from `agent.Input.OnEvent`
+5. `hook.Chain.OnEvent`
+6. tool calls through `hook.Chain.BeforeToolCall`
+7. tool execution
+8. `hook.Chain.AfterToolCall`
+9. output guardrails on terminal assistant output
