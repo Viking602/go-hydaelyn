@@ -14,7 +14,7 @@ import (
 
 func TestImportMCPToolsMapsExternalToolsToLocalDrivers(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		defer request.Body.Close()
+		defer func() { _ = request.Body.Close() }()
 		var payload map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request: %v", err)

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	core "github.com/Viking602/go-hydaelyn/internal/core"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func TestVersionPrintsBuildString(t *testing.T) {
@@ -35,10 +35,10 @@ func TestHelpListsTopLevelCommands(t *testing.T) {
 func TestInspectEventsFiltersByTask(t *testing.T) {
 	dir := t.TempDir()
 	eventsPath := filepath.Join(dir, "events.json")
-	events := []core.Event{
-		{RunID: "run-1", TaskID: "task-1", Sequence: 1, Type: core.EventTaskCreated},
-		{RunID: "run-1", TaskID: "task-2", Sequence: 2, Type: core.EventTaskCreated},
-		{RunID: "run-1", TaskID: "task-1", Sequence: 3, Type: core.EventTaskCompleted},
+	events := []model.Event{
+		{RunID: "run-1", TaskID: "task-1", Sequence: 1, Type: model.EventTaskCreated},
+		{RunID: "run-1", TaskID: "task-2", Sequence: 2, Type: model.EventTaskCreated},
+		{RunID: "run-1", TaskID: "task-1", Sequence: 3, Type: model.EventTaskCompleted},
 	}
 	payload, err := json.Marshal(events)
 	if err != nil {

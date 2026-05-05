@@ -68,7 +68,7 @@ func (c *LLMCompactor) summarize(ctx context.Context, dropped []message.Message)
 	if err != nil {
 		return "", err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var summary strings.Builder
 	for {

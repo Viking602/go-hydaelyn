@@ -1,20 +1,23 @@
 package core
 
-import corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
+import (
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
+)
 
-func dependencyGate(task Task, tasks map[string]Task) (ready bool, fatal bool) {
+func dependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, fatal bool) {
 	return corestate.DependencyGate(task, tasks)
 }
 
-func taskCanBecomeReady(status TaskStatus) bool {
+func taskCanBecomeReady(status model.TaskStatus) bool {
 	return corestate.TaskCanBecomeReady(status)
 }
 
-func isTerminalTask(status TaskStatus) bool {
+func isTerminalTask(status model.TaskStatus) bool {
 	return corestate.IsTerminalTask(status)
 }
 
-func isTerminalRun(status RunStatus) bool {
+func isTerminalRun(status model.RunStatus) bool {
 	return corestate.IsTerminalRun(status)
 }
 

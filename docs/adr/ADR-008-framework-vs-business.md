@@ -26,7 +26,7 @@ Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并�
 ### 1. 框架职责（保留 / 补完）
 
 | 能力 | 形式 |
-|------|------|
+| ---- | ---- |
 | Run / Task 状态机 | `Run`, `Task`, `RunStatus`, `TaskStatus`, `TaskType` 仅作为字符串别名（不绑定语义） |
 | Blackboard | 读写 + 过滤 + Subscribe（M2.2）；item kind 由调用方任意命名 |
 | Mailbox | 路由 + fan-out（M2.1）+ Lease + Ack/DeadLetter |
@@ -39,7 +39,7 @@ Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并�
 ### 2. 业务职责（开发者侧 — 框架不可预设）
 
 | 业务概念 | 实现方式（框架提供原料） |
-|----------|--------------------------|
+| -------- | ------------------------ |
 | 角色（Monitor / Reviewer / Hazard…） | `AgentProfile.Role` + `AgentProfile.Metadata` |
 | 任务种类语义 | `Task.Tags []string` + `Task.Type`（开发者自定字符串） |
 | 黑板条目种类 | 调用方传入 `BlackboardItemKind`（任意字符串） |

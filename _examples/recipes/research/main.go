@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
 )
 
@@ -67,7 +67,7 @@ func main() {
 		RunID:      run.ID,
 		Type:       api.BlackboardItemFinding,
 		Source:     api.SourceIdentity{Type: api.SourceAgent, ID: "synth"},
-		Content:    fmt.Sprintf("synthesised %d evidence items into a recommendation", len(items)),
+		Content:    fmt.Sprintf("synthesized %d evidence items into a recommendation", len(items)),
 		Visibility: api.BlackboardVisibilityAgentVisible,
 	}))
 	fmt.Printf("research recipe complete: %d evidence → 1 finding\n", len(items))

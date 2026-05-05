@@ -35,15 +35,15 @@ go get github.com/Viking602/go-hydaelyn@v0.1.0
 go test ./...
 ```
 
-3. Create and push the release tag:
+1. Create and push the release tag:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-4. Wait for the `release` GitHub Action to finish.
-5. Confirm the GitHub Release exists and `go list -m github.com/Viking602/go-hydaelyn@v0.1.0` resolves.
+1. Wait for the `release` GitHub Action to finish.
+2. Confirm the GitHub Release exists and `go list -m github.com/Viking602/go-hydaelyn@v0.1.0` resolves.
 
 ## Versioning rules
 

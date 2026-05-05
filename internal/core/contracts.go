@@ -4,6 +4,7 @@ import (
 	"context"
 
 	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
@@ -40,7 +41,7 @@ type (
 )
 
 type UserTimelineProjector interface {
-	ProjectUserTimeline(context.Context, []Event) ([]RunTimelineItem, error)
+	ProjectUserTimeline(context.Context, []model.Event) ([]model.RunTimelineItem, error)
 }
 
 type (
@@ -54,4 +55,4 @@ type (
 	PipelineComponents = ports.PipelineComponents
 )
 
-type MailboxOutbox = TaskEnvelope
+type MailboxOutbox = model.TaskEnvelope

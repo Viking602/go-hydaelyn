@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
 )
 

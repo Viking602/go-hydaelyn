@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
+	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
 )
 
@@ -85,7 +85,7 @@ func main() {
 	must(err)
 	runOnce(ctx, runner, run.ID, synth.ID, "synth", api.TypedReport{
 		Status:  api.ReportStatusSuccess,
-		Summary: fmt.Sprintf("synthesised %d expert claims", len(claims)),
+		Summary: fmt.Sprintf("synthesized %d expert claims", len(claims)),
 	})
 	fmt.Printf("panel recipe complete: %d claims → 1 synthesis\n", len(claims))
 }

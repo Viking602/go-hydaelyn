@@ -14,23 +14,25 @@ Runtime correctness has higher priority than benchmark breadth. When a change ti
 
 Stable packages:
 
+- `hydaelyn`
+- `api`
 - `agent`
 - `blackboard`
 - `flow`
-- `orchestrator`
+- `hook`
+- `message`
 - `policy`
 - `provider`
 - `tool`
 - `transport/mcp`
+- `worker`
 
 Implementation-detail packages:
 
 - `internal/*`
-- `legacy/*`
 - `tool/tooltest`
 
-`legacy/*` is source-compatible during the migration window, but it is not the
-primary vNext runtime contract.
+Archived v1 packages are not part of the current public import surface.
 
 ## Compatibility Rules
 
@@ -38,7 +40,7 @@ primary vNext runtime contract.
 - Removing public fields, renaming them, or changing their meaning requires a major version.
 - Event payloads may add fields.
 - Event type renames or removals require a major version.
-- CLI may add flags such as `validate --strict-dataflow`.
+- CLI may add inspection flags and subcommands.
 - Removing CLI flags or changing their behavior incompatibly requires a major version.
 
 ## Release Gate

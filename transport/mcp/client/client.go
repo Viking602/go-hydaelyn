@@ -207,7 +207,7 @@ func (t *HTTPTransport) Call(ctx context.Context, method string, params any, res
 	if err != nil {
 		return err
 	}
-	defer httpResponse.Body.Close()
+	defer func() { _ = httpResponse.Body.Close() }()
 	var response jsonrpc.Response
 	if err := json.NewDecoder(httpResponse.Body).Decode(&response); err != nil {
 		return err

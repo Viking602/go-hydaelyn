@@ -18,7 +18,7 @@ func (m *mockDriver) Definition() tool.Definition {
 	return m.definition
 }
 
-func (m *mockDriver) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
+func (m *mockDriver) Execute(_ context.Context, _ tool.Call, _ tool.UpdateSink) (tool.Result, error) {
 	return m.result, m.err
 }
 

@@ -60,8 +60,8 @@ mailbox.Address{Kind: AddressKindGroup, Group: "qa-squad"}
 
 ## Intents & priorities
 
-| Intent       | Typical use                                     |
-|--------------|--------------------------------------------------|
+| Intent       | Typical use                                      |
+| ------------ | ------------------------------------------------ |
 | `ask`        | Default. Needs an answer.                        |
 | `answer`     | Reply to an `ask`; set `InReplyTo`.              |
 | `delegate`   | "You own this now."                              |

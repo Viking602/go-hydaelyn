@@ -35,7 +35,6 @@ func TestPublicAPISmoke(t *testing.T) {
 	_ = api.Tool{Name: "write", EffectType: api.ToolEffectWrite, RequiresActionTask: true}
 
 	runner := New()
-	var _ *Runner = runner
 	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{Request: "primary runner smoke"})
 	if err != nil {
 		t.Fatalf("QueueRun() error = %v", err)

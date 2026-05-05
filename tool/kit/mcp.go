@@ -18,7 +18,7 @@ func ImportMCPTools(ctx context.Context, client *mcpclient.Client) ([]tool.Drive
 	for _, definition := range tools {
 		drivers = append(drivers, remoteTool{
 			client:     client,
-			definition: tool.Definition(definition),
+			definition: definition,
 		})
 	}
 	return drivers, nil

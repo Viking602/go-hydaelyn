@@ -258,7 +258,7 @@ func (m *MockDriver) Metadata() Metadata {
 	return m.metadata
 }
 
-func (m *MockDriver) Stream(ctx context.Context, request Request) (Stream, error) {
+func (m *MockDriver) Stream(_ context.Context, _ Request) (Stream, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

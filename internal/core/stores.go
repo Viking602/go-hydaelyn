@@ -4,6 +4,7 @@ import (
 	"context"
 
 	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func (r *Runtime) StoreProvider() StoreProvider {
@@ -22,7 +23,7 @@ func (r *Runtime) Begin(ctx context.Context) (UnitOfWork, error) {
 
 // WriteItem is the public BlackboardStore API. It goes through the UoW command
 // path so policy, trace, and events are all recorded.
-func (r *Runtime) WriteItem(ctx context.Context, item BlackboardItem) error {
+func (r *Runtime) WriteItem(ctx context.Context, item model.BlackboardItem) error {
 	_, err := r.ExecuteCommand(ctx, WriteBlackboardItemCommand{Item: item})
 	return err
 }
@@ -35,17 +36,17 @@ func registerBlackboardUoWCommandHandlers(runtime *Runtime) {
 }
 
 // SelectItems is the public BlackboardStore read API backed by the configured store provider.
-func (r *Runtime) SelectItems(ctx context.Context, runID string, selector BlackboardSelector) ([]BlackboardItem, error) {
+func (r *Runtime) SelectItems(ctx context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	decision, err := r.currentPolicyEngine().Authorize(ctx, PolicyRequest{Operation: PolicyOperationBlackboardRead, RunID: runID, Selector: &selector})
+	decision, err := r.currentPolicyEngine().Authorize(ctx, model.PolicyRequest{Operation: model.PolicyOperationBlackboardRead, RunID: runID, Selector: &selector})
 	if err != nil {
 		return nil, err
 	}
-	if decision.Effect == PolicyEffectDeny || decision.Effect == PolicyEffectAbort || decision.Effect == PolicyEffectRequireApproval || decision.Effect == PolicyEffectPause {
+	if decision.Effect == model.PolicyEffectDeny || decision.Effect == model.PolicyEffectAbort || decision.Effect == model.PolicyEffectRequireApproval || decision.Effect == model.PolicyEffectPause {
 		return nil, ErrPolicyDenied
 	}
 	return uow.Blackboard().SelectItems(ctx, runID, selector)

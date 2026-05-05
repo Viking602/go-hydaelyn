@@ -7,7 +7,7 @@ package hydaelyn
 
 import (
 	"github.com/Viking602/go-hydaelyn/api"
-	core "github.com/Viking602/go-hydaelyn/internal/core"
+	"github.com/Viking602/go-hydaelyn/internal/core"
 	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
 )
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
@@ -10,7 +11,7 @@ import (
 type IDGenerator func(prefix string) string
 
 // UoWAuthorizer is the runtime policy boundary exposed to migrated handlers.
-type UoWAuthorizer func(context.Context, ports.UnitOfWork, PolicyRequest) (PolicyDecision, error)
+type UoWAuthorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
 
 // UoWTraceRecorder records a completed trace span inside the active UnitOfWork.
 type UoWTraceRecorder func(context.Context, ports.UnitOfWork, string, string, string, string) error
@@ -25,4 +26,4 @@ type PipelineProvider func() PipelineComponents
 type OutputGatewayProvider func() OutputGateway
 
 // ApprovalFactory creates an approval request and matching resume token for a task.
-type ApprovalFactory func(Task, string, string) (ApprovalRequest, ResumeToken)
+type ApprovalFactory func(model.Task, string, string) (model.ApprovalRequest, model.ResumeToken)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	actionsvc "github.com/Viking602/go-hydaelyn/internal/action"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 type (
@@ -12,26 +13,26 @@ type (
 	completeActionAttemptResult  = actionsvc.CompleteAttemptResult
 )
 
-func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (ActionAttempt, error) {
+func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (model.ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return ActionAttempt{}, err
+		return model.ActionAttempt{}, err
 	}
-	attempt, ok := result.(ActionAttempt)
+	attempt, ok := result.(model.ActionAttempt)
 	if !ok {
-		return ActionAttempt{}, ErrInvalidCommand
+		return model.ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
 }
 
-func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (ActionAttempt, error) {
+func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (model.ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return ActionAttempt{}, err
+		return model.ActionAttempt{}, err
 	}
-	attempt, ok := result.(ActionAttempt)
+	attempt, ok := result.(model.ActionAttempt)
 	if !ok {
-		return ActionAttempt{}, ErrInvalidCommand
+		return model.ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
 }

@@ -2,7 +2,8 @@ package adapter
 
 import (
 	"github.com/Viking602/go-hydaelyn/api"
-	core "github.com/Viking602/go-hydaelyn/internal/core"
+	"github.com/Viking602/go-hydaelyn/internal/core"
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func CommandToCore(command api.Command) (core.RuntimeCommand, bool) {
@@ -64,7 +65,7 @@ func responseCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	case api.HandoffCommand:
 		return core.HandoffCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, FromAgentID: cmd.FromAgentID, ToAgentID: cmd.ToAgentID, TaskVersion: cmd.TaskVersion, HandoffContext: cmd.HandoffContext}, true
 	case api.SubmitResponseOutputCommand:
-		return core.SubmitResponseOutputCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, Type: core.UserMessageType(cmd.Type), Title: cmd.Title, Payload: cmd.Payload, IdempotencyKey: cmd.IdempotencyKey}, true
+		return core.SubmitResponseOutputCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, Type: model.UserMessageType(cmd.Type), Title: cmd.Title, Payload: cmd.Payload, IdempotencyKey: cmd.IdempotencyKey}, true
 	case api.PublishResponseCommand:
 		return core.PublishResponseCommand{RunID: cmd.RunID, MessageID: cmd.MessageID}, true
 	default:
@@ -75,7 +76,7 @@ func responseCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	switch cmd := command.(type) {
 	case api.AcquireTaskExecutionCommand:
-		return core.AcquireTaskExecutionCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL}, true
+		return core.AcquireTaskExecutionCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL}, true
 	case api.HeartbeatTaskExecutionCommand:
 		return core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, TTL: cmd.TTL}, true
 	case api.ReleaseTaskExecutionCommand:
@@ -89,9 +90,9 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	case api.RecoverResumeTokenCommand:
 		return core.RecoverResumeTokenCommand{TokenID: cmd.TokenID}, true
 	case api.StartActionAttemptCommand:
-		return core.StartActionAttemptCommand{AttemptID: cmd.AttemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}, true
+		return core.StartActionAttemptCommand{AttemptID: cmd.AttemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}, true
 	case api.CompleteActionAttemptCommand:
-		return core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: core.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, RequiresReconcile: cmd.RequiresReconcile}, true
+		return core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, RequiresReconcile: cmd.RequiresReconcile}, true
 	default:
 		return nil, false
 	}
@@ -117,7 +118,7 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		RunID:              cmd.RunID,
 		TaskID:             cmd.TaskID,
 		ParentTaskID:       cmd.ParentTaskID,
-		Type:               core.TaskType(cmd.Type),
+		Type:               model.TaskType(cmd.Type),
 		Goal:               cmd.Goal,
 		AssignedAgentID:    cmd.AssignedAgentID,
 		OwnerAgentID:       cmd.OwnerAgentID,
@@ -126,9 +127,9 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		Tags:               cloneStrings(cmd.Tags),
 		CompletionCriteria: cloneStrings(cmd.CompletionCriteria),
 		DependsOn:          cloneStrings(cmd.DependsOn),
-		AwaitMode:          core.AwaitMode(cmd.AwaitMode),
+		AwaitMode:          model.AwaitMode(cmd.AwaitMode),
 		AwaitQuorum:        cmd.AwaitQuorum,
-		OnDependencyFailed: core.OnDependencyFailed(cmd.OnDependencyFailed),
+		OnDependencyFailed: model.OnDependencyFailed(cmd.OnDependencyFailed),
 		ReadSelectors:      BlackboardSelectorsToModel(cmd.ReadSelectors),
 		WriteTargets:       cloneStrings(cmd.WriteTargets),
 		RetryPolicy:        RetryPolicyToModel(cmd.RetryPolicy),
@@ -137,19 +138,19 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 }
 
 func TransitionRunCommandToCore(cmd api.TransitionRunCommand) core.TransitionRunCommand {
-	return core.TransitionRunCommand{RunID: cmd.RunID, To: core.RunStatus(cmd.To)}
+	return core.TransitionRunCommand{RunID: cmd.RunID, To: model.RunStatus(cmd.To)}
 }
 
 func TransitionTaskCommandToCore(cmd api.TransitionTaskCommand) core.TransitionTaskCommand {
-	return core.TransitionTaskCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, To: core.TaskStatus(cmd.To)}
+	return core.TransitionTaskCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, To: model.TaskStatus(cmd.To)}
 }
 
 func SubmitTypedReportCommandToCore(cmd api.SubmitTypedReportCommand) core.SubmitTypedReportCommand {
-	return core.SubmitTypedReportCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, Report: TypedReportToModel(cmd.Report)}
+	return core.SubmitTypedReportCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, Report: TypedReportToModel(cmd.Report)}
 }
 
 func ToolInvocationToCore(cmd api.ToolInvocation) core.ToolInvocation {
-	return core.ToolInvocation{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: core.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, Input: cmd.Input}
+	return core.ToolInvocation{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, Input: cmd.Input}
 }
 
 func ToolInvocationResultFromCore(in core.ToolInvocationResult) api.ToolInvocationResult {

@@ -109,7 +109,7 @@ func TestDriverStreamForwardsStopAndThinking(t *testing.T) {
 
 func collectAnthropicEvents(t *testing.T, stream provider.Stream) []provider.Event {
 	t.Helper()
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	events := make([]provider.Event, 0, 8)
 	for {
 		event, err := stream.Recv()

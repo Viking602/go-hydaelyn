@@ -1,8 +1,8 @@
 # Runner Runtime
 
 The root `hydaelyn` package is the recommended façade for the primary Run/Task
-runner. The `orchestrator` package remains as an advanced compatibility surface
-for users who need direct access to the same commands and storage contracts.
+runner. Public contracts live in the `api` package; `internal/core` remains the
+composition root behind the façade.
 
 Implementation details now live across focused `internal/*` packages. `internal/core`
 keeps the Runtime façade, command registration, configuration, compatibility

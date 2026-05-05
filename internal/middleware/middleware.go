@@ -118,7 +118,7 @@ func (h hookAdapter) TransformContext(ctx context.Context, messages []message.Me
 		if response == nil {
 			return nil, nil
 		}
-		return append([]message.Message{}, (*response)...), nil
+		return append([]message.Message{}, *response...), nil
 	}
 	return current, nil
 }

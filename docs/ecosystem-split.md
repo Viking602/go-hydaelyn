@@ -5,10 +5,9 @@
 `go-hydaelyn` now keeps the following in-tree:
 
 - runtime core
-- unified team/planner/blackboard/capability/scheduler abstractions
+- public `hydaelyn.Runner` and `api` Run/Task contracts
+- blackboard, policy, provider, tool, worker, and MCP integration packages
 - CLI and official examples
-- `recipe` compiler
-- `evaluation` harness
 
 These are kept in-tree because they define the authoring and verification surface for the core runtime.
 
@@ -25,9 +24,9 @@ The following remain good ecosystem-layer candidates when they outgrow the core 
 
 ## Current In-Tree Incubation Rule
 
-`recipe` and `evaluation` are implemented in-tree now, but they still follow the same constraint:
+Incubating integrations should follow the same constraint:
 
-- compile into `planner -> team -> host`
+- compile into `api.PipelineComponents` or `worker.AgentWorker`
 - do not create a second runtime
 - keep external-service assumptions out of the minimal core
 

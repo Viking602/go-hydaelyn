@@ -6,10 +6,11 @@ import (
 	"maps"
 	"time"
 
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
-func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest) (PolicyDecision, error) {
+func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest) (model.PolicyDecision, error) {
 	if request.RunID == "" {
 		request.RunID = requestRunID(request)
 	}
@@ -18,23 +19,23 @@ func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, reques
 	}
 	decision, err := r.currentPolicyEngine().Authorize(ctx, request)
 	if err != nil {
-		return PolicyDecision{}, err
+		return model.PolicyDecision{}, err
 	}
 	if decision.Effect == "" {
-		decision.Effect = PolicyEffectAllow
+		decision.Effect = model.PolicyEffectAllow
 	}
-	if err := uow.Trace().SaveTraceSpan(ctx, TraceSpan{ID: r.newID("span"), RunID: request.RunID, TaskID: request.TaskID, Name: "policy.authorize." + string(request.Operation), Component: "policy", Status: TraceSpanEnded, StartedAt: time.Now().UTC(), EndedAt: time.Now().UTC()}); err != nil {
-		return PolicyDecision{}, err
+	if err := uow.Trace().SaveTraceSpan(ctx, model.TraceSpan{ID: r.newID("span"), RunID: request.RunID, TaskID: request.TaskID, Name: "policy.authorize." + string(request.Operation), Component: "policy", Status: model.TraceSpanEnded, StartedAt: time.Now().UTC(), EndedAt: time.Now().UTC()}); err != nil {
+		return model.PolicyDecision{}, err
 	}
 	switch decision.Effect {
-	case PolicyEffectDeny, PolicyEffectAbort:
+	case model.PolicyEffectDeny, model.PolicyEffectAbort:
 		return decision, ErrPolicyDenied
-	case PolicyEffectRequireApproval:
+	case model.PolicyEffectRequireApproval:
 		if err := r.applyPolicyApprovalEffectUoW(ctx, uow, request, decision); err != nil {
 			return decision, err
 		}
 		return decision, commitWithError(ErrPolicyDenied)
-	case PolicyEffectPause:
+	case model.PolicyEffectPause:
 		if err := r.applyPolicyPauseEffectUoW(ctx, uow, request, decision); err != nil {
 			return decision, err
 		}
@@ -44,7 +45,7 @@ func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, reques
 	}
 }
 
-func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest, decision PolicyDecision) error {
+func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest, decision model.PolicyDecision) error {
 	task, ok, err := policyEffectTaskUoW(ctx, uow, request)
 	if err != nil || !ok {
 		return err
@@ -67,13 +68,13 @@ func (r *Runtime) applyPolicyApprovalEffectUoW(ctx context.Context, uow ports.Un
 	if err := pauseTaskForPolicyUoW(ctx, uow, task, reason); err != nil {
 		return err
 	}
-	if err := transitionRunForPolicyUoW(ctx, uow, task.RunID, RunStatusWaitingApproval); err != nil {
+	if err := transitionRunForPolicyUoW(ctx, uow, task.RunID, model.RunStatusWaitingApproval); err != nil {
 		return err
 	}
-	return uow.Events().AppendEvent(ctx, Event{RunID: task.RunID, TaskID: task.ID, Type: EventApprovalRequested, Payload: map[string]any{"approvalId": approval.ApprovalID, "resumeToken": token.TokenID, "reason": reason, "decisionId": decision.DecisionID, "operation": string(request.Operation)}, RecordedAt: time.Now().UTC()})
+	return uow.Events().AppendEvent(ctx, model.Event{RunID: task.RunID, TaskID: task.ID, Type: model.EventApprovalRequested, Payload: map[string]any{"approvalId": approval.ApprovalID, "resumeToken": token.TokenID, "reason": reason, "decisionId": decision.DecisionID, "operation": string(request.Operation)}, RecordedAt: time.Now().UTC()})
 }
 
-func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest, decision PolicyDecision) error {
+func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest, decision model.PolicyDecision) error {
 	task, ok, err := policyEffectTaskUoW(ctx, uow, request)
 	if err != nil || !ok {
 		return err
@@ -82,28 +83,28 @@ func (r *Runtime) applyPolicyPauseEffectUoW(ctx context.Context, uow ports.UnitO
 	if err := pauseTaskForPolicyUoW(ctx, uow, task, reason); err != nil {
 		return err
 	}
-	return transitionRunForPolicyUoW(ctx, uow, task.RunID, RunStatusBlocked)
+	return transitionRunForPolicyUoW(ctx, uow, task.RunID, model.RunStatusBlocked)
 }
 
-func policyEffectTaskUoW(ctx context.Context, uow ports.UnitOfWork, request PolicyRequest) (Task, bool, error) {
+func policyEffectTaskUoW(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest) (model.Task, bool, error) {
 	if request.RunID == "" || request.TaskID == "" {
-		return Task{}, false, nil
+		return model.Task{}, false, nil
 	}
 	task, err := uow.Tasks().LoadTask(ctx, request.RunID, request.TaskID)
 	if errors.Is(err, ErrNotFound) {
-		return Task{}, false, nil
+		return model.Task{}, false, nil
 	}
 	if err != nil {
-		return Task{}, false, err
+		return model.Task{}, false, err
 	}
 	return task, true, nil
 }
 
-func pauseTaskForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, task Task, reason string) error {
+func pauseTaskForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, task model.Task, reason string) error {
 	if isTerminalTask(task.Status) {
 		return nil
 	}
-	paused, err := transitionTaskPure(task, TaskStatusPaused, true)
+	paused, err := transitionTaskPure(task, model.TaskStatusPaused, true)
 	if err != nil {
 		if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrTerminalState) {
 			return nil
@@ -116,15 +117,15 @@ func pauseTaskForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, task Task,
 	if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, paused.RunID, paused.ID); err != nil {
 		return err
 	} else if ok {
-		lease.Status = LeaseStatusReleased
+		lease.Status = model.LeaseStatusReleased
 		if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 			return err
 		}
 	}
-	return uow.Events().AppendEvent(ctx, Event{RunID: paused.RunID, TaskID: paused.ID, Type: EventTaskPaused, Payload: map[string]any{"reason": reason, "task": taskEventPayload(paused)}, RecordedAt: time.Now().UTC()})
+	return uow.Events().AppendEvent(ctx, model.Event{RunID: paused.RunID, TaskID: paused.ID, Type: model.EventTaskPaused, Payload: map[string]any{"reason": reason, "task": taskEventPayload(paused)}, RecordedAt: time.Now().UTC()})
 }
 
-func transitionRunForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, runID string, status RunStatus) error {
+func transitionRunForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, runID string, status model.RunStatus) error {
 	run, err := uow.Runs().LoadRun(ctx, runID)
 	if errors.Is(err, ErrNotFound) || isTerminalRun(run.Status) {
 		return nil
@@ -142,9 +143,9 @@ func transitionRunForPolicyUoW(ctx context.Context, uow ports.UnitOfWork, runID 
 	if err := uow.Runs().SaveRun(ctx, next); err != nil {
 		return err
 	}
-	return uow.Events().AppendEvent(ctx, Event{RunID: next.ID, TaskID: next.RootTaskID, Type: EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(next.Status), "run": runPayload(next)}, RecordedAt: time.Now().UTC()})
+	return uow.Events().AppendEvent(ctx, model.Event{RunID: next.ID, TaskID: next.RootTaskID, Type: model.EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(next.Status), "run": runPayload(next)}, RecordedAt: time.Now().UTC()})
 }
 
-func appendResumeTokenCreatedEventUoW(ctx context.Context, uow ports.UnitOfWork, token ResumeToken) error {
-	return uow.Events().AppendEvent(ctx, Event{RunID: token.RunID, TaskID: token.TaskID, Type: EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
+func appendResumeTokenCreatedEventUoW(ctx context.Context, uow ports.UnitOfWork, token model.ResumeToken) error {
+	return uow.Events().AppendEvent(ctx, model.Event{RunID: token.RunID, TaskID: token.TaskID, Type: model.EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
 }

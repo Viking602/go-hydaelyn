@@ -17,9 +17,9 @@ type (
 )
 
 const (
-	AddressKindAgent AddressKind = model.AddressKindAgent
-	AddressKindRole  AddressKind = model.AddressKindRole
-	AddressKindGroup AddressKind = model.AddressKindGroup
+	AddressKindAgent = model.AddressKindAgent
+	AddressKindRole  = model.AddressKindRole
+	AddressKindGroup = model.AddressKindGroup
 )
 
 // ResolveRecipients expands an Address into the set of concrete agent IDs

@@ -36,7 +36,7 @@ packages.
 ### Moved to `internal/` (no longer importable from outside the module)
 
 | Before                                   | After                                  | Access from outside |
-|------------------------------------------|----------------------------------------|---------------------|
+| ---------------------------------------- | -------------------------------------- | ------------------- |
 | `github.com/.../auth`                    | `internal/auth`                        | via `host.AuthDriver` / `host.StaticAuth` aliases |
 | `github.com/.../gate`                    | `internal/security`                    | via `capability.SecurityContext` + context helpers |
 | `github.com/.../security`                | `internal/security`                    | via `capability.SecurityContext` + context helpers |
@@ -53,7 +53,7 @@ packages.
 ### Renamed at the top level
 
 | Before                                   | After                                   |
-|------------------------------------------|-----------------------------------------|
+| ---------------------------------------- | --------------------------------------- |
 | `github.com/.../patterns` (tree)         | `github.com/.../pattern` (tree)         |
 | `github.com/.../mcp`                     | `github.com/.../transport/mcp`          |
 | `github.com/.../fixtures/` (JSON data)   | `github.com/.../testdata/`              |

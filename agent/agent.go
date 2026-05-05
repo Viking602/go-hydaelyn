@@ -248,7 +248,7 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 	prepared := make([]tool.Call, 0, len(calls))
 	terminal := false
 	for _, call := range calls {
-		item := tool.Call(call)
+		item := call
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
 			return nil, false, err
 		}
@@ -263,17 +263,17 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 	}
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
-		item := tool.Result(current)
+		item := current
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
 			return nil, false, err
 		}
-		items = append(items, message.ToolResult(item))
+		items = append(items, item)
 	}
 	return items, terminal, nil
 }
 
 func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent func(provider.Event) error) (message.Message, provider.Usage, provider.StopReason, error) {
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
 	for {

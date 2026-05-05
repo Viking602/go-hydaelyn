@@ -72,7 +72,7 @@ func (sel ExchangeSelector) Matches(exchange Exchange) bool {
 // SelectExchanges returns exchanges matching the selector, applying
 // verification + confidence + finding-linkage gates. Returned exchanges are
 // cloned so callers can mutate without corrupting state.
-func (s State) SelectExchanges(sel ExchangeSelector) []Exchange {
+func (s *State) SelectExchanges(sel ExchangeSelector) []Exchange {
 	supportedClaims := map[string]struct{}{}
 	if sel.RequireVerified {
 		threshold := sel.MinConfidence
@@ -111,7 +111,7 @@ func (s State) SelectExchanges(sel ExchangeSelector) []Exchange {
 // The match logic is delegated to findingMatchesSelector so this top-level
 // method remains a small loop driver — easier to scan and below revive's
 // gocyclo threshold.
-func (s State) SelectFindings(sel ExchangeSelector) []Finding {
+func (s *State) SelectFindings(sel ExchangeSelector) []Finding {
 	threshold := sel.MinConfidence
 	if threshold <= 0 && sel.RequireVerified {
 		threshold = DefaultVerificationConfidence
@@ -133,7 +133,7 @@ func (s State) SelectFindings(sel ExchangeSelector) []Finding {
 // collectSupportedClaims builds the set of claim IDs that have at least one
 // verification result clearing threshold. Returns nil when verification is
 // not required (callers should treat nil and empty equivalently).
-func (s State) collectSupportedClaims(required bool, threshold float64) map[string]struct{} {
+func (s *State) collectSupportedClaims(required bool, threshold float64) map[string]struct{} {
 	if !required {
 		return nil
 	}
