@@ -1,5 +1,45 @@
 # Migration Notes
 
+## v0.7 → v0.8 — public framework release
+
+v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Most v0.7 callers can upgrade with a single search-and-replace pass. The full plan, including the Path A (use a reference store impl) vs Path B (bring-your-own-provider) decision rule and an end-to-end ent-based provider template, lives in `docs/product-spec/v0.8.0/12-migration-guide.md`.
+
+### Mechanical breaking changes
+
+| Old | New |
+| --- | --- |
+| `api.Flow{BypassTaskStore, BypassPolicyEngine, BypassTaskExecutionLease, BypassHandoff, BypassResponseLayer, BypassOutputGateway}` | removed — recipes do not bypass runtime invariants |
+| `api.ErrFlowBypass` | removed |
+| `runner.ExecuteCommand(StartRunCommand)` returning `[]any{Run, RootTask}` | returns `api.StartRunResult{Run, RootTask}` |
+| `runner.ExecuteCommand(RequestApprovalCommand)` returning `[]any{Approval, Token}` | returns `api.RequestApprovalResult{Approval, Token}` |
+| `runner.ExecuteCommand(AcquireTaskExecutionCommand)` returning `[]any{Lease, bool}` | returns `api.AcquireTaskExecutionResult{Lease, Acquired}` |
+
+`api.AgentProfile` itself is unchanged; new declarative fields land on the new `api.AgentDefinition` type instead.
+
+### New surfaces to discover
+
+| Need | Reach for |
+| --- | --- |
+| Declare an agent (instructions, model, capabilities, triggers, governance) ahead of time | `api.AgentDefinition` (then `.AsProfile()` for runtime attribution) |
+| Publish a system's callable surface to MCP / future renderers | `api.Capability` + `api.CapabilityManifest` |
+| Cron / webhook / event / manual entrypoints | `transport/scheduler`, `transport/webhook`, `transport/event`, `api.Trigger` |
+| Background worker that polls envelopes, leases, heartbeats, drains | `worker.Runtime` (plug your own `EnvelopePoller`) |
+| Production-grade durable store | implement `api.StoreProvider` and run `contract.RunStoreProviderContractTests` against it |
+| Local durable store for development | `storage/sqlite` (pure-Go, no CGO) |
+| Bundle a vertical "research / support / devops / aiops" preset | `packs.Pack` + `packs.Registry` |
+| Grade an agent run in CI | `eval.Eval` / `eval.Run` with assertions from `eval/assert` |
+
+### What's not in v0.8.0 yet
+
+- OpenAPI / CLI renderers for `CapabilityManifest` (MCP renderer ships).
+- `api.ArtifactStore`, `api.BudgetPolicy`, `api.PolicyEnforcer` — types and interfaces deferred to v0.8.1+. The data shapes they will consume (UsageRecord, Budget, ContextSource) are stable in v0.8.0.
+- `api.Memory[T Identified]` — ships in v0.8.0 as an optional plugin. The framework defines the verbs (Write/Read/Forget) and the identity contract (Identified). The application defines `T` and provides the storage backend; no reference implementation ships. See ADR-013 (revised) and `docs/product-spec/v0.8.0/13-memory-optional-plugin.md`.
+- OpenTelemetry exporter (`observe/otel/`).
+
+See `docs/release-notes/v0.8.0.md` for the full deferral list.
+
+---
+
 ## 从旧 Team + Pattern 风格迁移到 Runner API
 
 旧模型：

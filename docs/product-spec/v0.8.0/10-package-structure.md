@@ -37,7 +37,7 @@ github.com/Viking602/go-hydaelyn/
 │   ├── errors.go
 │   ├── capability.go               # NEW: Capability, CapabilityManifest
 │   ├── registry.go                 # NEW: Registry interface, AgentSelector, CapabilitySelector
-│   ├── memory.go                   # NEW: Memory interface, MemoryEntry, MemorySelector
+│   ├── memory.go                   # NEW: Memory[T Identified] optional plugin + MemorySelector
 │   ├── artifact.go                 # NEW: ArtifactStore, Artifact
 │   ├── context.go                  # NEW: ContextScope, ContextSource
 │   ├── usage.go                    # NEW: UsageRecord, UsageStore, UsageSelector
