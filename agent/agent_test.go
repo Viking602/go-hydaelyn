@@ -51,7 +51,7 @@ func TestEngineRunsToolLoop(t *testing.T) {
 		Provider: fakeProvider{},
 		Tools:    tool.NewBus(driver),
 	}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
 			message.NewText(message.RoleUser, "find hydaelyn"),
@@ -72,7 +72,7 @@ func TestEngineRunsToolLoop(t *testing.T) {
 
 func TestEngineFailsWhenToolCallsExistButToolBusMissing(t *testing.T) {
 	engine := Engine{Provider: fakeProvider{}}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
 		MaxIterations: 1,
@@ -109,7 +109,7 @@ func TestEngineCollectsThinkingDeltas(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations: 1,
@@ -137,7 +137,7 @@ func TestEngineForwardsStopAndThinkingBudget(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:          "test-model",
 		Messages:       []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations:  1,
@@ -167,7 +167,7 @@ func TestEngineForwardsExtraBody(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations: 1,
@@ -240,7 +240,7 @@ func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 		Provider: driver,
 		Tools:    tool.NewBus(driverTool),
 	}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
 		MaxIterations: 3,
@@ -403,7 +403,7 @@ func TestEngineStopsAfterTerminalTool(t *testing.T) {
 		Provider: driver,
 		Tools:    tool.NewBus(terminalTool{}),
 	}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "finish")},
 		MaxIterations: 3,

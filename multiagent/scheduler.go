@@ -1,0 +1,25 @@
+package multiagent
+
+import (
+	"context"
+
+	"github.com/Viking602/go-hydaelyn/api"
+)
+
+// Scheduler decides which AgentInstance executes which api.Task next.
+// v0.8.0 ships the interface and the TeamState contract; the three
+// reference Schedulers (Sequential, Router, Supervisor) land in
+// Phase 4 per the rollout plan.
+//
+// Spec anchor: docs/product-spec/v0.8.0/05-multi-agent-layer.md.
+type Scheduler interface {
+	Next(ctx context.Context, state TeamState) ([]Dispatch, error)
+}
+
+// TeamState is the snapshot a Scheduler.Next sees on each tick.
+type TeamState struct {
+	RunID      string               `json:"runId"`
+	Tasks      []api.Task           `json:"tasks,omitempty"`
+	Instances  []AgentInstance      `json:"instances,omitempty"`
+	Blackboard []api.BlackboardItem `json:"blackboard,omitempty"`
+}

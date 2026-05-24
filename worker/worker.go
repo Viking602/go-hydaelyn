@@ -65,18 +65,23 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if err != nil {
 		return err
 	}
-	inputs, err := w.materializeInputs(ctx, task)
-	if err != nil {
-		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
-		return err
-	}
 
-	messages := w.buildMessages(run, task, inputs, req.Messages)
 	engine := w.governedEngine(task, lease)
-	result, err := w.runEngineWithHeartbeat(ctx, engine, messages, lease.ID, ttl)
-	if err != nil {
-		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
-		return err
+	if engine.Model == "" {
+		engine.Model = w.Model
+	}
+	if engine.ToolMode == "" {
+		engine.ToolMode = w.ToolMode
+	}
+	if engine.LoopPolicy.MaxIterations == 0 {
+		engine.LoopPolicy.MaxIterations = w.MaxIterations
+	}
+	engine.ContextBuilder = workerContextBuilder{worker: w, run: run, extra: req.Messages}
+
+	result, runErr := w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl)
+	if runErr != nil {
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, runErr)
+		return runErr
 	}
 
 	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
@@ -162,19 +167,20 @@ func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease)
 	return engine
 }
 
-func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, messages []message.Message, leaseID string, ttl time.Duration) (agent.Result, error) {
+func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, leaseID string, ttl time.Duration) (agent.Result, error) {
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	go w.heartbeatLoop(heartbeatCtx, leaseID, ttl, heartbeatDone)
-	result, err := engine.Run(ctx, agent.Input{
-		Model:         w.Model,
-		Messages:      messages,
-		ToolMode:      w.ToolMode,
-		MaxIterations: w.MaxIterations,
-	})
+	result := engine.Run(ctx, task, agent.OutputPolicy{})
 	stopHeartbeat()
 	<-heartbeatDone
-	return result, err
+	if result.Failure != nil {
+		// AgentFailure satisfies the error interface; its Unwrap chain
+		// surfaces the underlying provider/tool error so worker callers
+		// can errors.Is against it (e.g. the failure-injection test).
+		return result, result.Failure
+	}
+	return result, nil
 }
 
 func (w AgentWorker) submitFailureReportHandled(ctx context.Context, task api.Task, lease api.TaskExecutionLease, cause error) bool {
@@ -182,8 +188,8 @@ func (w AgentWorker) submitFailureReportHandled(ctx context.Context, task api.Ta
 }
 
 func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lease api.TaskExecutionLease, result agent.Result) (bool, error) {
-	summary := finalAssistantText(result.Messages)
-	if strings.TrimSpace(summary) == "" {
+	summary := strings.TrimSpace(result.Text)
+	if summary == "" {
 		summary = "completed"
 	}
 	if err := w.Runner.WriteItem(ctx, api.BlackboardItem{
@@ -231,6 +237,28 @@ func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time
 			})
 		}
 	}
+}
+
+// workerContextBuilder adapts the worker's task-message + blackboard
+// fan-in logic into the agent.ContextManager surface agent.Engine.Run
+// reads at task start. Compact is a no-op pass-through; tightening it
+// lands when LoopPolicy.MaxTokens is wired in Phase 2.
+type workerContextBuilder struct {
+	worker AgentWorker
+	run    api.Run
+	extra  []message.Message
+}
+
+func (b workerContextBuilder) Build(ctx context.Context, task api.Task) ([]message.Message, error) {
+	inputs, err := b.worker.materializeInputs(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	return b.worker.buildMessages(b.run, task, inputs, b.extra), nil
+}
+
+func (workerContextBuilder) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
+	return history, nil
 }
 
 func (w AgentWorker) materializeInputs(ctx context.Context, task api.Task) ([]api.BlackboardItem, error) {
@@ -292,15 +320,6 @@ func (w AgentWorker) submitFailure(ctx context.Context, task api.Task, lease api
 			Summary: cause.Error(),
 		},
 	})
-}
-
-func finalAssistantText(messages []message.Message) string {
-	for idx := len(messages) - 1; idx >= 0; idx-- {
-		if messages[idx].Role == message.RoleAssistant && strings.TrimSpace(messages[idx].Text) != "" {
-			return messages[idx].Text
-		}
-	}
-	return ""
 }
 
 func firstWriteTarget(task api.Task) string {

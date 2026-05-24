@@ -4,6 +4,8 @@
 
 已接受 — 自 v2.0 路线图（计划文件：`/Users/viking/.claude/plans/sunny-hugging-goose.md`）开始强制。
 
+**Revised 2026-05-24:** v0.8.0 reconstruction (master spec `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md`, ADR-016) introduces a first-class `multiagent/` kernel package whose vocabulary includes terms like `Scheduler`, `Supervisor`, `Voting`, `Debate`. These are *framework primitives* for multi-agent coordination, not business vocabulary, and are explicitly exempted from the ban below. See *Revised — multi-agent primitive exception list* at the bottom of this ADR.
+
 ## 背景
 
 Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并发调度任务、协调多 Agent、传递证据、做审批与处置"这套**能力**做厚做正确，让开发者在其上自由定义自己的业务架构（用户给出的事故响应参考架构只是一种可能性）。
@@ -66,7 +68,58 @@ Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并�
 - M3（业务词剥离）成为 v2.0 的硬性 break change：剥离 `TaskTypeSynthesis/Review/Action` 与 `BlackboardItem*Result`，由开发者自定。
 - 评分回归：`sentrux session_end` 与 M0 baseline（quality_signal=6166, modularity=3233）对比；M5 拆分后 modularity 应回升。
 
+## Revised 2026-05-24 — multi-agent primitive exception list
+
+The v0.8.0 reconstruction introduces a `multiagent/` top-level kernel package (see ADR-016 and `docs/product-spec/v0.8.0/05-multi-agent-layer.md`). Its public surface uses the following nouns and verbs. These are framework primitives for multi-agent coordination — they are **not** business vocabulary and are explicitly exempted from the §3 hard constraint:
+
+```
+Scheduler        (multiagent.Scheduler interface, multiagent.SequentialScheduler, ...)
+Supervisor       (multiagent.SupervisorScheduler, multiagent/supervisor.go)
+Voting           (multiagent/voting.go)
+Debate           (reserved for v0.9.0 schedulers)
+Handoff          (multiagent.Handoff, api.HandoffStore — already in use)
+Dispatch         (multiagent.Dispatch)
+Team             (multiagent.Team)
+AgentClass       (multiagent.AgentClass)
+AgentInstance    (multiagent.AgentInstance — ADR-014 revised)
+TypedReport      (the Blackboard write of agent.Result.Structured)
+TeamState        (multiagent.TeamState)
+```
+
+Permitted locations for these primitives: `api/`, `multiagent/**`, `agent/**` (when referencing the Scheduler boundary), `worker/**` (when adapting to Scheduler dispatches), `internal/**` mirrors of the above, `_examples/`, `examples/`, `packs/`, `docs/`.
+
+What is NOT exempted (the §3 ban still applies in full to):
+
+```
+incident, change, ticket, customer, sales, deploy, repository, document,
+synthesis, hazard, lead, agent_review,
+review (as a TaskType), action (as a TaskType)
+```
+
+The exception list is *closed* — adding a new framework primitive requires an ADR amendment. Adding a business word still requires removal during code review.
+
+### Baseline update
+
+`.sentrux/business-words.baseline` and `scripts/check-business-words.sh` are updated alongside the v0.8.0 reconstruction to:
+
+1. Remove `Scheduler`, `Supervisor`, `Voting`, `Debate`, `Handoff`, `Dispatch`, `Team`, `AgentClass`, `AgentInstance`, `TypedReport`, `TeamState` from the banned-word list if they were ever included (most never were; this is defensive).
+2. Keep the existing business-word baseline = 45 ceiling. CI continues to enforce "≤ baseline; only allows decrease."
+3. Add a comment header to `business-words.baseline` referencing this ADR revision so future contributors can trace why the exception list exists.
+
+### Compatibility with the original decision
+
+The original §1/§2/§3 split holds:
+
+- §1 (framework responsibilities) — extended to include multi-agent coordination primitives. The ADR-016 surface lands here.
+- §2 (business responsibilities) — unchanged. Domain concepts (incident response, code review workflows, customer support routing) still live in `packs/` and recipes.
+- §3 (immediately-effective hard constraints) — narrowed only by the closed exception list above. All other bans hold.
+
+The intent of ADR-008 — "framework primitives are mechanism, business concepts are policy" — is unchanged. The revision recognizes that multi-agent coordination *is* a framework mechanism, and gives it vocabulary accordingly.
+
 ## 引用
 
 - 计划文件：`/Users/viking/.claude/plans/sunny-hugging-goose.md`
 - 强制配置：`.sentrux/rules.toml`、`.sentrux/business-words.baseline`、`.github/workflows/ci.yml`（`architecture-gate` job）
+- Master spec: `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md`
+- Multi-agent layer design: `docs/product-spec/v0.8.0/05-multi-agent-layer.md`
+- Related ADRs: ADR-015 (Strong Bounded Agent Loop), ADR-016 (Explicit Multi-Agent Scheduler), ADR-017 (Durable Runner Boundary), ADR-014 (Agent Ontology Stance — revised)
