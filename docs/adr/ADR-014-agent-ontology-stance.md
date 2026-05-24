@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted — enforced from the v0.8.0 roadmap onward. Anchor documents: `docs/product-spec/v0.8.0/03-agent-profile.md`, `docs/product-spec/v0.8.0/02-capability.md` (reserved namespace), `docs/product-spec/v0.8.0/07-context.md` (self-knowledge convention), `docs/product-spec/v0.8.0/09-boundaries.md` line 119 (ADR-014 mapping).
+Accepted — enforced from the v0.8.0 roadmap onward. Anchor documents: `docs/product-spec/v0.8.0/04-agent-class.md` (renamed from 03-agent-profile in the v0.8.0 reconstruction), `docs/product-spec/v0.8.0/02-capability.md` (reserved namespace), `docs/product-spec/v0.8.0/09-context.md` (self-knowledge convention), `docs/product-spec/v0.8.0/11-boundaries.md` (ADR-014 mapping).
+
+**Revised 2026-05-24:** the AgentInstance deferral recorded in the original §1 table is withdrawn. With ADR-016 establishing `multiagent/` as a first-class kernel package, AgentInstance becomes a structural-identity concept that lands in v0.8.0. The metaphysical-identity red lines in §2 remain unchanged. See *Revised decision* at the bottom of this ADR.
 
 ## Context
 
@@ -94,11 +96,42 @@ Constructs that are not falsifiable, depend on subjective LLM extraction, or bre
 - **Any PR may cite this ADR** as the basis for rejecting requests to add Agent selfhood, auto-derive personality, expose `UpdateOwnProfile`, or introduce persona fields into `api/`.
 - **Downstream expectation management.** Teams building persona-driven Agents do so via packs/ + `Capability.Metadata` + explicit Memory writes. The framework provides primitives, not concepts.
 
+## Revised decision (2026-05-24) — AgentInstance accepted as structural identity
+
+The original §1 table marked AgentInstance as deferred ("If a multi-instance-per-profile need surfaces, it is layered in v0.9.0 or later"). The v0.8.0 reconstruction (master spec `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md` §4) and ADR-016 establish `multiagent/` as a first-class kernel package whose Scheduler routinely spawns multiple instances of the same AgentClass within a single Run — for example two `ForensicsAgent` instances investigating two evidence branches in parallel.
+
+Under the original framing this need would be re-implemented per Pack with no shared abstraction. That is incoherent with the framework positioning as a durable typed multi-agent framework. Therefore:
+
+- **AgentInstance is accepted** as a v0.8.0 structural-identity concept, living in `multiagent/instance.go`:
+
+  ```go
+  type AgentInstance struct {
+      ID    AgentID
+      Class AgentClass
+      RunID RunID
+      State AgentState
+  }
+  ```
+
+- **AgentInstance.ID is deterministic** from `(RunID, Class.Name, spawn-sequence)`. Replay reconstructs the same instance IDs from EventStore. This preserves Principle 5 (long-running work resumable) and ADR-007 (EventStore replay determinism).
+
+- **AgentClass owns declaration; AgentInstance owns execution-time state.** AgentClass is reused across runs; AgentInstance is run-local.
+
+- **The metaphysical red lines in §2 are unchanged.** No `Self` type, no `UpdateOwnProfile`, no auto-derived personality, no lifecycle metaphors (Birth/Death/Reincarnate). An AgentInstance is a run-scoped execution context — not "the self that emerged this run."
+
+- **AgentProfile (in `api/types.go`) remains as the declarative identity.** AgentClass (in `multiagent/`) is the Scheduler-facing form. The two coexist; Packs may use either or both. AgentProfile.ID matches AgentClass.Name when a Pack wires them together.
+
+- **`AgentInstanceStore` is added to `UnitOfWork`** (per ADR-017 §5). Per ADR-012 Position D the framework ships no implementation.
+
+Why this is safe under the original §2 red lines: AgentInstance is **structural** (deterministic, enumerable, contract-testable), not metaphysical. It carries `ID`, `Class`, `RunID`, `State` — all falsifiable. It carries no persona, mood, or auto-derived behavior. Schedulers reason about AgentInstance for routing decisions, not for "who this agent is."
+
 ## References
 
-- Design: `docs/product-spec/v0.8.0/03-agent-profile.md` (full Status / PreviousVersionID / RunSelector / AgentVersion specification)
+- Master spec: `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md` §4
+- Design: `docs/product-spec/v0.8.0/04-agent-class.md` (renamed from 03-agent-profile)
+- Multi-agent layer: `docs/product-spec/v0.8.0/05-multi-agent-layer.md`
 - Reserved namespace: `docs/product-spec/v0.8.0/02-capability.md` §Reserved namespace
-- Self-memory convention: `docs/product-spec/v0.8.0/07-context.md` §Self-knowledge convention
-- Boundary mapping: `docs/product-spec/v0.8.0/09-boundaries.md` line 119
+- Self-memory convention: `docs/product-spec/v0.8.0/09-context.md` §Self-knowledge convention
+- Boundary mapping: `docs/product-spec/v0.8.0/11-boundaries.md`
 - v0.9.0 anchor: `docs/product-spec/v0.9.0/README.md`
-- Related ADRs: ADR-008 (framework vs business boundary), ADR-001 (Profile vs AgentInstance separation), ADR-013 (Memory kernel vs pipeline)
+- Related ADRs: ADR-008 (framework vs business boundary), ADR-001 (Profile vs AgentInstance separation), ADR-013 (Memory kernel vs pipeline), ADR-015 (Strong Bounded Agent Loop), ADR-016 (Explicit Multi-Agent Scheduler), ADR-017 (Durable Runner Boundary)

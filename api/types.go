@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ToolEffectType string
 
@@ -538,8 +541,17 @@ type Task struct {
 	PolicyDecisions    []PolicyDecision     `json:"policyDecisions,omitempty"`
 	Result             *TypedReport         `json:"result,omitempty"`
 	Error              string               `json:"error,omitempty"`
-	CreatedAt          time.Time            `json:"createdAt"`
-	UpdatedAt          time.Time            `json:"updatedAt"`
+
+	// v0.8.0 additions (all omitempty, additive). Budget is the per-Task
+	// budget agent.Engine consumes; InputSchema / OutputSchema are the
+	// typed-handoff contract multiagent.Scheduler enforces. Spec anchor:
+	// docs/product-spec/v0.8.0/01-public-api.md §Change 4.
+	Budget       *TaskBudget     `json:"budget,omitempty"`
+	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type TaskEnvelope struct {

@@ -2,68 +2,38 @@
 
 ## Goals
 
-Make the public API tell the truth. Remove fields that the runtime rejects. Stop returning `[]any` from public commands.
+Make the public API tell the truth. Remove fields that the runtime rejects. Stop returning `[]any` from public commands. Extend `api.Task` with the schemas and budget that the v0.8.0 four-layer architecture requires.
 
-## Change 1 — Remove `Flow.Bypass*`
+## Change 1 — Flow already precision-shrunk (no further work in v0.8.0)
 
-**Current state** (api/types.go:224-229):
-
-```go
-type Flow struct {
-    Name                     string `json:"name"`
-    BypassTaskStore          bool   `json:"bypassTaskStore,omitempty"`
-    BypassPolicyEngine       bool   `json:"bypassPolicyEngine,omitempty"`
-    BypassTaskExecutionLease bool   `json:"bypassTaskExecutionLease,omitempty"`
-    BypassHandoff            bool   `json:"bypassHandoff,omitempty"`
-    BypassResponseLayer      bool   `json:"bypassResponseLayer,omitempty"`
-    BypassOutputGateway      bool   `json:"bypassOutputGateway,omitempty"`
-}
-```
-
-`internal/core/flow_registry.go:8-14` rejects any flow with any `Bypass*=true` and returns `ErrFlowBypass`. The fields are pure decoys — setting any to true causes registration failure.
-
-**Target state**:
+Status: **done**. The `Bypass*` removal that this section originally
+described shipped in a prior commit. Current state:
 
 ```go
 type Flow struct {
-    Name string `json:"name"`
+    Name            string `json:"name"`
+    PlannerPreset   string `json:"plannerPreset,omitempty"`
+    RouterPreset    string `json:"routerPreset,omitempty"`
+    PolicyPreset    string `json:"policyPreset,omitempty"`
+    ProjectorPreset string `json:"projectorPreset,omitempty"`
 }
 ```
 
-**Files changed**:
+The four `*Preset` fields are non-policy hints used by the flow
+registry to pick concrete planner / router / policy / projector
+implementations from named presets registered with the runtime. They
+do not bypass any subsystem and do not encode business policy. They
+are retained.
 
-- `api/types.go`: remove 6 fields from `Flow`
-- `api/errors.go`: remove `ErrFlowBypass`
-- `internal/core/model/flow.go`: remove 6 fields from internal model
-- `internal/core/model/errors.go`: remove `ErrFlowBypass`
-- `internal/core/errors.go`: remove `ErrFlowBypass` re-export
-- `internal/core/flow_registry.go`: remove `Bypass*` check, RegisterFlow becomes 4 lines
-- `internal/core/adapter/types.go:475-480`: remove 6 fields from round-trip
-- `internal/core/adapter/errors.go:59,86`: remove `ErrFlowBypass` from translation tables
-- `internal/core/runtime_test.go:619`: remove `TestRegisterFlow_RejectsBypass` test, replace with a smoke test that successful registration works
-- `errors.go` (top level): remove `ErrFlowBypass` re-export
-
-**Breaking-change classification**: pre-1.0 minor bump; documented in `12-migration-guide.md`.
+v0.8.0 ships no further `api.Flow` shape changes. If a future release
+folds preset hints into a richer registry-side API, that lands in a
+later spec rather than v0.8.0.
 
 ## Change 2 — Type `StartRunResult`
-
-**Current state** (runner.go:50):
-
-```go
-case api.StartRunCommand:
-    started, ok := result.(core.StartRunResult)
-    if !ok { return result, true }
-    return []any{adapter.RunFromModel(started.Run), adapter.TaskFromModel(started.Root)}, true
-```
-
-Public callers must do `result.([]any)[0].(api.Run)` — a triple type assertion. The internal type `core.StartRunResult` already exists; it just isn't exported.
 
 **Target state** — add to `api/types.go`:
 
 ```go
-// StartRunResult is the typed result of StartRunCommand. Use Runner.QueueRun
-// for the typed entrypoint; this type is also returned from
-// Runner.ExecuteCommand for low-level callers.
 type StartRunResult struct {
     Run      Run  `json:"run"`
     RootTask Task `json:"rootTask"`
@@ -84,19 +54,9 @@ case api.StartRunCommand:
 
 ## Change 3 — Type `RequestApprovalResult`
 
-**Current state** (runner.go:99-103):
-
-```go
-case api.RequestApprovalCommand:
-    requested, ok := result.(core.RequestApprovalResult)
-    if !ok { return result, true }
-    return []any{adapter.ApprovalRequestFromModel(requested.Approval), adapter.ResumeTokenFromModel(requested.Token)}, true
-```
-
 **Target state** — add to `api/types.go`:
 
 ```go
-// RequestApprovalResult is the typed result of RequestApprovalCommand.
 type RequestApprovalResult struct {
     Approval ApprovalRequest `json:"approval"`
     Token    ResumeToken     `json:"token"`
@@ -105,7 +65,39 @@ type RequestApprovalResult struct {
 
 Update runner.go accordingly.
 
-## Change 4 — `ExecuteCommand` documentation
+## Change 4 — `Task` contract extension (NEW for v0.8.0)
+
+Per ADR-017 and `06-durable-runner.md`, `api.Task` carries the schemas
+and budget the multi-agent flow requires.
+
+**Target state** — add to `api/types.go`:
+
+```go
+type Task struct {
+    ID    TaskID
+    Role  string
+    Input json.RawMessage
+
+    // v0.8.0 additions (all omitempty, additive)
+    Budget       *TaskBudget     `json:"budget,omitempty"`
+    InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+    OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+}
+
+type TaskBudget struct {
+    MaxTokens    int64         `json:"maxTokens,omitempty"`
+    MaxWallClock time.Duration `json:"maxWallClock,omitempty"`
+    MaxToolCalls int           `json:"maxToolCalls,omitempty"`
+    MaxSteps     int           `json:"maxSteps,omitempty"`
+}
+```
+
+`TaskBudget` is the unified per-Task budget consumed by `agent.Engine`
+and summed by `multiagent.Scheduler` for team-level observability. The
+prior `agent.LoopBudget` / `runner.RunBudget` / per-tool-call budget
+forks are collapsed into this single source of truth.
+
+## Change 5 — `ExecuteCommand` documentation
 
 Mark `Runner.ExecuteCommand` as a low-level escape hatch:
 
@@ -113,24 +105,56 @@ Mark `Runner.ExecuteCommand` as a low-level escape hatch:
 // ExecuteCommand runs a command through the internal command bus and returns
 // the typed result. For most use cases prefer the typed methods (QueueRun,
 // RequestApproval, AcquireTaskExecution, …) which avoid the type assertion
-// and provide better compile-time signatures. ExecuteCommand exists for tools
-// (replay, migration, admin) that operate generically over commands.
+// and provide better compile-time signatures.
 func (r *Runner) ExecuteCommand(ctx context.Context, command api.Command) (any, error)
 ```
 
 No signature change. Documentation only.
 
-## Change 5 — Lint to prevent regression
+## Change 6 — `agent/` package public surface (NEW)
 
-Add `golangci-lint` custom rule or `revive` rule (depending on existing config in `.golangci.yml`):
+The Agent Loop layer is itself a public surface — `03-agent-loop.md`
+specifies the full type set (`Step`, `StepPolicy`, `OutputPolicy`,
+`Result`, `ToolSafety`, `ContextManager`, `AgentFailure`,
+`FailureKind`, `LoopPolicy`). This document records that those types
+land under `agent/` rather than `api/` because they bind to runtime
+concerns the kernel data model does not own.
 
-- Forbid `[]any` as the named return type of any exported function in `api/` or root package.
-- Forbid public type field of type `any` unless explicitly tagged `// godoc-allow-any`.
+Cross-references:
 
-Concrete implementation: a script at `scripts/check-public-any.sh` invoked from CI similar to `check-business-words.sh`. Pattern:
+- `agent.Result.Failure *agent.AgentFailure` — the only failure
+  shape that crosses the agent → multiagent boundary
+  (`11-boundaries.md` Principle 6).
+- `agent.Engine.Run(ctx, api.Task, agent.OutputPolicy) agent.Result`
+  — typed return; bare error is rejected.
+
+## Change 7 — `multiagent/` package public surface (NEW)
+
+`multiagent/` is the new top-level kernel package
+(`05-multi-agent-layer.md`). Its public surface includes `AgentClass`,
+`AgentInstance`, `Team`, `Scheduler`, `Dispatch`, `Handoff`,
+`BlackboardEntry`, `VotingResult`, `SupervisorDecision`, and the
+events listed in `05-multi-agent-layer.md` §Multi-agent events.
+
+`multiagent/` imports `api/` and `agent/` only. `internal/` imports
+from `multiagent/` are forbidden by sentrux rules.
+
+## Change 8 — Lint to prevent regression
+
+Add `golangci-lint` custom rule or `revive` rule:
+
+- Forbid `[]any` as the named return type of any exported function in
+  `api/`, root package, `agent/`, or `multiagent/`.
+- Forbid public type field of type `any` unless explicitly tagged
+  `// godoc-allow-any`.
+- Forbid `agent.Engine`'s entry points returning bare `error` for
+  business failures (must be `agent.Result.Failure`).
+
+Concrete implementation: a script at `scripts/check-public-any.sh`
+invoked from CI similar to `check-business-words.sh`. Pattern:
 
 ```bash
-grep -rnE '^func .* \) \(.*\[\]any' api/ *.go
+grep -rnE '^func .* \) \(.*\[\]any' api/ agent/ multiagent/ *.go
 ```
 
 ## Verification
@@ -140,4 +164,6 @@ grep -rnE '^func .* \) \(.*\[\]any' api/ *.go
 - New typed-result tests:
   - `TestExecuteCommand_StartRunReturnsTypedResult`
   - `TestExecuteCommand_RequestApprovalReturnsTypedResult`
-- CI gate `scripts/check-public-any.sh` passes
+- `TestTask_BudgetInputOutputSchema_JSONRoundTrip` — Task with TaskBudget + InputSchema + OutputSchema survives JSON round-trip
+- `TestTaskBudget_ZeroValueOmittedInJSON` — empty Task.Budget = nil, not `{}`
+- CI gate `scripts/check-public-any.sh` passes against `api/`, `agent/`, `multiagent/`

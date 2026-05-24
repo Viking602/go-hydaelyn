@@ -19,7 +19,7 @@ func TestEngineOutputGuardrailCanReplaceFinalOutput(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
 			message.NewText(message.RoleUser, "hi"),
@@ -60,7 +60,7 @@ func TestEngineOutputGuardrailCanRetryFinalOutput(t *testing.T) {
 		},
 	}
 	engine := Engine{Provider: driver}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
 			message.NewText(message.RoleUser, "hi"),
@@ -108,7 +108,7 @@ func TestEngineOutputGuardrailRetryDoesNotIncludeRejectedOutputByDefault(t *test
 		},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations: 3,
@@ -149,7 +149,7 @@ func TestEngineOutputGuardrailRetryCanIncludeRejectedOutputWithPolicy(t *testing
 		},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations: 3,
@@ -182,7 +182,7 @@ func TestEngineOutputGuardrailCanBlockFinalOutput(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
 			message.NewText(message.RoleUser, "hi"),
@@ -214,7 +214,7 @@ func TestEngineOutputGuardrailRetryExhaustionReturnsError(t *testing.T) {
 		}},
 	}
 	engine := Engine{Provider: driver}
-	_, err := engine.Run(context.Background(), Input{
+	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
 			message.NewText(message.RoleUser, "hi"),
@@ -265,7 +265,7 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 		Provider: driver,
 		Tools:    tool.NewBus(toolDriver),
 	}
-	result, err := engine.Run(context.Background(), Input{
+	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
 		MaxIterations: 3,

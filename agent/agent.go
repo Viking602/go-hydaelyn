@@ -14,7 +14,11 @@ import (
 
 var ErrToolBusMissing = errors.New("tool bus missing")
 
-type Input struct {
+// LoopInput is the message-level input to Engine.RunMessages, the
+// low-level loop entry preserved from v0.7. Most callers should use
+// Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
+// task-level entry the v0.8.0 multi-agent layer schedules against.
+type LoopInput struct {
 	Model         string
 	Messages      []message.Message
 	Metadata      map[string]string
@@ -22,40 +26,45 @@ type Input struct {
 	MaxIterations int
 	OnEvent       func(provider.Event) error
 
-	// StopSequences and ThinkingBudget are forwarded to provider.Request
-	// so guardrails can be set per-run without crafting the request by
-	// hand. Empty/zero values leave the provider default.
 	StopSequences  []string
 	ThinkingBudget int
 	ResponseFormat *provider.ResponseFormat
 	ExtraBody      map[string]any
 
-	// OutputGuardrails run only after a terminal assistant output is
-	// collected. They are distinct from hooks/middleware/capability
-	// policies because they operate on the final assistant answer rather
-	// than prompt/tool/runtime stages.
 	OutputGuardrails []OutputGuardrail
 	OutputRecorder   OutputGuardrailRecorder
 }
 
-type Result struct {
+// LoopOutput is the message-level result from Engine.RunMessages. The
+// task-level Result type lives in result.go.
+type LoopOutput struct {
 	Messages   []message.Message
 	Usage      provider.Usage
 	StopReason provider.StopReason
 	Iterations int
-	// Thinking is the concatenated reasoning stream from the final turn,
-	// when the provider emits EventThinkingDelta. Empty when the model
-	// didn't surface any reasoning or the driver discards it.
-	Thinking string
+	Thinking   string
 }
 
+// Engine drives the bounded agent loop. Configure Provider/Tools/Hooks
+// at construction; the v0.8.0 fields (Model, ToolMode, LoopPolicy,
+// ContextBuilder) bind the defaults Engine.Run (the task-level entry)
+// needs. Engine.RunMessages remains available as the low-level
+// message-driven entry; it ignores the v0.8.0 fields and reads
+// everything it needs from LoopInput.
 type Engine struct {
 	Provider provider.Driver
 	Tools    *tool.Bus
 	Hooks    hook.Chain
+
+	Model          string
+	ToolMode       tool.Mode
+	LoopPolicy     LoopPolicy
+	ContextBuilder ContextManager
 }
 
-func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
+// RunMessages is the low-level loop that drives one LoopInput to
+// completion. Engine.Run is the task-level wrapper most callers want.
+func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, error) {
 	if input.MaxIterations <= 0 {
 		input.MaxIterations = 4
 	}
@@ -67,13 +76,13 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
 		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
 		if err != nil {
-			return Result{}, err
+			return LoopOutput{}, err
 		}
 		totalUsage = totalUsage.Add(usage)
 		if len(assistant.ToolCalls) == 0 {
 			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
 			if err != nil {
-				return Result{}, err
+				return LoopOutput{}, err
 			}
 			if len(retryMessages) > 0 {
 				if retryPolicy.IncludeRejectedOutput && (assistant.Text != "" || assistant.Thinking != "") {
@@ -88,7 +97,7 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 			if finalOutput.Text != "" || finalOutput.Thinking != "" {
 				current = append(current, finalOutput)
 			}
-			return Result{
+			return LoopOutput{
 				Messages:   current,
 				Usage:      totalUsage,
 				StopReason: stopReason,
@@ -100,17 +109,17 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 			current = append(current, assistant)
 		}
 		if e.Tools == nil {
-			return Result{}, ErrToolBusMissing
+			return LoopOutput{}, ErrToolBusMissing
 		}
 		results, terminal, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
 		if err != nil {
-			return Result{}, err
+			return LoopOutput{}, err
 		}
 		for _, result := range results {
 			current = append(current, message.NewToolResult(result))
 		}
 		if terminal {
-			return Result{
+			return LoopOutput{
 				Messages:   current,
 				Usage:      totalUsage,
 				StopReason: provider.StopReasonComplete,
@@ -119,7 +128,7 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 			}, nil
 		}
 	}
-	return Result{
+	return LoopOutput{
 		Messages:   current,
 		Usage:      totalUsage,
 		StopReason: provider.StopReasonMaxTurns,
@@ -127,7 +136,7 @@ func (e Engine) Run(ctx context.Context, input Input) (Result, error) {
 	}, nil
 }
 
-func (e Engine) applyOutputGuardrails(ctx context.Context, input Input, current []message.Message, assistant message.Message, iteration int, usage provider.Usage, stopReason provider.StopReason) (message.Message, []message.Message, RetryPolicy, error) {
+func (e Engine) applyOutputGuardrails(ctx context.Context, input LoopInput, current []message.Message, assistant message.Message, iteration int, usage provider.Usage, stopReason provider.StopReason) (message.Message, []message.Message, RetryPolicy, error) {
 	if len(input.OutputGuardrails) == 0 {
 		return assistant, nil, RetryPolicy{}, nil
 	}
@@ -180,7 +189,7 @@ func (e Engine) applyOutputGuardrails(ctx context.Context, input Input, current 
 	return candidate, nil, RetryPolicy{}, nil
 }
 
-func (e Engine) recordOutputGuardrailDecision(ctx context.Context, input Input, name string, action OutputGuardrailAction, reason string, iteration int, metadata map[string]string) {
+func (e Engine) recordOutputGuardrailDecision(ctx context.Context, input LoopInput, name string, action OutputGuardrailAction, reason string, iteration int, metadata map[string]string) {
 	if input.OutputRecorder == nil {
 		return
 	}
@@ -217,7 +226,7 @@ func cloneAnyMap(values map[string]any) map[string]any {
 
 // runTurn executes a single model turn: context transform, request assembly,
 // provider stream and event collection.
-func (e Engine) runTurn(ctx context.Context, current []message.Message, input Input) (message.Message, provider.Usage, provider.StopReason, error) {
+func (e Engine) runTurn(ctx context.Context, current []message.Message, input LoopInput) (message.Message, provider.Usage, provider.StopReason, error) {
 	transformed, err := e.Hooks.TransformContext(ctx, current)
 	if err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, err

@@ -1,0 +1,19 @@
+package multiagent
+
+import "github.com/Viking602/go-hydaelyn/api"
+
+// Multi-agent EventType extensions added in v0.8.0. These are valid
+// api.EventType values for transport over the event store; the runner
+// treats them opaquely.
+//
+// Spec anchor: docs/product-spec/v0.8.0/05-multi-agent-layer.md
+// §"Multi-agent events".
+const (
+	EventAgentInstanceCreated  api.EventType = "AgentInstanceCreated"
+	EventAgentInstanceFinished api.EventType = "AgentInstanceFinished"
+	EventSchedulerTick         api.EventType = "SchedulerTick"
+	EventDispatchEmitted       api.EventType = "DispatchEmitted"
+	EventTypedHandoff          api.EventType = "TypedHandoff"
+	EventVotingResolved        api.EventType = "VotingResolved"
+	EventSupervisorDecided     api.EventType = "SupervisorDecided"
+)
