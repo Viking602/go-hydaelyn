@@ -15,9 +15,8 @@ Each item below corresponds to a `// reserved for v0.9.0+` marker that already e
 | v0.8.0 reservation | v0.9.0 deliverable |
 |---|---|
 | `recipe/memory-pyramid/` (planned) | L0→L3 extraction pipeline that operates over an application-provided `api.Memory[T]`. The recipe defines the `T` shape it requires (atoms, scenarios, personas) and the application either uses that `T` or composes its own with adapters. Reference design: TencentDB Agent Memory L0 Conversation → L1 Atom → L2 Scenario → L3 Persona. |
-| `recipe/memory-retrieval/` (planned) | BM25 + semantic + hybrid (RRF) retrieval procedures that wrap an application-provided `api.Memory[T]` and a vector backend chosen by the application. The framework no longer ships `storage/sqlite-vec/` or `storage/postgres-pgvector/` Memory backends; those belong in application code or community packages. |
+| `recipe/memory-retrieval/` (planned) | BM25 + semantic + hybrid (RRF) retrieval procedures that wrap an application-provided `api.Memory[T]` and a vector backend chosen by the application. The framework ships no storage backends (see ADR-012 revised, Position D). |
 | `ContextSourceKind = "knowledge_graph"` reserved | KG resolver implementation with validity windows. Reference design: MemPalace temporal KG. |
-| `storage/postgres/` `SupportsBlackboardSubscribe = false` | Implement `LISTEN/NOTIFY`-based Subscribe; flip capability flag to true. |
 | `worker/` symbolic short-term memory placeholder | `recipe/context-canvas/` — Mermaid-encoded task state in Blackboard with Artifact-backed offload. Reference design: TencentDB Agent Memory symbolic memory. |
 | `hydaelyn.self.*` reserved Capability namespace (doc 02) | Ship the four built-ins as framework-provided Capabilities: `hydaelyn.self.profile`, `hydaelyn.self.memory.read`, `hydaelyn.self.history`, `hydaelyn.self.summarize_history`. Each is a read-only query against AgentProfile / Memory / RunSelector — no profile mutation, no auto-derived persona. |
 

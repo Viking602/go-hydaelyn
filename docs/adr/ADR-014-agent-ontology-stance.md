@@ -63,7 +63,7 @@ Constructs that are not falsifiable, depend on subjective LLM extraction, or bre
 
 ### 3. Immediately-effective hard constraints
 
-- `api/`, `internal/core/**`, `agent/**`, `internal/registry/**`, `internal/capability/**`, `internal/memory/**` (post-rename: `storage/memory/**`), `internal/run/**`, `internal/task/**`, and `internal/blackboard/**` MUST NOT introduce new identifiers, constants, struct fields, or struct tags with these names:
+- `api/`, `internal/core/**`, `agent/**`, `internal/registry/**`, `internal/capability/**`, `internal/memory/**`, `internal/run/**`, `internal/task/**`, and `internal/blackboard/**` MUST NOT introduce new identifiers, constants, struct fields, or struct tags with these names:
 
   ```
   Self (as a noun for selfhood)

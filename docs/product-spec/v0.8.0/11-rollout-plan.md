@@ -38,42 +38,31 @@ Phases respect these dependencies.
 
 **Goal**: lock the `StoreProvider` contract, ship the contract test suite as the primary public deliverable, ship reference implementations as convenience, deliver the durable polling Worker Runtime.
 
-**Position**: doc 05 was reframed around Position C (contract-first, reference implementations as starter / dev tooling, production-grade providers expected to be downstream-owned). This phase's effort allocates accordingly — most of the engineering goes into contract quality and contract tests, not into hardening reference adapters for every possible deployment.
+**Position**: doc 05 was first reframed around Position C (contract-first, reference implementations as starter / dev tooling, production-grade providers expected to be downstream-owned) and then further reduced on 2026-05-24 to Position D (no reference implementations at all — see ADR-012 revised). This phase's effort allocates accordingly: contract quality and contract tests are the deliverable; there is no reference-adapter work.
 
 **Work**:
 
 - Doc 05 contract foundations: extend `LeaseStore` with CAS, extend `ResumeTokenStore`, `UserMessageOutboxScanner`, add `StoreCapabilities`. Add `AgentProfileStore`, `CapabilityStore`, `UsageStore`, `DeadLetterStore`, `RunSelector + RunStore.ListRuns`. Update `UnitOfWork`. **Contract is locked at end of this phase.**
 - Build `contract/` package + `RunStoreProviderContractTests` suite (~35 tests). This is the primary public deliverable of Phase 2.
-- Move `internal/memory` → `storage/memory` (reference: in-process, dev / test).
-- Build `storage/sqlite/` reference implementation end to end (single-node, durable).
-- Build `storage/mysql/` reference implementation. CI matrix: stock MySQL 8.0 + OceanBase 4.x community + TiDB 6+. **Quality bar: passes contract tests** — not "production hardened for every workload". OceanBase compatibility matrix shipped as `storage/mysql/oceanbase_compat.md` for forkers.
-- Build `storage/postgres/` reference implementation. Subscribe deferred to v0.8.1.
-- Each reference adapter ships `MigrationsFS()` + `Options{AutoMigrate}` — minimal migration ergonomics. No deep Atlas integration in framework code; SQL files are plain enough that any migration tool can consume them.
+- Build `contract/internal/inmemfake/` — a non-exported `api.StoreProvider` (wraps `internal/memory.Provider`) used solely by framework CI to self-test the contract suite. Structurally unreachable from user code via Go's `internal/` rule.
 - Doc 04 in full: `worker.Runtime` with poll loop, lease, heartbeat, retry, dead-letter, graceful shutdown, concurrency pool, backoff strategy. `DeadLetterStore` and `DeadLetterSink` wired.
-- CI: matrix runs the contract test suite against memory + sqlite + (mysql × {MySQL 8, OB 4.x, TiDB 6}) + postgres.
+- CI: runs the contract test suite against the inmemfake adapter on every PR.
 
-**Deliverable**: v0.8.0-beta where the contract is locked, the contract test suite is exported, four reference implementations pass it, and the Worker Runtime survives process kill against any of them.
+**Deliverable**: v0.8.0-beta where the contract is locked, the contract test suite is exported, the framework self-tests the suite via `contract/internal/inmemfake`, and the Worker Runtime survives process kill against the runtime's internal default store.
 
-**Integration with downstream project**: external user (running OceanBase 4.x in MySQL mode) has two paths to consider:
-  - Path A (fastest): use `storage/mysql` reference implementation directly. Works for moderate scale; team accepts that the schema and migrations are Hydaelyn's.
-  - Path B (recommended for production): implement their own `StoreProvider` against their ent stack, validated by the contract test suite. Doc 12 ships the complete template.
+**Integration with downstream project**: external user (running OceanBase 4.x in MySQL mode) implements `api.StoreProvider` against their own ent stack and validates with `contract.RunStoreProviderContractTests`. Doc 12 ships the complete template. There is no framework-shipped MySQL/Postgres/SQLite reference to start from — and that absence is the point.
 
-This is a downstream choice, not a Phase 2 blocker — Phase 2 ships both the reference and the contract test suite.
-
-**Duration estimate**: 15 working days.
+**Duration estimate**: 9 working days (down from Position C's 15).
 
 | Sub-item | Days |
 |---|---|
 | Contract types + interfaces + `RunSelector` | 2 |
 | Contract test suite (~35 tests) — the primary deliverable | 5 |
-| memory reference (move + contract tests pass) | 1 |
-| sqlite reference (schema + migrations + impl + contract tests) | 3 |
-| mysql reference (schema + migrations + OB CI matrix + contract tests) | 2 |
-| postgres reference (schema + migrations + contract tests) | 1 |
+| `contract/internal/inmemfake` self-test adapter | 1 |
 | Worker Runtime (doc 04 full) | 1 |
-| **Total** | **15** |
+| **Total** | **9** |
 
-The shrink from the previous "17-20 + 3 migration tooling = 20-23 days" is real because Position C removes substantial scope from the framework's plate: no Atlas integration, no schema-evolution discipline as a framework feature (it's a convention documented for forkers), no migration-CLI tooling, no commitment to fix every OB-specific quirk in framework code. The freed budget reinforces contract test quality, which is the actual long-term asset.
+The further shrink from Position C's 15 days reflects the elimination of all reference-implementation work: no sqlite, no mysql with the OceanBase compat matrix, no postgres. The contract surface is what the framework owns; the freed budget reinforces contract test quality, which is the actual long-term asset.
 
 ## Phase 3 — Governance + Context (weeks 5-6)
 
@@ -158,7 +147,7 @@ Rationale: phases are interdependent; merging phase 1 to main would leave 8 week
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
 | Postgres LISTEN/NOTIFY edge cases | — | — | **Already mitigated**: Postgres Subscribe deferred to v0.8.1. v0.8.0 ships Postgres adapter with polling fallback only. |
-| OceanBase 4.x MySQL mode diverges from stock MySQL 8.0 on specific SQL (SKIP LOCKED, JSON funcs, txn timeouts) | **low (downgraded under Position C)** | Reference impl users may need to fork; framework not on the hook | OB compat matrix documented in `storage/mysql/oceanbase_compat.md`; CI runs both stock MySQL and OB containers; schema avoids `JSON_TABLE`/`JSON_OVERLAPS` and `AUTO_INCREMENT` PKs. Position C makes this matrix a documentation artifact for forkers, not a framework support commitment. |
+| OceanBase 4.x MySQL mode diverges from stock MySQL 8.0 on specific SQL (SKIP LOCKED, JSON funcs, txn timeouts) | **none under Position D** | n/a — framework ships no MySQL implementation | Per ADR-012 (revised, Position D) the framework ships no `storage/mysql/`. OB / MySQL fork compatibility is entirely an application-side concern, scoped by whoever writes the `api.StoreProvider`. The contract suite validates correctness; DBMS-specific quirks are out of the framework's scope. |
 | OceanBase OBProxy connection routing causes lease drops under failover in reference impl | **low (downgraded under Position C)** | Reference impl users self-mitigate; framework provides guidance | `ConnMaxLifetime` 30 min; worker heartbeat extends lease independently of SQL connection lifetime; lease CAS detects stale ownership. Production teams running OB at scale are expected to use Layer 3 (own provider) regardless. |
 | Contract test suite is incomplete and lets a broken external provider pass | medium | External providers ship subtle bugs | Contract tests are Phase 2's primary public deliverable, allocated 5 working days; every reference impl must pass before phase exits; tests are reviewed alongside the contract definition. |
 | External project's existing flow blocks on Bypass field removal | high | Phase 1 stalls | Send migration patch directly; estimate 30 min downstream change |
@@ -172,7 +161,7 @@ Rationale: phases are interdependent; merging phase 1 to main would leave 8 week
 | End of phase | Decision required |
 |--------------|-------------------|
 | Phase 1 | External user reviewed and confirmed AgentProfile + Capability + ModelPolicy shapes. **No further changes to these fields without a new ADR.** |
-| Phase 2 | Contract test suite is locked and reviewed (the framework's primary v0.8.0 storage deliverable). All four reference implementations pass it on their respective CI matrices. MySQL reference impl is verified against stock MySQL 8.0 AND OceanBase 4.x containers. If OB-specific issues remain in the reference impl: document them in `oceanbase_compat.md` as known limitations of the reference; downstream production users are expected to either accept the limitation, fork the reference, or write a Layer 3 provider. Postgres Subscribe is already deferred per design (v0.8.1). |
+| Phase 2 | Contract test suite is locked and reviewed (the framework's primary v0.8.0 storage deliverable). Per ADR-012 (revised, Position D) the framework ships no reference implementations; the suite is exercised in CI via the non-exported `contract/internal/inmemfake` adapter. Production providers are downstream-owned per doc 12. |
 | Phase 3 | Default `PolicyEnforcer` shipped: yes/no opt-in. Recommend: shipped enabled by default, with a config switch to disable for legacy callers. |
 | Phase 4 | Trigger runtimes: ship all three or subset. Recommend: scheduler + webhook in v0.8.0; event bus optional (interface defined, in-process default). |
 | Phase 5 | Eval `Repeats` flakiness threshold: ship the framework with deterministic-only assertions documented, semantic-similarity assertions deferred to v0.9.0. |
