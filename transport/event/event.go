@@ -40,9 +40,9 @@ type Event struct {
 // Driver routes Events to registered triggers. The zero value is
 // unusable; construct via New.
 type Driver struct {
-	mu     sync.RWMutex
+	mu      sync.RWMutex
 	byTopic map[string][]trigger.Registration
-	logger func(format string, args ...any)
+	logger  func(format string, args ...any)
 }
 
 // Options configures Driver construction.

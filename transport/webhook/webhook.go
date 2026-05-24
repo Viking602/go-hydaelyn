@@ -64,14 +64,14 @@ func New(opts Options) *Driver {
 	if logger == nil {
 		logger = func(format string, args ...any) {}
 	}
-	max := opts.MaxBodyBytes
-	if max <= 0 {
-		max = defaultMaxBodyBytes
+	maxBytes := opts.MaxBodyBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxBodyBytes
 	}
 	return &Driver{
 		routes:      map[routeKey]trigger.Registration{},
 		logger:      logger,
-		max:         max,
+		max:         maxBytes,
 		verifyToken: opts.VerifyToken,
 	}
 }

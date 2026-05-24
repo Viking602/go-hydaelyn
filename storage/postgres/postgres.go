@@ -21,6 +21,9 @@ import (
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/storage/sqlbase"
 
+	// pgx/v5/stdlib registers the "pgx" database/sql driver via init().
+	// dialect.go imports pgconn (a separate sub-package) for typed error
+	// inspection, so this blank import is required to wire up the driver.
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 

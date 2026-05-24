@@ -50,12 +50,12 @@ type Trigger struct {
 // declarative spec carried here so the registry can show humans what an
 // agent will actually call.
 type ModelPolicy struct {
-	Provider     string  `json:"provider,omitempty"`
-	Model        string  `json:"model"`
-	Temperature  float64 `json:"temperature,omitempty"`
-	TopP         float64 `json:"topP,omitempty"`
-	MaxTokens    int     `json:"maxTokens,omitempty"`
-	FallbackModel string `json:"fallbackModel,omitempty"`
+	Provider      string  `json:"provider,omitempty"`
+	Model         string  `json:"model"`
+	Temperature   float64 `json:"temperature,omitempty"`
+	TopP          float64 `json:"topP,omitempty"`
+	MaxTokens     int     `json:"maxTokens,omitempty"`
+	FallbackModel string  `json:"fallbackModel,omitempty"`
 }
 
 // Budget bounds the total spend a single Run is allowed to incur. The

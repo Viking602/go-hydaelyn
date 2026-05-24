@@ -346,16 +346,16 @@ func testSaveAndListAgentProfiles(t *testing.T, factory ProviderFactory) {
 
 func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	cap := api.Capability{Name: "summarize", AgentID: "agent-1", Description: "summarize text"}
+	capability := api.Capability{Name: "summarize", AgentID: "agent-1", Description: "summarize text"}
 	withUoW(t, p, func(uow api.UnitOfWork) error {
-		return uow.CapabilityCatalog().SaveCapability(context.Background(), cap)
+		return uow.CapabilityCatalog().SaveCapability(context.Background(), capability)
 	})
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		got, err := uow.CapabilityCatalog().ListCapabilities(context.Background(), api.CapabilitySelector{})
 		if err != nil {
 			return err
 		}
-		if len(got) != 1 || got[0].Name != cap.Name {
+		if len(got) != 1 || got[0].Name != capability.Name {
 			t.Fatalf("capability list mismatch: %+v", got)
 		}
 		return nil

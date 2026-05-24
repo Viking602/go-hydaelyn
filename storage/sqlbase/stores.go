@@ -744,6 +744,12 @@ func (s *leaseStore) AcquireWithExpectedVersion(ctx context.Context, l api.TaskE
 		newLease.ID, newLease.RunID, newLease.TaskID, newLease.HolderID,
 		string(newLease.Status), int64(newLease.Version), payload, unixNano(newLease.ExpiresAt))
 	if err != nil {
+		// Two writers racing on expectedVersion==0 both think the row is
+		// absent; the loser hits a unique-key violation. Treat that as a
+		// CAS miss (false, nil) to honor the LeaseStore contract.
+		if s.u.dialect.IsDuplicateKey(err) {
+			return false, nil
+		}
 		return false, fmt.Errorf("%s: AcquireWithExpectedVersion insert: %w", s.u.dialect.Name(), err)
 	}
 	return true, nil
@@ -754,9 +760,12 @@ func (s *leaseStore) ExtendLease(ctx context.Context, leaseID, workerID string, 
 	if err != nil {
 		return false, err
 	}
+	// Reject already-expired leases — once expires_at <= now, the lease is
+	// transferable and the current holder no longer owns it. The UPDATE's
+	// expires_at > ? clause makes this check atomic with the extension.
 	res, err := s.u.exec(ctx,
-		`UPDATE leases SET expires_at=? WHERE id=? AND holder_id=? AND status=?`,
-		unixNano(newExpiry), leaseID, workerID, string(api.LeaseStatusActive))
+		`UPDATE leases SET expires_at=? WHERE id=? AND holder_id=? AND status=? AND expires_at>?`,
+		unixNano(newExpiry), leaseID, workerID, string(api.LeaseStatusActive), unixNano(time.Now().UTC()))
 	if err != nil {
 		return false, fmt.Errorf("%s: ExtendLease: %w", s.u.dialect.Name(), err)
 	}
@@ -1111,23 +1120,24 @@ func (s *capabilityStore) ListCapabilities(ctx context.Context, sel api.Capabili
 type usageStore struct{ u *UnitOfWork }
 
 func (s *usageStore) AppendUsage(ctx context.Context, r api.UsageRecord) error {
+	if r.ID == "" {
+		// Use a transient placeholder length; the actual marshaled payload
+		// reflects whatever id is assigned here, so QueryUsage sees the
+		// same value when it unmarshals payload back into a UsageRecord.
+		r.ID = fmt.Sprintf("usage-%d", time.Now().UnixNano())
+	}
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now().UTC()
+	}
 	payload, err := marshalJSON(r)
 	if err != nil {
 		return err
-	}
-	id := r.ID
-	if id == "" {
-		id = fmt.Sprintf("usage-%d-%d", time.Now().UnixNano(), len(payload))
-	}
-	createdAt := r.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
 	}
 	q := s.u.upsert("usage_records",
 		[]string{"id", "run_id", "task_id", "agent_id", "provider", "credits", "payload", "created_at"},
 		[]string{"id"},
 		[]string{"payload"})
-	if _, err := s.u.exec(ctx, q, id, r.RunID, r.TaskID, r.AgentID, r.Provider, r.Credits, payload, unixNano(createdAt)); err != nil {
+	if _, err := s.u.exec(ctx, q, r.ID, r.RunID, r.TaskID, r.AgentID, r.Provider, r.Credits, payload, unixNano(r.CreatedAt)); err != nil {
 		return fmt.Errorf("%s: AppendUsage: %w", s.u.dialect.Name(), err)
 	}
 	return nil

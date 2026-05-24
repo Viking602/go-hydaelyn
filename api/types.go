@@ -775,7 +775,7 @@ func (c Capability) AsTool() Tool {
 
 // CapabilityManifest is the declarative bundle a system publishes to
 // announce "here is what an agent can ask me to do." A manifest is the
-// agent-level analogue of an OpenAPI document: name and version identify
+// agent-level analog of an OpenAPI document: name and version identify
 // the manifest itself; each Capability inside is one callable operation.
 //
 // Manifests are the seed format for the v0.8.0 interop renderers in

@@ -22,8 +22,9 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/storage/sqlbase"
-
-	_ "github.com/go-sql-driver/mysql"
+	// github.com/go-sql-driver/mysql is imported (typed) from dialect.go for
+	// MySQLError and registers the "mysql" driver via init() — no blank
+	// import needed here.
 )
 
 //go:embed schema.sql

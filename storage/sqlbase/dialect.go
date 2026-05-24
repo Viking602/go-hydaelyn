@@ -39,6 +39,13 @@ type Dialect interface {
 	// SQLite/Postgres: "ON CONFLICT(pk1,pk2) DO UPDATE SET c=excluded.c"
 	// MySQL:           "ON DUPLICATE KEY UPDATE c=VALUES(c)"
 	UpsertClause(pk []string, updateCols []string) string
+
+	// IsDuplicateKey reports whether err is a unique-constraint violation
+	// from the underlying driver. Stores that implement optimistic-insert
+	// CAS semantics (AcquireWithExpectedVersion when expectedVersion==0
+	// races with another writer creating the same row) treat a duplicate
+	// key as a CAS miss — (false, nil) — rather than a hard error.
+	IsDuplicateKey(err error) bool
 }
 
 // RebindDollar rewrites `?` placeholders into `$N` form, used by the

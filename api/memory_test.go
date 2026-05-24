@@ -57,3 +57,28 @@ func TestMemorySelector_ZeroValueIsValid(t *testing.T) {
 		t.Fatalf("zero-value IDs should be empty (no ID restriction), got %v", sel.IDs)
 	}
 }
+
+// TestMemory_ApplicationFieldsRoundTrip exercises the design intent that T may
+// carry arbitrary application-owned fields (here: content, tags) which the
+// framework never inspects but which round-trip through Write/Read intact.
+func TestMemory_ApplicationFieldsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	var mem api.Memory[fakeEntry] = &fakeStore{}
+	in := fakeEntry{
+		id:        "e1",
+		scope:     api.ContextAgent,
+		subjectID: "agent-1",
+		content:   "hello world",
+		tags:      []string{"greeting", "demo"},
+	}
+	if err := mem.Write(ctx, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := mem.Read(ctx, api.MemorySelector{})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got) != 1 || got[0].content != in.content || len(got[0].tags) != len(in.tags) {
+		t.Fatalf("application fields did not round-trip: %+v", got)
+	}
+}

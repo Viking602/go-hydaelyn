@@ -19,8 +19,9 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/storage/sqlbase"
-
-	_ "modernc.org/sqlite"
+	// modernc.org/sqlite is imported (typed) from dialect.go for its
+	// error-type and registers the "sqlite" driver via init() — no blank
+	// import needed here.
 )
 
 //go:embed schema.sql

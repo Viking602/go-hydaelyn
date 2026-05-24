@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -107,6 +108,15 @@ type Runtime struct {
 	stopOnce sync.Once
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+
+	// runStarted flips true on the first Run call and is used by Stop to
+	// distinguish "Run never called" (return immediately) from "Run in
+	// flight" (wait on runDone). runDone is closed by Run on exit and
+	// runErr holds Run's drain return value — Stop reads it once runDone
+	// fires, observing the value via the channel-close happens-before.
+	runStarted atomic.Bool
+	runDone    chan struct{}
+	runErr     error
 }
 
 // NewRuntime wires a poller + executor with options. Both arguments are
@@ -129,6 +139,7 @@ func NewRuntime(p EnvelopePoller, e EnvelopeExecutor, opts RuntimeOptions) *Runt
 		executor: e,
 		opts:     opts,
 		stopCh:   make(chan struct{}),
+		runDone:  make(chan struct{}),
 	}
 }
 
@@ -137,10 +148,25 @@ func NewRuntime(p EnvelopePoller, e EnvelopeExecutor, opts RuntimeOptions) *Runt
 // case to avoid silently dropping work.
 var ErrRuntimeMisconfigured = errors.New("worker: runtime missing poller or executor")
 
+// ErrRuntimeAlreadyStarted is returned when Run is called more than once on
+// the same Runtime. Each Runtime is a one-shot loop; construct a new one to
+// restart after Stop.
+var ErrRuntimeAlreadyStarted = errors.New("worker: Run already started")
+
 // Run blocks until ctx is cancelled or Stop is called. A nil poller or
 // executor returns ErrRuntimeMisconfigured immediately so caller-side
 // bugs surface loudly rather than as silent no-ops.
 func (r *Runtime) Run(ctx context.Context) error {
+	if !r.runStarted.CompareAndSwap(false, true) {
+		return ErrRuntimeAlreadyStarted
+	}
+	defer close(r.runDone)
+	err := r.run(ctx)
+	r.runErr = err
+	return err
+}
+
+func (r *Runtime) run(ctx context.Context) error {
 	if r.poller == nil || r.executor == nil {
 		return ErrRuntimeMisconfigured
 	}
@@ -201,9 +227,23 @@ func (r *Runtime) Run(ctx context.Context) error {
 // Stop signals Run to exit after draining in-flight envelopes. Returns
 // nil on clean drain, or a timeout error if ShutdownDrainTimeout elapses
 // before workers finish.
+//
+// Stop blocks on Run's exit (not directly on the WaitGroup) so that the
+// only goroutine calling wg.Add is also the one calling wg.Wait via
+// drain — eliminating the Add/Wait race that arises when an external
+// caller waits on the WaitGroup concurrently with the loop still
+// dispatching envelopes.
 func (r *Runtime) Stop() error {
 	r.stopOnce.Do(func() { close(r.stopCh) })
-	return r.waitDrain(r.opts.ShutdownDrainTimeout)
+	if !r.runStarted.Load() {
+		return nil
+	}
+	select {
+	case <-r.runDone:
+		return r.runErr
+	case <-time.After(r.opts.ShutdownDrainTimeout):
+		return fmt.Errorf("worker: drain timed out after %s", r.opts.ShutdownDrainTimeout)
+	}
 }
 
 func (r *Runtime) drain(cause error) error {

@@ -576,16 +576,16 @@ func (a apiAgentProfileStoreAdapter) ListAgentProfiles(ctx context.Context, sel 
 
 type apiCapabilityStoreAdapter struct{ inner api.CapabilityStore }
 
-func (a apiCapabilityStoreAdapter) SaveCapability(ctx context.Context, cap model.Capability) error {
-	return ErrorToCore(a.inner.SaveCapability(ctx, CapabilityFromModel(cap)))
+func (a apiCapabilityStoreAdapter) SaveCapability(ctx context.Context, capability model.Capability) error {
+	return ErrorToCore(a.inner.SaveCapability(ctx, CapabilityFromModel(capability)))
 }
 
 func (a apiCapabilityStoreAdapter) LoadCapability(ctx context.Context, name string, agentID string) (model.Capability, error) {
-	cap, err := a.inner.LoadCapability(ctx, name, agentID)
+	capability, err := a.inner.LoadCapability(ctx, name, agentID)
 	if err != nil {
 		return model.Capability{}, ErrorToCore(err)
 	}
-	return CapabilityToModel(cap), nil
+	return CapabilityToModel(capability), nil
 }
 
 func (a apiCapabilityStoreAdapter) ListCapabilities(ctx context.Context, sel model.CapabilitySelector) ([]model.Capability, error) {
@@ -1049,16 +1049,16 @@ func (a coreAgentProfileStoreAdapter) ListAgentProfiles(ctx context.Context, sel
 
 type coreCapabilityStoreAdapter struct{ inner core.CapabilityStore }
 
-func (a coreCapabilityStoreAdapter) SaveCapability(ctx context.Context, cap api.Capability) error {
-	return ErrorToAPI(a.inner.SaveCapability(ctx, CapabilityToModel(cap)))
+func (a coreCapabilityStoreAdapter) SaveCapability(ctx context.Context, capability api.Capability) error {
+	return ErrorToAPI(a.inner.SaveCapability(ctx, CapabilityToModel(capability)))
 }
 
 func (a coreCapabilityStoreAdapter) LoadCapability(ctx context.Context, name string, agentID string) (api.Capability, error) {
-	cap, err := a.inner.LoadCapability(ctx, name, agentID)
+	capability, err := a.inner.LoadCapability(ctx, name, agentID)
 	if err != nil {
 		return api.Capability{}, ErrorToAPI(err)
 	}
-	return CapabilityFromModel(cap), nil
+	return CapabilityFromModel(capability), nil
 }
 
 func (a coreCapabilityStoreAdapter) ListCapabilities(ctx context.Context, sel api.CapabilitySelector) ([]api.Capability, error) {

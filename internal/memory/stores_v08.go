@@ -96,15 +96,15 @@ func matchAgentSelector(p model.AgentProfile, sel model.AgentSelector) bool {
 
 func capabilityKey(name, agentID string) string { return name + "|" + agentID }
 
-func (s *capabilityStore) SaveCapability(_ context.Context, cap model.Capability) error {
+func (s *capabilityStore) SaveCapability(_ context.Context, capability model.Capability) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cap.Name) == "" {
+	if strings.TrimSpace(capability.Name) == "" {
 		return fmt.Errorf("capability name required: %w", model.ErrInvalidCommand)
 	}
-	u.staged.Capabilities[capabilityKey(cap.Name, cap.AgentID)] = cap
+	u.staged.Capabilities[capabilityKey(capability.Name, capability.AgentID)] = capability
 	return nil
 }
 
@@ -113,11 +113,11 @@ func (s *capabilityStore) LoadCapability(_ context.Context, name string, agentID
 	if err := u.ensureOpen(); err != nil {
 		return model.Capability{}, err
 	}
-	cap, ok := u.staged.Capabilities[capabilityKey(name, agentID)]
+	capability, ok := u.staged.Capabilities[capabilityKey(name, agentID)]
 	if !ok {
 		return model.Capability{}, model.ErrNotFound
 	}
-	return cap, nil
+	return capability, nil
 }
 
 func (s *capabilityStore) ListCapabilities(_ context.Context, sel model.CapabilitySelector) ([]model.Capability, error) {
