@@ -24,6 +24,10 @@ type (
 	ApprovalStore             = ports.ApprovalStore
 	ResumeTokenStore          = ports.ResumeTokenStore
 	ActionAttemptStore        = ports.ActionAttemptStore
+	AgentProfileStore         = ports.AgentProfileStore
+	CapabilityStore           = ports.CapabilityStore
+	UsageStore                = ports.UsageStore
+	DeadLetterStore           = ports.DeadLetterStore
 	BlackboardStore           = ports.BlackboardReadWriter
 	UnitOfWork                = ports.UnitOfWork
 	StoreProvider             = ports.StoreProvider

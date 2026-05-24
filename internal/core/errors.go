@@ -16,7 +16,6 @@ var (
 	ErrResponseTaskRequired    = model.ErrResponseTaskRequired
 	ErrPolicyDenied            = model.ErrPolicyDenied
 	ErrPolicyObligationFailed  = model.ErrPolicyObligationFailed
-	ErrFlowBypass              = model.ErrFlowBypass
 	ErrHandoffCycle            = model.ErrHandoffCycle
 	ErrHandoffDepthExceeded    = model.ErrHandoffDepthExceeded
 	ErrInvalidCommand          = model.ErrInvalidCommand

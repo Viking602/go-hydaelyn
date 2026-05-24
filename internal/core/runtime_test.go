@@ -616,8 +616,8 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 		t.Fatalf("expected PolicyObligationFailed event, got %#v", rt.Events(run.ID))
 	}
 
-	if err := rt.RegisterFlow(Flow{Name: "bad", BypassTaskStore: true}); !errors.Is(err, ErrFlowBypass) {
-		t.Fatalf("expected flow bypass to be rejected, got %v", err)
+	if err := rt.RegisterFlow(Flow{Name: "smoke", PlannerPreset: "default"}); err != nil {
+		t.Fatalf("expected flow registration to succeed, got %v", err)
 	}
 	projection, err := rt.Replay(run.ID, ReplayModeAudit)
 	if err != nil {

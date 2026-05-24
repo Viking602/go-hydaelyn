@@ -145,6 +145,9 @@ jobs:
       - name: Framework business-word boundary (ADR-008)
         run: ./scripts/check-business-words.sh
 
+      - name: Public API any-return boundary (spec v0.8.0 §01 Change 5)
+        run: ./scripts/check-public-any.sh
+
   release-soak:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/internal/core"
@@ -253,6 +254,22 @@ func (a apiUnitOfWorkAdapter) ActionAttempts() ports.ActionAttemptStore {
 	return apiActionAttemptStoreAdapter{inner: a.inner.ActionAttempts()}
 }
 
+func (a apiUnitOfWorkAdapter) AgentProfiles() ports.AgentProfileStore {
+	return apiAgentProfileStoreAdapter{inner: a.inner.AgentProfiles()}
+}
+
+func (a apiUnitOfWorkAdapter) CapabilityCatalog() ports.CapabilityStore {
+	return apiCapabilityStoreAdapter{inner: a.inner.CapabilityCatalog()}
+}
+
+func (a apiUnitOfWorkAdapter) UsageRecords() ports.UsageStore {
+	return apiUsageStoreAdapter{inner: a.inner.UsageRecords()}
+}
+
+func (a apiUnitOfWorkAdapter) DeadLetters() ports.DeadLetterStore {
+	return apiDeadLetterStoreAdapter{inner: a.inner.DeadLetters()}
+}
+
 func (a apiUnitOfWorkAdapter) Commit(ctx context.Context) error {
 	return ErrorToCore(a.inner.Commit(ctx))
 }
@@ -273,6 +290,14 @@ func (a apiRunStoreAdapter) LoadRun(ctx context.Context, runID string) (model.Ru
 		return model.Run{}, ErrorToCore(err)
 	}
 	return RunToModel(run), nil
+}
+
+func (a apiRunStoreAdapter) ListRuns(ctx context.Context, sel model.RunSelector) ([]model.Run, error) {
+	runs, err := a.inner.ListRuns(ctx, RunSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return RunsToModel(runs), nil
 }
 
 type apiTaskStoreAdapter struct{ inner api.TaskStore }
@@ -305,6 +330,14 @@ func (a apiEventStoreAdapter) AppendEvent(ctx context.Context, event model.Event
 
 func (a apiEventStoreAdapter) ListEvents(ctx context.Context, runID string) ([]model.Event, error) {
 	events, err := a.inner.ListEvents(ctx, runID)
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return EventsToModel(events), nil
+}
+
+func (a apiEventStoreAdapter) ListAfter(ctx context.Context, runID string, afterSeq uint64) ([]model.Event, error) {
+	events, err := a.inner.ListAfter(ctx, runID, afterSeq)
 	if err != nil {
 		return nil, ErrorToCore(err)
 	}
@@ -411,6 +444,14 @@ func (a apiUserMessageStoreAdapter) ListMessages(ctx context.Context, runID stri
 	return UserMessagesToModel(messages), nil
 }
 
+func (a apiUserMessageStoreAdapter) ListPendingFor(ctx context.Context, sel model.UserMessageSelector) ([]model.UserMessage, error) {
+	messages, err := a.inner.ListPendingFor(ctx, UserMessageSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return UserMessagesToModel(messages), nil
+}
+
 func (a apiUserMessageStoreAdapter) ListQueuedMessages(ctx context.Context) ([]model.UserMessage, error) {
 	scanner, ok := a.inner.(api.UserMessageOutboxScanner)
 	if !ok {
@@ -445,6 +486,22 @@ func (a apiLeaseStoreAdapter) ActiveLeaseForTask(ctx context.Context, runID, tas
 	return TaskExecutionLeaseToModel(lease), ok, nil
 }
 
+func (a apiLeaseStoreAdapter) AcquireWithExpectedVersion(ctx context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error) {
+	ok, err := a.inner.AcquireWithExpectedVersion(ctx, TaskExecutionLeaseFromModel(lease), expectedVersion)
+	if err != nil {
+		return false, ErrorToCore(err)
+	}
+	return ok, nil
+}
+
+func (a apiLeaseStoreAdapter) ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error) {
+	ok, err := a.inner.ExtendLease(ctx, leaseID, workerID, newExpiry)
+	if err != nil {
+		return false, ErrorToCore(err)
+	}
+	return ok, nil
+}
+
 type apiApprovalStoreAdapter struct{ inner api.ApprovalStore }
 
 func (a apiApprovalStoreAdapter) SaveApproval(ctx context.Context, approval model.ApprovalRequest) error {
@@ -473,6 +530,14 @@ func (a apiResumeTokenStoreAdapter) LoadResumeToken(ctx context.Context, tokenID
 	return ResumeTokenToModel(token), nil
 }
 
+func (a apiResumeTokenStoreAdapter) ListPending(ctx context.Context, sel model.ResumeTokenSelector) ([]model.ResumeToken, error) {
+	tokens, err := a.inner.ListPending(ctx, ResumeTokenSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return ResumeTokensToModel(tokens), nil
+}
+
 type apiActionAttemptStoreAdapter struct{ inner api.ActionAttemptStore }
 
 func (a apiActionAttemptStoreAdapter) SaveActionAttempt(ctx context.Context, attempt model.ActionAttempt) error {
@@ -485,6 +550,90 @@ func (a apiActionAttemptStoreAdapter) LoadActionAttempt(ctx context.Context, att
 		return model.ActionAttempt{}, ErrorToCore(err)
 	}
 	return ActionAttemptToModel(attempt), nil
+}
+
+type apiAgentProfileStoreAdapter struct{ inner api.AgentProfileStore }
+
+func (a apiAgentProfileStoreAdapter) SaveAgentProfile(ctx context.Context, profile model.AgentProfile) error {
+	return ErrorToCore(a.inner.SaveAgentProfile(ctx, AgentProfileFromModel(profile)))
+}
+
+func (a apiAgentProfileStoreAdapter) LoadAgentProfile(ctx context.Context, id string) (model.AgentProfile, error) {
+	profile, err := a.inner.LoadAgentProfile(ctx, id)
+	if err != nil {
+		return model.AgentProfile{}, ErrorToCore(err)
+	}
+	return AgentProfileToModel(profile), nil
+}
+
+func (a apiAgentProfileStoreAdapter) ListAgentProfiles(ctx context.Context, sel model.AgentSelector) ([]model.AgentProfile, error) {
+	profiles, err := a.inner.ListAgentProfiles(ctx, AgentSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return AgentProfilesToModel(profiles), nil
+}
+
+type apiCapabilityStoreAdapter struct{ inner api.CapabilityStore }
+
+func (a apiCapabilityStoreAdapter) SaveCapability(ctx context.Context, cap model.Capability) error {
+	return ErrorToCore(a.inner.SaveCapability(ctx, CapabilityFromModel(cap)))
+}
+
+func (a apiCapabilityStoreAdapter) LoadCapability(ctx context.Context, name string, agentID string) (model.Capability, error) {
+	cap, err := a.inner.LoadCapability(ctx, name, agentID)
+	if err != nil {
+		return model.Capability{}, ErrorToCore(err)
+	}
+	return CapabilityToModel(cap), nil
+}
+
+func (a apiCapabilityStoreAdapter) ListCapabilities(ctx context.Context, sel model.CapabilitySelector) ([]model.Capability, error) {
+	caps, err := a.inner.ListCapabilities(ctx, CapabilitySelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return CapabilitiesToModel(caps), nil
+}
+
+type apiUsageStoreAdapter struct{ inner api.UsageStore }
+
+func (a apiUsageStoreAdapter) AppendUsage(ctx context.Context, rec model.UsageRecord) error {
+	return ErrorToCore(a.inner.AppendUsage(ctx, UsageRecordFromModel(rec)))
+}
+
+func (a apiUsageStoreAdapter) QueryUsage(ctx context.Context, sel model.UsageSelector) ([]model.UsageRecord, error) {
+	records, err := a.inner.QueryUsage(ctx, UsageSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return UsageRecordsToModel(records), nil
+}
+
+func (a apiUsageStoreAdapter) SumCredits(ctx context.Context, sel model.UsageSelector) (int64, error) {
+	sum, err := a.inner.SumCredits(ctx, UsageSelectorFromModel(sel))
+	if err != nil {
+		return 0, ErrorToCore(err)
+	}
+	return sum, nil
+}
+
+type apiDeadLetterStoreAdapter struct{ inner api.DeadLetterStore }
+
+func (a apiDeadLetterStoreAdapter) AppendDeadLetter(ctx context.Context, entry model.DeadLetterEntry) error {
+	return ErrorToCore(a.inner.AppendDeadLetter(ctx, DeadLetterEntryFromModel(entry)))
+}
+
+func (a apiDeadLetterStoreAdapter) ListDeadLetters(ctx context.Context, sel model.DeadLetterSelector) ([]model.DeadLetterEntry, error) {
+	entries, err := a.inner.ListDeadLetters(ctx, DeadLetterSelectorFromModel(sel))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return DeadLetterEntriesToModel(entries), nil
+}
+
+func (a apiDeadLetterStoreAdapter) Requeue(ctx context.Context, deadLetterID string) error {
+	return ErrorToCore(a.inner.Requeue(ctx, deadLetterID))
 }
 
 func StoreProviderFromCore(inner core.StoreProvider) api.StoreProvider {
@@ -578,6 +727,22 @@ func (a coreUnitOfWorkAdapter) ActionAttempts() api.ActionAttemptStore {
 	return coreActionAttemptStoreAdapter{inner: a.inner.ActionAttempts()}
 }
 
+func (a coreUnitOfWorkAdapter) AgentProfiles() api.AgentProfileStore {
+	return coreAgentProfileStoreAdapter{inner: a.inner.AgentProfiles()}
+}
+
+func (a coreUnitOfWorkAdapter) CapabilityCatalog() api.CapabilityStore {
+	return coreCapabilityStoreAdapter{inner: a.inner.CapabilityCatalog()}
+}
+
+func (a coreUnitOfWorkAdapter) UsageRecords() api.UsageStore {
+	return coreUsageStoreAdapter{inner: a.inner.UsageRecords()}
+}
+
+func (a coreUnitOfWorkAdapter) DeadLetters() api.DeadLetterStore {
+	return coreDeadLetterStoreAdapter{inner: a.inner.DeadLetters()}
+}
+
 func (a coreUnitOfWorkAdapter) Commit(ctx context.Context) error {
 	return ErrorToAPI(a.inner.Commit(ctx))
 }
@@ -598,6 +763,14 @@ func (a coreRunStoreAdapter) LoadRun(ctx context.Context, runID string) (api.Run
 		return api.Run{}, ErrorToAPI(err)
 	}
 	return RunFromModel(run), nil
+}
+
+func (a coreRunStoreAdapter) ListRuns(ctx context.Context, sel api.RunSelector) ([]api.Run, error) {
+	runs, err := a.inner.ListRuns(ctx, RunSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return RunsFromModel(runs), nil
 }
 
 type coreTaskStoreAdapter struct{ inner core.TaskStore }
@@ -630,6 +803,14 @@ func (a coreEventStoreAdapter) AppendEvent(ctx context.Context, event api.Event)
 
 func (a coreEventStoreAdapter) ListEvents(ctx context.Context, runID string) ([]api.Event, error) {
 	events, err := a.inner.ListEvents(ctx, runID)
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return EventsFromModel(events), nil
+}
+
+func (a coreEventStoreAdapter) ListAfter(ctx context.Context, runID string, afterSeq uint64) ([]api.Event, error) {
+	events, err := a.inner.ListAfter(ctx, runID, afterSeq)
 	if err != nil {
 		return nil, ErrorToAPI(err)
 	}
@@ -736,6 +917,14 @@ func (a coreUserMessageStoreAdapter) ListMessages(ctx context.Context, runID str
 	return UserMessagesFromModel(messages), nil
 }
 
+func (a coreUserMessageStoreAdapter) ListPendingFor(ctx context.Context, sel api.UserMessageSelector) ([]api.UserMessage, error) {
+	messages, err := a.inner.ListPendingFor(ctx, UserMessageSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return UserMessagesFromModel(messages), nil
+}
+
 func (a coreUserMessageStoreAdapter) ListQueuedMessages(ctx context.Context) ([]api.UserMessage, error) {
 	scanner, ok := a.inner.(core.UserMessageOutboxScanner)
 	if !ok {
@@ -770,6 +959,22 @@ func (a coreLeaseStoreAdapter) ActiveLeaseForTask(ctx context.Context, runID, ta
 	return TaskExecutionLeaseFromModel(lease), ok, nil
 }
 
+func (a coreLeaseStoreAdapter) AcquireWithExpectedVersion(ctx context.Context, lease api.TaskExecutionLease, expectedVersion uint64) (bool, error) {
+	ok, err := a.inner.AcquireWithExpectedVersion(ctx, TaskExecutionLeaseToModel(lease), expectedVersion)
+	if err != nil {
+		return false, ErrorToAPI(err)
+	}
+	return ok, nil
+}
+
+func (a coreLeaseStoreAdapter) ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error) {
+	ok, err := a.inner.ExtendLease(ctx, leaseID, workerID, newExpiry)
+	if err != nil {
+		return false, ErrorToAPI(err)
+	}
+	return ok, nil
+}
+
 type coreApprovalStoreAdapter struct{ inner core.ApprovalStore }
 
 func (a coreApprovalStoreAdapter) SaveApproval(ctx context.Context, approval api.ApprovalRequest) error {
@@ -798,6 +1003,14 @@ func (a coreResumeTokenStoreAdapter) LoadResumeToken(ctx context.Context, tokenI
 	return ResumeTokenFromModel(token), nil
 }
 
+func (a coreResumeTokenStoreAdapter) ListPending(ctx context.Context, sel api.ResumeTokenSelector) ([]api.ResumeToken, error) {
+	tokens, err := a.inner.ListPending(ctx, ResumeTokenSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return ResumeTokensFromModel(tokens), nil
+}
+
 type coreActionAttemptStoreAdapter struct{ inner core.ActionAttemptStore }
 
 func (a coreActionAttemptStoreAdapter) SaveActionAttempt(ctx context.Context, attempt api.ActionAttempt) error {
@@ -810,4 +1023,88 @@ func (a coreActionAttemptStoreAdapter) LoadActionAttempt(ctx context.Context, at
 		return api.ActionAttempt{}, ErrorToAPI(err)
 	}
 	return ActionAttemptFromModel(attempt), nil
+}
+
+type coreAgentProfileStoreAdapter struct{ inner core.AgentProfileStore }
+
+func (a coreAgentProfileStoreAdapter) SaveAgentProfile(ctx context.Context, profile api.AgentProfile) error {
+	return ErrorToAPI(a.inner.SaveAgentProfile(ctx, AgentProfileToModel(profile)))
+}
+
+func (a coreAgentProfileStoreAdapter) LoadAgentProfile(ctx context.Context, id string) (api.AgentProfile, error) {
+	profile, err := a.inner.LoadAgentProfile(ctx, id)
+	if err != nil {
+		return api.AgentProfile{}, ErrorToAPI(err)
+	}
+	return AgentProfileFromModel(profile), nil
+}
+
+func (a coreAgentProfileStoreAdapter) ListAgentProfiles(ctx context.Context, sel api.AgentSelector) ([]api.AgentProfile, error) {
+	profiles, err := a.inner.ListAgentProfiles(ctx, AgentSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return AgentProfilesFromModel(profiles), nil
+}
+
+type coreCapabilityStoreAdapter struct{ inner core.CapabilityStore }
+
+func (a coreCapabilityStoreAdapter) SaveCapability(ctx context.Context, cap api.Capability) error {
+	return ErrorToAPI(a.inner.SaveCapability(ctx, CapabilityToModel(cap)))
+}
+
+func (a coreCapabilityStoreAdapter) LoadCapability(ctx context.Context, name string, agentID string) (api.Capability, error) {
+	cap, err := a.inner.LoadCapability(ctx, name, agentID)
+	if err != nil {
+		return api.Capability{}, ErrorToAPI(err)
+	}
+	return CapabilityFromModel(cap), nil
+}
+
+func (a coreCapabilityStoreAdapter) ListCapabilities(ctx context.Context, sel api.CapabilitySelector) ([]api.Capability, error) {
+	caps, err := a.inner.ListCapabilities(ctx, CapabilitySelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return CapabilitiesFromModel(caps), nil
+}
+
+type coreUsageStoreAdapter struct{ inner core.UsageStore }
+
+func (a coreUsageStoreAdapter) AppendUsage(ctx context.Context, rec api.UsageRecord) error {
+	return ErrorToAPI(a.inner.AppendUsage(ctx, UsageRecordToModel(rec)))
+}
+
+func (a coreUsageStoreAdapter) QueryUsage(ctx context.Context, sel api.UsageSelector) ([]api.UsageRecord, error) {
+	records, err := a.inner.QueryUsage(ctx, UsageSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return UsageRecordsFromModel(records), nil
+}
+
+func (a coreUsageStoreAdapter) SumCredits(ctx context.Context, sel api.UsageSelector) (int64, error) {
+	sum, err := a.inner.SumCredits(ctx, UsageSelectorToModel(sel))
+	if err != nil {
+		return 0, ErrorToAPI(err)
+	}
+	return sum, nil
+}
+
+type coreDeadLetterStoreAdapter struct{ inner core.DeadLetterStore }
+
+func (a coreDeadLetterStoreAdapter) AppendDeadLetter(ctx context.Context, entry api.DeadLetterEntry) error {
+	return ErrorToAPI(a.inner.AppendDeadLetter(ctx, DeadLetterEntryToModel(entry)))
+}
+
+func (a coreDeadLetterStoreAdapter) ListDeadLetters(ctx context.Context, sel api.DeadLetterSelector) ([]api.DeadLetterEntry, error) {
+	entries, err := a.inner.ListDeadLetters(ctx, DeadLetterSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return DeadLetterEntriesFromModel(entries), nil
+}
+
+func (a coreDeadLetterStoreAdapter) Requeue(ctx context.Context, deadLetterID string) error {
+	return ErrorToAPI(a.inner.Requeue(ctx, deadLetterID))
 }

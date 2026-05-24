@@ -261,3 +261,135 @@ func TestMemoryProviderBeginReturnsUnifiedUnitOfWork(t *testing.T) {
 		t.Fatalf("LoadActionAttempt() error = %v", err)
 	}
 }
+
+func TestMemoryProvider_CapabilityReporter(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	caps, err := provider.Capabilities(ctx)
+	if err != nil {
+		t.Fatalf("Capabilities() error = %v", err)
+	}
+	if !caps.SupportsTransactions {
+		t.Fatalf("expected SupportsTransactions=true")
+	}
+	if !caps.SupportsBlackboardSubscribe {
+		t.Fatalf("expected SupportsBlackboardSubscribe=true")
+	}
+	if !caps.SupportsListPending {
+		t.Fatalf("expected SupportsListPending=true")
+	}
+	if caps.SupportsConcurrentWriters {
+		t.Fatalf("expected SupportsConcurrentWriters=false (single-writer via gate)")
+	}
+}
+
+func TestMemoryProvider_Close(t *testing.T) {
+	provider := NewProvider()
+	if err := provider.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestMemoryLeaseStore_AcquireWithExpectedVersion(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+
+	cas, ok := uow.Leases().(interface {
+		AcquireWithExpectedVersion(context.Context, model.TaskExecutionLease, uint64) (bool, error)
+	})
+	if !ok {
+		t.Fatalf("leaseStore does not satisfy LeaseCAS")
+	}
+
+	lease := model.TaskExecutionLease{
+		ID:         "lease-cas-1",
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		HolderID:   "worker-A",
+		HolderType: model.HolderAgent,
+		Status:     model.LeaseStatusActive,
+		Expiry:     time.Now().Add(time.Minute),
+	}
+	acquired, err := cas.AcquireWithExpectedVersion(ctx, lease, 0)
+	if err != nil {
+		t.Fatalf("Acquire(version=0) error = %v", err)
+	}
+	if !acquired {
+		t.Fatalf("expected first Acquire to succeed")
+	}
+
+	stale, err := cas.AcquireWithExpectedVersion(ctx, lease, 0)
+	if err != nil {
+		t.Fatalf("Acquire(stale) error = %v", err)
+	}
+	if stale {
+		t.Fatalf("expected stale Acquire to return false")
+	}
+
+	winning, err := cas.AcquireWithExpectedVersion(ctx, lease, 1)
+	if err != nil {
+		t.Fatalf("Acquire(version=1) error = %v", err)
+	}
+	if !winning {
+		t.Fatalf("expected Acquire with current version to succeed")
+	}
+}
+
+func TestMemoryLeaseStore_ExtendLease(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+
+	cas := uow.Leases().(interface {
+		AcquireWithExpectedVersion(context.Context, model.TaskExecutionLease, uint64) (bool, error)
+		ExtendLease(context.Context, string, string, time.Time) (bool, error)
+	})
+
+	original := time.Now().Add(30 * time.Second)
+	lease := model.TaskExecutionLease{
+		ID:         "lease-ext-1",
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		HolderID:   "worker-A",
+		HolderType: model.HolderAgent,
+		Status:     model.LeaseStatusActive,
+		Expiry:     original,
+	}
+	if _, err := cas.AcquireWithExpectedVersion(ctx, lease, 0); err != nil {
+		t.Fatalf("Acquire error = %v", err)
+	}
+
+	newExpiry := original.Add(time.Minute)
+	extended, err := cas.ExtendLease(ctx, lease.ID, "worker-A", newExpiry)
+	if err != nil {
+		t.Fatalf("ExtendLease(self) error = %v", err)
+	}
+	if !extended {
+		t.Fatalf("expected ExtendLease(self) to succeed")
+	}
+
+	rotated, err := cas.ExtendLease(ctx, lease.ID, "worker-B", newExpiry.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ExtendLease(other) error = %v", err)
+	}
+	if rotated {
+		t.Fatalf("expected ExtendLease(other) to return false")
+	}
+
+	missing, err := cas.ExtendLease(ctx, "no-such-lease", "worker-A", newExpiry)
+	if err != nil {
+		t.Fatalf("ExtendLease(missing) error = %v", err)
+	}
+	if missing {
+		t.Fatalf("expected ExtendLease(missing) to return false")
+	}
+}

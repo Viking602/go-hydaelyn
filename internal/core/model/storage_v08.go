@@ -1,0 +1,119 @@
+package model
+
+import "time"
+
+// RunSelector mirrors api.RunSelector. AND-combined fields.
+type RunSelector struct {
+	IDs          []string
+	AgentID      string
+	AgentVersion string
+	Statuses     []RunStatus
+	Since        time.Time
+	Until        time.Time
+	Limit        int
+}
+
+// UserMessageSelector mirrors api.UserMessageSelector.
+type UserMessageSelector struct {
+	RunID     string
+	Recipient string
+	Statuses  []string
+	Since     time.Time
+	Until     time.Time
+	Limit     int
+}
+
+// ResumeTokenSelector mirrors api.ResumeTokenSelector.
+type ResumeTokenSelector struct {
+	RunID    string
+	TaskID   string
+	Statuses []string
+	Since    time.Time
+	Until    time.Time
+	Limit    int
+	Cursor   string
+}
+
+// AgentSelector mirrors api.AgentSelector.
+type AgentSelector struct {
+	IDs      []string
+	Roles    []string
+	Groups   []string
+	Statuses []string
+	Limit    int
+}
+
+// CapabilitySelector mirrors api.CapabilitySelector.
+type CapabilitySelector struct {
+	Names    []string
+	AgentIDs []string
+	Tags     []string
+	Limit    int
+}
+
+// UsageRecord mirrors api.UsageRecord. Append-only metering datum.
+type UsageRecord struct {
+	ID           string
+	RunID        string
+	TaskID       string
+	AgentID      string
+	Provider     string
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	ToolCalls    int
+	DurationMS   int64
+	Credits      int64
+	Metadata     map[string]string
+	CreatedAt    time.Time
+}
+
+// UsageSelector mirrors api.UsageSelector.
+type UsageSelector struct {
+	RunID    string
+	TaskID   string
+	AgentID  string
+	Provider string
+	Since    time.Time
+	Until    time.Time
+	Limit    int
+}
+
+// DeadLetterEntry mirrors api.DeadLetterEntry.
+type DeadLetterEntry struct {
+	ID         string
+	EnvelopeID string
+	RunID      string
+	TaskID     string
+	Reason     string
+	Attempts   int
+	Envelope   TaskEnvelope
+	Payload    map[string]any
+	CreatedAt  time.Time
+}
+
+// DeadLetterSelector mirrors api.DeadLetterSelector.
+type DeadLetterSelector struct {
+	RunID  string
+	TaskID string
+	Since  time.Time
+	Until  time.Time
+	Limit  int
+}
+
+// Capability mirrors api.Capability. Declaration of a single unit of work
+// an agent exposes to the runtime.
+type Capability struct {
+	Name             string
+	Version          string
+	Description      string
+	AgentID          string
+	InputSchema      map[string]any
+	OutputSchema     map[string]any
+	EffectType       ToolEffectType
+	RiskLevel        string
+	Idempotent       bool
+	RequiresApproval bool
+	Tags             []string
+	Metadata         map[string]string
+}

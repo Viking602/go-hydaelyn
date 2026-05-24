@@ -215,18 +215,42 @@ type Event struct {
 	RecordedAt time.Time      `json:"recordedAt"`
 }
 
+// Flow is a named combination of preset adapters that the Runner uses to
+// resolve planner / router / policy / projector behaviour for a Run. Flows
+// compose runtime primitives; they cannot bypass any runtime invariant
+// (TaskStore, PolicyEngine, TaskExecutionLease, Handoff, ResponseLayer,
+// OutputGateway). The bypass concept was removed in v0.8.0 — Runner now
+// enforces all primitives unconditionally.
 type Flow struct {
-	Name                     string `json:"name"`
-	PlannerPreset            string `json:"plannerPreset,omitempty"`
-	RouterPreset             string `json:"routerPreset,omitempty"`
-	PolicyPreset             string `json:"policyPreset,omitempty"`
-	ProjectorPreset          string `json:"projectorPreset,omitempty"`
-	BypassTaskStore          bool   `json:"bypassTaskStore,omitempty"`
-	BypassPolicyEngine       bool   `json:"bypassPolicyEngine,omitempty"`
-	BypassTaskExecutionLease bool   `json:"bypassTaskExecutionLease,omitempty"`
-	BypassHandoff            bool   `json:"bypassHandoff,omitempty"`
-	BypassResponseLayer      bool   `json:"bypassResponseLayer,omitempty"`
-	BypassOutputGateway      bool   `json:"bypassOutputGateway,omitempty"`
+	Name            string `json:"name"`
+	PlannerPreset   string `json:"plannerPreset,omitempty"`
+	RouterPreset    string `json:"routerPreset,omitempty"`
+	PolicyPreset    string `json:"policyPreset,omitempty"`
+	ProjectorPreset string `json:"projectorPreset,omitempty"`
+}
+
+// StartRunResult is the typed result of StartRunCommand.
+// Prefer the typed Runner.QueueRun / Runner.StartRun methods over
+// ExecuteCommand for compile-time safety; this type is also returned by
+// Runner.ExecuteCommand for tools that operate generically over commands.
+type StartRunResult struct {
+	Run      Run  `json:"run"`
+	RootTask Task `json:"rootTask"`
+}
+
+// RequestApprovalResult is the typed result of RequestApprovalCommand.
+// Prefer the typed Runner.RequestApproval over ExecuteCommand.
+type RequestApprovalResult struct {
+	Approval ApprovalRequest `json:"approval"`
+	Token    ResumeToken     `json:"token"`
+}
+
+// AcquireTaskExecutionResult is the typed result of AcquireTaskExecutionCommand.
+// Acquired is false when the lease was not granted (already held by another
+// holder); in that case Lease is the zero value.
+type AcquireTaskExecutionResult struct {
+	Lease    TaskExecutionLease `json:"lease"`
+	Acquired bool               `json:"acquired"`
 }
 
 type TaskExecutionLease struct {
@@ -241,6 +265,13 @@ type TaskExecutionLease struct {
 	ExpiresAt   time.Time   `json:"expiresAt"`
 	HeartbeatAt time.Time   `json:"heartbeatAt"`
 	Status      LeaseStatus `json:"status"`
+	// Version is the monotonic CAS source-of-truth for AcquireWithExpectedVersion.
+	// Providers MUST increment this on every successful save. v0.8.0+.
+	Version uint64 `json:"version,omitempty"`
+	// Expiry is the wall-clock deadline at which the lease auto-releases.
+	// Distinct from ExpiresAt (which is the deadline of the *task* execution
+	// window): Expiry is purely lease-level liveness. v0.8.0+.
+	Expiry time.Time `json:"expiry,omitempty"`
 }
 
 type ResumeToken struct {
@@ -555,4 +586,219 @@ type TraceSpan struct {
 	EndedAt   time.Time         `json:"endedAt,omitempty"`
 	Error     string            `json:"error,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+// RunSelector filters ListRuns. All set fields AND-combine.
+//
+// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"RunSelector".
+type RunSelector struct {
+	IDs          []string    `json:"ids,omitempty"`
+	AgentID      string      `json:"agentId,omitempty"`
+	AgentVersion string      `json:"agentVersion,omitempty"`
+	Statuses     []RunStatus `json:"statuses,omitempty"`
+	Since        time.Time   `json:"since,omitempty"`
+	Until        time.Time   `json:"until,omitempty"`
+	Limit        int         `json:"limit,omitempty"`
+}
+
+// UserMessageSelector filters UserMessageStore.ListPendingFor. All set
+// fields AND-combine. The selector is intentionally minimal; providers MAY
+// extend their own selectors but the contract test suite only exercises
+// these.
+//
+// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Outbox FIFO".
+type UserMessageSelector struct {
+	RunID     string    `json:"runId,omitempty"`
+	Recipient string    `json:"recipient,omitempty"`
+	Statuses  []string  `json:"statuses,omitempty"`
+	Since     time.Time `json:"since,omitempty"`
+	Until     time.Time `json:"until,omitempty"`
+	Limit     int       `json:"limit,omitempty"`
+}
+
+// ResumeTokenSelector filters ResumeTokenStore.ListPending. Providers MAY
+// support cursor-based pagination via Cursor; cursor format is opaque to
+// callers.
+//
+// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Resume token enumeration".
+type ResumeTokenSelector struct {
+	RunID    string    `json:"runId,omitempty"`
+	TaskID   string    `json:"taskId,omitempty"`
+	Statuses []string  `json:"statuses,omitempty"`
+	Since    time.Time `json:"since,omitempty"`
+	Until    time.Time `json:"until,omitempty"`
+	Limit    int       `json:"limit,omitempty"`
+	Cursor   string    `json:"cursor,omitempty"`
+}
+
+// AgentSelector filters AgentProfileStore.ListByAgentSelector.
+//
+// Spec anchor: docs/product-spec/v0.8.0/03-agent-ontology.md.
+type AgentSelector struct {
+	IDs      []string `json:"ids,omitempty"`
+	Roles    []string `json:"roles,omitempty"`
+	Groups   []string `json:"groups,omitempty"`
+	Statuses []string `json:"statuses,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+}
+
+// CapabilitySelector filters CapabilityStore.ListByCapabilitySelector.
+//
+// Spec anchor: docs/product-spec/v0.8.0/03-agent-ontology.md.
+type CapabilitySelector struct {
+	Names    []string `json:"names,omitempty"`
+	AgentIDs []string `json:"agentIds,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+}
+
+// UsageRecord is an append-only metering datum captured per task execution.
+// The runtime emits one per LLM call, tool call, or other billable unit.
+//
+// Spec anchor: docs/product-spec/v0.8.0/06-usage-metering.md (detailed
+// fields may be added there; this is the v0.8.0 baseline).
+type UsageRecord struct {
+	ID           string            `json:"id"`
+	RunID        string            `json:"runId"`
+	TaskID       string            `json:"taskId,omitempty"`
+	AgentID      string            `json:"agentId,omitempty"`
+	Provider     string            `json:"provider,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	InputTokens  int               `json:"inputTokens,omitempty"`
+	OutputTokens int               `json:"outputTokens,omitempty"`
+	ToolCalls    int               `json:"toolCalls,omitempty"`
+	DurationMS   int64             `json:"durationMs,omitempty"`
+	Credits      int64             `json:"credits,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	CreatedAt    time.Time         `json:"createdAt"`
+}
+
+// UsageSelector filters UsageStore.Query.
+type UsageSelector struct {
+	RunID    string    `json:"runId,omitempty"`
+	TaskID   string    `json:"taskId,omitempty"`
+	AgentID  string    `json:"agentId,omitempty"`
+	Provider string    `json:"provider,omitempty"`
+	Since    time.Time `json:"since,omitempty"`
+	Until    time.Time `json:"until,omitempty"`
+	Limit    int       `json:"limit,omitempty"`
+}
+
+// DeadLetterEntry records a TaskEnvelope that exhausted retries and was
+// moved to the dead-letter store. Providers MAY support re-queue via the
+// DeadLetterStore.Requeue method; this is gated on
+// StoreCapabilities.SupportsDeadLetterRequeue.
+//
+// Spec anchor: docs/product-spec/v0.8.0/04-worker-runtime.md.
+type DeadLetterEntry struct {
+	ID         string         `json:"id"`
+	EnvelopeID string         `json:"envelopeId"`
+	RunID      string         `json:"runId"`
+	TaskID     string         `json:"taskId,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
+	Attempts   int            `json:"attempts,omitempty"`
+	Envelope   TaskEnvelope   `json:"envelope"`
+	Payload    map[string]any `json:"payload,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+}
+
+// DeadLetterSelector filters DeadLetterStore.List.
+type DeadLetterSelector struct {
+	RunID  string    `json:"runId,omitempty"`
+	TaskID string    `json:"taskId,omitempty"`
+	Since  time.Time `json:"since,omitempty"`
+	Until  time.Time `json:"until,omitempty"`
+	Limit  int       `json:"limit,omitempty"`
+}
+
+// Capability declares a single unit of work an agent (or system) exposes
+// to the runtime — analogous to a typed Tool but at the agent/program
+// boundary rather than the model-call boundary. v0.8.0 ships the type
+// declaration; AgentProfile + CapabilityStore wiring lands in doc 03.
+//
+// Spec anchor: docs/product-spec/v0.8.0/03-agent-ontology.md.
+type Capability struct {
+	Name             string            `json:"name"`
+	Version          string            `json:"version,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	AgentID          string            `json:"agentId,omitempty"`
+	InputSchema      map[string]any    `json:"inputSchema,omitempty"`
+	OutputSchema     map[string]any    `json:"outputSchema,omitempty"`
+	EffectType       ToolEffectType    `json:"effectType,omitempty"`
+	RiskLevel        string            `json:"riskLevel,omitempty"`
+	Idempotent       bool              `json:"idempotent,omitempty"`
+	RequiresApproval bool              `json:"requiresApproval,omitempty"`
+	Tags             []string          `json:"tags,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+}
+
+// AsCapability projects a Tool into the broader Capability shape so it can
+// be advertised on a CapabilityManifest, exported to MCP/OpenAPI/CLI, or
+// stored via CapabilityStore. The agent that owns the tool is supplied by
+// the caller — Tool itself is agent-agnostic. Fields Capability carries
+// that Tool does not (description, input/output schema, version) are left
+// empty so callers can layer them on top.
+//
+// The conversion is intentionally lossy in one direction only: round-
+// tripping Tool → Capability → Tool drops fields like Description and
+// Schemas because they have no Tool counterpart. The reverse direction
+// (Capability.AsTool) drops Version, AgentID, schemas, and Tags.
+func (t Tool) AsCapability(agentID string) Capability {
+	return Capability{
+		Name:             t.Name,
+		AgentID:          agentID,
+		EffectType:       t.EffectType,
+		RiskLevel:        t.RiskLevel,
+		Idempotent:       t.Idempotent,
+		RequiresApproval: t.RequiresActionTask,
+		Tags:             append([]string(nil), t.PolicyTags...),
+		Metadata:         cloneStringMap(t.Metadata),
+	}
+}
+
+// AsTool projects a Capability back into a Tool descriptor for use inside
+// the model-call boundary (agent.Engine, tool.Bus). Fields Capability
+// carries that Tool cannot represent (description, schemas, AgentID,
+// version) are dropped; callers needing them should keep the Capability
+// alongside the Tool.
+func (c Capability) AsTool() Tool {
+	return Tool{
+		Name:               c.Name,
+		EffectType:         c.EffectType,
+		RequiresActionTask: c.RequiresApproval,
+		RiskLevel:          c.RiskLevel,
+		Idempotent:         c.Idempotent,
+		PolicyTags:         append([]string(nil), c.Tags...),
+		Metadata:           cloneStringMap(c.Metadata),
+	}
+}
+
+// CapabilityManifest is the declarative bundle a system publishes to
+// announce "here is what an agent can ask me to do." A manifest is the
+// agent-level analogue of an OpenAPI document: name and version identify
+// the manifest itself; each Capability inside is one callable operation.
+//
+// Manifests are the seed format for the v0.8.0 interop renderers in
+// transport/mcp, transport/openapi, and the CLI generator — each turns a
+// CapabilityManifest into the format its target ecosystem expects.
+type CapabilityManifest struct {
+	Name         string            `json:"name"`
+	Version      string            `json:"version,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	Capabilities []Capability      `json:"capabilities"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+// cloneStringMap returns a shallow copy of m so callers can mutate the
+// result without writing through to the source. Returns nil for nil so
+// JSON omitempty behavior is preserved on the round trip.
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

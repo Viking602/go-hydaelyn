@@ -22,6 +22,10 @@ type State struct {
 	Approvals         map[string]model.ApprovalRequest
 	ResumeTokens      map[string]model.ResumeToken
 	ActionAttempts    map[string]model.ActionAttempt
+	AgentProfiles     map[string]model.AgentProfile
+	Capabilities      map[string]model.Capability // key = name|agentID
+	UsageRecords      map[string]model.UsageRecord
+	DeadLetters       map[string]model.DeadLetterEntry
 	Seq               map[string]int
 	NextID            int
 }
@@ -42,6 +46,10 @@ func NewState() *State {
 		Approvals:         map[string]model.ApprovalRequest{},
 		ResumeTokens:      map[string]model.ResumeToken{},
 		ActionAttempts:    map[string]model.ActionAttempt{},
+		AgentProfiles:     map[string]model.AgentProfile{},
+		Capabilities:      map[string]model.Capability{},
+		UsageRecords:      map[string]model.UsageRecord{},
+		DeadLetters:       map[string]model.DeadLetterEntry{},
 		Seq:               map[string]int{},
 	}
 }
@@ -65,6 +73,10 @@ func (s *State) Clone() *State {
 	clone.Approvals = maps.Clone(s.Approvals)
 	clone.ResumeTokens = maps.Clone(s.ResumeTokens)
 	clone.ActionAttempts = maps.Clone(s.ActionAttempts)
+	clone.AgentProfiles = maps.Clone(s.AgentProfiles)
+	clone.Capabilities = maps.Clone(s.Capabilities)
+	clone.UsageRecords = maps.Clone(s.UsageRecords)
+	clone.DeadLetters = maps.Clone(s.DeadLetters)
 	clone.Seq = maps.Clone(s.Seq)
 	clone.NextID = s.NextID
 	return clone
