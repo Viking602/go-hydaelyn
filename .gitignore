@@ -7,3 +7,5 @@
 benchmarks/_external/
 benchmarks/results/
 .idea/
+.goland/
+docs/superpowers/

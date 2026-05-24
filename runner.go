@@ -15,6 +15,18 @@ type Runner struct {
 	rt *core.Runtime
 }
 
+// ExecuteCommand dispatches a Command through the internal command bus and
+// returns the typed result. For most use cases prefer the typed methods
+// (QueueRun, StartRun, RequestApproval, AcquireTaskExecution, ...) which
+// avoid the result-type assertion and provide better compile-time signatures.
+// ExecuteCommand exists for tools (replay, migration, admin) that operate
+// generically over Commands.
+//
+// Result types follow the api.<Command>Result naming convention where a
+// command produces a structured value (StartRunCommand -> api.StartRunResult,
+// RequestApprovalCommand -> api.RequestApprovalResult,
+// AcquireTaskExecutionCommand -> api.AcquireTaskExecutionResult). Commands
+// that produce a single domain value return that value directly.
 func (r *Runner) ExecuteCommand(ctx context.Context, command api.Command) (any, error) {
 	coreCommand, ok := adapter.CommandToCore(command)
 	if !ok {
@@ -47,7 +59,10 @@ func runTaskResultFromCore(command api.Command, result any) (any, bool) {
 		if !ok {
 			return result, true
 		}
-		return []any{adapter.RunFromModel(started.Run), adapter.TaskFromModel(started.Root)}, true
+		return api.StartRunResult{
+			Run:      adapter.RunFromModel(started.Run),
+			RootTask: adapter.TaskFromModel(started.Root),
+		}, true
 	case api.CreateTaskCommand:
 		if task, ok := result.(model.Task); ok {
 			return adapter.TaskFromModel(task), true
@@ -84,10 +99,10 @@ func governanceResultFromCore(command api.Command, result any) (any, bool) {
 	switch command.(type) {
 	case api.AcquireTaskExecutionCommand:
 		if acquired, ok := result.(core.AcquireTaskExecutionResult); ok {
-			return struct {
-				Lease    api.TaskExecutionLease
-				Acquired bool
-			}{Lease: adapter.TaskExecutionLeaseFromModel(acquired.Lease), Acquired: acquired.Acquired}, true
+			return api.AcquireTaskExecutionResult{
+				Lease:    adapter.TaskExecutionLeaseFromModel(acquired.Lease),
+				Acquired: acquired.Acquired,
+			}, true
 		}
 		return result, true
 	case api.ToolInvocation:
@@ -100,7 +115,10 @@ func governanceResultFromCore(command api.Command, result any) (any, bool) {
 		if !ok {
 			return result, true
 		}
-		return []any{adapter.ApprovalRequestFromModel(requested.Approval), adapter.ResumeTokenFromModel(requested.Token)}, true
+		return api.RequestApprovalResult{
+			Approval: adapter.ApprovalRequestFromModel(requested.Approval),
+			Token:    adapter.ResumeTokenFromModel(requested.Token),
+		}, true
 	case api.RecoverResumeTokenCommand:
 		if token, ok := result.(model.ResumeToken); ok {
 			return adapter.ResumeTokenFromModel(token), true

@@ -16,7 +16,6 @@ var (
 	ErrResponseTaskRequired    = api.ErrResponseTaskRequired
 	ErrPolicyDenied            = api.ErrPolicyDenied
 	ErrPolicyObligationFailed  = api.ErrPolicyObligationFailed
-	ErrFlowBypass              = api.ErrFlowBypass
 	ErrHandoffCycle            = api.ErrHandoffCycle
 	ErrHandoffDepthExceeded    = api.ErrHandoffDepthExceeded
 	ErrInvalidCommand          = api.ErrInvalidCommand

@@ -14,6 +14,8 @@ type TaskExecutionLease struct {
 	ExpiresAt   time.Time   `json:"expiresAt"`
 	HeartbeatAt time.Time   `json:"heartbeatAt"`
 	Status      LeaseStatus `json:"status"`
+	Version     uint64      `json:"version,omitempty"`
+	Expiry      time.Time   `json:"expiry,omitempty"`
 }
 
 type ResumeToken struct {

@@ -14,7 +14,6 @@ var (
 	ErrResponseTaskRequired    = errors.New("orchestrator: response task required")
 	ErrPolicyDenied            = errors.New("orchestrator: policy denied")
 	ErrPolicyObligationFailed  = errors.New("orchestrator: policy obligation failed")
-	ErrFlowBypass              = errors.New("orchestrator: flow bypasses runtime primitives")
 	ErrHandoffCycle            = errors.New("orchestrator: handoff owner cycle")
 	ErrHandoffDepthExceeded    = errors.New("orchestrator: handoff depth exceeded")
 	ErrInvalidCommand          = errors.New("orchestrator: invalid command")

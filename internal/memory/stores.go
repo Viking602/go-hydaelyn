@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
@@ -77,6 +79,47 @@ func (s *runStore) LoadRun(_ context.Context, runID string) (model.Run, error) {
 	return run, nil
 }
 
+// ListRuns filters runs by RunSelector. All set fields AND-combine. Result
+// is sorted by CreatedAt ascending so callers get deterministic order.
+func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.Run, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	var out []model.Run
+	for _, run := range u.staged.Runs {
+		if len(sel.IDs) > 0 && !slices.Contains(sel.IDs, run.ID) {
+			continue
+		}
+		if len(sel.Statuses) > 0 && !slices.Contains(sel.Statuses, run.Status) {
+			continue
+		}
+		if !sel.Since.IsZero() && run.CreatedAt.Before(sel.Since) {
+			continue
+		}
+		if !sel.Until.IsZero() && run.CreatedAt.After(sel.Until) {
+			continue
+		}
+		// AgentID / AgentVersion: Run model doesn't yet carry these in
+		// v0.8.0 baseline. When AgentProfile binding lands (doc 03), this
+		// match clause should consult run.AgentID / run.AgentVersion.
+		out = append(out, run)
+	}
+	slices.SortFunc(out, func(a, b model.Run) int {
+		if a.CreatedAt.Before(b.CreatedAt) {
+			return -1
+		}
+		if a.CreatedAt.After(b.CreatedAt) {
+			return 1
+		}
+		return 0
+	})
+	if sel.Limit > 0 && len(out) > sel.Limit {
+		out = out[:sel.Limit]
+	}
+	return out, nil
+}
+
 func (s *taskStore) SaveTask(_ context.Context, task model.Task) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
@@ -137,6 +180,23 @@ func (s *eventStore) ListEvents(_ context.Context, runID string) ([]model.Event,
 		return nil, err
 	}
 	return slices.Clone(u.staged.Events[runID]), nil
+}
+
+// ListAfter returns events with Sequence > afterSeq within the run, in
+// Sequence order. Per the storage contract, sequence is per-run monotonic.
+func (s *eventStore) ListAfter(_ context.Context, runID string, afterSeq uint64) ([]model.Event, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	all := u.staged.Events[runID]
+	var out []model.Event
+	for _, ev := range all {
+		if uint64(ev.Sequence) > afterSeq {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
 }
 
 func (s *blackboardStore) WriteItem(_ context.Context, item model.BlackboardItem) error {
@@ -302,6 +362,53 @@ func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessag
 	return out, nil
 }
 
+// ListPendingFor returns messages matching the selector in FIFO insertion
+// order. Status filter defaults to UserMessageQueued when no statuses are
+// specified. Recipient is currently a no-op until UserMessage gains a
+// Recipient field; spec callers should treat it as advisory.
+func (s *messageStore) ListPendingFor(_ context.Context, sel model.UserMessageSelector) ([]model.UserMessage, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	statusFilter := sel.Statuses
+	if len(statusFilter) == 0 {
+		statusFilter = []string{string(model.UserMessageQueued)}
+	}
+	var out []model.UserMessage
+	runIDs := make([]string, 0, len(u.staged.MessagesByRun))
+	if sel.RunID != "" {
+		runIDs = append(runIDs, sel.RunID)
+	} else {
+		for runID := range u.staged.MessagesByRun {
+			runIDs = append(runIDs, runID)
+		}
+		slices.Sort(runIDs)
+	}
+	for _, runID := range runIDs {
+		for _, id := range u.staged.MessagesByRun[runID] {
+			message, ok := u.staged.Messages[id]
+			if !ok {
+				continue
+			}
+			if !slices.Contains(statusFilter, string(message.Status)) {
+				continue
+			}
+			if !sel.Since.IsZero() && message.CreatedAt.Before(sel.Since) {
+				continue
+			}
+			if !sel.Until.IsZero() && message.CreatedAt.After(sel.Until) {
+				continue
+			}
+			out = append(out, message)
+			if sel.Limit > 0 && len(out) >= sel.Limit {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *traceStore) SaveTraceSpan(_ context.Context, span model.TraceSpan) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
@@ -367,6 +474,11 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 	if lease.ID == "" {
 		lease.ID = u.nextID("lease")
 	}
+	if existing, ok := u.staged.Leases[lease.ID]; ok && lease.Version <= existing.Version {
+		lease.Version = existing.Version + 1
+	} else if lease.Version == 0 {
+		lease.Version = 1
+	}
 	u.staged.Leases[lease.ID] = lease
 	key := activeLeaseKey(lease.RunID, lease.TaskID)
 	if lease.Status == model.LeaseStatusActive {
@@ -375,6 +487,62 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 		delete(u.staged.ActiveLeaseByTask, key)
 	}
 	return nil
+}
+
+// AcquireWithExpectedVersion atomically persists lease iff the currently
+// stored lease for the same ID has Version == expectedVersion. Returns
+// (false, nil) on mismatch. expectedVersion == 0 means "no prior lease".
+// Satisfies ports.LeaseCAS — see api/store.go for the full contract.
+func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return false, err
+	}
+	if lease.ID == "" {
+		return false, fmt.Errorf("lease.ID required for AcquireWithExpectedVersion: %w", model.ErrInvalidCommand)
+	}
+	existing, exists := u.staged.Leases[lease.ID]
+	var currentVersion uint64
+	if exists {
+		currentVersion = existing.Version
+	}
+	if currentVersion != expectedVersion {
+		return false, nil
+	}
+	lease.Version = currentVersion + 1
+	u.staged.Leases[lease.ID] = lease
+	key := activeLeaseKey(lease.RunID, lease.TaskID)
+	if lease.Status == model.LeaseStatusActive {
+		u.staged.ActiveLeaseByTask[key] = lease.ID
+	} else if u.staged.ActiveLeaseByTask[key] == lease.ID {
+		delete(u.staged.ActiveLeaseByTask, key)
+	}
+	return true, nil
+}
+
+// ExtendLease atomically advances Expiry iff the current holder == workerID
+// and the lease has not expired. Returns (false, nil) on rotation/expiry.
+// Satisfies ports.LeaseCAS.
+func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return false, err
+	}
+	existing, ok := u.staged.Leases[leaseID]
+	if !ok {
+		return false, nil
+	}
+	if existing.HolderID != workerID {
+		return false, nil
+	}
+	if !existing.Expiry.IsZero() && existing.Expiry.Before(time.Now()) {
+		return false, nil
+	}
+	existing.Expiry = newExpiry
+	existing.HeartbeatAt = time.Now()
+	existing.Version++
+	u.staged.Leases[leaseID] = existing
+	return true, nil
 }
 
 func (s *leaseStore) LoadLease(_ context.Context, leaseID string) (model.TaskExecutionLease, error) {
@@ -442,6 +610,49 @@ func (s *resumeTokenStore) LoadResumeToken(_ context.Context, tokenID string) (m
 		return model.ResumeToken{}, model.ErrNotFound
 	}
 	return token, nil
+}
+
+// ListPending returns resume tokens that have not yet expired. Tokens whose
+// ExpiresAt has passed are filtered out — the runtime treats expired
+// tokens as already-consumed.
+func (s *resumeTokenStore) ListPending(_ context.Context, sel model.ResumeTokenSelector) ([]model.ResumeToken, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	var out []model.ResumeToken
+	for _, token := range u.staged.ResumeTokens {
+		if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(now) {
+			continue
+		}
+		if sel.RunID != "" && token.RunID != sel.RunID {
+			continue
+		}
+		if sel.TaskID != "" && token.TaskID != sel.TaskID {
+			continue
+		}
+		if !sel.Since.IsZero() && token.ExpiresAt.Before(sel.Since) {
+			continue
+		}
+		if !sel.Until.IsZero() && token.ExpiresAt.After(sel.Until) {
+			continue
+		}
+		out = append(out, token)
+	}
+	slices.SortFunc(out, func(a, b model.ResumeToken) int {
+		if a.ExpiresAt.Before(b.ExpiresAt) {
+			return -1
+		}
+		if a.ExpiresAt.After(b.ExpiresAt) {
+			return 1
+		}
+		return strings.Compare(a.TokenID, b.TokenID)
+	})
+	if sel.Limit > 0 && len(out) > sel.Limit {
+		out = out[:sel.Limit]
+	}
+	return out, nil
 }
 
 func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.ActionAttempt) error {

@@ -27,7 +27,6 @@ func TestErrorVarsMatchModel(t *testing.T) {
 		{"ErrResponseTaskRequired", core.ErrResponseTaskRequired, model.ErrResponseTaskRequired},
 		{"ErrPolicyDenied", core.ErrPolicyDenied, model.ErrPolicyDenied},
 		{"ErrPolicyObligationFailed", core.ErrPolicyObligationFailed, model.ErrPolicyObligationFailed},
-		{"ErrFlowBypass", core.ErrFlowBypass, model.ErrFlowBypass},
 		{"ErrHandoffCycle", core.ErrHandoffCycle, model.ErrHandoffCycle},
 		{"ErrHandoffDepthExceeded", core.ErrHandoffDepthExceeded, model.ErrHandoffDepthExceeded},
 		{"ErrInvalidCommand", core.ErrInvalidCommand, model.ErrInvalidCommand},

@@ -81,6 +81,25 @@ func (p *Provider) CommittedSnapshot() *State {
 	return p.committed.Clone()
 }
 
+// Capabilities reports the optional features this provider supports.
+// Memory: transactional (single-writer via gate), blackboard subscribe via
+// the local hub, list-pending via in-memory scan; no concurrent writers, no
+// dead-letter requeue. Satisfies ports.CapabilityReporter.
+func (p *Provider) Capabilities(context.Context) (ports.StoreCapabilities, error) {
+	return ports.StoreCapabilities{
+		SupportsTransactions:        true,
+		SupportsBlackboardSubscribe: true,
+		SupportsListPending:         true,
+		SupportsConcurrentWriters:   false,
+		SupportsDeadLetterRequeue:   false,
+	}, nil
+}
+
+// Close releases provider-scoped resources. Memory provider keeps state in
+// process memory, so Close is a no-op. Satisfies ports.ProviderCloser so the
+// runtime can call it during shutdown without a type-specific path.
+func (p *Provider) Close(context.Context) error { return nil }
+
 type UnitOfWork struct {
 	provider *Provider
 	staged   *State
@@ -101,6 +120,10 @@ func (u *UnitOfWork) Leases() ports.LeaseStore                 { return (*leaseS
 func (u *UnitOfWork) Approvals() ports.ApprovalStore           { return (*approvalStore)(u) }
 func (u *UnitOfWork) ResumeTokens() ports.ResumeTokenStore     { return (*resumeTokenStore)(u) }
 func (u *UnitOfWork) ActionAttempts() ports.ActionAttemptStore { return (*actionAttemptStore)(u) }
+func (u *UnitOfWork) AgentProfiles() ports.AgentProfileStore   { return (*agentProfileStore)(u) }
+func (u *UnitOfWork) CapabilityCatalog() ports.CapabilityStore { return (*capabilityStore)(u) }
+func (u *UnitOfWork) UsageRecords() ports.UsageStore           { return (*usageStore)(u) }
+func (u *UnitOfWork) DeadLetters() ports.DeadLetterStore       { return (*deadLetterStore)(u) }
 func (u *UnitOfWork) ensureOpen() error {
 	if u.closed {
 		return fmt.Errorf("memory unit of work closed: %w", model.ErrInvalidCommand)
