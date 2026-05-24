@@ -6,13 +6,16 @@
 [![CI](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml/badge.svg)](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Viking602/go-hydaelyn?sort=semver)](https://github.com/Viking602/go-hydaelyn/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Viking602/go-hydaelyn/blob/main/LICENSE)
-[![Module](https://img.shields.io/badge/module-github.com%2FViking602%2Fgo--hydaelyn-007d9c?logo=go)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
 
-Hydaelyn is a Run/Task runner for Go.
+**Hydaelyn is a durable typed multi-agent framework for Go.**
 
-Embed it into your application with `hydaelyn.New()` to run durable
-workflows where every state change goes through Run/Task commands, policy,
-leases, typed reports, handoff, response outbox, and replay.
+It ships a strong but bounded single-agent loop, an explicit role/class
+based multi-agent scheduler, and durable execution primitives for
+approvals, audit, resume, and idempotent side effects. Embed the root
+`Runner` into your Go application and drive work through typed
+`Run + Task` commands.
+
+> **Pre-1.0 status.** The public surface is still evolving toward v1.0.
 
 ## Install
 
@@ -22,7 +25,7 @@ go get github.com/Viking602/go-hydaelyn@latest
 
 ## Quickstart
 
-Start a run with the default in-memory runner and inspect the append-only
+Queue a run on the default in-memory runner and inspect the append-only
 event stream:
 
 ```go
@@ -38,12 +41,14 @@ import (
 
 func main() {
 	runner := hydaelyn.New()
+
 	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 		Request: "compare options for a Go research assistant",
 	})
 	if err != nil {
 		panic(err)
 	}
+
 	events, err := runner.RunEvents(context.Background(), run.ID)
 	if err != nil {
 		panic(err)
@@ -52,15 +57,7 @@ func main() {
 }
 ```
 
-## Core Concepts
-
-Hydaelyn centers on embeddable runner primitives. New work should model
-execution as `Run + Task + TaskExecutionLease`. The optional `worker` package
-bridges `TaskEnvelope` execution to `agent.Engine`. Flow adapters are presets
-only; they must not bypass `TaskStore`, `PolicyEngine`, `TaskExecutionLease`,
-handoff, `ResponseLayer`, or `OutputGateway`.
-
-Use `api.Config` only when overriding defaults:
+Override the defaults via `api.Config`:
 
 ```go
 runner := hydaelyn.New(api.Config{
@@ -68,40 +65,108 @@ runner := hydaelyn.New(api.Config{
 })
 ```
 
-The old Team + Pattern runtime has been removed from the v2 public surface.
-Compose new work around the root `hydaelyn` runner API.
+## Architecture
 
-## Examples + Read Next
+Hydaelyn is organized as four layers. Each layer depends only on the
+one below it — no upward imports.
 
-### Examples
+```
+┌─────────────────────────────────────────────┐
+│ Packs / Examples                            │
+│ research, customer-support, devops, aiops   │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│ Multi-Agent Layer  (multiagent/)            │
+│ AgentClass, AgentInstance, Team, Scheduler, │
+│ Dispatch, typed Handoff, Blackboard, Voting │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│ Agent Loop Layer  (agent/)                  │
+│ Step, OutputPolicy, ToolSafety,             │
+│ ContextManager, AgentFailure, LoopPolicy    │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│ Durable Runner  (root + internal/)          │
+│ Run / Task / Event / Lease / Approval /     │
+│ Outbox / ActionAttempt / Handoff stores     │
+└─────────────────────────────────────────────┘
+```
 
-- [_examples/research](_examples/research/main.go) - Local quickstart
-- [_examples/panel](_examples/panel/main.go) - Panel task-board collaboration
-- [_examples/collab](_examples/collab/main.go) - Collaboration pattern
-- [_examples/tooling](_examples/tooling/main.go) - Tool integration
-- [_examples/approval](_examples/approval/main.go) - Approval flows
-- [_examples/durable](_examples/durable/main.go) - Durable execution
+- **Strong bounded Agent Loop** (`agent/`) — one agent does one task
+  well. Step trace, schema repair, tool safety, context management,
+  typed failure, budget enforcement.
+- **Explicit Multi-Agent Scheduler** (`multiagent/`) — named first-class
+  primitives for team coordination instead of ad-hoc Pack helpers.
+- **Durable Runner** (root + `internal/`) — persists, leases, audits,
+  and resumes every multi-agent decision. Storage is a contract; the
+  framework ships no built-in backend.
+- **Product Packs** (`packs/`, `_examples/`) — vertical scenarios. Free
+  to encode domain vocabulary; the kernel never does.
 
-Examples live under `_examples/` (leading underscore) so they are skipped
-by `go build ./...`. Build or run one explicitly with `go run ./_examples/research/`.
+## Packages
 
-### Read Next
+| Path | Purpose |
+|------|---------|
+| `hydaelyn` (root) | `Runner` façade — construction, run/task commands, event reads |
+| `api/` | Public contracts: `Config`, commands, `Task`, `Run`, interfaces |
+| `agent/` | Strong bounded agent loop: `Engine`, `Step`, `OutputPolicy`, `ToolSafety`, `ContextManager`, `AgentFailure`, `LoopPolicy` |
+| `multiagent/` | Multi-agent primitives: `AgentClass`, `AgentInstance`, `Team`, `Scheduler`, `Dispatch`, `Handoff`, `BlackboardEntry`, `Voting`, `Supervisor` |
+| `memory/` | Optional-plugin `Memory[T]` interface (no backend ships) |
+| `worker/` | Optional glue from `TaskEnvelope` execution to `agent.Engine` |
+| `packs/` | Skeleton vertical packs: `research`, `customersupport`, `devops`, `aiops` |
+| `provider/` | LLM provider adapters: Anthropic, OpenAI, scripted (testing) |
+| `tool/`, `hook/`, `policy/`, `message/` | Tool bus, hook chain, policy engine, message types |
+| `eval/`, `contract/` | Evaluation framework and storage contract suite |
 
-- [Quickstart](docs/quickstart.md) - Deep-dive tutorial
-- [Extensions](docs/extensions.md) - Stage / Capability / Output / Hook guide
-- [Task Dataflow](docs/task-dataflow.md) - Dataflow documentation
-- [Recipe Compiler](docs/recipe.md) - Recipe/YAML configuration
-- [Evaluation](docs/evaluation.md) - Performance evaluation
-- [Durable Execution](docs/durable-execution.md) - Replay and durability
+## Examples
 
-## Where Hydaelyn Fits
+Examples live under `_examples/` (leading underscore skips them from
+`go build ./...`). Run one with `go run ./_examples/<name>`.
 
-Hydaelyn is designed to live inside your Go application. Compose the root
-`Runner`, register stable provider/tool/policy/flow contracts, and drive work
-through Run/Task commands.
+- [`research`](_examples/research/main.go) — fan-out by group; work-stealing semantics
+- [`incident_response`](_examples/incident_response/main.go) — full multi-agent reference (fan-out → blackboard → review → approval → action)
+- [`panel`](_examples/panel/main.go) — panel task-board collaboration
+- [`collab`](_examples/collab/main.go) — collaboration pattern
+- [`orchestrator`](_examples/orchestrator/main.go) — orchestrator runtime
+- [`tooling`](_examples/tooling/main.go) — tool integration
+- [`approval`](_examples/approval/main.go) — approval flows
+- [`durable`](_examples/durable/main.go) — durable execution + replay
+- [`governed_tool`](_examples/governed_tool/main.go) — governed tool bus
+- [`mailbox_pingpong`](_examples/mailbox_pingpong/main.go) — mailbox primitives
+- [`dataflow`](_examples/dataflow/main.go) — task dataflow
+- [`evaluation`](_examples/evaluation/main.go) — evaluation harness
+- [`recipes/`](_examples/recipes/) — recipe / YAML configuration walkthroughs (`collab`, `deepsearch`, `panel`, `research`)
+- [`worker`](_examples/worker/main.go) — worker bridging to `agent.Engine`
 
-The CLI is useful for inspection and workflow support, but the library is the primary surface. MCP can be plugged in as one integration path, not as the core execution model. V1 stays single-process, and the intended extension model is composition around the runner rather than subclassing a framework.
+## Documentation
+
+- [Quickstart](docs/quickstart.md) — deep-dive tutorial
+- [Public API](docs/public-api.md) — surface reference
+- [Task Dataflow](docs/task-dataflow.md)
+- [Durable Execution](docs/durable-execution.md) — replay and resume
+- [Evaluation](docs/evaluation.md)
+- [Recipe Compiler](docs/recipe.md) — YAML configuration
+- [Extensions](docs/extensions.md) — Stage / Capability / Output / Hook
+- [Plugin Development](docs/plugin-development.md)
+
+## What's out of scope
+
+By design the framework ships no:
+
+- Built-in storage backend
+- Built-in memory backend
+- Domain vocabulary in the kernel
+- UI / Console
+- Hosted observability backends
+- Provider-specific deep integrations
+
+These belong in application code or optional plugins.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for coding standards and contribution guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for coding standards, the
+architectural gates that CI enforces (`sentrux`, `check-public-any.sh`,
+`check-business-words.sh`), and contribution guidelines.
