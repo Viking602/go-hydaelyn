@@ -1,22 +1,24 @@
-# 05 — Storage Contract and Reference Implementations
+# 05 — Storage Contract (Position D)
 
 ## Goal
 
-Make `api.StoreProvider` and the contract test suite the **primary public surface** for durable storage in Hydaelyn. Ship a small number of **reference implementations** (memory, sqlite, mysql, postgres) as dev convenience and as executable documentation of the contract. Production teams with existing data stacks (ent / gorm / sqlc, DBA-controlled DDL, sharding, multi-region) are expected to implement their own `StoreProvider` against their stack — and the contract test suite is what validates that they did it correctly.
+Make `api.StoreProvider` and the contract test suite the **sole public surface** the framework ships for durable storage in Hydaelyn. Applications implement the contract against their own data stack (ent / gorm / sqlc / DBA-controlled DDL / sharding / multi-region) and validate the implementation with `contract.RunStoreProviderContractTests`. The framework ships no `api.StoreProvider` implementation — public or otherwise — beyond the non-exported in-memory adapter the framework's own contract self-test runs against.
 
 ## Position
 
-> **The framework owns the contract. The framework does not own production storage operations.**
+> **The framework owns the contract and the contract test suite. The framework does not own — and does not ship — any `api.StoreProvider` implementation.**
 
 This is the architectural shift from earlier v0.8.0 drafts that positioned MySQL / Postgres adapters as "the official production storage." That framing forced the framework to absorb DDL ownership, schema-evolution discipline, migration-tool integration, ORM-coexistence policies, and DBA-workflow shimming — none of which a general-purpose agent runtime can credibly do well across every downstream team's infrastructure.
 
-Position C (see design discussion in `docs/architecture-boundaries.md` and ADR-012):
+A subsequent intermediate position (Position C, the original text of this document and ADR-012) attempted to keep "reference implementations" under `storage/{memory,sqlite,mysql,postgres}` as a "starting point for forking." That phrasing turned out to be load-bearing in one direction only — downstream teams read it as "production answer regardless of README wording," and the framework ended up implicitly responsible for operational properties of every fork.
+
+Position D resolves both: the framework owns the contract, the application owns the implementation, and there is no in-tree implementation that could be mistaken for either.
 
 - **Layer 1 — Contract (required, framework-owned)**: `api.StoreProvider`, all store sub-interfaces, the `contract/` test suite. SemVer-stable post v1.0.0.
-- **Layer 2 — Reference implementations (framework-shipped convenience)**: `storage/memory` (dev / test), `storage/sqlite` (single-node), `storage/mysql` (multi-node reference), `storage/postgres` (multi-node reference). Maintained to a "passes contract tests" bar, not a "production hardened for every environment" bar.
-- **Layer 3 — User-owned production providers**: downstream teams write their own `StoreProvider` using their existing ORM / data layer / migration tools. Validate with `contract.RunStoreProviderContractTests`.
+- **Layer 2 — REMOVED.** Earlier drafts shipped reference implementations under `storage/{memory,sqlite,mysql,postgres}`. The 2026-05-24 revision to ADR-012 (Position D) deletes them. Applications implement Layer 1 against their own data stack — see the ent-based template in `12-migration-guide.md`.
+- **Layer 3 — User-owned production providers**: downstream teams write their own `StoreProvider` using their existing ORM / data layer / migration tools. Validate with `contract.RunStoreProviderContractTests`. This is now the **only** production path.
 
-This document specifies Layer 1 in detail, sketches Layer 2 lightly, and gives Layer 3 a clear on-ramp.
+This document specifies Layer 1 in detail and gives Layer 3 a clear on-ramp.
 
 ## Layer 1 — The StoreProvider contract
 
@@ -164,92 +166,15 @@ Detailed methods are in the respective specs (doc 03, doc 04, doc 06). Each is j
 
 ### What the contract intentionally does NOT mandate
 
-- **Schema shape**. The framework defines stores by Go interface, not by table layout. A provider can use one table per store, one wide table, document storage, KV, anything. The reference implementations happen to use the table layout described in Layer 2 — that is one valid implementation, not the contract.
-- **ID format**. Use UUID, ULID, snowflake, integer, whatever. The framework treats all IDs as opaque strings.
-- **Connection management**. `*sql.DB`, `pgxpool`, in-memory map, gRPC client to a remote service — all valid.
-- **Migration tooling**. Providers handle their own schema setup. The framework calls `Begin` and expects it to work.
-- **Backup / restore / replication**. Out of scope; that's the deployment's concern.
-
-## Layer 2 — Reference implementations
-
-Four reference implementations ship in `storage/`. Each is maintained to one bar: **passes the contract test suite**. Beyond that, they aim for clarity and small surface, not enterprise-grade hardening.
-
-### Selection guidance for users
-
-| Implementation | Intended use | Production-ready? |
-|---|---|---|
-| `storage/memory` | Tests, examples, ephemeral demos | No — process-local, lost on restart |
-| `storage/sqlite` | Single-node deployments, local-first apps, demos with persistence | Yes for single-node scale; not for multi-process writers |
-| `storage/mysql` | Reference for multi-node SQL deployments; starting point for teams forking it | Conditional — fine for moderate scale; teams with strong DBA / ORM constraints should treat it as a starting template, not the production answer |
-| `storage/postgres` | Reference for multi-node SQL deployments; starting point for teams forking it | Same as mysql |
-
-The phrase **"starting point for teams forking it"** is the load-bearing one. The framework's commitment to `storage/mysql` is "passes contract tests, exists as runnable reference". The framework does NOT commit to:
-
-- Compatibility with every MySQL fork's idiosyncrasies beyond the baseline (MySQL 8.0, OceanBase 4.x, TiDB) tracked in CI
-- Tuning for every workload profile
-- Schema layouts optimized for any particular team's query patterns
-- Integration with arbitrary migration tools (the reference ships embed.FS SQL files; that's the deal)
-
-Teams whose answer to "is this acceptable" is "no" are expected to write their own provider — see Layer 3.
-
-### Reference: memory
-
-`storage/memory/` (moved from `internal/memory/`).
-
-Single-process, clone-on-Begin, replace-on-Commit. Reports `SupportsConcurrentWriters: false`.
-
-Use for: tests, examples, `_examples/`, eval suites, anything that does not need persistence.
-
-### Reference: sqlite
-
-`storage/sqlite/`.
-
-- Driver: `modernc.org/sqlite` (pure Go, no CGO) by default; `mattn/go-sqlite3` available via build tag.
-- Schema: `storage/sqlite/schema.sql` + numbered migrations in `storage/sqlite/migrations/`.
-- Transactions: `BEGIN IMMEDIATE` per UoW.
-- Lease CAS: `UPDATE ... WHERE version = ?`, check affected rows.
-- Subscribe: not implemented; polling fallback.
-- AutoMigrate: opt-in via `sqlite.Options{AutoMigrate: true}`. SQL files are also exposed via `sqlite.MigrationsFS()` for users who want to manage migrations externally.
-
-Use for: single-node apps, local-first deployments, examples that need durability.
-
-### Reference: mysql
-
-`storage/mysql/`.
-
-- Driver: `github.com/go-sql-driver/mysql`.
-- Targets tracked in CI: MySQL 8.0, MariaDB 10.5+, OceanBase 4.x MySQL mode, TiDB 6+.
-- Schema: `storage/mysql/schema.sql` + numbered migrations. Uses InnoDB, `utf8mb4`, `CHAR(36)` UUIDs, native `JSON`, `TIMESTAMP(6)`. Avoids `JSON_TABLE` / `JSON_OVERLAPS` / `AUTO_INCREMENT` PKs.
-- Lease fairness: `SELECT ... FOR UPDATE SKIP LOCKED`.
-- Subscribe: not implemented (MySQL lacks a pub/sub primitive); polling fallback.
-- AutoMigrate / external migration: same pattern as sqlite — `Options{AutoMigrate: true}` for convenience or `mysql.MigrationsFS()` for external tooling.
-
-OceanBase 4.x specifics tracked in `storage/mysql/oceanbase_compat.md`:
-
-| Concern | Behavior | Mitigation |
-|---|---|---|
-| `SELECT ... FOR UPDATE SKIP LOCKED` | Supported in OB 4.x | Used for envelope polling |
-| `ob_query_timeout` (default 10s) | Statement-level cap | Keep UoW short |
-| `ob_trx_timeout` (default 100s) | Transaction cap | Heartbeat extends lease, not the SQL txn |
-| `AUTO_INCREMENT` non-monotonic | Distributed seq | App-generated UUIDs |
-| OBProxy routing | Long conns stick | `ConnMaxLifetime` 30 min |
-| `JSON_TABLE` / `JSON_OVERLAPS` | Partial / unavailable | Decode JSON in Go |
-
-This matrix is documentation, not a commitment to fix every OB-specific issue in the framework — it tells forkers what to be aware of when they take the reference implementation into their own production.
-
-### Reference: postgres
-
-`storage/postgres/`.
-
-- Driver: `pgx/v5`.
-- Schema: `storage/postgres/schema.sql` + migrations. Uses `uuid`, `jsonb`, `timestamptz`.
-- Lease CAS: `UPDATE ... WHERE version = ?` with `RETURNING`.
-- Subscribe: **deferred to v0.8.1** (LISTEN/NOTIFY). v0.8.0 reports `SupportsBlackboardSubscribe = false` and uses polling.
-- AutoMigrate / external migration: same pattern; `postgres.MigrationsFS()`.
+- **Schema shape.** The framework defines stores by Go interface, not by table layout. A provider can use one table per store, one wide table, document storage, KV, anything.
+- **ID format.** Use UUID, ULID, snowflake, integer, whatever. The framework treats all IDs as opaque strings.
+- **Connection management.** `*sql.DB`, `pgxpool`, in-memory map, gRPC client to a remote service — all valid.
+- **Migration tooling.** Providers handle their own schema setup. The framework calls `Begin` and expects it to work.
+- **Backup / restore / replication.** Out of scope; that's the deployment's concern.
 
 ## Layer 3 — Bring your own provider
 
-This is the **recommended path** for any team with existing data infrastructure (ent / gorm / sqlc / custom ORM / DBA-controlled schema / sharding / multi-region replicas).
+This is the **only** production path. There is no Layer 2 fallback.
 
 ### The on-ramp
 
@@ -290,7 +215,9 @@ func TestMyProvider(t *testing.T) {
 
 If this passes, the provider is correct as far as Hydaelyn is concerned. If it fails, the failure message names the specific contract clause violated.
 
-A complete worked example using ent against MySQL / OceanBase is shipped in `docs/migration.md` (doc 12) — copy, modify, run, ship.
+The framework runs the same suite on every PR via a non-exported in-memory adapter at `contract/internal/inmemfake/` — same correctness bar, no special-cased framework path.
+
+A complete worked example using ent against MySQL / OceanBase is shipped in `12-migration-guide.md` — copy, modify, run, ship.
 
 ### What you trade
 
@@ -302,7 +229,7 @@ A complete worked example using ent against MySQL / OceanBase is shipped in `doc
 
 ### What the framework guarantees in return
 
-- The contract test suite is the same gate the framework's own reference implementations pass. Same correctness bar.
+- The contract test suite is the same gate the framework runs in its own CI via `contract/internal/inmemfake`. Same correctness bar.
 - The contract is SemVer-stable post v1.0.0. v0.8.0 → v1.0.0 may add OPTIONAL store interfaces (declared via new `StoreCapabilities` flags) but will not remove or break-change existing ones.
 - New optional features arrive as additive capability flags. Your provider can return `false` and the runtime falls back gracefully.
 
@@ -350,7 +277,7 @@ The suite covers:
 
 ### Total: ~35 tests
 
-All four reference implementations (memory, sqlite, mysql, postgres) MUST pass the full suite under CI. External providers MUST pass it before any team should treat them as production-ready.
+External providers MUST pass the full suite before any team should treat them as production-ready. The framework's own CI runs the suite on every PR via `contract/internal/inmemfake` to prevent suite rot.
 
 ## RunSelector
 
@@ -375,17 +302,8 @@ type RunStore interface {
 
 Contract requirement: `ListRuns` filters AND-combine all set fields. Pagination beyond `Limit` is provider's choice (cursor / offset / none).
 
-## Migration of moved packages
-
-- `internal/memory/*` → `storage/memory/*`. Public API unchanged (memory was already exposed via `hydaelyn.New()` default).
-
 ## Verification
 
-- Contract test suite passes for all four reference implementations on CI matrices:
-  - memory: any OS, no service
-  - sqlite: any OS, no service
-  - mysql: stock MySQL 8.0 + OceanBase 4.x community edition containers
-  - postgres: postgres 15+ container
-- `contract.RunStoreProviderContractTests` is exported and documented, runnable by external adapter authors
-- Doc 12 ships a complete ent-based custom provider example, validated by the contract test suite in CI
-- `_examples/storage-custom/` ships a runnable demo of Layer 3 (bring your own provider)
+- `contract.RunStoreProviderContractTests` is exported and documented, runnable by external adapter authors.
+- Framework CI runs the suite on every PR via the non-exported `contract/internal/inmemfake` adapter (`go test -race ./contract/...`).
+- `12-migration-guide.md` ships a complete ent-based custom provider template, intended to be copied into the application repository and validated against `contract.RunStoreProviderContractTests` there.

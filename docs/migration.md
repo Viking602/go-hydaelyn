@@ -25,7 +25,7 @@ v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Mos
 | Cron / webhook / event / manual entrypoints | `transport/scheduler`, `transport/webhook`, `transport/event`, `api.Trigger` |
 | Background worker that polls envelopes, leases, heartbeats, drains | `worker.Runtime` (plug your own `EnvelopePoller`) |
 | Production-grade durable store | implement `api.StoreProvider` and run `contract.RunStoreProviderContractTests` against it |
-| Local durable store for development | `storage/sqlite` (pure-Go, no CGO) |
+| Local durable store for development | Implement `api.StoreProvider` against your own data stack — see `docs/product-spec/v0.8.0/12-migration-guide.md` for the ent-based template. The framework no longer ships reference storage backends; see ADR-012 (revised, Position D). |
 | Bundle a vertical "research / support / devops / aiops" preset | `packs.Pack` + `packs.Registry` |
 | Grade an agent run in CI | `eval.Eval` / `eval.Run` with assertions from `eval/assert` |
 

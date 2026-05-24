@@ -74,12 +74,12 @@ No other public types are removed or renamed in v0.8.0. All new fields on `api.A
 
 Package path moves (also breaking):
 
-- `internal/memory` → `storage/memory` (renamed export from internal)
-- New top-level packages: `storage/`, `memory/`, `artifact/`, `eval/`, `recipe/`, `contract/`, `packs/`, `transport/openapi/`, `transport/webhook/`, `transport/scheduler/`, `transport/event/`, `observe/otel/`
+- `internal/memory` stays internal — earlier drafts moved it to `storage/memory`; per ADR-012 (revised, Position D) that move is withdrawn.
+- New top-level packages: `memory/`, `artifact/`, `eval/`, `recipe/`, `contract/`, `packs/`, `transport/openapi/`, `transport/webhook/`, `transport/scheduler/`, `transport/event/`, `observe/otel/`. `storage/` does NOT exist — the framework ships no `api.StoreProvider` implementation.
 
 ## Theme statement (for README and release notes)
 
-> Hydaelyn v0.8.0 — *Public Framework Release*. v0.8.0 ships the abstractions every Go agent application needs: declarative Capability manifests, an extended AgentProfile with model and governance fields, a complete Worker Runtime, a **storage contract** with reference implementations (SQLite + MySQL + Postgres) and a contract test suite for teams who bring their own provider, usage metering, policy obligation enforcement, and a four-layer context model. The runtime kernel remains domain-free; everything new is mechanism, not policy.
+> Hydaelyn v0.8.0 — *Public Framework Release*. v0.8.0 ships the abstractions every Go agent application needs: declarative Capability manifests, an extended AgentProfile with model and governance fields, a complete Worker Runtime, a **storage contract** (`api.StoreProvider` + `contract.RunStoreProviderContractTests`) that applications implement against their own data stack, usage metering, policy obligation enforcement, and a four-layer context model. The runtime kernel remains domain-free; everything new is mechanism, not policy. Per ADR-012 (revised, Position D) the framework ships no `api.StoreProvider` implementation.
 
 ## Open design defaults (locked unless rejected)
 
@@ -88,9 +88,7 @@ These were AI-defaulted to minimize risk; flag any you want to override:
 | # | Topic | Default |
 |---|-------|---------|
 | 1 | `UsageRecord.Credits` semantic | Abstract integer cost unit; framework records it but does not assign a meaning. Adapters/packs define conversion to currency or token-equivalent. |
-| 2 | Postgres **reference implementation** driver | `pgx` v5. **LISTEN/NOTIFY-based Subscribe deferred to v0.8.1**. Reference quality bar: passes contract tests. Teams needing production hardening fork or write their own provider per doc 05 Layer 3. |
-| 2b | MySQL **reference implementation** driver | `github.com/go-sql-driver/mysql`. CI matrix: MySQL 8.0 + OceanBase 4.x community + TiDB 6+. `SKIP LOCKED` for lease fairness. Same reference quality bar as Postgres. |
-| 2c | Production storage path | **Layer 3 (bring your own provider)** is the recommended path for teams with existing data stacks (ent / gorm / DBA-controlled DDL). Reference implementations exist for dev / starter use; the contract test suite is what validates production providers. See doc 05 + doc 12 for the ent-based template. |
+| 2 | Storage path | **Position D (ADR-012 revised)**: framework ships the `api.StoreProvider` contract and `contract.RunStoreProviderContractTests` only. No reference implementations, public or otherwise — `storage/` does not exist. Applications implement the contract against their own data stack (ent / gorm / sqlc / DBA-controlled DDL). See doc 05 and doc 12 for the ent-based template. |
 | 3 | `Memory[T]` interface | Define the generic `Memory[T Identified]` optional-plugin contract in `api/memory.go`. The framework ships no reference implementation — applications either implement against their existing database / ORM or skip the interface entirely. |
 | 4 | `AgentSelector` filter fields | `IDs []string`, `Roles []string`, `Groups []string`, `Tags []string`, `Version string`, `Capabilities []string`. All optional, AND-combined. |
 | 5 | `Trigger.Filter` shape | `map[string]string` for v0.8.0. Adapters parse semantics. Reserved escape hatch: a future `FilterRaw json.RawMessage` may be added without breaking. |

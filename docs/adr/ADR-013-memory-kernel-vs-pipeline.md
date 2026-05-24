@@ -49,7 +49,7 @@ The full surface is documented in `docs/product-spec/v0.8.0/13-memory-optional-p
 - No `MemoryEntry` type. Application defines `T`.
 - No `Content` / `Embedding` / `Tags` / `Metadata` / `CreatedAt` / `ExpiresAt` / `Refs` / `Layer` fields on any framework type. These are application schema.
 - No `RetrievalStrategy` enum and no `ErrUnsupportedStrategy` sentinel. Retrieval algorithms are recipe or application concerns.
-- No reference implementation. No `memory/inmem/`. No `storage/memory/long-term-memory/`. The framework ships zero Memory backends.
+- No reference implementation. No `memory/inmem/`. No long-term memory backend anywhere in the tree. The framework ships zero Memory backends (and, per ADR-012 revised, zero StoreProvider backends either).
 - No runtime dependency on Memory being configured. Code paths that *would* use Memory must check presence and degrade gracefully.
 
 ### Capability binding

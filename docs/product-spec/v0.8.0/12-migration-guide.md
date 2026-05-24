@@ -12,7 +12,7 @@ Existing downstream users on `github.com/Viking602/go-hydaelyn v0.7.x` upgrading
 | `api.ErrFlowBypass` | Breaking removal | Remove any error-equality check against it |
 | `StartRunCommand` result | Breaking type change | Replace `[]any` triple-assertion with `api.StartRunResult` |
 | `RequestApprovalCommand` result | Breaking type change | Replace `[]any` triple-assertion with `api.RequestApprovalResult` |
-| `internal/memory` import | Path move (not breaking unless you forked) | Replace with `storage/memory` |
+| `internal/memory` import (private) | No move | `internal/memory` stays internal; it is the runtime's default and is not part of the public API. The earlier-planned move to `storage/memory` was withdrawn — see ADR-012 (revised, Position D). |
 | New types in `api/` | Additive | No action required; consume as needed |
 | `AgentProfile` fields | Additive | No action required; existing profiles still valid (empty `Status` = Active) |
 | `AgentProfile.Status` + `PreviousVersionID` | Additive | Optional. Set `Status` only if you need lifecycle gating; set `PreviousVersionID` when registering a successor profile |
@@ -138,73 +138,21 @@ Or, preferred:
 requested, err := runner.RequestApproval(ctx, ...)
 ```
 
-## Path move — `internal/memory` → `storage/memory`
+## `internal/memory` stays internal
 
-If you imported `github.com/Viking602/go-hydaelyn/internal/memory` (you should not have — it was under `internal/`), the new path is:
-
-```go
-import "github.com/Viking602/go-hydaelyn/storage/memory"
-```
-
-If you used the public `hydaelyn.New(...)` constructor with default settings, no change required — the constructor wires the new path internally.
+Earlier v0.8.0 drafts moved `internal/memory` to a public `storage/memory` reference implementation. Per ADR-012 (revised, Position D) that move is withdrawn — `internal/memory` remains the runtime's internal default, and the framework ships no public `api.StoreProvider` implementation. If you used the public `hydaelyn.New(...)` constructor with default settings, no change required.
 
 ## What you now have access to (additive)
 
 These types are new in v0.8.0 and require no migration action. Consume them when you are ready:
 
-### Persistent storage — pick a path
+### Persistent storage — implement the contract against your data stack
 
-v0.8.0 takes **Position C** on storage: the framework owns the `StoreProvider` contract and ships reference implementations; production teams with existing data stacks are expected to bring their own provider. Two paths, choose by team context.
+v0.8.0 takes **Position D** on storage (see ADR-012 revised): the framework owns the `StoreProvider` contract and the contract test suite, and ships no implementation. Applications implement `api.StoreProvider` against their own data stack (ent / gorm / sqlc / DBA-controlled DDL) and validate via `contract.RunStoreProviderContractTests`. There is no fallback "starter" backend — this is the canonical starting point.
 
-#### Path A — Use a reference implementation (fastest)
+The framework's commitment: the `StoreProvider` contract is SemVer-stable post v1.0.0, and `contract.RunStoreProviderContractTests` is the correctness gate. The team's commitment: implement the interfaces against your own schema and tooling.
 
-Good when: team has no strong DBA / ORM constraint, scale is moderate, schema being framework-owned is acceptable.
-
-```go
-import "github.com/Viking602/go-hydaelyn/storage/sqlite"
-
-provider, err := sqlite.Open(ctx, "/var/lib/hydaelyn/state.db",
-    sqlite.Options{AutoMigrate: true})
-runner, _ := hydaelyn.New(ctx, api.Config{StoreProvider: provider, /* ... */})
-```
-
-For MySQL / OceanBase 4.x:
-
-```go
-import "github.com/Viking602/go-hydaelyn/storage/mysql"
-
-// DSN works for stock MySQL, MariaDB, TiDB, or OceanBase 4.x MySQL mode.
-// For OceanBase via OBProxy:
-//   user@tenant#cluster:password@tcp(obproxy:2883)/hydaelyn?parseTime=true&loc=Local
-provider, err := mysql.Open(ctx, dsn, mysql.Options{
-    AutoMigrate: true, // or false + run mysql.MigrationsFS() through your tool
-    TablePrefix: "hyd_",
-})
-```
-
-OceanBase-specific guidance for the reference impl:
-
-- `ConnMaxLifetime` 30 minutes for OBProxy routing.
-- Reference schema avoids `JSON_TABLE` / `JSON_OVERLAPS` / `AUTO_INCREMENT` PKs.
-- See `storage/mysql/oceanbase_compat.md` for the full matrix.
-
-Postgres:
-
-```go
-import "github.com/Viking602/go-hydaelyn/storage/postgres"
-
-provider, err := postgres.Open(ctx, "postgres://...", postgres.Options{AutoMigrate: true})
-```
-
-v0.8.0 Postgres reference impl does NOT include `LISTEN/NOTIFY`-based Subscribe — polling fallback only. Subscribe lands in v0.8.1.
-
-#### Path B — Bring your own provider (recommended for production)
-
-Good when: team uses ent / gorm / sqlc / custom ORM, has DBA-controlled DDL, runs production scale, wants framework upgrades not to touch DDL.
-
-The framework's commitment: the `StoreProvider` contract is SemVer-stable, and `contract.RunStoreProviderContractTests` validates correctness. The team's commitment: implement the interfaces against your own schema and tooling.
-
-A complete ent-based template, validated by the contract test suite, ships as `_examples/storage-ent-mysql/`. The shape:
+A complete ent-based template, validated by the contract test suite, is sketched below. Copy it into your repository, adjust the schema to match your ent definitions and DBA conventions, then validate with `contract.RunStoreProviderContractTests`. The shape:
 
 ```go
 package entstorage
@@ -318,10 +266,6 @@ runner, _ := hydaelyn.New(ctx, api.Config{StoreProvider: provider})
 - Your ent schema (with the `hyd_*` table definitions) is owned by your team. `ent generate` + `entClient.Schema.Create()` or Atlas runs your migrations on your normal CI/CD flow.
 - When Hydaelyn adds new columns to the `StoreProvider` contract (e.g., `Run.AgentVersion`), you update your ent schema to match. The contract is documented in `api/store.go`; columns map 1:1. `Memory[T]` is **not** part of `StoreProvider` — under ADR-013 it is an optional plugin owned entirely by the application, so the migration guidance here does not apply to it.
 - The framework will not run any DDL against your DB. Ever.
-
-#### Decision rule
-
-If you read both paths and aren't sure, default to **Path A** for v0.8.0 and migrate to Path B in v0.8.1 or v0.9.0 if any of these become true: scale problems, DBA pushback, schema customization needs, ORM hook integration needs, multi-region routing.
 
 ### Capability declaration
 

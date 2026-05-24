@@ -78,27 +78,12 @@ github.com/Viking602/go-hydaelyn/
 │   ├── filesystem/
 │   └── inmem/
 │
-├── storage/                        # NEW: StoreProvider contract + reference implementations
-│   ├── README.md                   # Layer 1 / Layer 2 / Layer 3 framing — point Layer 3 to contract/ + 12-migration-guide.md
-│   ├── memory/                     # Reference impl — moved from internal/memory; dev/test default
-│   │   ├── provider.go
-│   │   └── uow.go
-│   ├── sqlite/                     # Reference impl — local durable demo / single-node starter
-│   │   ├── provider.go
-│   │   ├── schema.sql
-│   │   └── migrations/
-│   ├── mysql/                      # Reference impl — MySQL 8.0 / OceanBase 4.x MySQL-mode / TiDB starter, fork-and-adapt
-│   │   ├── provider.go
-│   │   ├── schema.sql
-│   │   ├── oceanbase_compat.md
-│   │   └── migrations/
-│   └── postgres/                   # Reference impl — Postgres starter, fork-and-adapt; LISTEN/NOTIFY deferred to v0.8.1
-│       ├── provider.go
-│       ├── schema.sql
-│       └── migrations/
-│
-│   # Production storage path = Layer 3 (BYO provider via api.StoreProvider + contract test suite).
-│   # See docs/product-spec/v0.8.0/05-storage.md and 12-migration-guide.md for the ent-based template.
+│   # storage/ DELETED 2026-05-24 (ADR-012 revised, Position D). The framework
+│   # ships no StoreProvider implementation. Applications implement
+│   # api.StoreProvider against their own data stack; see 05-storage.md
+│   # and 12-migration-guide.md for the ent-based template. Framework CI
+│   # self-tests the contract suite via the non-exported
+│   # contract/internal/inmemfake/ adapter.
 │
 ├── worker/                         # Worker Runtime + AgentWorker
 │   ├── worker.go                   # AgentWorker (existing)
@@ -207,7 +192,7 @@ This layout makes the three tiers physical:
 | Tier | Directories | Stability promise |
 |------|-------------|-------------------|
 | **Kernel** | `api/`, root package, `agent/`, `blackboard/`, `tool/`, `policy/`, `worker/`, `flow/`, `message/`, `hook/`, `internal/` | Public types in `api/` follow SemVer once v1.0.0 lands |
-| **Extension** | `provider/{openai,anthropic,…}`, `storage/{memory,sqlite,mysql,postgres}`, `memory/`, `artifact/`, `transport/{mcp,openapi,webhook,scheduler,event}`, `observe/otel/`, `eval/`, `contract/`, `recipe/` | Interface stability tracks `api/` (and `contract/` for storage); reference implementations under `storage/{sqlite,mysql,postgres}` are starting points for forking — they MAY evolve faster than the contract and carry no production-operations promise |
+| **Extension** | `provider/{openai,anthropic,…}`, `memory/`, `artifact/`, `transport/{mcp,openapi,webhook,scheduler,event}`, `observe/otel/`, `eval/`, `contract/`, `recipe/` | Interface stability tracks `api/` (and `contract/` for storage). Per ADR-012 (revised, Position D) the framework ships no `api.StoreProvider` implementation — `storage/` does not exist in the repository. |
 | **Pack** | `packs/{research,support,devops,aiops}`, `examples/` | No stability promise; domain logic is free to break |
 
 ## Boundary rules (mechanical)
@@ -224,7 +209,6 @@ Enforced by `.sentrux/rules.toml` `[[boundaries]]`:
 ## Naming conventions
 
 - Packages: lower case, single word where possible
-- Storage adapters: `storage/<backend>/` (e.g., `storage/sqlite/`)
 - Transport adapters: `transport/<protocol>/` (e.g., `transport/openapi/`)
 - Provider adapters: `provider/<vendor>/` (e.g., `provider/anthropic/`)
 - Observability adapters: `observe/<system>/` (e.g., `observe/otel/`)
@@ -237,22 +221,8 @@ Packages in `packs/` are created with only a `doc.go` and `README.md` for v0.8.0
 
 ## Migration of moved packages
 
-- `internal/memory/*` → `storage/memory/*`
+- `internal/memory/*` stays under `internal/` — it remains the runtime's internal default and is not part of the public API. Earlier v0.8.0 drafts moved it to `storage/memory/`; per ADR-012 (revised, Position D) that move is withdrawn and `storage/` no longer exists.
 - **Examples naming (locked)**: `_examples/` stays as-is for internal end-to-end / integration / sandbox material — the leading underscore deliberately excludes it from `go build ./...` and `go test ./...`, keeping CI clean. A new top-level `examples/` directory hosts the **curated public showcase** that compiles as part of `./...` and ships in release notes. Migration rule: nothing moves automatically; an example is **lifted** into `examples/` only after it is reviewed for runnable correctness, dependency hygiene, and documentation quality. The two directories are not synced — `_examples/` may carry experimental or broken-for-now demos, `examples/` must always be green.
-
-## Migration of imports
-
-External users see the following import path changes:
-
-```go
-// Before
-import "github.com/Viking602/go-hydaelyn/internal/memory"  // was never public; just for reference
-
-// After
-import "github.com/Viking602/go-hydaelyn/storage/memory"
-```
-
-Since `internal/memory` was not part of the public API (it's under `internal/`), this is not technically a breaking change for users — only contributors and forks.
 
 ## Verification
 

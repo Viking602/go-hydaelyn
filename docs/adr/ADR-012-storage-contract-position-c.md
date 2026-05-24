@@ -4,6 +4,8 @@
 
 Accepted — enforced from the v0.8.0 roadmap onward. Anchor documents: `docs/product-spec/v0.8.0/05-storage.md`, `docs/product-spec/v0.8.0/09-boundaries.md` line 117 (Principle 4/5 → ADR-012 mapping), `docs/product-spec/v0.8.0/12-migration-guide.md` (Layer 3 ent-based provider template).
 
+**Revised 2026-05-24:** Superseded by Position D — see the *Revised decision* section at the bottom of this ADR. Layer 2 (framework-shipped reference implementations) is withdrawn; the framework now ships the contract only. The Layer 1 + Layer 3 split remains intact.
+
 ## Context
 
 Before v0.7.x Hydaelyn shipped only one in-process storage implementation under `internal/memory`. During v0.8.0 design the project briefly committed to an "official production storage" path — MySQL (including OceanBase 4.x / TiDB) and Postgres adapters as the production-recommended choice, with the framework owning DDL, schema evolution, migration-tool integration, and ORM coexistence policies.
@@ -33,21 +35,9 @@ Adopt **Position C — a three-layer structure**:
 
 Layer 1 follows SemVer after v1.0.0. Optional new store interfaces may be added (declared via new `StoreCapabilities` flags), but no existing interface is removed or break-changed.
 
-### Layer 2 — Reference implementations (framework-shipped convenience)
+### Layer 2 — Reference implementations (WITHDRAWN — see Revised decision)
 
-- `storage/memory` — in-process, clone-on-Begin, replace-on-Commit. Reports `SupportsConcurrentWriters: false`. Use for tests / examples / ephemeral demos.
-- `storage/sqlite` — `modernc.org/sqlite` pure-Go driver, `BEGIN IMMEDIATE`, single-node persistent demo.
-- `storage/mysql` — `go-sql-driver/mysql`; CI matrix covers MySQL 8.0 + MariaDB 10.5+ + OceanBase 4.x community edition + TiDB 6+; `SELECT ... FOR UPDATE SKIP LOCKED` provides lease fairness.
-- `storage/postgres` — `pgx/v5`; `UPDATE ... WHERE version = ? RETURNING`. **`LISTEN/NOTIFY`-based Subscribe is deferred to v0.8.1**; v0.8.0 reports `SupportsBlackboardSubscribe = false` and uses polling.
-
-**The only maintenance promise for Layer 2** is "passes `contract.RunStoreProviderContractTests`". The framework does NOT commit to:
-
-- Compatibility with every MySQL fork's edge-case semantics
-- Tuning for any specific workload profile
-- Schema or index optimization for any specific query pattern
-- Integration with arbitrary migration tools (the references expose `embed.FS` and an optional `Options{AutoMigrate: true}` — that is the deal)
-
-Documentation, godoc, README, and release notes for `storage/{sqlite,mysql,postgres}` use the phrase **"starting point for teams forking it"** consistently. This is load-bearing language.
+This section described `storage/{memory,sqlite,mysql,postgres}` as framework-shipped reference implementations under the rule "passes contract tests, exists as runnable reference." Under the revised decision (Position D, see below) these implementations have been deleted from the repository. The framework no longer ships any `api.StoreProvider` implementation. The contract test suite continues to be exercised in framework CI via a non-exported in-memory adapter at `contract/internal/inmemfake/`, which is structurally unreachable from user code and is NOT a reference implementation.
 
 ### Layer 3 — User-owned production providers (recommended production path)
 
@@ -61,24 +51,31 @@ Downstream teams implement `StoreProvider` against their own data stack (ent / g
 
 ## Immediately-effective hard constraints
 
-1. **05-storage.md line 9 position statement is normative text**:
-   > The framework owns the contract. The framework does not own production storage operations.
-2. **`storage/{mysql,postgres}` README, godoc, and release notes MUST NOT use the words "production", "official", or "recommended for production"**. The consistent phrasing is "reference implementation / starting point for forking".
-3. **The official production recommendation is Layer 3.** Documentation and examples must direct downstream teams to "start by copying the ent template in 12-migration-guide.md" as the default choice.
-4. **CI matrix has exactly one semantic.** Reference impls pass `contract.RunStoreProviderContractTests`. The matrix does not chase operational scenarios such as "large transactions on OB 4.x", "OBProxy routing under failover", or "cross-region writes".
-5. **Contract tests are written before reference implementations.** The first action of v0.8.0 Phase 2 is to land the named test list in `contract/store_provider.go` (bodies may be `t.Skip("TODO")`). Reference impls are written *to make a specific contract test green*, never the reverse.
+1. **05-storage.md position statement is normative text**:
+   > The framework owns the contract and the contract test suite. The framework does not own — and does not ship — any `api.StoreProvider` implementation.
+2. **No framework-shipped `api.StoreProvider` implementation.** The `storage/` directory does not exist in the repository. Past references to `storage/sqlite | storage/mysql | storage/postgres | storage/memory` in documentation are historical only.
+3. **The production path is Layer 3.** Applications implement `api.StoreProvider` against their own data stack. The ent-based template in `docs/product-spec/v0.8.0/12-migration-guide.md` is the canonical starting point.
+4. **CI matrix has exactly one semantic.** The framework runs `contract.RunStoreProviderContractTests` against the non-exported `contract/internal/inmemfake` adapter on every PR. The matrix does not chase operational scenarios such as "large transactions on OB 4.x", "OBProxy routing under failover", or "cross-region writes" — those belong to whoever ships an implementation.
+5. **Contract tests are the framework's product surface.** Any change that would weaken `contract.RunStoreProviderContractTests` requires an explicit ADR amendment.
 
-## In-scope exceptions
+## Revised decision (2026-05-24) — Position D
 
-- **A downstream team may fork `storage/mysql`** as a production template rather than adopt Layer 3. The framework does not block this, but the README carries no endorsement and operational responsibility belongs entirely to the downstream.
-- **The OceanBase 4.x compatibility matrix** stays in `storage/mysql/oceanbase_compat.md` as forker-facing notes, not as a framework compatibility commitment.
+The principle recorded in `13-memory-optional-plugin.md` applies to `api.StoreProvider` too: the framework owns the verbs and invariants; the application owns the nouns, the schema, and the storage. The asymmetry between Memory (no reference impl) and StoreProvider (ref impls retained) is rejected.
+
+Position D in one sentence:
+
+> The framework ships the contract (`api.StoreProvider`, `contract.RunStoreProviderContractTests`) and nothing else. There are no framework-shipped StoreProvider implementations. Applications implement the contract against their own data stack and validate with the contract test suite.
+
+Why C did not survive: "starting point for forking" was read as "production answer regardless of README wording," and the framework ended up implicitly responsible for operational properties of every fork. Position D removes the ambiguity at the only place where it could exist — the existence of an in-tree implementation.
+
+The contract test suite is the framework's load-bearing test artifact and continues to run on every PR via `contract/internal/inmemfake`. The adapter wraps the existing `internal/memory.Provider` (which remains as the runtime's internal default), lives under Go's `internal/` to be structurally unreachable from user code, and exists for one reason: to prevent suite rot. It is not a backend.
 
 ## Impact
 
 - **Phase 2 duration drops from 17-20+3 days to 15 days.** Time previously budgeted for polishing MySQL/Postgres production edge cases is redirected into contract test coverage and the ent template.
 - **All OB-specific risks in the risk register are downgraded.** From "framework must reach production stability on OB 4.x" to "reference impl passes CI".
 - **Any PR review may cite this ADR** as the basis for rejecting language that positions mysql/postgres as the production answer, rejecting schema changes that bleed into framework releases, and rejecting workload-specific optimization of reference impls.
-- **Downstream expectation management.** v0.8.0 release notes and the top of the README state that the production path is Layer 3; any "I ran storage/mysql in production and hit X" issue is routed via the issue template to the Layer 3 on-ramp.
+- **Downstream expectation management.** v0.8.0 release notes and the top of the README state that the production path is Layer 3. Under the original Position C, "I ran storage/mysql in production and hit X" issues were routed to the Layer 3 on-ramp. Under the revised Position D no such issue can arise — `storage/` does not ship, so the routing rule is moot.
 
 ## References
 
