@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const Version = "2.0"
+const (
+	Version       = "2.0"
+	MaxFrameBytes = 4 << 20
+)
 
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -120,6 +123,9 @@ func ReadFramed(reader *bufio.Reader) ([]byte, error) {
 	}
 	if length <= 0 {
 		return nil, io.ErrUnexpectedEOF
+	}
+	if length > MaxFrameBytes {
+		return nil, fmt.Errorf("jsonrpc: frame too large: content-length %d exceeds %d", length, MaxFrameBytes)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(reader, payload); err != nil {

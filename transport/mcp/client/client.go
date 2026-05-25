@@ -10,16 +10,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/transport/mcp/jsonrpc"
 )
+
+const (
+	defaultHTTPTransportTimeout = 30 * time.Second
+	defaultStdioCloseTimeout    = time.Second
+)
+
+var errStreamTransportClosed = errors.New("mcp stream transport closed")
 
 type Transport interface {
 	Call(ctx context.Context, method string, params any, result any) error
@@ -181,7 +190,7 @@ func NewHTTPTransport(url string, headers http.Header) *HTTPTransport {
 		cloned = headers.Clone()
 	}
 	return &HTTPTransport{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: defaultHTTPTransportTimeout},
 		url:     url,
 		headers: cloned,
 	}
@@ -226,11 +235,14 @@ func (t *HTTPTransport) Close() error {
 }
 
 type StreamTransport struct {
-	reader  *bufio.Reader
-	writer  io.Writer
-	closers []io.Closer
-	mu      sync.Mutex
-	counter uint64
+	reader    *bufio.Reader
+	writer    io.Writer
+	closers   []io.Closer
+	mu        sync.Mutex
+	closeOnce sync.Once
+	closeErr  error
+	closed    atomic.Bool
+	counter   uint64
 }
 
 func NewStreamTransport(reader io.Reader, writer io.Writer, closers ...io.Closer) *StreamTransport {
@@ -241,9 +253,18 @@ func NewStreamTransport(reader io.Reader, writer io.Writer, closers ...io.Closer
 	}
 }
 
-func (t *StreamTransport) Call(_ context.Context, method string, params any, result any) error {
+func (t *StreamTransport) Call(ctx context.Context, method string, params any, result any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed.Load() {
+		return errStreamTransportClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	id := atomic.AddUint64(&t.counter, 1)
 	request, err := jsonrpc.NewRequest(id, method, params)
 	if err != nil {
@@ -252,35 +273,64 @@ func (t *StreamTransport) Call(_ context.Context, method string, params any, res
 	if err := jsonrpc.WriteFramed(t.writer, request); err != nil {
 		return err
 	}
-	for {
-		payload, err := jsonrpc.ReadFramed(t.reader)
-		if err != nil {
-			return err
+	responses := make(chan streamResponse, 1)
+	go func() {
+		responses <- t.readResponse(id)
+	}()
+	select {
+	case response := <-responses:
+		if response.err != nil {
+			return response.err
 		}
-		response, err := jsonrpc.DecodeResponse(payload)
-		if err != nil {
-			return err
-		}
-		if response.ID != nil && fmt.Sprint(response.ID) != fmt.Sprint(id) {
-			continue
-		}
-		if response.Error != nil {
-			return fmt.Errorf("%s", response.Error.Message)
+		if response.response.Error != nil {
+			return fmt.Errorf("%s", response.response.Error.Message)
 		}
 		if result == nil {
 			return nil
 		}
-		return json.Unmarshal(response.Result, result)
+		return json.Unmarshal(response.response.Result, result)
+	case <-ctx.Done():
+		t.closed.Store(true)
+		go func() { _ = t.Close() }()
+		return ctx.Err()
+	}
+}
+
+type streamResponse struct {
+	response jsonrpc.Response
+	err      error
+}
+
+func (t *StreamTransport) readResponse(id uint64) streamResponse {
+	for {
+		payload, err := jsonrpc.ReadFramed(t.reader)
+		if err != nil {
+			return streamResponse{err: err}
+		}
+		response, err := jsonrpc.DecodeResponse(payload)
+		if err != nil {
+			return streamResponse{err: err}
+		}
+		if response.ID != nil && fmt.Sprint(response.ID) != fmt.Sprint(id) {
+			continue
+		}
+		return streamResponse{response: response}
 	}
 }
 
 func (t *StreamTransport) Close() error {
-	for _, closer := range t.closers {
-		if closer != nil {
-			_ = closer.Close()
+	t.closeOnce.Do(func() {
+		t.closed.Store(true)
+		for _, closer := range t.closers {
+			if closer == nil {
+				continue
+			}
+			if err := closer.Close(); err != nil && t.closeErr == nil {
+				t.closeErr = err
+			}
 		}
-	}
-	return nil
+	})
+	return t.closeErr
 }
 
 type StdioConfig struct {
@@ -302,11 +352,59 @@ func DialStdio(ctx context.Context, cfg StdioConfig) (*Client, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, err
 	}
-	transport := NewStreamTransport(stdout, stdin, stdin, stdout)
+	transport := NewStreamTransport(stdout, stdin, newStdioProcess(cmd, stdin, stdout))
 	return New(transport), nil
+}
+
+type stdioProcess struct {
+	cmd      *exec.Cmd
+	stdin    io.Closer
+	stdout   io.Closer
+	waitOnce sync.Once
+	waitDone chan struct{}
+	waitErr  error
+}
+
+func newStdioProcess(cmd *exec.Cmd, stdin io.Closer, stdout io.Closer) *stdioProcess {
+	return &stdioProcess{
+		cmd:      cmd,
+		stdin:    stdin,
+		stdout:   stdout,
+		waitDone: make(chan struct{}),
+	}
+}
+
+func (p *stdioProcess) Close() error {
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	if p.stdout != nil {
+		_ = p.stdout.Close()
+	}
+	go p.wait()
+	select {
+	case <-p.waitDone:
+		return nil
+	case <-time.After(defaultStdioCloseTimeout):
+		if p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
+		}
+		<-p.waitDone
+		return nil
+	}
+}
+
+func (p *stdioProcess) wait() {
+	p.waitOnce.Do(func() {
+		p.waitErr = p.cmd.Wait()
+		close(p.waitDone)
+	})
 }

@@ -12,6 +12,22 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 
+func TestNewDefaultClientTimeout(t *testing.T) {
+	driver := New(Config{})
+	if driver.config.Client == nil {
+		t.Fatal("expected default client")
+	}
+	if driver.config.Client.Timeout <= 0 {
+		t.Fatalf("expected default client timeout, got %s", driver.config.Client.Timeout)
+	}
+
+	supplied := &http.Client{}
+	driver = New(Config{Client: supplied})
+	if driver.config.Client != supplied {
+		t.Fatal("expected supplied client to be preserved")
+	}
+}
+
 func TestDriverStreamParsesMessageSSE(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/messages" {

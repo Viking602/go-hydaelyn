@@ -1,10 +1,14 @@
 package kit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -29,6 +33,67 @@ func TestHTTPTool(t *testing.T) {
 	}
 	if result.Content != `{"status":"ok"}` {
 		t.Fatalf("unexpected result: %q", result.Content)
+	}
+}
+
+func TestHTTPToolRejectsOversizedResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write(bytes.Repeat([]byte("x"), 1<<20+1))
+	}))
+	defer ts.Close()
+
+	driver := HTTPTool("remote", tool.Schema{Type: "object"}, HTTPToolConfig{URL: ts.URL})
+	_, err := driver.Execute(context.Background(), tool.Call{
+		ID:        "call-oversized",
+		Name:      "remote",
+		Arguments: json.RawMessage(`{}`),
+	}, nil)
+	if err == nil {
+		t.Fatal("expected oversized response error")
+	}
+}
+
+func TestProcessToolRejectsOversizedOutput(t *testing.T) {
+	if os.Getenv("HYDAELYN_PROCESS_OVERSIZED_OUTPUT_HELPER") == "1" {
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), 1<<20+1))
+		os.Exit(0)
+	}
+
+	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestProcessToolRejectsOversizedOutput$"},
+		Env:     append(os.Environ(), "HYDAELYN_PROCESS_OVERSIZED_OUTPUT_HELPER=1"),
+	})
+	_, err := driver.Execute(context.Background(), tool.Call{
+		ID:        "call-process-oversized",
+		Name:      "run",
+		Arguments: json.RawMessage(`{}`),
+	}, nil)
+	if err == nil {
+		t.Fatal("expected oversized output error")
+	}
+}
+
+func TestProcessToolPreservesCommandContextCancel(t *testing.T) {
+	if os.Getenv("HYDAELYN_PROCESS_CANCEL_HELPER") == "1" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		time.Sleep(time.Hour)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestProcessToolPreservesCommandContextCancel$"},
+		Env:     append(os.Environ(), "HYDAELYN_PROCESS_CANCEL_HELPER=1"),
+	})
+	_, err := driver.Execute(ctx, tool.Call{
+		ID:        "call-process-cancel",
+		Name:      "run",
+		Arguments: json.RawMessage(`{}`),
+	}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline error, got %v", err)
 	}
 }
 
