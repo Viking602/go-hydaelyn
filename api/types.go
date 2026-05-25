@@ -210,10 +210,11 @@ const (
 )
 
 type Event struct {
-	RunID      string         `json:"runId"`
-	TaskID     string         `json:"taskId,omitempty"`
-	Sequence   int            `json:"sequence"`
-	Type       EventType      `json:"type"`
+	RunID    string    `json:"runId"`
+	TaskID   string    `json:"taskId,omitempty"`
+	Sequence int       `json:"sequence"`
+	Type     EventType `json:"type"`
+	// godoc-allow-any: event payloads are typed by EventType, not one global Go struct.
 	Payload    map[string]any `json:"payload,omitempty"`
 	RecordedAt time.Time      `json:"recordedAt"`
 }
@@ -329,9 +330,10 @@ type ApprovalDecision struct {
 
 // Intent describes the user's request as interpreted by the runtime pipeline.
 type Intent struct {
-	RunID   string         `json:"runId"`
-	Summary string         `json:"summary,omitempty"`
-	Fields  map[string]any `json:"fields,omitempty"`
+	RunID   string `json:"runId"`
+	Summary string `json:"summary,omitempty"`
+	// godoc-allow-any: intent fields are produced by host-supplied analyzers.
+	Fields map[string]any `json:"fields,omitempty"`
 }
 
 type TodoPlan struct {
@@ -461,8 +463,9 @@ type RunTimelineItem struct {
 }
 
 type TypedReport struct {
-	Status        ReportStatus    `json:"status"`
-	Summary       string          `json:"summary,omitempty"`
+	Status  ReportStatus `json:"status"`
+	Summary string       `json:"summary,omitempty"`
+	// godoc-allow-any: structured report payloads follow task-specific schemas.
 	Structured    map[string]any  `json:"structured,omitempty"`
 	ActionOutcome *ActionOutcome  `json:"actionOutcome,omitempty"`
 	Handoff       *HandoffRequest `json:"handoff,omitempty"`
@@ -555,26 +558,27 @@ type Task struct {
 }
 
 type TaskEnvelope struct {
-	ID              string               `json:"envelopeId"`
-	RunID           string               `json:"runId"`
-	TaskID          string               `json:"taskId"`
-	TodoID          string               `json:"todoId,omitempty"`
-	From            string               `json:"from,omitempty"`
-	Type            string               `json:"type,omitempty"`
-	TargetAgentID   string               `json:"targetAgentId,omitempty"`
-	TargetComponent string               `json:"targetComponent,omitempty"`
-	Payload         map[string]any       `json:"payload,omitempty"`
-	ReadSelectors   []BlackboardSelector `json:"readSelectors,omitempty"`
-	WriteTargets    []string             `json:"writeTargets,omitempty"`
-	TraceID         string               `json:"traceId,omitempty"`
-	TaskVersion     int                  `json:"taskVersion,omitempty"`
-	Deadline        time.Time            `json:"deadline,omitempty"`
-	RetryPolicy     RetryPolicy          `json:"retryPolicy,omitempty"`
-	Status          string               `json:"status"`
-	Attempts        int                  `json:"attempts,omitempty"`
-	NextRetryAt     time.Time            `json:"nextRetryAt,omitempty"`
-	CreatedAt       time.Time            `json:"createdAt"`
-	DeliveredAt     time.Time            `json:"deliveredAt,omitempty"`
+	ID              string `json:"envelopeId"`
+	RunID           string `json:"runId"`
+	TaskID          string `json:"taskId"`
+	TodoID          string `json:"todoId,omitempty"`
+	From            string `json:"from,omitempty"`
+	Type            string `json:"type,omitempty"`
+	TargetAgentID   string `json:"targetAgentId,omitempty"`
+	TargetComponent string `json:"targetComponent,omitempty"`
+	// godoc-allow-any: envelope payloads are host-defined task input data.
+	Payload       map[string]any       `json:"payload,omitempty"`
+	ReadSelectors []BlackboardSelector `json:"readSelectors,omitempty"`
+	WriteTargets  []string             `json:"writeTargets,omitempty"`
+	TraceID       string               `json:"traceId,omitempty"`
+	TaskVersion   int                  `json:"taskVersion,omitempty"`
+	Deadline      time.Time            `json:"deadline,omitempty"`
+	RetryPolicy   RetryPolicy          `json:"retryPolicy,omitempty"`
+	Status        string               `json:"status"`
+	Attempts      int                  `json:"attempts,omitempty"`
+	NextRetryAt   time.Time            `json:"nextRetryAt,omitempty"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	DeliveredAt   time.Time            `json:"deliveredAt,omitempty"`
 }
 
 type TraceSpanStatus string
@@ -703,15 +707,16 @@ type UsageSelector struct {
 //
 // Spec anchor: docs/product-spec/v0.8.0/04-worker-runtime.md.
 type DeadLetterEntry struct {
-	ID         string         `json:"id"`
-	EnvelopeID string         `json:"envelopeId"`
-	RunID      string         `json:"runId"`
-	TaskID     string         `json:"taskId,omitempty"`
-	Reason     string         `json:"reason,omitempty"`
-	Attempts   int            `json:"attempts,omitempty"`
-	Envelope   TaskEnvelope   `json:"envelope"`
-	Payload    map[string]any `json:"payload,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
+	ID         string       `json:"id"`
+	EnvelopeID string       `json:"envelopeId"`
+	RunID      string       `json:"runId"`
+	TaskID     string       `json:"taskId,omitempty"`
+	Reason     string       `json:"reason,omitempty"`
+	Attempts   int          `json:"attempts,omitempty"`
+	Envelope   TaskEnvelope `json:"envelope"`
+	// godoc-allow-any: dead-letter payload preserves the original extension data.
+	Payload   map[string]any `json:"payload,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
 }
 
 // DeadLetterSelector filters DeadLetterStore.List.
@@ -730,11 +735,13 @@ type DeadLetterSelector struct {
 //
 // Spec anchor: docs/product-spec/v0.8.0/03-agent-ontology.md.
 type Capability struct {
-	Name             string            `json:"name"`
-	Version          string            `json:"version,omitempty"`
-	Description      string            `json:"description,omitempty"`
-	AgentID          string            `json:"agentId,omitempty"`
-	InputSchema      map[string]any    `json:"inputSchema,omitempty"`
+	Name        string `json:"name"`
+	Version     string `json:"version,omitempty"`
+	Description string `json:"description,omitempty"`
+	AgentID     string `json:"agentId,omitempty"`
+	// godoc-allow-any: JSON Schema is represented as an open object.
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
+	// godoc-allow-any: JSON Schema is represented as an open object.
 	OutputSchema     map[string]any    `json:"outputSchema,omitempty"`
 	EffectType       ToolEffectType    `json:"effectType,omitempty"`
 	RiskLevel        string            `json:"riskLevel,omitempty"`

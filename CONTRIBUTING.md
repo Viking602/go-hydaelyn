@@ -75,21 +75,15 @@ clearest domain term in surrounding context.
 
 ## Verification Commands
 
-Before submitting changes, run the same checks as CI:
+Before submitting changes, run the local CI parity gate with Go 1.25.10:
 
 ```bash
-# Run tests
-go test ./...
-
-# Run vet
-go vet ./...
-
-# Run staticcheck (if installed)
-staticcheck ./...
-
-# Run race tests
-go test -race ./...
+make ci-local
 ```
+
+This target runs formatting, module-tidy, `go vet`, `staticcheck`,
+`govulncheck`, `golangci-lint`, normal tests, race tests, Sentrux, and
+the framework boundary scripts.
 
 ## Guardrails
 
@@ -97,7 +91,7 @@ These constraints apply to all changes:
 
 1. **No package/directory renames** - Current package structure is stable
 2. **No exported symbol renames** - Public API changes require explicit approval
-3. **No new linting stack** - Do not introduce golangci-lint, .editorconfig, or additional formatters in this pass
+3. **No new linting stack** - Keep linting centralized in `.golangci.yml`, CI, and the existing Makefile targets
 
 ## References
 

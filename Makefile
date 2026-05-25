@@ -68,6 +68,7 @@ vulncheck: ## Run govulncheck (install: go install golang.org/x/vuln/cmd/govulnc
 architecture-check: ## Run Sentrux and framework boundary checks
 	$(SENTRUX) check .
 	./scripts/check-business-words.sh
+	./scripts/check-public-any.sh
 
 .PHONY: tidy
 tidy: ## Run go mod tidy
