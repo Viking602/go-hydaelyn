@@ -29,7 +29,8 @@ type LoopInput struct {
 	StopSequences  []string
 	ThinkingBudget int
 	ResponseFormat *provider.ResponseFormat
-	ExtraBody      map[string]any
+	// godoc-allow-any: provider-specific request extensions are intentionally open.
+	ExtraBody map[string]any
 
 	OutputGuardrails []OutputGuardrail
 	OutputRecorder   OutputGuardrailRecorder

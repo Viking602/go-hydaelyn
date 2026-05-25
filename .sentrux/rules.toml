@@ -25,10 +25,9 @@
 #                              packages and keeps public compatibility aliases
 #   internal/{run,report,...} — domain behavior packages
 #
-# Grep-based gates run in CI (see Makefile or scripts/check-boundaries.sh):
-#   grep -R "Locked(" internal/core/{mailbox,blackboard,execution,...}
-#   grep -R "fallback" internal/core/{mailbox,execution,...}
-#   grep -R "subscriptionHub" internal/core/{mailbox,execution,...}
+# Script-based gates run in CI and `make architecture-check`:
+#   scripts/check-business-words.sh  — framework/business vocabulary boundary
+#   scripts/check-public-any.sh      — public []any return and any-field contract
 
 [constraints]
 # Acyclic always.

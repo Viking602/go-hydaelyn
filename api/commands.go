@@ -58,13 +58,15 @@ type DispatchTaskCommand struct {
 	TaskID          string
 	TargetAgentID   string
 	TargetComponent string
-	Payload         map[string]any
+	// godoc-allow-any: dispatch payloads are host-defined extension data.
+	Payload map[string]any
 }
 
 type FanOutDispatchTaskCommand struct {
-	RunID   string
-	TaskID  string
-	To      Address
+	RunID  string
+	TaskID string
+	To     Address
+	// godoc-allow-any: fan-out payloads are host-defined extension data.
 	Payload map[string]any
 }
 
@@ -125,12 +127,14 @@ type ToolInvocation struct {
 	HolderID    string
 	TaskVersion int
 	ToolName    string
-	Input       any
+	// godoc-allow-any: tool input is defined by the selected tool schema.
+	Input any
 }
 
 type ToolInvocationResult struct {
 	ToolName string
-	Output   any
+	// godoc-allow-any: tool output is defined by the selected tool schema.
+	Output any
 }
 
 type HandoffCommand struct {
