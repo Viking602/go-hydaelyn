@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -149,7 +150,21 @@ func testSaveAndLoadRun(t *testing.T, factory ProviderFactory) {
 
 func testSaveAndLoadTask(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	task := api.Task{ID: "task-1", RunID: "run-crud-2", Type: api.TaskTypeWorker, Goal: "do thing", Status: api.TaskStatusCreated}
+	task := api.Task{
+		ID:     "task-1",
+		RunID:  "run-crud-2",
+		Type:   api.TaskTypeWorker,
+		Goal:   "do thing",
+		Status: api.TaskStatusCreated,
+		Budget: &api.TaskBudget{
+			MaxTokens:    12_000,
+			MaxWallClock: 2 * time.Minute,
+			MaxToolCalls: 3,
+			MaxSteps:     8,
+		},
+		InputSchema:  json.RawMessage(`{"type":"object","required":["topic"],"properties":{"topic":{"type":"string"}}}`),
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error { return uow.Tasks().SaveTask(context.Background(), task) })
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		got, err := uow.Tasks().LoadTask(context.Background(), task.RunID, task.ID)
@@ -158,6 +173,38 @@ func testSaveAndLoadTask(t *testing.T, factory ProviderFactory) {
 		}
 		if got.Goal != task.Goal {
 			t.Fatalf("LoadTask goal mismatch: %q vs %q", got.Goal, task.Goal)
+		}
+		if got.Budget == nil || *got.Budget != *task.Budget {
+			t.Fatalf("LoadTask budget mismatch: %#v vs %#v", got.Budget, task.Budget)
+		}
+		if string(got.InputSchema) != string(task.InputSchema) {
+			t.Fatalf("LoadTask input schema mismatch: %s vs %s", got.InputSchema, task.InputSchema)
+		}
+		if string(got.OutputSchema) != string(task.OutputSchema) {
+			t.Fatalf("LoadTask output schema mismatch: %s vs %s", got.OutputSchema, task.OutputSchema)
+		}
+		listed, err := uow.Tasks().ListTasks(context.Background(), task.RunID)
+		if err != nil {
+			return err
+		}
+		var listedTask *api.Task
+		for i := range listed {
+			if listed[i].ID == task.ID {
+				listedTask = &listed[i]
+				break
+			}
+		}
+		if listedTask == nil {
+			t.Fatalf("ListTasks missing task %q in %+v", task.ID, listed)
+		}
+		if listedTask.Budget == nil || *listedTask.Budget != *task.Budget {
+			t.Fatalf("ListTasks budget mismatch: %#v vs %#v", listedTask.Budget, task.Budget)
+		}
+		if string(listedTask.InputSchema) != string(task.InputSchema) {
+			t.Fatalf("ListTasks input schema mismatch: %s vs %s", listedTask.InputSchema, task.InputSchema)
+		}
+		if string(listedTask.OutputSchema) != string(task.OutputSchema) {
+			t.Fatalf("ListTasks output schema mismatch: %s vs %s", listedTask.OutputSchema, task.OutputSchema)
 		}
 		return nil
 	})
