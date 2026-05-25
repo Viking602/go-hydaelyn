@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,11 +16,10 @@ import (
 // surface a failure crosses to the multi-agent layer (boundaries
 // Principle 6); Run intentionally does not return a bare error.
 //
-// v0.8.0 ships the contract and a working scaffold. Schema repair (the
-// full OutputPolicy.Repair loop with MaxRepairAttempts) lands in
-// Phase 2; this scaffold validates that the model's terminal text is
-// valid JSON when OutputPolicy.Schema is supplied, and surfaces
-// FailureKindSchemaInvalid otherwise.
+// When OutputPolicy.Validate is set with a Schema, Run validates the
+// terminal assistant JSON against that schema and, when requested,
+// re-prompts the model with validation feedback up to
+// MaxRepairAttempts.
 func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Result {
 	runCtx, cancelRun, budgetDriven := e.runContext(ctx, task)
 	defer cancelRun()
@@ -64,31 +63,110 @@ func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Res
 		}
 	}
 
-	text := finalAssistantTextFromMessages(output.Messages)
-	result := Result{
-		Text:       text,
-		Thinking:   output.Thinking,
-		Usage:      output.Usage,
-		StopReason: output.StopReason,
-		Messages:   output.Messages,
-		Valid:      true,
+	result := resultFromLoopOutput(output, 0)
+	if !policy.Validate || len(policy.Schema) == 0 {
+		return result
+	}
+	return e.validateAndRepairStructuredOutput(runCtx, input, output, result, policy, budgetDriven)
+}
+
+func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input LoopInput, output LoopOutput, result Result, policy OutputPolicy, budgetDriven bool) Result {
+	schema, schemaErr := parseOutputPolicySchema(policy.Schema)
+	if schemaErr != nil {
+		result.Valid = false
+		result.Structured = nil
+		result.Failure = schemaInvalidFailure(schemaErr)
+		return result
+	}
+	validationErr := validateResultStructuredOutput(&result, schema)
+	if validationErr == nil {
+		return result
+	}
+	if !policy.Repair || policy.MaxRepairAttempts <= 0 {
+		result.Failure = schemaInvalidFailure(validationErr)
+		return result
 	}
 
-	if len(policy.Schema) > 0 && policy.Validate {
-		if json.Valid([]byte(text)) {
-			result.Structured = json.RawMessage(text)
-			result.Valid = true
-		} else {
-			result.Valid = false
-			result.Failure = &AgentFailure{
-				Kind:      FailureKindSchemaInvalid,
-				Reason:    "agent terminal output is not valid JSON",
-				Retryable: policy.Repair,
+	totalUsage := output.Usage
+	for repairCount := 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
+		repairInput := input
+		repairInput.Messages = append(cloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
+		repairOutput, repairErr := e.RunMessages(ctx, repairInput)
+		if repairErr != nil {
+			kind := FailureKindEngineError
+			if budgetDriven && errors.Is(repairErr, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				kind = FailureKindBudgetExhausted
 			}
+			return Result{
+				Messages:    repairOutput.Messages,
+				Usage:       totalUsage.Add(repairOutput.Usage),
+				StopReason:  repairOutput.StopReason,
+				Thinking:    repairOutput.Thinking,
+				RepairCount: repairCount,
+				Failure: (&AgentFailure{
+					Kind:   kind,
+					Reason: repairErr.Error(),
+				}).WithCause(repairErr),
+			}
+		}
+		totalUsage = totalUsage.Add(repairOutput.Usage)
+		repairOutput.Usage = totalUsage
+		output = repairOutput
+		result = resultFromLoopOutput(output, repairCount)
+		validationErr = validateResultStructuredOutput(&result, schema)
+		if validationErr == nil {
+			return result
 		}
 	}
 
+	result.Failure = &AgentFailure{
+		Kind:      FailureKindRepairFailed,
+		Reason:    fmt.Sprintf("structured output repair failed after %d attempt(s): %s", policy.MaxRepairAttempts, validationErr),
+		Retryable: false,
+	}
+
 	return result
+}
+
+func resultFromLoopOutput(output LoopOutput, repairCount int) Result {
+	return Result{
+		Text:        finalAssistantTextFromMessages(output.Messages),
+		Thinking:    output.Thinking,
+		Usage:       output.Usage,
+		StopReason:  output.StopReason,
+		Messages:    output.Messages,
+		Valid:       true,
+		RepairCount: repairCount,
+	}
+}
+
+func validateResultStructuredOutput(result *Result, schema outputPolicySchema) error {
+	structured, err := validateStructuredOutputAgainstSchema(schema, result.Text)
+	if err != nil {
+		result.Valid = false
+		result.Structured = nil
+		return err
+	}
+	result.Valid = true
+	result.Structured = structured
+	result.Failure = nil
+	return nil
+}
+
+func schemaInvalidFailure(err error) *AgentFailure {
+	return &AgentFailure{
+		Kind:      FailureKindSchemaInvalid,
+		Reason:    err.Error(),
+		Retryable: false,
+	}
+}
+
+func repairInstructionMessage(schema []byte, validationErr error) message.Message {
+	return message.NewText(message.RoleUser, fmt.Sprintf(
+		"Repair the previous JSON output so it satisfies the required JSON Schema. Return only the corrected JSON, with no prose.\n\nValidation error: %s\n\nJSON Schema:\n%s",
+		validationErr,
+		string(schema),
+	))
 }
 
 func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context, context.CancelFunc, bool) {
