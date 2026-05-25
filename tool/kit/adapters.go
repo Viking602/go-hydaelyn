@@ -24,14 +24,7 @@ func HTTPTool(name string, schema tool.Schema, cfg HTTPToolConfig, options ...To
 		option(&config)
 	}
 	driver := staticDriver{
-		definition: tool.Definition{
-			Name:        name,
-			Description: config.description,
-			InputSchema: schema,
-			Tags:        config.tags,
-			Metadata:    config.metadata,
-			Origin:      "http",
-		},
+		definition: definitionFromConfig(name, schema, config),
 		execute: func(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
 			client := cfg.Client
 			if client == nil {
@@ -78,14 +71,7 @@ func ProcessTool(name string, schema tool.Schema, cfg ProcessToolConfig, options
 		option(&config)
 	}
 	return staticDriver{
-		definition: tool.Definition{
-			Name:        name,
-			Description: config.description,
-			InputSchema: schema,
-			Tags:        config.tags,
-			Metadata:    config.metadata,
-			Origin:      "process",
-		},
+		definition: definitionFromConfig(name, schema, config),
 		execute: func(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
 			command := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 			command.Dir = cfg.Dir
