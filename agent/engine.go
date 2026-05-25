@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
@@ -20,11 +22,18 @@ import (
 // valid JSON when OutputPolicy.Schema is supplied, and surfaces
 // FailureKindSchemaInvalid otherwise.
 func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Result {
-	messages, err := e.buildContext(ctx, task)
+	runCtx, cancelRun, budgetDriven := e.runContext(ctx, task)
+	defer cancelRun()
+
+	messages, err := e.buildContext(runCtx, task)
 	if err != nil {
+		kind := FailureKindContextBuildFailed
+		if budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			kind = FailureKindBudgetExhausted
+		}
 		return Result{
 			Failure: (&AgentFailure{
-				Kind:   FailureKindContextBuildFailed,
+				Kind:   kind,
 				Reason: err.Error(),
 			}).WithCause(err),
 		}
@@ -37,15 +46,19 @@ func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Res
 		MaxIterations: e.LoopPolicy.MaxIterations,
 	}
 
-	output, runErr := e.RunMessages(ctx, input)
+	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
+		kind := FailureKindEngineError
+		if budgetDriven && errors.Is(runErr, context.DeadlineExceeded) && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			kind = FailureKindBudgetExhausted
+		}
 		return Result{
 			Messages:   output.Messages,
 			Usage:      output.Usage,
 			StopReason: output.StopReason,
 			Thinking:   output.Thinking,
 			Failure: (&AgentFailure{
-				Kind:   FailureKindEngineError,
+				Kind:   kind,
 				Reason: runErr.Error(),
 			}).WithCause(runErr),
 		}
@@ -76,6 +89,32 @@ func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Res
 	}
 
 	return result
+}
+
+func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context, context.CancelFunc, bool) {
+	maxWallClock := e.maxWallClock(task)
+	if maxWallClock <= 0 {
+		return ctx, func() {}, false
+	}
+	deadline := time.Now().Add(maxWallClock)
+	if parentDeadline, ok := ctx.Deadline(); ok && !deadline.Before(parentDeadline) {
+		return ctx, func() {}, false
+	}
+	runCtx, cancel := context.WithDeadline(ctx, deadline)
+	return runCtx, cancel, true
+}
+
+func (e Engine) maxWallClock(task api.Task) time.Duration {
+	if task.Budget != nil && task.Budget.MaxWallClock > 0 {
+		return task.Budget.MaxWallClock
+	}
+	if e.LoopPolicy.Budget != nil && e.LoopPolicy.Budget.MaxWallClock > 0 {
+		return e.LoopPolicy.Budget.MaxWallClock
+	}
+	if e.LoopPolicy.MaxWallClock > 0 {
+		return e.LoopPolicy.MaxWallClock
+	}
+	return 0
 }
 
 func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {

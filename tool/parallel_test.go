@@ -46,6 +46,34 @@ func TestMaxConcurrencyParallelToolsReduceLatency(t *testing.T) {
 	t.Logf("sequential=%s parallel=%s", sequentialDuration, parallelDuration)
 }
 
+func TestExecuteBatchWithOptionsParallelMaxConcurrency(t *testing.T) {
+	driver := &latencyDriver{name: "slow", latency: 20 * time.Millisecond}
+	bus := NewBus(driver)
+	calls := []Call{
+		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
+		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
+		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
+		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
+		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
+	}
+
+	results, err := bus.ExecuteBatchWithOptions(context.Background(), calls, ModeParallel, nil, BatchOptions{
+		MaxConcurrency: 2,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteBatchWithOptions(parallel) error = %v", err)
+	}
+	if len(results) != len(calls) {
+		t.Fatalf("result length = %d, want %d", len(results), len(calls))
+	}
+	if peak := driver.Max(); peak > 2 {
+		t.Fatalf("max concurrency = %d, want <= 2", peak)
+	}
+	if peak := driver.Max(); peak != 2 {
+		t.Fatalf("max concurrency = %d, want exactly 2 active calls", peak)
+	}
+}
+
 type latencyDriver struct {
 	name    string
 	latency time.Duration

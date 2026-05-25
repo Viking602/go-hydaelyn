@@ -29,6 +29,10 @@ const (
 	ModeParallel   Mode = "parallel"
 )
 
+type BatchOptions struct {
+	MaxConcurrency int
+}
+
 type Update struct {
 	Kind    string            `json:"kind"`
 	Message string            `json:"message,omitempty"`
@@ -135,12 +139,22 @@ func (b *Bus) Execute(ctx context.Context, call Call, sink UpdateSink) (Result, 
 	if !ok {
 		return Result{}, fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
 	}
+	definition := driver.Definition()
+	if definition.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, definition.Timeout)
+		defer cancel()
+	}
 	return driver.Execute(ctx, call, sink)
 }
 
 func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, sink UpdateSink) ([]Result, error) {
+	return b.ExecuteBatchWithOptions(ctx, calls, mode, sink, BatchOptions{})
+}
+
+func (b *Bus) ExecuteBatchWithOptions(ctx context.Context, calls []Call, mode Mode, sink UpdateSink, options BatchOptions) ([]Result, error) {
 	if mode == ModeParallel {
-		return b.executeParallel(ctx, calls, sink)
+		return b.executeParallel(ctx, calls, sink, options)
 	}
 	results := make([]Result, 0, len(calls))
 	for _, call := range calls {
@@ -153,14 +167,27 @@ func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, sink Up
 	return results, nil
 }
 
-func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink) ([]Result, error) {
+func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink, options BatchOptions) ([]Result, error) {
 	results := make([]Result, len(calls))
 	errs := make([]error, len(calls))
 	var wg sync.WaitGroup
+	var sem chan struct{}
+	if options.MaxConcurrency > 0 {
+		sem = make(chan struct{}, options.MaxConcurrency)
+	}
 	for idx, call := range calls {
 		wg.Add(1)
 		go func(index int, current Call) {
 			defer wg.Done()
+			if sem != nil {
+				select {
+				case sem <- struct{}{}:
+					defer func() { <-sem }()
+				case <-ctx.Done():
+					errs[index] = ctx.Err()
+					return
+				}
+			}
 			results[index], errs[index] = b.Execute(ctx, current, sink)
 		}(idx, call)
 	}
