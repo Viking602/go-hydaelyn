@@ -3,9 +3,15 @@ package mcpclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func newTestServer(t *testing.T, handler func(method string, params map[string]any) any) *httptest.Server {
@@ -145,4 +151,92 @@ func TestGetPromptReturnsMessages(t *testing.T) {
 	if messages[0].Content.Text != "Summarize: hello world" {
 		t.Fatalf("unexpected content %#v", messages[0].Content)
 	}
+}
+
+func TestHTTPTransportUsesDefaultClientTimeout(t *testing.T) {
+	transport := NewHTTPTransport("https://mcp.example.test", nil)
+	if transport.client == nil {
+		t.Fatal("expected default http client")
+	}
+	if transport.client.Timeout <= 0 {
+		t.Fatalf("expected default timeout, got %s", transport.client.Timeout)
+	}
+}
+
+func TestStreamTransportCallCancelReturnsWhenNoResponseArrives(t *testing.T) {
+	reader := newBlockingReadCloser()
+	transport := NewStreamTransport(reader, io.Discard, reader)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		var result map[string]any
+		errCh <- transport.Call(ctx, "tools/list", map[string]any{}, &result)
+	}()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context deadline error, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = transport.Close()
+		t.Fatal("Call did not return after context deadline")
+	}
+}
+
+func TestDialStdioCloseWaitsForProcessCancelLifecycle(t *testing.T) {
+	if os.Getenv("HYDAELYN_MCP_STDIO_CLOSE_HELPER") == "1" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		time.Sleep(50 * time.Millisecond)
+		if path := os.Getenv("HYDAELYN_MCP_STDIO_CLOSE_FILE"); path != "" {
+			_ = os.WriteFile(path, []byte("done"), 0o600)
+		}
+		os.Exit(0)
+	}
+
+	exitFile := filepath.Join(t.TempDir(), "exited")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	client, err := DialStdio(context.Background(), StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioCloseWaitsForProcessCancelLifecycle$"},
+		Env: append(os.Environ(),
+			"HYDAELYN_MCP_STDIO_CLOSE_HELPER=1",
+			"HYDAELYN_MCP_STDIO_CLOSE_FILE="+exitFile,
+		),
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Stat(exitFile); err != nil {
+		t.Fatalf("Close returned before stdio process exited: %v", err)
+	}
+}
+
+type blockingReadCloser struct {
+	once   sync.Once
+	closed chan struct{}
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{closed: make(chan struct{})}
+}
+
+func (r *blockingReadCloser) Read(_ []byte) (int, error) {
+	<-r.closed
+	return 0, io.EOF
+}
+
+func (r *blockingReadCloser) Close() error {
+	r.once.Do(func() {
+		close(r.closed)
+	})
+	return nil
 }

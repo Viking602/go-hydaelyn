@@ -87,6 +87,9 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if path == "" {
 		return trigger.Registration{}, fmt.Errorf("webhook: trigger %q missing config[\"path\"]", t.ID)
 	}
+	if t.Config["secret"] != "" && d.verifyToken == nil {
+		return trigger.Registration{}, fmt.Errorf("webhook: trigger %q configures secret without verifier", t.ID)
+	}
 	method := strings.ToUpper(strings.TrimSpace(t.Config["method"]))
 	if method == "" {
 		method = http.MethodPost
@@ -144,18 +147,26 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if secret := reg.Trigger.Config["secret"]; secret != "" && d.verifyToken != nil {
+	if secret := reg.Trigger.Config["secret"]; secret != "" {
+		if d.verifyToken == nil {
+			http.Error(w, "webhook verifier not configured", http.StatusInternalServerError)
+			return
+		}
 		if !d.verifyToken(r, secret) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, d.max))
+	body, err := io.ReadAll(io.LimitReader(r.Body, d.max+1))
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
+	if int64(len(body)) > d.max {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	attrs := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
@@ -175,7 +186,7 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := reg.Handler.Handle(ctx, tc); err != nil {
 		d.logger("webhook: trigger %s handler failed: %v", reg.Trigger.ID, err)
-		http.Error(w, "handler failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "handler failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)

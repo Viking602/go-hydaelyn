@@ -2,6 +2,8 @@ package webhook_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,5 +109,83 @@ func TestDriver_VerifyTokenGatesRequest(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusAccepted {
 		t.Fatalf("with token: expected 202, got %d", resp2.StatusCode)
+	}
+}
+
+func TestDriver_RejectsSecretWithoutVerifier(t *testing.T) {
+	d := webhook.New(webhook.Options{})
+	_, err := d.Register(
+		api.Trigger{
+			ID:     "secret",
+			Type:   api.TriggerWebhook,
+			Config: map[string]string{"path": "/secret", "secret": "hunter2"},
+		},
+		"agent",
+		trigger.HandlerFunc(func(ctx context.Context, t trigger.TriggerContext) error { return nil }),
+	)
+	if err == nil {
+		t.Fatal("expected secret registration without verifier to fail")
+	}
+}
+
+func TestDriver_OversizedBodyReturnsTooLarge(t *testing.T) {
+	d := webhook.New(webhook.Options{MaxBodyBytes: 4})
+	var called bool
+	_, err := d.Register(
+		api.Trigger{ID: "hook", Type: api.TriggerWebhook, Config: map[string]string{"path": "/hooks/incoming"}},
+		"agent-1",
+		trigger.HandlerFunc(func(ctx context.Context, tc trigger.TriggerContext) error {
+			called = true
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	srv := httptest.NewServer(d.Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/hooks/incoming", "application/json", strings.NewReader("12345"))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.StatusCode)
+	}
+	if called {
+		t.Fatal("handler should not be called for oversized body")
+	}
+}
+
+func TestDriver_HandlerErrorDoesNotExposeSecretDetails(t *testing.T) {
+	d := webhook.New(webhook.Options{})
+	_, err := d.Register(
+		api.Trigger{ID: "hook", Type: api.TriggerWebhook, Config: map[string]string{"path": "/hooks/incoming"}},
+		"agent-1",
+		trigger.HandlerFunc(func(ctx context.Context, tc trigger.TriggerContext) error {
+			return errors.New("internal secret token leaked")
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	srv := httptest.NewServer(d.Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/hooks/incoming", "application/json", strings.NewReader(`{"x":1}`))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "internal secret token") {
+		t.Fatalf("handler error leaked in response body: %q", body)
 	}
 }

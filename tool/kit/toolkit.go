@@ -151,6 +151,32 @@ func Tool(name string, fn any, options ...ToolOption) (tool.Driver, error) {
 	return builder, nil
 }
 
+func definitionFromConfig(name string, schema tool.Schema, cfg toolConfig) tool.Definition {
+	return tool.Definition{
+		Name:        name,
+		Description: cfg.description,
+		InputSchema: schema,
+		Tags:        cfg.tags,
+		Metadata:    cfg.metadata,
+		Origin:      cfg.origin,
+		Security: message.ToolSecurity{
+			RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
+			RequiresApproval:    cfg.requiresApproval,
+			RiskLevel:           cfg.riskLevel,
+			Idempotent:          cfg.idempotent,
+		},
+		RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
+		RequiresApproval:    cfg.requiresApproval,
+		RiskLevel:           cfg.riskLevel,
+		EffectType:          cfg.effectType,
+		RequiresActionTask:  cfg.requiresActionTask,
+		Idempotent:          cfg.idempotent,
+		Timeout:             cfg.timeout,
+		RetryPolicy:         cfg.retryPolicy,
+		PolicyTags:          append([]string{}, cfg.policyTags...),
+	}
+}
+
 type functionTool struct {
 	definition tool.Definition
 	fn         reflect.Value
@@ -192,29 +218,7 @@ func newFunctionTool(name string, fn any, cfg toolConfig) (*functionTool, error)
 		return nil, err
 	}
 	return &functionTool{
-		definition: tool.Definition{
-			Name:        name,
-			Description: cfg.description,
-			InputSchema: schema,
-			Tags:        cfg.tags,
-			Metadata:    cfg.metadata,
-			Origin:      cfg.origin,
-			Security: message.ToolSecurity{
-				RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
-				RequiresApproval:    cfg.requiresApproval,
-				RiskLevel:           cfg.riskLevel,
-				Idempotent:          cfg.idempotent,
-			},
-			RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
-			RequiresApproval:    cfg.requiresApproval,
-			RiskLevel:           cfg.riskLevel,
-			EffectType:          cfg.effectType,
-			RequiresActionTask:  cfg.requiresActionTask,
-			Idempotent:          cfg.idempotent,
-			Timeout:             cfg.timeout,
-			RetryPolicy:         cfg.retryPolicy,
-			PolicyTags:          append([]string{}, cfg.policyTags...),
-		},
+		definition: definitionFromConfig(name, schema, cfg),
 		fn:         value,
 		inputType:  inputType,
 		outputType: outputType,

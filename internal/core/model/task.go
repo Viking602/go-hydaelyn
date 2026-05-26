@@ -1,6 +1,16 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+type TaskBudget struct {
+	MaxTokens    int64         `json:"maxTokens,omitempty"`
+	MaxWallClock time.Duration `json:"maxWallClock,omitempty"`
+	MaxToolCalls int           `json:"maxToolCalls,omitempty"`
+	MaxSteps     int           `json:"maxSteps,omitempty"`
+}
 
 type Task struct {
 	ID                 string               `json:"taskId"`
@@ -29,6 +39,9 @@ type Task struct {
 	PolicyDecisions    []PolicyDecision     `json:"policyDecisions,omitempty"`
 	Result             *TypedReport         `json:"result,omitempty"`
 	Error              string               `json:"error,omitempty"`
+	Budget             *TaskBudget          `json:"budget,omitempty"`
+	InputSchema        json.RawMessage      `json:"inputSchema,omitempty"`
+	OutputSchema       json.RawMessage      `json:"outputSchema,omitempty"`
 	CreatedAt          time.Time            `json:"createdAt"`
 	UpdatedAt          time.Time            `json:"updatedAt"`
 }

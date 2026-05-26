@@ -552,6 +552,14 @@ func (a apiActionAttemptStoreAdapter) LoadActionAttempt(ctx context.Context, att
 	return ActionAttemptToModel(attempt), nil
 }
 
+func (a apiActionAttemptStoreAdapter) LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error) {
+	attempt, err := a.inner.LoadActionAttemptByIdempotencyKey(ctx, runID, taskID, toolName, key)
+	if err != nil {
+		return model.ActionAttempt{}, ErrorToCore(err)
+	}
+	return ActionAttemptToModel(attempt), nil
+}
+
 type apiAgentProfileStoreAdapter struct{ inner api.AgentProfileStore }
 
 func (a apiAgentProfileStoreAdapter) SaveAgentProfile(ctx context.Context, profile model.AgentProfile) error {
@@ -1019,6 +1027,14 @@ func (a coreActionAttemptStoreAdapter) SaveActionAttempt(ctx context.Context, at
 
 func (a coreActionAttemptStoreAdapter) LoadActionAttempt(ctx context.Context, attemptID string) (api.ActionAttempt, error) {
 	attempt, err := a.inner.LoadActionAttempt(ctx, attemptID)
+	if err != nil {
+		return api.ActionAttempt{}, ErrorToAPI(err)
+	}
+	return ActionAttemptFromModel(attempt), nil
+}
+
+func (a coreActionAttemptStoreAdapter) LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (api.ActionAttempt, error) {
+	attempt, err := a.inner.LoadActionAttemptByIdempotencyKey(ctx, runID, taskID, toolName, key)
 	if err != nil {
 		return api.ActionAttempt{}, ErrorToAPI(err)
 	}

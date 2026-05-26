@@ -41,6 +41,13 @@ func cloneStrings(in []string) []string {
 	return append([]string(nil), in...)
 }
 
+func cloneBytes(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	return append([]byte(nil), in...)
+}
+
 func RunToModel(in api.Run) model.Run {
 	return model.Run{
 		ID:         in.ID,
@@ -93,6 +100,9 @@ func TaskToModel(in api.Task) model.Task {
 		PolicyDecisions:    PolicyDecisionsToModel(in.PolicyDecisions),
 		Result:             TypedReportPtrToModel(in.Result),
 		Error:              in.Error,
+		Budget:             TaskBudgetPtrToModel(in.Budget),
+		InputSchema:        cloneBytes(in.InputSchema),
+		OutputSchema:       cloneBytes(in.OutputSchema),
 		CreatedAt:          in.CreatedAt,
 		UpdatedAt:          in.UpdatedAt,
 	}
@@ -126,6 +136,9 @@ func TaskFromModel(in model.Task) api.Task {
 		PolicyDecisions:    PolicyDecisionsFromModel(in.PolicyDecisions),
 		Result:             TypedReportPtrFromModel(in.Result),
 		Error:              in.Error,
+		Budget:             TaskBudgetPtrFromModel(in.Budget),
+		InputSchema:        cloneBytes(in.InputSchema),
+		OutputSchema:       cloneBytes(in.OutputSchema),
 		CreatedAt:          in.CreatedAt,
 		UpdatedAt:          in.UpdatedAt,
 	}
@@ -231,6 +244,30 @@ func RetryPolicyToModel(in api.RetryPolicy) model.RetryPolicy {
 
 func RetryPolicyFromModel(in model.RetryPolicy) api.RetryPolicy {
 	return api.RetryPolicy{MaxAttempts: in.MaxAttempts, Backoff: in.Backoff}
+}
+
+func TaskBudgetPtrToModel(in *api.TaskBudget) *model.TaskBudget {
+	if in == nil {
+		return nil
+	}
+	return &model.TaskBudget{
+		MaxTokens:    in.MaxTokens,
+		MaxWallClock: in.MaxWallClock,
+		MaxToolCalls: in.MaxToolCalls,
+		MaxSteps:     in.MaxSteps,
+	}
+}
+
+func TaskBudgetPtrFromModel(in *model.TaskBudget) *api.TaskBudget {
+	if in == nil {
+		return nil
+	}
+	return &api.TaskBudget{
+		MaxTokens:    in.MaxTokens,
+		MaxWallClock: in.MaxWallClock,
+		MaxToolCalls: in.MaxToolCalls,
+		MaxSteps:     in.MaxSteps,
+	}
 }
 
 func SourceIdentityToModel(in api.SourceIdentity) model.SourceIdentity {

@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
@@ -46,6 +47,18 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 	}
 	if !task.AllowsAction {
 		return nil, model.ErrActionTaskRequired
+	}
+	if cmd.IdempotencyKey != "" {
+		existing, err := uow.ActionAttempts().LoadActionAttemptByIdempotencyKey(ctx, cmd.RunID, cmd.TaskID, cmd.ToolName, cmd.IdempotencyKey)
+		if err == nil {
+			if existing.InputHash != cmd.InputHash {
+				return nil, model.ErrIdempotencyConflict
+			}
+			return existing, nil
+		}
+		if !errors.Is(err, model.ErrNotFound) {
+			return nil, err
+		}
 	}
 	attemptID := cmd.AttemptID
 	if attemptID == "" {

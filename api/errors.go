@@ -11,6 +11,7 @@ var (
 	ErrOwnerMismatch           = errors.New("orchestrator: owner mismatch")
 	ErrActionTaskRequired      = errors.New("orchestrator: action task required")
 	ErrActionReconcileRequired = errors.New("orchestrator: action reconcile required")
+	ErrIdempotencyConflict     = errors.New("orchestrator: idempotency conflict")
 	ErrResponseTaskRequired    = errors.New("orchestrator: response task required")
 	ErrPolicyDenied            = errors.New("orchestrator: policy denied")
 	ErrPolicyObligationFailed  = errors.New("orchestrator: policy obligation failed")

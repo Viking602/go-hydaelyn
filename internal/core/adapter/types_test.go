@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -73,6 +74,35 @@ func TestTaskRoundTripPreservesPublicFields(t *testing.T) {
 	roundTrip := TaskFromModel(TaskToModel(original))
 	if !reflect.DeepEqual(roundTrip, original) {
 		t.Fatalf("task round-trip mismatch\nwant: %#v\n got: %#v", original, roundTrip)
+	}
+}
+
+func TestTaskAdapterRoundTripsV08Fields(t *testing.T) {
+	original := api.Task{
+		ID:     "task-v08",
+		RunID:  "run-v08",
+		Type:   api.TaskTypeWorker,
+		Status: api.TaskStatusCreated,
+		Budget: &api.TaskBudget{
+			MaxTokens:    12_000,
+			MaxWallClock: 2 * time.Minute,
+			MaxToolCalls: 3,
+			MaxSteps:     8,
+		},
+		InputSchema:  json.RawMessage(`{"type":"object","required":["topic"],"properties":{"topic":{"type":"string"}}}`),
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	}
+
+	roundTrip := TaskFromModel(TaskToModel(original))
+
+	if !reflect.DeepEqual(roundTrip.Budget, original.Budget) {
+		t.Fatalf("Budget mismatch\nwant: %#v\n got: %#v", original.Budget, roundTrip.Budget)
+	}
+	if string(roundTrip.InputSchema) != string(original.InputSchema) {
+		t.Fatalf("InputSchema mismatch\nwant: %s\n got: %s", original.InputSchema, roundTrip.InputSchema)
+	}
+	if string(roundTrip.OutputSchema) != string(original.OutputSchema) {
+		t.Fatalf("OutputSchema mismatch\nwant: %s\n got: %s", original.OutputSchema, roundTrip.OutputSchema)
 	}
 }
 

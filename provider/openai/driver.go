@@ -2,9 +2,12 @@ package openai
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/provider"
 )
+
+const defaultClientTimeout = 30 * time.Second
 
 type Config struct {
 	APIKey  string
@@ -27,6 +30,9 @@ func New(config Config) Driver {
 	}
 	if config.BaseURL == "" {
 		config.BaseURL = "https://api.openai.com/v1"
+	}
+	if config.Client == nil {
+		config.Client = &http.Client{Timeout: defaultClientTimeout}
 	}
 	return Driver{config: config}
 }

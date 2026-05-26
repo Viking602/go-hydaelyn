@@ -272,9 +272,9 @@ type TaskExecutionLease struct {
 	// Version is the monotonic CAS source-of-truth for AcquireWithExpectedVersion.
 	// Providers MUST increment this on every successful save. v0.8.0+.
 	Version uint64 `json:"version,omitempty"`
-	// Expiry is the wall-clock deadline at which the lease auto-releases.
-	// Distinct from ExpiresAt (which is the deadline of the *task* execution
-	// window): Expiry is purely lease-level liveness. v0.8.0+.
+	// Expiry is a compatibility alias for ExpiresAt. Providers MUST keep
+	// Expiry and ExpiresAt synchronized when persisting or extending leases.
+	// New code should treat ExpiresAt as the canonical lease liveness deadline.
 	Expiry time.Time `json:"expiry,omitempty"`
 }
 

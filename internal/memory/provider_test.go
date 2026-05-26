@@ -376,6 +376,13 @@ func TestMemoryLeaseStore_ExtendLease(t *testing.T) {
 	if !extended {
 		t.Fatalf("expected ExtendLease(self) to succeed")
 	}
+	loaded, err := uow.Leases().LoadLease(ctx, lease.ID)
+	if err != nil {
+		t.Fatalf("LoadLease() error = %v", err)
+	}
+	if loaded.ExpiresAt.IsZero() || loaded.Expiry.IsZero() || !loaded.ExpiresAt.Equal(loaded.Expiry) || !loaded.ExpiresAt.Equal(newExpiry) {
+		t.Fatalf("expected synchronized expiry fields after ExtendLease, got %+v", loaded)
+	}
 
 	rotated, err := cas.ExtendLease(ctx, lease.ID, "worker-B", newExpiry.Add(time.Minute))
 	if err != nil {

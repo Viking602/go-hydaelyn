@@ -40,7 +40,8 @@ func ValidateSubmission(ctx context.Context, uow ports.UnitOfWork, runID, taskID
 	if lease.RunID != runID || lease.TaskID != taskID || lease.HolderType != holderType || lease.HolderID != holderID {
 		return model.Run{}, model.Task{}, model.TaskExecutionLease{}, model.ErrLeaseHolderMismatch
 	}
-	if lease.ExpiresAt.Before(time.Now().UTC()) {
+	expiry := model.LeaseExpiry(lease)
+	if expiry.IsZero() || expiry.Before(time.Now().UTC()) {
 		lease.Status = model.LeaseStatusExpired
 		_ = uow.Leases().SaveLease(ctx, lease)
 		return model.Run{}, model.Task{}, model.TaskExecutionLease{}, model.ErrLeaseNotActive

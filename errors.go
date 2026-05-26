@@ -13,6 +13,7 @@ var (
 	ErrOwnerMismatch           = api.ErrOwnerMismatch
 	ErrActionTaskRequired      = api.ErrActionTaskRequired
 	ErrActionReconcileRequired = api.ErrActionReconcileRequired
+	ErrIdempotencyConflict     = api.ErrIdempotencyConflict
 	ErrResponseTaskRequired    = api.ErrResponseTaskRequired
 	ErrPolicyDenied            = api.ErrPolicyDenied
 	ErrPolicyObligationFailed  = api.ErrPolicyObligationFailed
