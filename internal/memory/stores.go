@@ -474,6 +474,7 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 	if lease.ID == "" {
 		lease.ID = u.nextID("lease")
 	}
+	model.SyncLeaseExpiry(&lease)
 	if existing, ok := u.staged.Leases[lease.ID]; ok && lease.Version <= existing.Version {
 		lease.Version = existing.Version + 1
 	} else if lease.Version == 0 {
@@ -501,6 +502,7 @@ func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.T
 	if lease.ID == "" {
 		return false, fmt.Errorf("lease.ID required for AcquireWithExpectedVersion: %w", model.ErrInvalidCommand)
 	}
+	model.SyncLeaseExpiry(&lease)
 	existing, exists := u.staged.Leases[lease.ID]
 	var currentVersion uint64
 	if exists {
@@ -535,9 +537,11 @@ func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID str
 	if existing.HolderID != workerID {
 		return false, nil
 	}
-	if !existing.Expiry.IsZero() && existing.Expiry.Before(time.Now()) {
+	expiry := model.LeaseExpiry(existing)
+	if !expiry.IsZero() && expiry.Before(time.Now()) {
 		return false, nil
 	}
+	existing.ExpiresAt = newExpiry
 	existing.Expiry = newExpiry
 	existing.HeartbeatAt = time.Now()
 	existing.Version++

@@ -54,7 +54,7 @@ func Acquire(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input
 	}
 	if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, input.RunID, input.TaskID); err != nil {
 		return AcquireResult{}, err
-	} else if ok && lease.Status == model.LeaseStatusActive && lease.ExpiresAt.After(time.Now().UTC()) {
+	} else if ok && lease.Status == model.LeaseStatusActive && model.LeaseExpiry(lease).After(time.Now().UTC()) {
 		return AcquireResult{Lease: lease, Acquired: false}, nil
 	}
 	ttl := input.TTL
@@ -75,6 +75,7 @@ func Acquire(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input
 		HeartbeatAt: now,
 		Status:      model.LeaseStatusActive,
 	}
+	model.SyncLeaseExpiry(&lease)
 	task, err = corestate.TransitionTask(task, model.TaskStatusRunning, false)
 	if err != nil {
 		return AcquireResult{}, err
@@ -114,6 +115,7 @@ func Heartbeat(ctx context.Context, uow ports.UnitOfWork, leaseID string, ttl ti
 	now := time.Now().UTC()
 	lease.HeartbeatAt = now
 	lease.ExpiresAt = now.Add(ttl)
+	model.SyncLeaseExpiry(&lease)
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		return model.TaskExecutionLease{}, err
 	}

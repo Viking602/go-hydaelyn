@@ -18,6 +18,25 @@ type TaskExecutionLease struct {
 	Expiry      time.Time   `json:"expiry,omitempty"`
 }
 
+// SyncLeaseExpiry keeps the compatibility Expiry alias equal to ExpiresAt.
+func SyncLeaseExpiry(lease *TaskExecutionLease) {
+	if lease == nil {
+		return
+	}
+	if lease.ExpiresAt.IsZero() {
+		lease.ExpiresAt = lease.Expiry
+	}
+	lease.Expiry = lease.ExpiresAt
+}
+
+// LeaseExpiry returns the canonical lease liveness deadline.
+func LeaseExpiry(lease TaskExecutionLease) time.Time {
+	if !lease.ExpiresAt.IsZero() {
+		return lease.ExpiresAt
+	}
+	return lease.Expiry
+}
+
 type ResumeToken struct {
 	TokenID          string            `json:"tokenId"`
 	RunID            string            `json:"runId"`

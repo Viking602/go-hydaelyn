@@ -650,6 +650,13 @@ func testLeaseAcquireSucceeds(t *testing.T, factory ProviderFactory) {
 		if !ok {
 			t.Fatal("AcquireWithExpectedVersion(version=0): want true")
 		}
+		got, err := uow.Leases().LoadLease(context.Background(), lease.ID)
+		if err != nil {
+			return err
+		}
+		if got.ExpiresAt.IsZero() || got.Expiry.IsZero() || !got.ExpiresAt.Equal(got.Expiry) {
+			t.Fatalf("AcquireWithExpectedVersion expiry fields not synchronized: %+v", got)
+		}
 		return nil
 	})
 }
@@ -698,12 +705,20 @@ func testLeaseExtendHonorsWorker(t *testing.T, factory ProviderFactory) {
 		return nil
 	})
 	withUoW(t, p, func(uow api.UnitOfWork) error {
-		ok, err := uow.Leases().ExtendLease(ctx, lease.ID, "worker-A", time.Now().UTC().Add(5*time.Minute))
+		newExpiry := time.Now().UTC().Add(5 * time.Minute)
+		ok, err := uow.Leases().ExtendLease(ctx, lease.ID, "worker-A", newExpiry)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			t.Fatal("ExtendLease(holder match): want true")
+		}
+		got, err := uow.Leases().LoadLease(ctx, lease.ID)
+		if err != nil {
+			return err
+		}
+		if got.ExpiresAt.IsZero() || got.Expiry.IsZero() || !got.ExpiresAt.Equal(got.Expiry) || !got.ExpiresAt.Equal(newExpiry) {
+			t.Fatalf("ExtendLease expiry fields not synchronized: %+v", got)
 		}
 		return nil
 	})
