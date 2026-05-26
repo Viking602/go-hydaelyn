@@ -93,6 +93,7 @@ type ResumeTokenStore interface {
 type ActionAttemptStore interface {
 	SaveActionAttempt(context.Context, model.ActionAttempt) error
 	LoadActionAttempt(context.Context, string) (model.ActionAttempt, error)
+	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error)
 }
 
 type AgentProfileStore interface {

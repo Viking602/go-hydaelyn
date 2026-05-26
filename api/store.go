@@ -123,6 +123,7 @@ type ResumeTokenStore interface {
 type ActionAttemptStore interface {
 	SaveActionAttempt(context.Context, ActionAttempt) error
 	LoadActionAttempt(context.Context, string) (ActionAttempt, error)
+	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (ActionAttempt, error)
 }
 
 // AgentProfileStore persists the framework-level identity of agents.

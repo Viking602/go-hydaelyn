@@ -454,7 +454,14 @@ func testSaveAndListDeadLetters(t *testing.T, factory ProviderFactory) {
 
 func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	att := api.ActionAttempt{AttemptID: "att-1", RunID: "run-act", TaskID: "task-act", ToolName: "tool-x"}
+	att := api.ActionAttempt{
+		AttemptID:      "att-1",
+		RunID:          "run-act",
+		TaskID:         "task-act",
+		ToolName:       "tool-x",
+		IdempotencyKey: "idem-1",
+		InputHash:      "hash-1",
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		return uow.ActionAttempts().SaveActionAttempt(context.Background(), att)
 	})
@@ -465,6 +472,13 @@ func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 		}
 		if got.ToolName != att.ToolName {
 			t.Fatalf("action attempt mismatch: %q", got.ToolName)
+		}
+		byKey, err := uow.ActionAttempts().LoadActionAttemptByIdempotencyKey(context.Background(), att.RunID, att.TaskID, att.ToolName, att.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if byKey.AttemptID != att.AttemptID || byKey.InputHash != att.InputHash {
+			t.Fatalf("action attempt idempotency lookup mismatch: %+v", byKey)
 		}
 		return nil
 	})

@@ -676,6 +676,25 @@ func (s *actionAttemptStore) LoadActionAttempt(_ context.Context, attemptID stri
 	return attempt, nil
 }
 
+func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.ActionAttempt{}, err
+	}
+	if key == "" {
+		return model.ActionAttempt{}, model.ErrNotFound
+	}
+	for _, attempt := range u.staged.ActionAttempts {
+		if attempt.RunID == runID &&
+			attempt.TaskID == taskID &&
+			attempt.ToolName == toolName &&
+			attempt.IdempotencyKey == key {
+			return attempt, nil
+		}
+	}
+	return model.ActionAttempt{}, model.ErrNotFound
+}
+
 func cmpString(a, b string) int {
 	switch {
 	case a < b:
