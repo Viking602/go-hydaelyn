@@ -3,6 +3,8 @@ package multiagent
 import (
 	"context"
 	"errors"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -31,6 +33,11 @@ type DriveOptions struct {
 	// MaxTicks caps scheduler iterations to guard against a Scheduler that
 	// never reaches a terminal state. Defaults to 64.
 	MaxTicks int
+	// MaxConcurrency bounds how many of a tick's dispatches execute in
+	// parallel. 0 means unbounded (run every ready dispatch concurrently);
+	// 1 forces sequential execution. Schedulers that emit one dispatch per
+	// tick (Sequential/Router/Supervisor) are unaffected by this field.
+	MaxConcurrency int
 }
 
 // DriveResult is the terminal snapshot after the scheduler loop ends.
@@ -71,7 +78,7 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		if len(dispatches) == 0 {
 			return DriveResult{State: state, Ticks: tick - 1}, nil
 		}
-		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor)
+		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, opts.MaxConcurrency)
 		state = next
 		if execErr != nil {
 			return DriveResult{State: state, Ticks: tick}, execErr
@@ -80,19 +87,104 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 	return DriveResult{State: state, Ticks: maxTicks}, ErrMaxTicksExceeded
 }
 
-func applyDispatches(ctx context.Context, runID string, state TeamState, dispatches []Dispatch, executor Executor) (TeamState, error) {
+func applyDispatches(ctx context.Context, runID string, state TeamState, dispatches []Dispatch, executor Executor, maxConcurrency int) (TeamState, error) {
+	work := make([]Dispatch, 0, len(dispatches))
 	for _, dispatch := range dispatches {
-		if dispatch.Skip {
-			continue
-		}
-		instance, task, err := executeDispatch(ctx, runID, dispatch, executor)
-		state.Instances = append(state.Instances, instance)
-		state.Tasks = append(state.Tasks, task)
-		if err != nil {
-			return state, err
+		if !dispatch.Skip {
+			work = append(work, dispatch)
 		}
 	}
-	return state, nil
+	if len(work) == 0 {
+		return state, nil
+	}
+	// Sequential fast path preserves the original behavior exactly for
+	// single-dispatch ticks and when concurrency is explicitly disabled.
+	if len(work) == 1 || maxConcurrency == 1 {
+		for _, dispatch := range work {
+			instance, task, err := executeDispatch(ctx, runID, dispatch, executor)
+			state.Instances = append(state.Instances, instance)
+			state.Tasks = append(state.Tasks, task)
+			if err != nil {
+				return state, err
+			}
+		}
+		return state, nil
+	}
+	return applyConcurrent(ctx, runID, state, work, executor, maxConcurrency)
+}
+
+// applyConcurrent executes a tick's dispatches in parallel (bounded by
+// maxConcurrency; 0 means unbounded), then folds the results into TeamState
+// ordered by node id (AgentInstance.ClassName, tie-broken by instance ID) —
+// the same ordering Next and the sequential path use — so the folded state
+// is identical regardless of completion order or concurrency setting, keeping
+// Next a stable function of the snapshot. The first executor error is captured
+// via sync.Once, cancels in-flight work, and stops the rest of the tick from
+// launching (fail-fast); that root-cause error is returned after all spawned
+// goroutines drain, never masked by a sibling's context.Canceled.
+func applyConcurrent(ctx context.Context, runID string, state TeamState, work []Dispatch, executor Executor, maxConcurrency int) (TeamState, error) {
+	type outcome struct {
+		instance AgentInstance
+		task     api.Task
+		err      error
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	limit := maxConcurrency
+	if limit <= 0 || limit > len(work) {
+		limit = len(work)
+	}
+	sem := make(chan struct{}, limit)
+	results := make([]outcome, len(work))
+	var (
+		wg         sync.WaitGroup
+		once       sync.Once
+		triggerErr error
+	)
+
+	spawned := 0
+	for i, dispatch := range work {
+		// Fail-fast: once a dispatch has errored (or ctx was cancelled
+		// externally) stop launching the rest of this tick rather than
+		// running it under an already-cancelled context.
+		if cctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		spawned++
+		go func(i int, dispatch Dispatch) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			instance, task, err := executeDispatch(cctx, runID, dispatch, executor)
+			results[i] = outcome{instance: instance, task: task, err: err}
+			if err != nil {
+				once.Do(func() {
+					triggerErr = err
+					cancel()
+				})
+			}
+		}(i, dispatch)
+	}
+	wg.Wait()
+
+	// Fold only the dispatches that actually launched, ordered by node id so
+	// the snapshot is independent of completion order and matches the
+	// sequential path.
+	folded := results[:spawned]
+	sort.Slice(folded, func(a, b int) bool {
+		if folded[a].instance.ClassName != folded[b].instance.ClassName {
+			return folded[a].instance.ClassName < folded[b].instance.ClassName
+		}
+		return folded[a].instance.ID < folded[b].instance.ID
+	})
+	for _, result := range folded {
+		state.Instances = append(state.Instances, result.instance)
+		state.Tasks = append(state.Tasks, result.task)
+	}
+	return state, triggerErr
 }
 
 func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, executor Executor) (AgentInstance, api.Task, error) {
