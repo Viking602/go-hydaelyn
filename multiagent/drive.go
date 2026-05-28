@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/go-hydaelyn/stream"
 )
 
 // Executor runs one Dispatch and returns its TypedReport. Implementations
@@ -28,6 +29,18 @@ func (f ExecutorFunc) Execute(ctx context.Context, dispatch Dispatch) (api.Typed
 	return f(ctx, dispatch)
 }
 
+// StreamingExecutor is an optional Executor that can emit live stream.Frames
+// for a dispatch while it runs (e.g. by driving agent.Engine.RunStream). Drive
+// calls ExecuteStream only when DriveOptions.Sink is set and the executor
+// implements this interface; otherwise it uses Execute and the run proceeds
+// without frames. The returned report and error must match what Execute would
+// return — frames are a transient side-channel that never enters TeamState or
+// the event stream (final-state-only durability).
+type StreamingExecutor interface {
+	Executor
+	ExecuteStream(ctx context.Context, dispatch Dispatch, sink stream.Sink) (api.TypedReport, error)
+}
+
 // DriveOptions bounds a Drive run.
 type DriveOptions struct {
 	// MaxTicks caps scheduler iterations to guard against a Scheduler that
@@ -38,6 +51,14 @@ type DriveOptions struct {
 	// 1 forces sequential execution. Schedulers that emit one dispatch per
 	// tick (Sequential/Router/Supervisor) are unaffected by this field.
 	MaxConcurrency int
+	// Sink, when set, receives the live stream.Frames of every node whose
+	// Executor implements StreamingExecutor, each frame stamped with the node
+	// name (AgentInstance.ClassName) as its Source. It is a transient
+	// side-channel: frames never enter TeamState or the event stream, so a run
+	// with a Sink folds the identical snapshot as one without (final-state-only
+	// durability). If a dispatched Executor does not implement
+	// StreamingExecutor, that node runs without frames. nil disables streaming.
+	Sink stream.Sink
 }
 
 // DriveResult is the terminal snapshot after the scheduler loop ends.
@@ -78,7 +99,7 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		if len(dispatches) == 0 {
 			return DriveResult{State: state, Ticks: tick - 1}, nil
 		}
-		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, opts.MaxConcurrency)
+		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, opts.MaxConcurrency, opts.Sink)
 		state = next
 		if execErr != nil {
 			return DriveResult{State: state, Ticks: tick}, execErr
@@ -87,7 +108,7 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 	return DriveResult{State: state, Ticks: maxTicks}, ErrMaxTicksExceeded
 }
 
-func applyDispatches(ctx context.Context, runID string, state TeamState, dispatches []Dispatch, executor Executor, maxConcurrency int) (TeamState, error) {
+func applyDispatches(ctx context.Context, runID string, state TeamState, dispatches []Dispatch, executor Executor, maxConcurrency int, sink stream.Sink) (TeamState, error) {
 	work := make([]Dispatch, 0, len(dispatches))
 	for _, dispatch := range dispatches {
 		if !dispatch.Skip {
@@ -98,10 +119,11 @@ func applyDispatches(ctx context.Context, runID string, state TeamState, dispatc
 		return state, nil
 	}
 	// Sequential fast path preserves the original behavior exactly for
-	// single-dispatch ticks and when concurrency is explicitly disabled.
+	// single-dispatch ticks and when concurrency is explicitly disabled. Only
+	// one goroutine touches sink here, so it needs no serialization.
 	if len(work) == 1 || maxConcurrency == 1 {
 		for _, dispatch := range work {
-			instance, task, err := executeDispatch(ctx, runID, dispatch, executor)
+			instance, task, err := executeDispatch(ctx, runID, dispatch, executor, sink)
 			state.Instances = append(state.Instances, instance)
 			state.Tasks = append(state.Tasks, task)
 			if err != nil {
@@ -110,7 +132,7 @@ func applyDispatches(ctx context.Context, runID string, state TeamState, dispatc
 		}
 		return state, nil
 	}
-	return applyConcurrent(ctx, runID, state, work, executor, maxConcurrency)
+	return applyConcurrent(ctx, runID, state, work, executor, maxConcurrency, sink)
 }
 
 // applyConcurrent executes a tick's dispatches in parallel (bounded by
@@ -122,7 +144,7 @@ func applyDispatches(ctx context.Context, runID string, state TeamState, dispatc
 // via sync.Once, cancels in-flight work, and stops the rest of the tick from
 // launching (fail-fast); that root-cause error is returned after all spawned
 // goroutines drain, never masked by a sibling's context.Canceled.
-func applyConcurrent(ctx context.Context, runID string, state TeamState, work []Dispatch, executor Executor, maxConcurrency int) (TeamState, error) {
+func applyConcurrent(ctx context.Context, runID string, state TeamState, work []Dispatch, executor Executor, maxConcurrency int, sink stream.Sink) (TeamState, error) {
 	type outcome struct {
 		instance AgentInstance
 		task     api.Task
@@ -131,6 +153,12 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Frames from the tick's goroutines all funnel into one consumer Sink;
+	// serialize Emit so the caller's Sink need not be concurrency-safe.
+	if sink != nil {
+		sink = &serialSink{dst: sink}
+	}
 
 	limit := maxConcurrency
 	if limit <= 0 || limit > len(work) {
@@ -158,7 +186,7 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 		go func(i int, dispatch Dispatch) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			instance, task, err := executeDispatch(cctx, runID, dispatch, executor)
+			instance, task, err := executeDispatch(cctx, runID, dispatch, executor, sink)
 			results[i] = outcome{instance: instance, task: task, err: err}
 			if err != nil {
 				once.Do(func() {
@@ -187,11 +215,12 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 	return state, triggerErr
 }
 
-func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, executor Executor) (AgentInstance, api.Task, error) {
-	report, execErr := executor.Execute(ctx, dispatch)
+func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, executor Executor, sink stream.Sink) (AgentInstance, api.Task, error) {
+	className := classNameFromTaskID(runID, dispatch.Task.ID)
+	report, execErr := runDispatch(ctx, dispatch, executor, sink, className)
 	instance := AgentInstance{
 		ID:        dispatch.To,
-		ClassName: classNameFromTaskID(runID, dispatch.Task.ID),
+		ClassName: className,
 		RunID:     runID,
 		TaskID:    dispatch.Task.ID,
 		State:     InstanceStateFinished,
@@ -208,4 +237,44 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 	task.Status = api.TaskStatusCompleted
 	task.Result = &stored
 	return instance, task, nil
+}
+
+// runDispatch executes dispatch, streaming frames stamped with label when sink
+// is set and executor is a StreamingExecutor; otherwise it runs the plain
+// Execute path. The report and error are identical to the non-streaming path —
+// frames never affect the folded TeamState.
+func runDispatch(ctx context.Context, dispatch Dispatch, executor Executor, sink stream.Sink, label string) (api.TypedReport, error) {
+	if sink == nil {
+		return executor.Execute(ctx, dispatch)
+	}
+	streamer, ok := executor.(StreamingExecutor)
+	if !ok {
+		return executor.Execute(ctx, dispatch)
+	}
+	return streamer.ExecuteStream(ctx, dispatch, labeledSink(label, sink))
+}
+
+// labeledSink stamps Frame.Source with label (when a frame does not already
+// carry one) before forwarding to dst, so a single consumer can attribute each
+// frame to the node that produced it.
+func labeledSink(label string, dst stream.Sink) stream.Sink {
+	return stream.SinkFunc(func(ctx context.Context, frame stream.Frame) error {
+		if frame.Source == "" {
+			frame.Source = label
+		}
+		return dst.Emit(ctx, frame)
+	})
+}
+
+// serialSink serializes Emit so concurrent node goroutines can share one
+// consumer Sink that is not itself concurrency-safe.
+type serialSink struct {
+	mu  sync.Mutex
+	dst stream.Sink
+}
+
+func (s *serialSink) Emit(ctx context.Context, frame stream.Frame) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dst.Emit(ctx, frame)
 }
