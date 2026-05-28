@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/api"
@@ -92,8 +93,20 @@ func (s TeamState) reportInput(className string) json.RawMessage {
 // run. The TaskID is deterministic per (run, class); the instance ID is
 // deterministic per (class, run, task, step) via ComputeInstanceID, so
 // reconstruction from the event stream reproduces the same identities.
+// taskIDForClass derives the deterministic TaskID for a class within a run.
+// classNameFromTaskID is its inverse; Drive uses it to recover the class a
+// finished Dispatch belonged to (the Dispatch carries only the hashed
+// instance ID, not the class name).
+func taskIDForClass(runID, className string) string {
+	return runID + "-" + className
+}
+
+func classNameFromTaskID(runID, taskID string) string {
+	return strings.TrimPrefix(taskID, runID+"-")
+}
+
 func buildDispatch(runID string, class AgentClass, step int, input json.RawMessage) Dispatch {
-	taskID := runID + "-" + class.Name
+	taskID := taskIDForClass(runID, class.Name)
 	goal := class.Instructions
 	if goal == "" {
 		goal = class.Description

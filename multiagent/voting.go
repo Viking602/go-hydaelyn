@@ -96,9 +96,9 @@ func ballotOption(result agent.Result, field string) (string, error) {
 }
 
 // topVote returns the option with the strictly-highest tally that also
-// reaches min votes. An empty tally set, a top tally below min, or a tie
-// for the top tally each return "".
-func topVote(tally map[string]int, min int) string {
+// reaches threshold votes. An empty tally set, a top tally below
+// threshold, or a tie for the top tally each return "".
+func topVote(tally map[string]int, threshold int) string {
 	type optionTally struct {
 		option string
 		count  int
@@ -117,7 +117,7 @@ func topVote(tally map[string]int, min int) string {
 		return ranked[i].option < ranked[j].option
 	})
 	top := ranked[0]
-	if top.count < min {
+	if top.count < threshold {
 		return ""
 	}
 	if len(ranked) > 1 && ranked[1].count == top.count {
