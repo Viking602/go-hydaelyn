@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/go-hydaelyn/stream"
 )
 
 // Executor wiring for graphs lives here: subgraph delegation and the
@@ -15,22 +16,70 @@ import (
 // nested Drive over their compiled subgraph (with a derived run id and the
 // same opts, so a parent's MaxConcurrency/MaxTicks bound the whole subgraph
 // tree) and fold the nested result into a single TypedReport. Drive is
-// unchanged; the subgraph mechanism is pure executor composition.
+// unchanged; the subgraph mechanism is pure executor composition. The returned
+// executor also implements StreamingExecutor, so a subgraph node's frames flow
+// to the parent's DriveOptions.Sink, labeled by their nested node ids.
 func (c *CompiledGraph) Executor(leaf Executor, opts DriveOptions) Executor {
-	return ExecutorFunc(func(ctx context.Context, dispatch Dispatch) (api.TypedReport, error) {
-		nodeID := classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
-		node, ok := c.nodes[nodeID]
-		if !ok || node.sub == nil {
-			return leaf.Execute(ctx, dispatch)
-		}
-		subRunID := dispatch.Task.RunID + "/" + nodeID
-		result, err := Drive(ctx, subRunID, node.sub, node.sub.Executor(leaf, opts), opts)
-		if err != nil {
-			return api.TypedReport{}, err
-		}
-		return foldSubgraphResult(result), nil
-	})
+	return &compiledGraphExecutor{graph: c, leaf: leaf, opts: opts}
 }
+
+type compiledGraphExecutor struct {
+	graph *CompiledGraph
+	leaf  Executor
+	opts  DriveOptions
+}
+
+func (g *compiledGraphExecutor) Execute(ctx context.Context, dispatch Dispatch) (api.TypedReport, error) {
+	sub := g.subgraphFor(dispatch)
+	if sub == nil {
+		return g.leaf.Execute(ctx, dispatch)
+	}
+	// Execute is the non-streaming entry: never propagate a Sink into the
+	// nested Drive (ExecuteStream is the path that threads frames). This keeps
+	// streaming strictly opt-in through ExecuteStream.
+	subOpts := g.opts
+	subOpts.Sink = nil
+	result, err := Drive(ctx, g.subRunID(dispatch), sub, sub.Executor(g.leaf, subOpts), subOpts)
+	if err != nil {
+		return api.TypedReport{}, err
+	}
+	return foldSubgraphResult(result), nil
+}
+
+func (g *compiledGraphExecutor) ExecuteStream(ctx context.Context, dispatch Dispatch, sink stream.Sink) (api.TypedReport, error) {
+	sub := g.subgraphFor(dispatch)
+	if sub == nil {
+		// Leaf node: delegate to the leaf's streaming path when it has one.
+		if streamer, ok := g.leaf.(StreamingExecutor); ok {
+			return streamer.ExecuteStream(ctx, dispatch, sink)
+		}
+		return g.leaf.Execute(ctx, dispatch)
+	}
+	// Subgraph node: thread the sink through the nested Drive so nested-node
+	// frames reach the same consumer, labeled by their node ids.
+	subOpts := g.opts
+	subOpts.Sink = sink
+	result, err := Drive(ctx, g.subRunID(dispatch), sub, sub.Executor(g.leaf, subOpts), subOpts)
+	if err != nil {
+		return api.TypedReport{}, err
+	}
+	return foldSubgraphResult(result), nil
+}
+
+func (g *compiledGraphExecutor) subgraphFor(dispatch Dispatch) *CompiledGraph {
+	nodeID := classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
+	node, ok := g.graph.nodes[nodeID]
+	if !ok || node.sub == nil {
+		return nil
+	}
+	return node.sub
+}
+
+func (g *compiledGraphExecutor) subRunID(dispatch Dispatch) string {
+	return dispatch.Task.RunID + "/" + classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
+}
+
+var _ StreamingExecutor = (*compiledGraphExecutor)(nil)
 
 // foldSubgraphResult collapses a nested DriveResult into one TypedReport,
 // keying each finished node's report by its node id under Structured.
