@@ -274,7 +274,7 @@ func TestCollectBuildsToolCallsFromDeltasInStableOrder(t *testing.T) {
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
-	}), nil)
+	}), nil, nil)
 	if err != nil {
 		t.Fatalf("collect() error = %v", err)
 	}
@@ -304,7 +304,7 @@ func TestCollectMergesFullAndDeltaToolCalls(t *testing.T) {
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
-	}), nil)
+	}), nil, nil)
 	if err != nil {
 		t.Fatalf("collect() error = %v", err)
 	}
@@ -328,7 +328,7 @@ func TestCollectRejectsInvalidToolCallJSON(t *testing.T) {
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
-	}), nil)
+	}), nil, nil)
 	if err == nil {
 		t.Fatal("expected invalid tool call JSON error")
 	}
@@ -354,7 +354,7 @@ func TestCollectRejectsDuplicateToolCallID(t *testing.T) {
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
-	}), nil)
+	}), nil, nil)
 	if !errors.Is(err, provider.ErrDuplicateToolCallID) {
 		t.Fatalf("expected duplicate tool call id error, got %v", err)
 	}

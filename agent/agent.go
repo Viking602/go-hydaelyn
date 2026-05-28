@@ -9,6 +9,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/stream"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
@@ -25,6 +26,12 @@ type LoopInput struct {
 	ToolMode      tool.Mode
 	MaxIterations int
 	OnEvent       func(provider.Event) error
+
+	// Sink, when set, receives a live stream.Frame for every provider
+	// event and tool result as the loop runs. It is a transient
+	// side-channel: the durable LoopOutput is unaffected by it, so
+	// streaming never changes what the runner persists or replays.
+	Sink stream.Sink
 
 	StopSequences  []string
 	ThinkingBudget int
@@ -116,8 +123,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 		if err != nil {
 			return LoopOutput{}, err
 		}
-		for _, result := range results {
-			current = append(current, message.NewToolResult(result))
+		current, err = appendToolResults(ctx, current, results, input.Sink)
+		if err != nil {
+			return LoopOutput{}, err
 		}
 		if terminal {
 			return LoopOutput{
@@ -247,11 +255,11 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 	if err := e.Hooks.BeforeModelCall(ctx, &request); err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
 	}
-	stream, err := e.Provider.Stream(ctx, request)
+	providerStream, err := e.Provider.Stream(ctx, request)
 	if err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
 	}
-	return e.collect(ctx, stream, input.OnEvent)
+	return e.collect(ctx, providerStream, input.OnEvent, input.Sink)
 }
 
 func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, bool, error) {
@@ -282,12 +290,29 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 	return items, terminal, nil
 }
 
-func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent func(provider.Event) error) (message.Message, provider.Usage, provider.StopReason, error) {
-	defer func() { _ = stream.Close() }()
+// appendToolResults appends each tool result to the running history and,
+// when a sink is set, emits a FrameToolResult for it. Tool results are a
+// loop-level enrichment with no provider.Event equivalent.
+func appendToolResults(ctx context.Context, current []message.Message, results []message.ToolResult, sink stream.Sink) ([]message.Message, error) {
+	for _, result := range results {
+		current = append(current, message.NewToolResult(result))
+		if sink == nil {
+			continue
+		}
+		toolResult := result
+		if err := sink.Emit(ctx, stream.Frame{Kind: stream.FrameToolResult, ToolResult: &toolResult}); err != nil {
+			return nil, err
+		}
+	}
+	return current, nil
+}
+
+func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (message.Message, provider.Usage, provider.StopReason, error) {
+	defer func() { _ = providerStream.Close() }()
 	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
 	for {
-		event, err := stream.Recv()
+		event, err := providerStream.Recv()
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -301,6 +326,13 @@ func (e Engine) collect(ctx context.Context, stream provider.Stream, onEvent fun
 		}
 		if err := e.Hooks.OnEvent(ctx, event); err != nil {
 			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		}
+		if sink != nil {
+			if frame, ok := stream.FrameFromEvent(event); ok {
+				if err := sink.Emit(ctx, frame); err != nil {
+					return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+				}
+			}
 		}
 		events = append(events, event)
 	}

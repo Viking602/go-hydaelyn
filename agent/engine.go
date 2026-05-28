@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/stream"
 )
 
 // Run drives the agent loop against one api.Task under the supplied
@@ -21,6 +22,19 @@ import (
 // re-prompts the model with validation feedback up to
 // MaxRepairAttempts.
 func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Result {
+	return e.run(ctx, task, policy, nil)
+}
+
+// RunStream is Run with a live stream.Sink attached: the Sink receives a
+// Frame for every provider event and tool result as the loop runs, while
+// the returned Result is byte-for-byte identical to Run's. The stream is a
+// transient side-channel (final-state-only durability) — it never changes
+// what the runner persists or replays. Pass nil to fall back to Run.
+func (e Engine) RunStream(ctx context.Context, task api.Task, policy OutputPolicy, sink stream.Sink) Result {
+	return e.run(ctx, task, policy, sink)
+}
+
+func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sink stream.Sink) Result {
 	runCtx, cancelRun, budgetDriven := e.runContext(ctx, task)
 	defer cancelRun()
 
@@ -43,6 +57,7 @@ func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Res
 		Messages:      messages,
 		ToolMode:      e.ToolMode,
 		MaxIterations: e.LoopPolicy.MaxIterations,
+		Sink:          sink,
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
