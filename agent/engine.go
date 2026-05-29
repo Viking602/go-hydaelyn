@@ -54,14 +54,19 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 
 	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(task)
 	input := LoopInput{
-		Model:         e.Model,
-		Messages:      messages,
-		ToolMode:      e.ToolMode,
-		MaxIterations: e.LoopPolicy.MaxIterations,
-		MaxTokens:     maxTokens,
-		MaxToolCalls:  maxToolCalls,
-		MaxSteps:      maxSteps,
-		Sink:          sink,
+		Model:            e.Model,
+		Messages:         messages,
+		ToolMode:         e.ToolMode,
+		MaxIterations:    e.LoopPolicy.MaxIterations,
+		MaxTokens:        maxTokens,
+		MaxToolCalls:     maxToolCalls,
+		MaxSteps:         maxSteps,
+		StopSequences:    e.StopSequences,
+		ThinkingBudget:   e.ThinkingBudget,
+		ExtraBody:        e.ExtraBody,
+		OutputGuardrails: e.OutputGuardrails,
+		OutputRecorder:   e.OutputRecorder,
+		Sink:             sink,
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)

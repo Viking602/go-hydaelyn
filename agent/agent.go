@@ -97,6 +97,29 @@ type Engine struct {
 	ToolMode       tool.Mode
 	LoopPolicy     LoopPolicy
 	ContextBuilder ContextManager
+
+	// The fields below are the engine-level defaults Engine.Run threads into
+	// every LoopInput it builds, so the task-level entry can configure the
+	// provider request and output handling that previously only RunMessages
+	// callers could reach. ResponseFormat and per-request Metadata are
+	// deliberately not surfaced here: structured output on the Run path is
+	// owned by OutputPolicy, and request Metadata is a per-task value rather
+	// than an engine default.
+
+	// ThinkingBudget caps provider reasoning tokens per turn; zero leaves the
+	// provider default in place.
+	ThinkingBudget int
+	// StopSequences are forwarded to every provider turn the loop issues.
+	StopSequences []string
+	// godoc-allow-any: provider-specific request extensions are intentionally open.
+	ExtraBody map[string]any
+
+	// OutputGuardrails run in order against the terminal assistant output and
+	// may allow, replace, retry, or block it.
+	OutputGuardrails []OutputGuardrail
+	// OutputRecorder, when set, receives a decision record for every
+	// non-allow guardrail action.
+	OutputRecorder OutputGuardrailRecorder
 }
 
 // RunMessages is the low-level loop that drives one LoopInput to
