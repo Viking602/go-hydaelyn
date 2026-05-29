@@ -44,6 +44,7 @@ type CreateTaskInput struct {
 	PolicyDecisions    []model.PolicyDecision
 	InputSchema        json.RawMessage
 	OutputSchema       json.RawMessage
+	Budget             *model.TaskBudget
 }
 
 func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, error) {
@@ -90,6 +91,17 @@ func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 	return run, root, nil
 }
 
+// cloneTaskBudget deep-copies the per-task budget so the stored task does not
+// alias the caller's pointer. The budget is a flat value struct, so copying
+// the pointee is a complete clone.
+func cloneTaskBudget(budget *model.TaskBudget) *model.TaskBudget {
+	if budget == nil {
+		return nil
+	}
+	cloned := *budget
+	return &cloned
+}
+
 func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input CreateTaskInput) (model.Task, error) {
 	run, err := uow.Runs().LoadRun(ctx, input.RunID)
 	if err != nil {
@@ -131,6 +143,7 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		PolicyDecisions:    slices.Clone(input.PolicyDecisions),
 		InputSchema:        slices.Clone(input.InputSchema),
 		OutputSchema:       slices.Clone(input.OutputSchema),
+		Budget:             cloneTaskBudget(input.Budget),
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 
@@ -14,6 +15,13 @@ import (
 )
 
 var ErrToolBusMissing = errors.New("tool bus missing")
+
+// ErrBudgetExhausted is returned by RunMessages, wrapped with the exhausted
+// dimension, when a per-loop budget (MaxTokens/MaxToolCalls/MaxSteps) is hit
+// on a turn that would otherwise continue. The accompanying LoopOutput is the
+// partial trace accumulated so far. Engine.run maps it to a
+// FailureKindBudgetExhausted Result.
+var ErrBudgetExhausted = errors.New("agent loop budget exhausted")
 
 // LoopInput is the message-level input to Engine.RunMessages, the
 // low-level loop entry preserved from v0.7. Most callers should use
@@ -41,6 +49,18 @@ type LoopInput struct {
 
 	OutputGuardrails []OutputGuardrail
 	OutputRecorder   OutputGuardrailRecorder
+
+	// MaxTokens / MaxToolCalls / MaxSteps are the per-loop budget ceilings.
+	// Zero means unbounded on that dimension. They are enforced fail-closed
+	// but only on turns that would continue the loop: a run that is about to
+	// finish is never failed for a budget it has not yet exceeded. MaxSteps
+	// is a hard ceiling (exhausting it fails the run with ErrBudgetExhausted),
+	// distinct from MaxIterations, whose soft ceiling yields StopReasonMaxTurns.
+	// The token ceiling fails open against providers that report zero usage:
+	// a never-incrementing token count can never cross a positive ceiling.
+	MaxTokens    int64
+	MaxToolCalls int
+	MaxSteps     int
 }
 
 // LoopOutput is the message-level result from Engine.RunMessages. The
@@ -98,6 +118,22 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 	steps := make([]Step, 0, input.MaxIterations)
 	toolCallsUsed := 0
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
+		// Enforce the per-loop budget before every turn after the first.
+		// Reaching iteration N>0 means a prior turn chose to continue, so this
+		// is exactly a "will continue" boundary; a run that finished earlier
+		// returned before reaching here and is never charged a budget failure.
+		if iteration > 0 {
+			if _, dimension := budgetRemaining(input, totalUsage, toolCallsUsed, len(steps)); dimension != "" {
+				return LoopOutput{
+					Messages:      current,
+					Usage:         totalUsage,
+					StopReason:    provider.StopReasonAborted,
+					Iterations:    iteration,
+					Steps:         steps,
+					ToolCallsUsed: toolCallsUsed,
+				}, fmt.Errorf("%w: %s", ErrBudgetExhausted, dimension)
+			}
+		}
 		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
 		if err != nil {
 			return LoopOutput{}, err
@@ -189,6 +225,35 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+// budgetRemaining returns a copy of input whose budget ceilings are reduced by
+// the usage already spent, and reports the first exhausted dimension (empty
+// when the loop may still spend). It is the single source of truth for both
+// the in-loop "will continue" check and the cross-call repair check. The token
+// ceiling fails open: a provider that reports zero usage keeps TotalTokens at
+// zero, so the remaining budget never drops to or below zero on that dimension.
+func budgetRemaining(input LoopInput, usage provider.Usage, toolCallsUsed, steps int) (LoopInput, string) {
+	next := input
+	if input.MaxTokens > 0 {
+		next.MaxTokens = input.MaxTokens - int64(usage.TotalTokens)
+		if next.MaxTokens <= 0 {
+			return input, "max tokens"
+		}
+	}
+	if input.MaxToolCalls > 0 {
+		next.MaxToolCalls = input.MaxToolCalls - toolCallsUsed
+		if next.MaxToolCalls <= 0 {
+			return input, "max tool calls"
+		}
+	}
+	if input.MaxSteps > 0 {
+		next.MaxSteps = input.MaxSteps - steps
+		if next.MaxSteps <= 0 {
+			return input, "max steps"
+		}
+	}
+	return next, ""
 }
 
 // appendRetryContext assembles the messages a guardrail retry feeds back into

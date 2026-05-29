@@ -136,6 +136,7 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		PolicyDecisions:    PolicyDecisionsToModel(cmd.PolicyDecisions),
 		InputSchema:        cloneBytes(cmd.InputSchema),
 		OutputSchema:       cloneBytes(cmd.OutputSchema),
+		Budget:             TaskBudgetPtrToModel(cmd.Budget),
 	}
 }
 

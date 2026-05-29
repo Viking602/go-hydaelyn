@@ -52,20 +52,21 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		}
 	}
 
+	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(task)
 	input := LoopInput{
 		Model:         e.Model,
 		Messages:      messages,
 		ToolMode:      e.ToolMode,
 		MaxIterations: e.LoopPolicy.MaxIterations,
+		MaxTokens:     maxTokens,
+		MaxToolCalls:  maxToolCalls,
+		MaxSteps:      maxSteps,
 		Sink:          sink,
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
-		kind := FailureKindEngineError
-		if budgetDriven && errors.Is(runErr, context.DeadlineExceeded) && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			kind = FailureKindBudgetExhausted
-		}
+		kind := loopErrorFailureKind(runCtx, runErr, budgetDriven)
 		return Result{
 			Messages:   output.Messages,
 			Usage:      output.Usage,
@@ -105,15 +106,27 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 
 	totalUsage := output.Usage
 	accumulatedSteps := output.Steps
+	toolCallsUsed := output.ToolCallsUsed
 	for repairCount := 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
-		repairInput := input
+		// The loop budget spans the whole run, repairs included. Charge what
+		// the initial run and prior repairs already spent before issuing the
+		// next model call; if nothing is left, fail before calling out rather
+		// than overspending the budget on a repair turn.
+		repairInput, dimension := budgetRemaining(input, totalUsage, toolCallsUsed, len(accumulatedSteps))
+		if dimension != "" {
+			result.Usage = totalUsage
+			result.Steps = accumulatedSteps
+			result.RepairCount = repairCount - 1
+			result.Failure = &AgentFailure{
+				Kind:      FailureKindBudgetExhausted,
+				Reason:    fmt.Sprintf("loop budget exhausted before repair attempt %d: %s", repairCount, dimension),
+				Retryable: false,
+			}
+			return result
+		}
 		repairInput.Messages = append(cloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
 		repairOutput, repairErr := e.RunMessages(ctx, repairInput)
 		if repairErr != nil {
-			kind := FailureKindEngineError
-			if budgetDriven && errors.Is(repairErr, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				kind = FailureKindBudgetExhausted
-			}
 			return Result{
 				Messages:    repairOutput.Messages,
 				Usage:       totalUsage.Add(repairOutput.Usage),
@@ -122,12 +135,13 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 				Steps:       appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
 				RepairCount: repairCount,
 				Failure: (&AgentFailure{
-					Kind:   kind,
+					Kind:   loopErrorFailureKind(ctx, repairErr, budgetDriven),
 					Reason: repairErr.Error(),
 				}).WithCause(repairErr),
 			}
 		}
 		totalUsage = totalUsage.Add(repairOutput.Usage)
+		toolCallsUsed += repairOutput.ToolCallsUsed
 		accumulatedSteps = appendReindexedSteps(accumulatedSteps, repairOutput.Steps)
 		repairOutput.Usage = totalUsage
 		repairOutput.Steps = accumulatedSteps
@@ -226,6 +240,43 @@ func (e Engine) maxWallClock(task api.Task) time.Duration {
 		return e.LoopPolicy.MaxWallClock
 	}
 	return 0
+}
+
+// budgetLimits resolves the token, tool-call, and step ceilings the loop
+// enforces, per dimension, the same way maxWallClock resolves the wall-clock
+// ceiling: an explicit task.Budget value wins, otherwise the engine's
+// LoopPolicy.Budget supplies it. Zero on a dimension means unbounded.
+func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxSteps int) {
+	if task.Budget != nil {
+		maxTokens, maxToolCalls, maxSteps = task.Budget.MaxTokens, task.Budget.MaxToolCalls, task.Budget.MaxSteps
+	}
+	if e.LoopPolicy.Budget == nil {
+		return maxTokens, maxToolCalls, maxSteps
+	}
+	if maxTokens == 0 {
+		maxTokens = e.LoopPolicy.Budget.MaxTokens
+	}
+	if maxToolCalls == 0 {
+		maxToolCalls = e.LoopPolicy.Budget.MaxToolCalls
+	}
+	if maxSteps == 0 {
+		maxSteps = e.LoopPolicy.Budget.MaxSteps
+	}
+	return maxTokens, maxToolCalls, maxSteps
+}
+
+// loopErrorFailureKind classifies a RunMessages error. An explicit loop-budget
+// exhaustion, or a wall-clock deadline when the run is budget-driven, both
+// surface as a budget failure; anything else is a generic engine error.
+func loopErrorFailureKind(ctx context.Context, err error, budgetDriven bool) FailureKind {
+	switch {
+	case errors.Is(err, ErrBudgetExhausted):
+		return FailureKindBudgetExhausted
+	case budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return FailureKindBudgetExhausted
+	default:
+		return FailureKindEngineError
+	}
 }
 
 func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {

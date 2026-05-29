@@ -44,6 +44,10 @@ type CreateTaskCommand struct {
 	// store and contract already round-trip these on api.Task).
 	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
+	// Budget is the per-task loop budget. Like the schemas above it travels
+	// with the created task so the durable worker path can enforce the
+	// token, tool-call, and step ceilings the agent loop reads off the task.
+	Budget *TaskBudget
 }
 
 type TransitionRunCommand struct {

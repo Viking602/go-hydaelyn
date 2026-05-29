@@ -27,6 +27,38 @@ func TestCreateTask_UnderExistingRun(t *testing.T) {
 	}
 }
 
+func TestCreateTask_ThreadsBudgetThroughDurablePath(t *testing.T) {
+	r := newTestRunner(t)
+	ctx := context.Background()
+	run, root, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
+	created, err := r.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		ParentTaskID: root.ID,
+		Goal:         "bounded work",
+		Budget:       &api.TaskBudget{MaxTokens: 1000, MaxToolCalls: 3, MaxSteps: 5},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	// The per-task Budget must survive the public create path so the durable
+	// worker can hand it to the agent loop; without the full thread the create
+	// command would silently drop it.
+	if created.Budget == nil {
+		t.Fatal("CreateTask dropped the per-task Budget")
+	}
+	if created.Budget.MaxTokens != 1000 || created.Budget.MaxToolCalls != 3 || created.Budget.MaxSteps != 5 {
+		t.Fatalf("Budget round-trip mismatch: %#v", created.Budget)
+	}
+	// Reload from the store to prove persistence, not just the return value.
+	loaded, err := r.Task(ctx, run.ID, created.ID)
+	if err != nil {
+		t.Fatalf("Task: %v", err)
+	}
+	if loaded.Budget == nil || loaded.Budget.MaxToolCalls != 3 {
+		t.Fatalf("Budget did not persist through the store: %#v", loaded.Budget)
+	}
+}
+
 func TestTask_LoadsExistingTask(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()

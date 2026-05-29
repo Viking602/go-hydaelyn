@@ -35,6 +35,7 @@ type CreateTaskCommand struct {
 	PolicyDecisions    []model.PolicyDecision
 	InputSchema        json.RawMessage
 	OutputSchema       json.RawMessage
+	Budget             *model.TaskBudget
 }
 
 func (StartRunCommand) CommandName() string   { return "run.start" }
