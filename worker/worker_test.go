@@ -119,6 +119,56 @@ func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
 	}
 }
 
+func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-structured", RootTaskID: "root", Request: "do work"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-structured",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	// The model returns valid JSON that satisfies the task's OutputSchema, so
+	// the engine populates result.Structured.
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: `{"summary":"done"}`},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	if err := (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	completed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if completed.Status != api.TaskStatusCompleted {
+		t.Fatalf("expected completed task, got %#v", completed.Status)
+	}
+	// The validated structured payload must survive onto the persisted report;
+	// a success report carrying only Summary would drop it, leaving durable
+	// downstream readers (routers, graph edges) unable to route on it.
+	if completed.Result == nil {
+		t.Fatalf("completed task carries no typed report")
+	}
+	if completed.Result.Structured == nil || completed.Result.Structured["summary"] != "done" {
+		t.Fatalf("validated structured output dropped from report: %#v", completed.Result)
+	}
+}
+
 func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.New()

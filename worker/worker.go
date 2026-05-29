@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -200,6 +201,27 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 	if summary == "" {
 		summary = "completed"
 	}
+	report := api.TypedReport{
+		Status:  api.ReportStatusSuccess,
+		Summary: summary,
+	}
+	// Carry the schema-validated structured output onto the report so durable
+	// downstream readers (routers, graph edges) observe the same
+	// Task.Result.Structured the in-process report path exposes. result.Structured
+	// is populated only when the terminal output validated against the task's
+	// OutputSchema; without this, a schema-backed worker output is validated and
+	// then silently dropped. The report contract is object-shaped (map[string]any),
+	// matching the in-process path (see multiagent voting/router/graph consumers),
+	// so a validated non-object output is surfaced as a worker failure rather than
+	// quietly discarded.
+	if len(result.Structured) > 0 {
+		structured := map[string]any{}
+		if err := json.Unmarshal(result.Structured, &structured); err != nil {
+			err = fmt.Errorf("worker: validated structured output is not a JSON object: %w", err)
+			return w.submitFailureReportHandled(ctx, task, lease, err), err
+		}
+		report.Structured = structured
+	}
 	if err := w.Runner.WriteItem(ctx, api.BlackboardItem{
 		RunID:      task.RunID,
 		TaskID:     task.ID,
@@ -218,10 +240,7 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: api.TypedReport{
-			Status:  api.ReportStatusSuccess,
-			Summary: summary,
-		},
+		Report:      report,
 	})
 	return reportErr == nil, reportErr
 }
