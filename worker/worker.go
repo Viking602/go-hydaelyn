@@ -171,7 +171,15 @@ func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.En
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	go w.heartbeatLoop(heartbeatCtx, leaseID, ttl, heartbeatDone)
-	result := engine.Run(ctx, task, agent.OutputPolicy{})
+	// The task carries its OutputSchema through the durable store (see
+	// api.Task.OutputSchema); rebuild the OutputPolicy from it so structured
+	// validation actually runs on the worker path. This mirrors the in-process
+	// Dispatch.OutputPolicy that multiagent.buildDispatch constructs (Schema +
+	// Validate, no repair).
+	result := engine.Run(ctx, task, agent.OutputPolicy{
+		Schema:   task.OutputSchema,
+		Validate: len(task.OutputSchema) > 0,
+	})
 	stopHeartbeat()
 	<-heartbeatDone
 	if result.Failure != nil {

@@ -134,6 +134,8 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		WriteTargets:       cloneStrings(cmd.WriteTargets),
 		RetryPolicy:        RetryPolicyToModel(cmd.RetryPolicy),
 		PolicyDecisions:    PolicyDecisionsToModel(cmd.PolicyDecisions),
+		InputSchema:        cloneBytes(cmd.InputSchema),
+		OutputSchema:       cloneBytes(cmd.OutputSchema),
 	}
 }
 

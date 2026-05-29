@@ -71,6 +71,53 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	}
 }
 
+func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-schema", RootTaskID: "root", Request: "do work"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-schema",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	// The task's OutputSchema must survive the public CreateTask path so the
+	// worker can validate against it; an empty schema here would make the test
+	// vacuous (validation would be skipped).
+	if len(task.OutputSchema) == 0 {
+		t.Fatalf("CreateTask dropped OutputSchema: %#v", task)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	// The model returns prose, not JSON — invalid against the task's OutputSchema.
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "just some prose, not json"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	err = (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env})
+	if err == nil {
+		t.Fatal("expected schema-validation failure on worker path, got nil error")
+	}
+	failed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if failed.Status != api.TaskStatusFailed {
+		t.Fatalf("schema-invalid terminal output must fail the task, got status %#v", failed.Status)
+	}
+}
+
 func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.New()

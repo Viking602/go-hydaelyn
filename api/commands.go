@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Command is the public command contract accepted by Runner.ExecuteCommand.
 type Command interface {
@@ -36,6 +39,11 @@ type CreateTaskCommand struct {
 	WriteTargets       []string
 	RetryPolicy        RetryPolicy
 	PolicyDecisions    []PolicyDecision
+	// InputSchema / OutputSchema travel with the created task so the durable
+	// worker path can rebuild the agent OutputPolicy from OutputSchema (the
+	// store and contract already round-trip these on api.Task).
+	InputSchema  json.RawMessage
+	OutputSchema json.RawMessage
 }
 
 type TransitionRunCommand struct {

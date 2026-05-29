@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"slices"
 	"time"
@@ -41,6 +42,8 @@ type CreateTaskInput struct {
 	WriteTargets       []string
 	RetryPolicy        model.RetryPolicy
 	PolicyDecisions    []model.PolicyDecision
+	InputSchema        json.RawMessage
+	OutputSchema       json.RawMessage
 }
 
 func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, error) {
@@ -126,6 +129,8 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		WriteTargets:       slices.Clone(input.WriteTargets),
 		RetryPolicy:        input.RetryPolicy,
 		PolicyDecisions:    slices.Clone(input.PolicyDecisions),
+		InputSchema:        slices.Clone(input.InputSchema),
+		OutputSchema:       slices.Clone(input.OutputSchema),
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
