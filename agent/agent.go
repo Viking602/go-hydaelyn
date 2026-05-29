@@ -51,6 +51,15 @@ type LoopOutput struct {
 	StopReason provider.StopReason
 	Iterations int
 	Thinking   string
+
+	// Steps is the per-iteration trace of the loop, one entry per model
+	// turn (including guardrail-retry turns). Steps carry no wall-clock
+	// timestamps so a replayed loop reproduces them byte-for-byte (ADR-007).
+	Steps []Step
+	// ToolCallsUsed is the total number of tool calls dispatched across all
+	// iterations. It is the carrier the budget enforcement in Engine.run
+	// reads to charge the per-task MaxToolCalls budget.
+	ToolCallsUsed int
 }
 
 // Engine drives the bounded agent loop. Configure Provider/Tools/Hooks
@@ -86,36 +95,52 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 	}
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
+	steps := make([]Step, 0, input.MaxIterations)
+	toolCallsUsed := 0
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
 		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
 		if err != nil {
 			return LoopOutput{}, err
 		}
 		totalUsage = totalUsage.Add(usage)
+		modelCall := &ModelCall{
+			Model:        input.Model,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			StopReason:   stopReason,
+		}
 		if len(assistant.ToolCalls) == 0 {
 			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
 			if err != nil {
 				return LoopOutput{}, err
 			}
 			if len(retryMessages) > 0 {
-				if retryPolicy.IncludeRejectedOutput && (assistant.Text != "" || assistant.Thinking != "") {
-					current = append(current, assistant)
-				}
-				if len(retryPolicy.ReplacementContext) > 0 {
-					current = append(current, cloneMessages(retryPolicy.ReplacementContext)...)
-				}
-				current = append(current, retryMessages...)
+				// A guardrail asked to retry: record the turn as a continue
+				// step and loop again with the retry context appended.
+				steps = append(steps, Step{
+					Index:      iteration,
+					ModelCall:  modelCall,
+					Decision:   StepDecisionContinue,
+					BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+				})
+				current = appendRetryContext(current, assistant, retryMessages, retryPolicy)
 				continue
 			}
-			if finalOutput.Text != "" || finalOutput.Thinking != "" {
-				current = append(current, finalOutput)
-			}
+			current = appendFinalAssistant(current, finalOutput)
+			steps = append(steps, Step{
+				Index:      iteration,
+				ModelCall:  modelCall,
+				Decision:   StepDecisionFinish,
+				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+			})
 			return LoopOutput{
-				Messages:   current,
-				Usage:      totalUsage,
-				StopReason: stopReason,
-				Iterations: iteration + 1,
-				Thinking:   finalOutput.Thinking,
+				Messages:      current,
+				Usage:         totalUsage,
+				StopReason:    stopReason,
+				Iterations:    iteration + 1,
+				Thinking:      finalOutput.Thinking,
+				Steps:         steps,
+				ToolCallsUsed: toolCallsUsed,
 			}, nil
 		}
 		if assistant.Text != "" || len(assistant.ToolCalls) > 0 {
@@ -132,22 +157,89 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 		if err != nil {
 			return LoopOutput{}, err
 		}
+		toolCallsUsed += len(assistant.ToolCalls)
+		decision := StepDecisionContinue
+		if terminal {
+			decision = StepDecisionFinish
+		}
+		steps = append(steps, Step{
+			Index:      iteration,
+			ModelCall:  modelCall,
+			ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
+			Decision:   decision,
+			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+		})
 		if terminal {
 			return LoopOutput{
-				Messages:   current,
-				Usage:      totalUsage,
-				StopReason: provider.StopReasonComplete,
-				Iterations: iteration + 1,
-				Thinking:   assistant.Thinking,
+				Messages:      current,
+				Usage:         totalUsage,
+				StopReason:    provider.StopReasonComplete,
+				Iterations:    iteration + 1,
+				Thinking:      assistant.Thinking,
+				Steps:         steps,
+				ToolCallsUsed: toolCallsUsed,
 			}, nil
 		}
 	}
 	return LoopOutput{
-		Messages:   current,
-		Usage:      totalUsage,
-		StopReason: provider.StopReasonMaxTurns,
-		Iterations: input.MaxIterations,
+		Messages:      current,
+		Usage:         totalUsage,
+		StopReason:    provider.StopReasonMaxTurns,
+		Iterations:    input.MaxIterations,
+		Steps:         steps,
+		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+// appendRetryContext assembles the messages a guardrail retry feeds back into
+// the loop: optionally the rejected assistant output, any replacement
+// context, and the retry instructions themselves.
+func appendRetryContext(current []message.Message, assistant message.Message, retryMessages []message.Message, retryPolicy RetryPolicy) []message.Message {
+	if retryPolicy.IncludeRejectedOutput && (assistant.Text != "" || assistant.Thinking != "") {
+		current = append(current, assistant)
+	}
+	if len(retryPolicy.ReplacementContext) > 0 {
+		current = append(current, cloneMessages(retryPolicy.ReplacementContext)...)
+	}
+	return append(current, retryMessages...)
+}
+
+// appendFinalAssistant appends the finalized assistant message to history,
+// skipping it when the guardrails left nothing to record.
+func appendFinalAssistant(current []message.Message, finalOutput message.Message) []message.Message {
+	if finalOutput.Text != "" || finalOutput.Thinking != "" {
+		return append(current, finalOutput)
+	}
+	return current
+}
+
+// toolCallTraces builds a replay-safe trace for each tool call in a turn.
+// The bus returns results positionally aligned with calls (sequential
+// appends in order; parallel writes results[i] for calls[i]), so we pair by
+// index rather than ToolCallID — drivers are not required to echo the call
+// ID. Per-call timing is intentionally left zero: the bus exposes no
+// per-call duration, and a wall-clock reading here would be a
+// nondeterministic field on a replayable Step (ADR-007).
+func toolCallTraces(calls []message.ToolCall, results []message.ToolResult) []ToolCallTrace {
+	if len(calls) == 0 {
+		return nil
+	}
+	traces := make([]ToolCallTrace, 0, len(calls))
+	for i, call := range calls {
+		trace := ToolCallTrace{
+			Name:      call.Name,
+			Arguments: call.Arguments,
+		}
+		if i < len(results) {
+			result := results[i]
+			trace.Output = result.Structured
+			if result.IsError {
+				trace.Error = result.Content
+			}
+		}
+		traces = append(traces, trace)
+	}
+	return traces
 }
 
 func (e Engine) applyOutputGuardrails(ctx context.Context, input LoopInput, current []message.Message, assistant message.Message, iteration int, usage provider.Usage, stopReason provider.StopReason) (message.Message, []message.Message, RetryPolicy, error) {

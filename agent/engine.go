@@ -71,6 +71,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 			Usage:      output.Usage,
 			StopReason: output.StopReason,
 			Thinking:   output.Thinking,
+			Steps:      output.Steps,
 			Failure: (&AgentFailure{
 				Kind:   kind,
 				Reason: runErr.Error(),
@@ -103,6 +104,7 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 	}
 
 	totalUsage := output.Usage
+	accumulatedSteps := output.Steps
 	for repairCount := 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
 		repairInput := input
 		repairInput.Messages = append(cloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
@@ -117,6 +119,7 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 				Usage:       totalUsage.Add(repairOutput.Usage),
 				StopReason:  repairOutput.StopReason,
 				Thinking:    repairOutput.Thinking,
+				Steps:       appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
 				RepairCount: repairCount,
 				Failure: (&AgentFailure{
 					Kind:   kind,
@@ -125,7 +128,9 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 			}
 		}
 		totalUsage = totalUsage.Add(repairOutput.Usage)
+		accumulatedSteps = appendReindexedSteps(accumulatedSteps, repairOutput.Steps)
 		repairOutput.Usage = totalUsage
+		repairOutput.Steps = accumulatedSteps
 		output = repairOutput
 		result = resultFromLoopOutput(output, repairCount)
 		validationErr = validateResultStructuredOutput(&result, schema)
@@ -150,9 +155,22 @@ func resultFromLoopOutput(output LoopOutput, repairCount int) Result {
 		Usage:       output.Usage,
 		StopReason:  output.StopReason,
 		Messages:    output.Messages,
+		Steps:       output.Steps,
 		Valid:       true,
 		RepairCount: repairCount,
 	}
+}
+
+// appendReindexedSteps appends src onto dst, rewriting each appended Step's
+// Index so the combined slice stays globally continuous. RunMessages numbers
+// steps from zero on every call, so a repair turn's steps would collide with
+// the original run's indices without reindexing here.
+func appendReindexedSteps(dst, src []Step) []Step {
+	for _, step := range src {
+		step.Index = len(dst)
+		dst = append(dst, step)
+	}
+	return dst
 }
 
 func validateResultStructuredOutput(result *Result, schema outputPolicySchema) error {

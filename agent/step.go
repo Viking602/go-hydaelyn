@@ -7,9 +7,11 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 
-// Step is one iteration of the bounded agent loop. v0.8.0 ships the
-// type so multi-agent schedulers can branch on per-step trace data; the
-// loop itself begins emitting Steps in Phase 3.
+// Step is one iteration of the bounded agent loop. Engine.RunMessages
+// emits one Step per model turn (including guardrail-retry turns) so
+// multi-agent schedulers can branch on per-step trace data. Steps carry no
+// wall-clock timestamps: a replayed loop must reproduce them byte-for-byte
+// (ADR-007), so StartedAt/EndedAt are left zero by the loop.
 type Step struct {
 	Index        int             `json:"index"`
 	ModelCall    *ModelCall      `json:"modelCall,omitempty"`

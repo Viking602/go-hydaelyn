@@ -74,7 +74,9 @@ func TestEngineRunsToolLoop(t *testing.T) {
 // loop only ever stops by hitting its iteration ceiling.
 type alwaysToolProvider struct{ calls int }
 
-func (*alwaysToolProvider) Metadata() provider.Metadata { return provider.Metadata{Name: "always-tool"} }
+func (*alwaysToolProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "always-tool"}
+}
 
 func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (provider.Stream, error) {
 	p.calls++
