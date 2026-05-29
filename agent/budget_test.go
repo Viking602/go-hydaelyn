@@ -64,6 +64,96 @@ func TestRunMessagesMaxToolCallsBudgetAbortsWithPartialTrace(t *testing.T) {
 	}
 }
 
+// parallelToolProvider emits two tool calls in a single turn, modeling a model
+// that requests parallel tool execution within one model response.
+type parallelToolProvider struct{}
+
+func (*parallelToolProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "parallel-tool"}
+}
+
+func (*parallelToolProvider) Stream(_ context.Context, _ provider.Request) (provider.Stream, error) {
+	return provider.NewSliceStream([]provider.Event{
+		{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"query":"a"}`)}},
+		{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-2", Name: "lookup", Arguments: json.RawMessage(`{"query":"b"}`)}},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}), nil
+}
+
+func TestRunMessagesMaxToolCallsBudgetGatesParallelBatchBeforeDispatch(t *testing.T) {
+	executed := 0
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		executed++
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	engine := Engine{Provider: &parallelToolProvider{}, Tools: tool.NewBus(driver)}
+
+	// A single turn asks for two tool calls but the budget allows only one. The
+	// loop must refuse to dispatch the batch rather than run both and discover
+	// the overrun a turn later.
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:        "test-model",
+		Messages:     []message.Message{message.NewText(message.RoleUser, "loop")},
+		MaxToolCalls: 1,
+	})
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("err = %v, want ErrBudgetExhausted", err)
+	}
+	// Neither side-effecting tool runs: the gate fires before ExecuteBatch.
+	if executed != 0 {
+		t.Fatalf("tool executed %d times, want 0 (batch gated before dispatch)", executed)
+	}
+	if output.ToolCallsUsed != 0 {
+		t.Fatalf("ToolCallsUsed = %d, want 0 (no calls spent)", output.ToolCallsUsed)
+	}
+	if output.StopReason != provider.StopReasonAborted {
+		t.Fatalf("StopReason = %q, want aborted", output.StopReason)
+	}
+	// The model turn ran, so it is recorded as one failed step.
+	if len(output.Steps) != 1 {
+		t.Fatalf("len(Steps) = %d, want 1", len(output.Steps))
+	}
+	if output.Steps[0].Decision != StepDecisionFail {
+		t.Fatalf("Steps[0].Decision = %q, want fail", output.Steps[0].Decision)
+	}
+}
+
+func TestRunMessagesMaxToolCallsBudgetAllowsBatchThatExactlyFills(t *testing.T) {
+	executed := 0
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		executed++
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	engine := Engine{Provider: &parallelToolProvider{}, Tools: tool.NewBus(driver)}
+
+	// Two calls with a budget of exactly two: the batch fits, both tools run,
+	// and the run aborts only on the next pre-turn check.
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:        "test-model",
+		Messages:     []message.Message{message.NewText(message.RoleUser, "loop")},
+		MaxToolCalls: 2,
+	})
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("err = %v, want ErrBudgetExhausted on the following turn", err)
+	}
+	if executed != 2 {
+		t.Fatalf("tool executed %d times, want 2 (batch exactly fills the budget)", executed)
+	}
+	if output.ToolCallsUsed != 2 {
+		t.Fatalf("ToolCallsUsed = %d, want 2", output.ToolCallsUsed)
+	}
+}
+
 func TestRunMessagesMaxStepsBudgetIsHardFailure(t *testing.T) {
 	engine := newLoopToolEngine(t, &alwaysToolProvider{})
 	output, err := engine.RunMessages(context.Background(), LoopInput{
