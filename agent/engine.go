@@ -10,6 +10,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/stream"
+	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 // Run drives the agent loop against one api.Task under the supplied
@@ -71,17 +72,13 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 
 	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
-		kind := loopErrorFailureKind(runCtx, runErr, budgetDriven)
 		return Result{
 			Messages:   output.Messages,
 			Usage:      output.Usage,
 			StopReason: output.StopReason,
 			Thinking:   output.Thinking,
 			Steps:      output.Steps,
-			Failure: (&AgentFailure{
-				Kind:   kind,
-				Reason: runErr.Error(),
-			}).WithCause(runErr),
+			Failure:    loopErrorFailure(runCtx, runErr, budgetDriven),
 		}
 	}
 
@@ -139,10 +136,7 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 				Thinking:    repairOutput.Thinking,
 				Steps:       appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
 				RepairCount: repairCount,
-				Failure: (&AgentFailure{
-					Kind:   loopErrorFailureKind(ctx, repairErr, budgetDriven),
-					Reason: repairErr.Error(),
-				}).WithCause(repairErr),
+				Failure:     loopErrorFailure(ctx, repairErr, budgetDriven),
 			}
 		}
 		totalUsage = totalUsage.Add(repairOutput.Usage)
@@ -269,18 +263,32 @@ func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxS
 	return 0, 0, 0
 }
 
-// loopErrorFailureKind classifies a RunMessages error. An explicit loop-budget
-// exhaustion, or a wall-clock deadline when the run is budget-driven, both
-// surface as a budget failure; anything else is a generic engine error.
-func loopErrorFailureKind(ctx context.Context, err error, budgetDriven bool) FailureKind {
+// loopErrorFailure classifies a RunMessages error into the typed AgentFailure
+// that crosses the agent → multiagent boundary. An explicit loop-budget
+// exhaustion, or a wall-clock deadline on a budget-driven run, surfaces as a
+// budget failure. A tool the bus cannot serve — a name the model invoked that
+// is not registered (tool.ErrToolNotFound) or a missing bus altogether
+// (ErrToolBusMissing) — surfaces as FailureKindToolUnavailable, marked
+// retryable and escalatable so a scheduler applies the documented "retry with
+// backoff, then escalate" path (spec 03 §dispatch policy) instead of treating
+// an unavailable tool as an opaque engine error. Anything else is a generic
+// engine error. The Reason and cause mirror the source error so errors.Is /
+// errors.As still walk the chain across the boundary.
+func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentFailure {
+	failure := &AgentFailure{Reason: err.Error()}
 	switch {
 	case errors.Is(err, ErrBudgetExhausted):
-		return FailureKindBudgetExhausted
+		failure.Kind = FailureKindBudgetExhausted
 	case budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return FailureKindBudgetExhausted
+		failure.Kind = FailureKindBudgetExhausted
+	case errors.Is(err, ErrToolBusMissing) || errors.Is(err, tool.ErrToolNotFound):
+		failure.Kind = FailureKindToolUnavailable
+		failure.Retryable = true
+		failure.Escalatable = true
 	default:
-		return FailureKindEngineError
+		failure.Kind = FailureKindEngineError
 	}
+	return failure.WithCause(err)
 }
 
 func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {
