@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -191,8 +192,49 @@ func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.
 	if failed.Status != api.TaskStatusFailed || failed.Error != errBoom.Error() {
 		t.Fatalf("engine failure should submit failed report, got %#v", failed)
 	}
+	// The engine wraps the provider error in an AgentFailure; the worker must
+	// carry that typed classification onto the persisted report so a scheduler
+	// can branch on the failure mode end-to-end.
+	if failed.Result == nil || failed.Result.Kind != string(agent.FailureKindEngineError) {
+		t.Fatalf("failed report should carry the agent failure kind, got %#v", failed.Result)
+	}
 	if active := runner.ActiveLeaseCount(run.ID, task.ID); active != 0 {
 		t.Fatalf("engine failure should release active lease, got %d", active)
+	}
+}
+
+func TestFailureReportCarriesAgentFailureDisposition(t *testing.T) {
+	failure := (&agent.AgentFailure{
+		Kind:        agent.FailureKindBudgetExhausted,
+		Reason:      "out of budget",
+		Retryable:   true,
+		Escalatable: false,
+	}).WithCause(errors.New("underlying"))
+
+	// Wrapped so the test also exercises errors.As walking the chain, the way
+	// a real caller might re-wrap the failure before it reaches submitFailure.
+	report := failureReport(fmt.Errorf("worker: %w", failure))
+
+	if report.Status != api.ReportStatusFailed {
+		t.Fatalf("Status = %q, want failed", report.Status)
+	}
+	if report.Kind != string(agent.FailureKindBudgetExhausted) {
+		t.Fatalf("Kind = %q, want budget_exhausted", report.Kind)
+	}
+	// Distinct true/false guards against the booleans being swapped.
+	if !report.Retryable || report.Escalatable {
+		t.Fatalf("disposition mismatch: retryable=%v escalatable=%v", report.Retryable, report.Escalatable)
+	}
+}
+
+func TestFailureReportPlainErrorHasNoKind(t *testing.T) {
+	report := failureReport(errors.New("boom"))
+
+	if report.Status != api.ReportStatusFailed || report.Summary != "boom" {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	if report.Kind != "" || report.Retryable || report.Escalatable {
+		t.Fatalf("plain error should leave failure fields empty, got %#v", report)
 	}
 }
 

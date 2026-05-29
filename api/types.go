@@ -465,6 +465,15 @@ type RunTimelineItem struct {
 type TypedReport struct {
 	Status  ReportStatus `json:"status"`
 	Summary string       `json:"summary,omitempty"`
+	// Kind carries the agent loop's failure classification (the string value
+	// of agent.FailureKind) on a failed report, so a scheduler can branch on
+	// the failure mode without re-parsing Summary. Empty on non-failure reports.
+	Kind string `json:"kind,omitempty"`
+	// Retryable and Escalatable mirror the agent failure's disposition hints:
+	// whether re-dispatching the same task could succeed, and whether the
+	// failure warrants escalation (e.g. to a supervisor or human).
+	Retryable   bool `json:"retryable,omitempty"`
+	Escalatable bool `json:"escalatable,omitempty"`
 	// godoc-allow-any: structured report payloads follow task-specific schemas.
 	Structured    map[string]any  `json:"structured,omitempty"`
 	ActionOutcome *ActionOutcome  `json:"actionOutcome,omitempty"`

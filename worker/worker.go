@@ -323,11 +323,27 @@ func (w AgentWorker) submitFailure(ctx context.Context, task api.Task, lease api
 		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: api.TypedReport{
-			Status:  api.ReportStatusFailed,
-			Summary: cause.Error(),
-		},
+		Report:      failureReport(cause),
 	})
+}
+
+// failureReport builds the failed TypedReport for a cause. When the cause is
+// or wraps an AgentFailure it carries the agent loop's typed classification —
+// the failure Kind plus its retry/escalate disposition — so a scheduler can
+// branch on the failure mode rather than re-parsing Summary. A plain error
+// leaves those fields empty.
+func failureReport(cause error) api.TypedReport {
+	report := api.TypedReport{
+		Status:  api.ReportStatusFailed,
+		Summary: cause.Error(),
+	}
+	var failure *agent.AgentFailure
+	if errors.As(cause, &failure) && failure != nil {
+		report.Kind = string(failure.Kind)
+		report.Retryable = failure.Retryable
+		report.Escalatable = failure.Escalatable
+	}
+	return report
 }
 
 func firstWriteTarget(task api.Task) string {
