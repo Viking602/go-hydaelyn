@@ -237,14 +237,15 @@ func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context,
 func (e Engine) maxWallClock(task api.Task) time.Duration {
 	// A present task.Budget is authoritative for the wall-clock dimension too
 	// (zero means unbounded), mirroring budgetLimits and the LoopPolicy contract
-	// that a per-Task Budget overrides the engine default when present. The
-	// engine LoopPolicy supplies the ceiling only when the task carries no
-	// Budget of its own; there, an explicit LoopPolicy.Budget wins over the
-	// bare LoopPolicy.MaxWallClock.
+	// that a per-Task Budget overrides the engine default when present.
 	if task.Budget != nil {
 		return task.Budget.MaxWallClock
 	}
-	if e.LoopPolicy.Budget != nil && e.LoopPolicy.Budget.MaxWallClock > 0 {
+	// On the engine side a structured LoopPolicy.Budget likewise wins over the
+	// bare legacy LoopPolicy.MaxWallClock: a present Budget is authoritative, so
+	// its zero wall-clock means unbounded rather than inheriting the legacy
+	// deadline. The legacy field applies only when no Budget is set at all.
+	if e.LoopPolicy.Budget != nil {
 		return e.LoopPolicy.Budget.MaxWallClock
 	}
 	return e.LoopPolicy.MaxWallClock
