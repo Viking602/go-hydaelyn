@@ -272,6 +272,34 @@ func TestEngineRunPerTaskBudgetOverridesLoopPolicy(t *testing.T) {
 	}
 }
 
+func TestEngineRunTaskBudgetIsAuthoritativeAndDoesNotInheritEngineCaps(t *testing.T) {
+	engine := newLoopToolEngine(t, &alwaysToolProvider{})
+	// The engine default caps tool calls at 2 and allows up to 5 iterations.
+	// The task supplies its own Budget that bounds only tokens, leaving
+	// MaxToolCalls zero — which the api.TaskBudget contract defines as unbounded.
+	engine.LoopPolicy = LoopPolicy{MaxIterations: 5, Budget: &api.TaskBudget{MaxToolCalls: 2}}
+
+	result := engine.Run(context.Background(), api.Task{
+		Goal:   "loop",
+		Budget: &api.TaskBudget{MaxTokens: 1000},
+	}, OutputPolicy{})
+
+	// A present task budget is authoritative: its zero MaxToolCalls means
+	// unbounded, so the engine's cap of 2 must NOT be inherited (under the old
+	// per-dimension merge this run failed with budget_exhausted after 2 calls).
+	// The token ceiling fails open on the zero-usage provider, so the run
+	// reaches the soft iteration ceiling instead of a budget failure.
+	if result.Failure != nil {
+		t.Fatalf("task budget must not inherit the engine tool-call cap; got failure %#v", result.Failure)
+	}
+	if result.StopReason != provider.StopReasonMaxTurns {
+		t.Fatalf("StopReason = %q, want max-turns", result.StopReason)
+	}
+	if len(result.Steps) != 5 {
+		t.Fatalf("len(Steps) = %d, want 5 (ran to the iteration ceiling, tool calls unbounded)", len(result.Steps))
+	}
+}
+
 func TestEngineRepairStopsWhenBudgetExhaustedBeforeAttempt(t *testing.T) {
 	// A MaxSteps budget of 1: the initial run spends the only step, so the
 	// repair pre-check fails before issuing a second model call.

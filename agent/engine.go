@@ -235,39 +235,37 @@ func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context,
 }
 
 func (e Engine) maxWallClock(task api.Task) time.Duration {
-	if task.Budget != nil && task.Budget.MaxWallClock > 0 {
+	// A present task.Budget is authoritative for the wall-clock dimension too
+	// (zero means unbounded), mirroring budgetLimits and the LoopPolicy contract
+	// that a per-Task Budget overrides the engine default when present. The
+	// engine LoopPolicy supplies the ceiling only when the task carries no
+	// Budget of its own; there, an explicit LoopPolicy.Budget wins over the
+	// bare LoopPolicy.MaxWallClock.
+	if task.Budget != nil {
 		return task.Budget.MaxWallClock
 	}
 	if e.LoopPolicy.Budget != nil && e.LoopPolicy.Budget.MaxWallClock > 0 {
 		return e.LoopPolicy.Budget.MaxWallClock
 	}
-	if e.LoopPolicy.MaxWallClock > 0 {
-		return e.LoopPolicy.MaxWallClock
-	}
-	return 0
+	return e.LoopPolicy.MaxWallClock
 }
 
 // budgetLimits resolves the token, tool-call, and step ceilings the loop
-// enforces, per dimension, the same way maxWallClock resolves the wall-clock
-// ceiling: an explicit task.Budget value wins, otherwise the engine's
-// LoopPolicy.Budget supplies it. Zero on a dimension means unbounded.
+// enforces. A present task.Budget is authoritative: its fields are used as-is
+// and a zero dimension means unbounded (the api.TaskBudget contract), so it is
+// never backfilled from the engine default — otherwise a task that caps only
+// one dimension would silently inherit the engine's caps on the others. The
+// engine's LoopPolicy.Budget supplies all three ceilings only when the task
+// carries no Budget of its own. This mirrors maxWallClock and the LoopPolicy
+// contract that a per-Task Budget overrides the engine default when present.
 func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxSteps int) {
 	if task.Budget != nil {
-		maxTokens, maxToolCalls, maxSteps = task.Budget.MaxTokens, task.Budget.MaxToolCalls, task.Budget.MaxSteps
+		return task.Budget.MaxTokens, task.Budget.MaxToolCalls, task.Budget.MaxSteps
 	}
-	if e.LoopPolicy.Budget == nil {
-		return maxTokens, maxToolCalls, maxSteps
+	if e.LoopPolicy.Budget != nil {
+		return e.LoopPolicy.Budget.MaxTokens, e.LoopPolicy.Budget.MaxToolCalls, e.LoopPolicy.Budget.MaxSteps
 	}
-	if maxTokens == 0 {
-		maxTokens = e.LoopPolicy.Budget.MaxTokens
-	}
-	if maxToolCalls == 0 {
-		maxToolCalls = e.LoopPolicy.Budget.MaxToolCalls
-	}
-	if maxSteps == 0 {
-		maxSteps = e.LoopPolicy.Budget.MaxSteps
-	}
-	return maxTokens, maxToolCalls, maxSteps
+	return 0, 0, 0
 }
 
 // loopErrorFailureKind classifies a RunMessages error. An explicit loop-budget
