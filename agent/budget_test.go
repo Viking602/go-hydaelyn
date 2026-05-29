@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -151,6 +152,58 @@ func TestRunMessagesMaxToolCallsBudgetAllowsBatchThatExactlyFills(t *testing.T) 
 	}
 	if output.ToolCallsUsed != 2 {
 		t.Fatalf("ToolCallsUsed = %d, want 2", output.ToolCallsUsed)
+	}
+}
+
+func TestRunMessagesMaxTokensBudgetGatesToolDispatchAfterOverspend(t *testing.T) {
+	executed := 0
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		executed++
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	// The very first model turn reports 10 tokens against a 5-token ceiling and
+	// asks for a side-effecting tool. The token budget is already exhausted by
+	// that turn, so the loop must refuse to dispatch the batch rather than run
+	// the side effect and surface the overrun only on the next pre-turn check.
+	engine := Engine{
+		Provider: &usageToolProvider{perTurn: provider.Usage{InputTokens: 6, OutputTokens: 4, TotalTokens: 10}},
+		Tools:    tool.NewBus(driver),
+	}
+
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:     "test-model",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "loop")},
+		MaxTokens: 5,
+	})
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("err = %v, want ErrBudgetExhausted", err)
+	}
+	// MaxToolCalls is unbounded here, so only the token dimension can trip: this
+	// proves the token spend — not the tool-call count — gated the dispatch.
+	if !strings.Contains(err.Error(), "max tokens") {
+		t.Fatalf("err = %v, want the max tokens dimension", err)
+	}
+	// The token budget blew on this turn, so its tool batch never dispatches.
+	if executed != 0 {
+		t.Fatalf("tool executed %d times, want 0 (batch gated before dispatch)", executed)
+	}
+	if output.ToolCallsUsed != 0 {
+		t.Fatalf("ToolCallsUsed = %d, want 0 (no calls spent)", output.ToolCallsUsed)
+	}
+	if output.StopReason != provider.StopReasonAborted {
+		t.Fatalf("StopReason = %q, want aborted", output.StopReason)
+	}
+	// The model turn ran, so it is recorded as one failed step.
+	if len(output.Steps) != 1 {
+		t.Fatalf("len(Steps) = %d, want 1", len(output.Steps))
+	}
+	if output.Steps[0].Decision != StepDecisionFail {
+		t.Fatalf("Steps[0].Decision = %q, want fail", output.Steps[0].Decision)
 	}
 }
 

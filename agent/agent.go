@@ -203,21 +203,22 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 		if e.Tools == nil {
 			return LoopOutput{}, ErrToolBusMissing
 		}
-		// Gate the batch against the tool-call budget BEFORE dispatching it. A
-		// single model turn can return more parallel tool calls than the
-		// remaining MaxToolCalls budget; without this gate the whole batch —
-		// including side-effecting calls the task budget never authorized —
-		// executes, and the overrun is only caught by the next turn's pre-turn
-		// check, one turn too late. The model turn already ran, so it is
-		// recorded as a failed step before aborting.
-		if dispatchExceedsToolBudget(input, toolCallsUsed, len(assistant.ToolCalls)) {
+		// Gate the batch against every budget dimension BEFORE dispatching it.
+		// The model turn just ran, so its token spend is now folded into
+		// totalUsage: a turn that alone exhausts MaxTokens, or a batch that
+		// overflows MaxToolCalls, must abort here — otherwise the whole batch,
+		// including side-effecting calls the budget never authorized, executes
+		// and the overrun is only caught by the next turn's pre-turn check, one
+		// turn too late. The model turn already ran, so it is recorded as a
+		// failed step before aborting.
+		if dimension := preDispatchBudgetBlock(input, totalUsage, toolCallsUsed, len(steps), len(assistant.ToolCalls)); dimension != "" {
 			steps = append(steps, Step{
 				Index:      iteration,
 				ModelCall:  modelCall,
 				Decision:   StepDecisionFail,
 				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 			})
-			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, "max tool calls")
+			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
 		results, terminal, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
 		if err != nil {
@@ -299,6 +300,27 @@ func budgetRemaining(input LoopInput, usage provider.Usage, toolCallsUsed, steps
 // stops the run afterwards.
 func dispatchExceedsToolBudget(input LoopInput, toolCallsUsed, batch int) bool {
 	return input.MaxToolCalls > 0 && toolCallsUsed+batch > input.MaxToolCalls
+}
+
+// preDispatchBudgetBlock reports the budget dimension that forbids dispatching
+// this turn's tool batch, or "" when the batch may run. It guards what the
+// top-of-loop pre-turn check cannot: the just-completed model turn's token
+// spend (totalUsage now includes it, so a single turn that blows MaxTokens is
+// caught before its side-effecting tools run rather than at the next pre-turn
+// check), and the batch's own tool-call count, which one turn can inflate past
+// MaxToolCalls. A non-terminal tool turn is a "will continue" boundary, so any
+// exhausted dimension must abort here, before ExecuteBatch. The step ceiling is
+// evaluated against the pre-increment count, matching the pre-turn check: this
+// turn's step is not yet recorded, so step exhaustion it causes surfaces on the
+// next pre-turn check, never prematurely here.
+func preDispatchBudgetBlock(input LoopInput, usage provider.Usage, toolCallsUsed, steps, batch int) string {
+	if _, dimension := budgetRemaining(input, usage, toolCallsUsed, steps); dimension != "" {
+		return dimension
+	}
+	if dispatchExceedsToolBudget(input, toolCallsUsed, batch) {
+		return "max tool calls"
+	}
+	return ""
 }
 
 // budgetAbort builds the partial LoopOutput returned when the loop stops for
