@@ -70,6 +70,57 @@ func TestEngineRunsToolLoop(t *testing.T) {
 	}
 }
 
+// alwaysToolProvider emits a (non-terminal) tool call on every turn, so the
+// loop only ever stops by hitting its iteration ceiling.
+type alwaysToolProvider struct{ calls int }
+
+func (*alwaysToolProvider) Metadata() provider.Metadata { return provider.Metadata{Name: "always-tool"} }
+
+func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (provider.Stream, error) {
+	p.calls++
+	return provider.NewSliceStream([]provider.Event{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "lookup",
+				Arguments: json.RawMessage(`{"query":"x"}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}), nil
+}
+
+func TestRunMessagesDefaultMaxIterationsIsTwelve(t *testing.T) {
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	prov := &alwaysToolProvider{}
+	engine := Engine{Provider: prov, Tools: tool.NewBus(driver)}
+	result, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "test-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "loop forever")},
+		// MaxIterations intentionally unset -> exercises the default ceiling.
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if result.StopReason != provider.StopReasonMaxTurns {
+		t.Fatalf("expected StopReasonMaxTurns at the ceiling, got %q", result.StopReason)
+	}
+	if result.Iterations != 12 {
+		t.Fatalf("expected default ceiling of 12 iterations, got %d", result.Iterations)
+	}
+	if prov.calls != 12 {
+		t.Fatalf("expected 12 provider calls at the default ceiling, got %d", prov.calls)
+	}
+}
+
 func TestEngineFailsWhenToolCallsExistButToolBusMissing(t *testing.T) {
 	engine := Engine{Provider: fakeProvider{}}
 	_, err := engine.RunMessages(context.Background(), LoopInput{

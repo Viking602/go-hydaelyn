@@ -74,7 +74,12 @@ type Engine struct {
 // completion. Engine.Run is the task-level wrapper most callers want.
 func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, error) {
 	if input.MaxIterations <= 0 {
-		input.MaxIterations = 4
+		// Default loop ceiling when the caller sets no bound. 12 sits above
+		// OpenAI's default of 10 and well below LangGraph's 25; the prior
+		// default of 4 truncated legitimate multi-tool runs. This is the soft
+		// ceiling: exhausting it yields StopReasonMaxTurns, which flows through
+		// output validation (validate-first) rather than surfacing a failure.
+		input.MaxIterations = 12
 	}
 	if input.ToolMode == "" {
 		input.ToolMode = tool.ModeSequential
