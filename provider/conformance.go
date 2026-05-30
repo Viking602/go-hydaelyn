@@ -12,11 +12,17 @@ var ErrInvalidToolCallArguments = errors.New("invalid tool call arguments")
 var ErrDuplicateToolCallID = errors.New("duplicate tool call id")
 
 type NormalizedResponse struct {
-	Text       string             `json:"text,omitempty"`
-	Thinking   string             `json:"thinking,omitempty"`
-	ToolCalls  []message.ToolCall `json:"toolCalls,omitempty"`
-	Usage      Usage              `json:"usage,omitempty"`
-	StopReason StopReason         `json:"stopReason,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	// Signature is the opaque thinking-block signature accumulated from
+	// signature_delta events; empty for providers that do not sign reasoning.
+	Signature string `json:"signature,omitempty"`
+	// RedactedThinking is the opaque payload of a redacted_thinking block, if
+	// the provider emitted one.
+	RedactedThinking string             `json:"redactedThinking,omitempty"`
+	ToolCalls        []message.ToolCall `json:"toolCalls,omitempty"`
+	Usage            Usage              `json:"usage,omitempty"`
+	StopReason       StopReason         `json:"stopReason,omitempty"`
 }
 
 // NormalizeEvents replays a stream of provider Events into a single
@@ -41,6 +47,16 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			response.Text += event.Text
 		case EventThinkingDelta:
 			response.Thinking += event.Thinking
+			// signature_delta / redacted_thinking ride on thinking events.
+			// The loop models one thinking block per turn, so last-non-empty
+			// wins; interleaved multi-block fidelity is out of scope (see
+			// anthropic.toAnthropicRequest).
+			if event.Signature != "" {
+				response.Signature = event.Signature
+			}
+			if event.RedactedThinking != "" {
+				response.RedactedThinking = event.RedactedThinking
+			}
 		case EventToolCall:
 			if err := applyToolCallEvent(event.ToolCall, builders, &order, idKeys, indexKeys, &syntheticSeq); err != nil {
 				return NormalizedResponse{}, err

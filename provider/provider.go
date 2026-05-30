@@ -76,14 +76,21 @@ type ResponseFormat struct {
 }
 
 type Event struct {
-	Kind          EventKind         `json:"kind"`
-	Text          string            `json:"text,omitempty"`
-	Thinking      string            `json:"thinking,omitempty"`
-	ToolCall      *message.ToolCall `json:"toolCall,omitempty"`
-	ToolCallDelta *ToolCallDelta    `json:"toolCallDelta,omitempty"`
-	Usage         Usage             `json:"usage,omitempty"`
-	StopReason    StopReason        `json:"stopReason,omitempty"`
-	Err           error             `json:"-"`
+	Kind     EventKind `json:"kind"`
+	Text     string    `json:"text,omitempty"`
+	Thinking string    `json:"thinking,omitempty"`
+	// Signature carries the opaque thinking-block signature emitted alongside
+	// reasoning (Anthropic signature_delta). It is associated with the
+	// current thinking block and accumulated by NormalizeEvents.
+	Signature string `json:"signature,omitempty"`
+	// RedactedThinking carries the opaque payload of a redacted_thinking
+	// block delivered whole by the provider.
+	RedactedThinking string            `json:"redactedThinking,omitempty"`
+	ToolCall         *message.ToolCall `json:"toolCall,omitempty"`
+	ToolCallDelta    *ToolCallDelta    `json:"toolCallDelta,omitempty"`
+	Usage            Usage             `json:"usage,omitempty"`
+	StopReason       StopReason        `json:"stopReason,omitempty"`
+	Err              error             `json:"-"`
 }
 
 type Stream interface {

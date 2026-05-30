@@ -585,6 +585,8 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 	}
 	assistant.Text = normalized.Text
 	assistant.Thinking = normalized.Thinking
+	assistant.ThinkingSignature = normalized.Signature
+	assistant.RedactedThinking = normalized.RedactedThinking
 	assistant.ToolCalls = normalized.ToolCalls
 	return assistant, normalized.Usage, normalized.StopReason, nil
 }

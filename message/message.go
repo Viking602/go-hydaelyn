@@ -97,21 +97,30 @@ type ToolResult struct {
 }
 
 type Message struct {
-	ID          string            `json:"id,omitempty"`
-	Role        Role              `json:"role"`
-	Kind        Kind              `json:"kind,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Text        string            `json:"text,omitempty"`
-	Thinking    string            `json:"thinking,omitempty"`
-	ToolCalls   []ToolCall        `json:"toolCalls,omitempty"`
-	ToolResult  *ToolResult       `json:"toolResult,omitempty"`
-	TeamID      string            `json:"teamId,omitempty"`
-	AgentID     string            `json:"agentId,omitempty"`
-	RunID       string            `json:"runId,omitempty"`
-	ParentRunID string            `json:"parentRunId,omitempty"`
-	Visibility  Visibility        `json:"visibility,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	CreatedAt   time.Time         `json:"createdAt,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Role     Role   `json:"role"`
+	Kind     Kind   `json:"kind,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	// ThinkingSignature is the opaque signature Anthropic attaches to a
+	// thinking block; it must be round-tripped verbatim on the next request
+	// when extended thinking is combined with tool use, or the API rejects
+	// the assistant turn. Empty for providers that do not sign reasoning.
+	ThinkingSignature string `json:"thinkingSignature,omitempty"`
+	// RedactedThinking carries the opaque payload of a redacted_thinking
+	// block (reasoning encrypted by Anthropic's safety systems) so it can be
+	// replayed verbatim on a later turn. Empty in the common case.
+	RedactedThinking string            `json:"redactedThinking,omitempty"`
+	ToolCalls        []ToolCall        `json:"toolCalls,omitempty"`
+	ToolResult       *ToolResult       `json:"toolResult,omitempty"`
+	TeamID           string            `json:"teamId,omitempty"`
+	AgentID          string            `json:"agentId,omitempty"`
+	RunID            string            `json:"runId,omitempty"`
+	ParentRunID      string            `json:"parentRunId,omitempty"`
+	Visibility       Visibility        `json:"visibility,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	CreatedAt        time.Time         `json:"createdAt,omitempty"`
 }
 
 func NewText(role Role, text string) Message {
