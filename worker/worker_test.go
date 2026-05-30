@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -68,6 +69,103 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Payload != "summary done" {
 		t.Fatalf("missing worker output item: %#v", items)
+	}
+}
+
+func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-schema", RootTaskID: "root", Request: "do work"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-schema",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	// The task's OutputSchema must survive the public CreateTask path so the
+	// worker can validate against it; an empty schema here would make the test
+	// vacuous (validation would be skipped).
+	if len(task.OutputSchema) == 0 {
+		t.Fatalf("CreateTask dropped OutputSchema: %#v", task)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	// The model returns prose, not JSON — invalid against the task's OutputSchema.
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "just some prose, not json"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	err = (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env})
+	if err == nil {
+		t.Fatal("expected schema-validation failure on worker path, got nil error")
+	}
+	failed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if failed.Status != api.TaskStatusFailed {
+		t.Fatalf("schema-invalid terminal output must fail the task, got status %#v", failed.Status)
+	}
+}
+
+func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-structured", RootTaskID: "root", Request: "do work"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-structured",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	// The model returns valid JSON that satisfies the task's OutputSchema, so
+	// the engine populates result.Structured.
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: `{"summary":"done"}`},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	if err := (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	completed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if completed.Status != api.TaskStatusCompleted {
+		t.Fatalf("expected completed task, got %#v", completed.Status)
+	}
+	// The validated structured payload must survive onto the persisted report;
+	// a success report carrying only Summary would drop it, leaving durable
+	// downstream readers (routers, graph edges) unable to route on it.
+	if completed.Result == nil {
+		t.Fatalf("completed task carries no typed report")
+	}
+	if completed.Result.Structured == nil || completed.Result.Structured["summary"] != "done" {
+		t.Fatalf("validated structured output dropped from report: %#v", completed.Result)
 	}
 }
 
@@ -144,8 +242,49 @@ func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.
 	if failed.Status != api.TaskStatusFailed || failed.Error != errBoom.Error() {
 		t.Fatalf("engine failure should submit failed report, got %#v", failed)
 	}
+	// The engine wraps the provider error in an AgentFailure; the worker must
+	// carry that typed classification onto the persisted report so a scheduler
+	// can branch on the failure mode end-to-end.
+	if failed.Result == nil || failed.Result.Kind != string(agent.FailureKindEngineError) {
+		t.Fatalf("failed report should carry the agent failure kind, got %#v", failed.Result)
+	}
 	if active := runner.ActiveLeaseCount(run.ID, task.ID); active != 0 {
 		t.Fatalf("engine failure should release active lease, got %d", active)
+	}
+}
+
+func TestFailureReportCarriesAgentFailureDisposition(t *testing.T) {
+	failure := (&agent.AgentFailure{
+		Kind:        agent.FailureKindBudgetExhausted,
+		Reason:      "out of budget",
+		Retryable:   true,
+		Escalatable: false,
+	}).WithCause(errors.New("underlying"))
+
+	// Wrapped so the test also exercises errors.As walking the chain, the way
+	// a real caller might re-wrap the failure before it reaches submitFailure.
+	report := failureReport(fmt.Errorf("worker: %w", failure))
+
+	if report.Status != api.ReportStatusFailed {
+		t.Fatalf("Status = %q, want failed", report.Status)
+	}
+	if report.Kind != string(agent.FailureKindBudgetExhausted) {
+		t.Fatalf("Kind = %q, want budget_exhausted", report.Kind)
+	}
+	// Distinct true/false guards against the booleans being swapped.
+	if !report.Retryable || report.Escalatable {
+		t.Fatalf("disposition mismatch: retryable=%v escalatable=%v", report.Retryable, report.Escalatable)
+	}
+}
+
+func TestFailureReportPlainErrorHasNoKind(t *testing.T) {
+	report := failureReport(errors.New("boom"))
+
+	if report.Status != api.ReportStatusFailed || report.Summary != "boom" {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	if report.Kind != "" || report.Retryable || report.Escalatable {
+		t.Fatalf("plain error should leave failure fields empty, got %#v", report)
 	}
 }
 

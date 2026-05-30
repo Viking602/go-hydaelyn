@@ -862,11 +862,11 @@ func RunTimelineItemsFromModel(in []model.RunTimelineItem) []api.RunTimelineItem
 }
 
 func TypedReportToModel(in api.TypedReport) model.TypedReport {
-	return model.TypedReport{Status: model.ReportStatus(in.Status), Summary: in.Summary, Structured: anyMapToModel(in.Structured), ActionOutcome: ActionOutcomePtrToModel(in.ActionOutcome), Handoff: HandoffRequestPtrToModel(in.Handoff)}
+	return model.TypedReport{Status: model.ReportStatus(in.Status), Summary: in.Summary, Kind: in.Kind, Retryable: in.Retryable, Escalatable: in.Escalatable, Structured: anyMapToModel(in.Structured), ActionOutcome: ActionOutcomePtrToModel(in.ActionOutcome), Handoff: HandoffRequestPtrToModel(in.Handoff)}
 }
 
 func TypedReportFromModel(in model.TypedReport) api.TypedReport {
-	return api.TypedReport{Status: api.ReportStatus(in.Status), Summary: in.Summary, Structured: anyMapFromModel(in.Structured), ActionOutcome: ActionOutcomePtrFromModel(in.ActionOutcome), Handoff: HandoffRequestPtrFromModel(in.Handoff)}
+	return api.TypedReport{Status: api.ReportStatus(in.Status), Summary: in.Summary, Kind: in.Kind, Retryable: in.Retryable, Escalatable: in.Escalatable, Structured: anyMapFromModel(in.Structured), ActionOutcome: ActionOutcomePtrFromModel(in.ActionOutcome), Handoff: HandoffRequestPtrFromModel(in.Handoff)}
 }
 
 func TypedReportPtrToModel(in *api.TypedReport) *model.TypedReport {

@@ -82,6 +82,33 @@ func TestEngineRunMaxWallClockPrecedenceReturnsBudgetFailure(t *testing.T) {
 	}
 }
 
+func TestMaxWallClockEngineBudgetIsAuthoritativeOverLegacyMax(t *testing.T) {
+	// A present LoopPolicy.Budget is authoritative on the engine side too: a
+	// zero MaxWallClock in it means unbounded, so the legacy
+	// LoopPolicy.MaxWallClock must not be inherited (the same override contract
+	// as the per-Task budget).
+	engine := Engine{LoopPolicy: LoopPolicy{
+		MaxWallClock: 5 * time.Second,
+		Budget:       &api.TaskBudget{MaxTokens: 1000},
+	}}
+	if got := engine.maxWallClock(api.Task{}); got != 0 {
+		t.Fatalf("maxWallClock = %v, want 0 (engine budget present, wall-clock unbounded)", got)
+	}
+
+	// A present engine Budget that does set a wall-clock still wins over the
+	// legacy max.
+	engine.LoopPolicy.Budget = &api.TaskBudget{MaxWallClock: 2 * time.Second}
+	if got := engine.maxWallClock(api.Task{}); got != 2*time.Second {
+		t.Fatalf("maxWallClock = %v, want 2s (engine budget wall-clock wins)", got)
+	}
+
+	// With no engine Budget at all, the legacy bare max still applies.
+	engine.LoopPolicy.Budget = nil
+	if got := engine.maxWallClock(api.Task{}); got != 5*time.Second {
+		t.Fatalf("maxWallClock = %v, want 5s (legacy max applies when no budget)", got)
+	}
+}
+
 func TestEngineRunContextBuildHonorsMaxWallClock(t *testing.T) {
 	tests := []struct {
 		name       string

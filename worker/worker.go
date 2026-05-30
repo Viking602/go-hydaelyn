@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -171,7 +172,15 @@ func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.En
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	go w.heartbeatLoop(heartbeatCtx, leaseID, ttl, heartbeatDone)
-	result := engine.Run(ctx, task, agent.OutputPolicy{})
+	// The task carries its OutputSchema through the durable store (see
+	// api.Task.OutputSchema); rebuild the OutputPolicy from it so structured
+	// validation actually runs on the worker path. This mirrors the in-process
+	// Dispatch.OutputPolicy that multiagent.buildDispatch constructs (Schema +
+	// Validate, no repair).
+	result := engine.Run(ctx, task, agent.OutputPolicy{
+		Schema:   task.OutputSchema,
+		Validate: len(task.OutputSchema) > 0,
+	})
 	stopHeartbeat()
 	<-heartbeatDone
 	if result.Failure != nil {
@@ -192,6 +201,27 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 	if summary == "" {
 		summary = "completed"
 	}
+	report := api.TypedReport{
+		Status:  api.ReportStatusSuccess,
+		Summary: summary,
+	}
+	// Carry the schema-validated structured output onto the report so durable
+	// downstream readers (routers, graph edges) observe the same
+	// Task.Result.Structured the in-process report path exposes. result.Structured
+	// is populated only when the terminal output validated against the task's
+	// OutputSchema; without this, a schema-backed worker output is validated and
+	// then silently dropped. The report contract is object-shaped (map[string]any),
+	// matching the in-process path (see multiagent voting/router/graph consumers),
+	// so a validated non-object output is surfaced as a worker failure rather than
+	// quietly discarded.
+	if len(result.Structured) > 0 {
+		structured := map[string]any{}
+		if err := json.Unmarshal(result.Structured, &structured); err != nil {
+			err = fmt.Errorf("worker: validated structured output is not a JSON object: %w", err)
+			return w.submitFailureReportHandled(ctx, task, lease, err), err
+		}
+		report.Structured = structured
+	}
 	if err := w.Runner.WriteItem(ctx, api.BlackboardItem{
 		RunID:      task.RunID,
 		TaskID:     task.ID,
@@ -210,10 +240,7 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: api.TypedReport{
-			Status:  api.ReportStatusSuccess,
-			Summary: summary,
-		},
+		Report:      report,
 	})
 	return reportErr == nil, reportErr
 }
@@ -315,11 +342,27 @@ func (w AgentWorker) submitFailure(ctx context.Context, task api.Task, lease api
 		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
-		Report: api.TypedReport{
-			Status:  api.ReportStatusFailed,
-			Summary: cause.Error(),
-		},
+		Report:      failureReport(cause),
 	})
+}
+
+// failureReport builds the failed TypedReport for a cause. When the cause is
+// or wraps an AgentFailure it carries the agent loop's typed classification —
+// the failure Kind plus its retry/escalate disposition — so a scheduler can
+// branch on the failure mode rather than re-parsing Summary. A plain error
+// leaves those fields empty.
+func failureReport(cause error) api.TypedReport {
+	report := api.TypedReport{
+		Status:  api.ReportStatusFailed,
+		Summary: cause.Error(),
+	}
+	var failure *agent.AgentFailure
+	if errors.As(cause, &failure) && failure != nil {
+		report.Kind = string(failure.Kind)
+		report.Retryable = failure.Retryable
+		report.Escalatable = failure.Escalatable
+	}
+	return report
 }
 
 func firstWriteTarget(task api.Task) string {

@@ -1,6 +1,10 @@
 package run
 
-import "github.com/Viking602/go-hydaelyn/internal/core/model"
+import (
+	"encoding/json"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
+)
 
 type StartRunCommand struct {
 	RunID      string
@@ -29,6 +33,9 @@ type CreateTaskCommand struct {
 	WriteTargets       []string
 	RetryPolicy        model.RetryPolicy
 	PolicyDecisions    []model.PolicyDecision
+	InputSchema        json.RawMessage
+	OutputSchema       json.RawMessage
+	Budget             *model.TaskBudget
 }
 
 func (StartRunCommand) CommandName() string   { return "run.start" }

@@ -106,6 +106,28 @@ func TestTaskAdapterRoundTripsV08Fields(t *testing.T) {
 	}
 }
 
+func TestTypedReportAdapterRoundTripsFailureFields(t *testing.T) {
+	original := api.TypedReport{
+		Status:      api.ReportStatusFailed,
+		Summary:     "budget ran out",
+		Kind:        "budget_exhausted",
+		Retryable:   true,
+		Escalatable: false,
+		Structured:  map[string]any{"dimension": "max tokens"},
+	}
+
+	roundTrip := TypedReportFromModel(TypedReportToModel(original))
+
+	if !reflect.DeepEqual(roundTrip, original) {
+		t.Fatalf("TypedReport round-trip mismatch\nwant: %#v\n got: %#v", original, roundTrip)
+	}
+	// Distinct true/false values guard against the two booleans being swapped
+	// in the adapter.
+	if roundTrip.Kind != "budget_exhausted" || !roundTrip.Retryable || roundTrip.Escalatable {
+		t.Fatalf("failure fields not preserved: %#v", roundTrip)
+	}
+}
+
 func TestErrorBridgingPreservesErrorsIs(t *testing.T) {
 	apiErr := ErrorToAPI(model.ErrPolicyDenied)
 	if !errors.Is(apiErr, api.ErrPolicyDenied) {
