@@ -2,12 +2,42 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/message"
 )
+
+// panicDriver always panics from Execute, modeling a buggy tool driver.
+type panicDriver struct{ name string }
+
+func (d *panicDriver) Definition() Definition {
+	return Definition{Name: d.name, InputSchema: Schema{Type: "object"}}
+}
+
+func (d *panicDriver) Execute(_ context.Context, _ Call, _ UpdateSink) (Result, error) {
+	panic("driver exploded")
+}
+
+// TestExecuteParallelRecoversDriverPanic pins the parallel-mode containment
+// contract: a tool driver that panics on a bus-spawned goroutine must be
+// recovered there and surfaced as a batch error (ErrToolPanic), never allowed
+// to unwind the runtime and crash the process. Without the recover this test
+// would abort the package binary instead of failing an assertion.
+func TestExecuteParallelRecoversDriverPanic(t *testing.T) {
+	bus := NewBus(&panicDriver{name: "boom"})
+
+	_, err := bus.ExecuteBatch(context.Background(), []Call{{Name: "boom"}}, ModeParallel, nil)
+
+	if err == nil {
+		t.Fatal("expected an error from a panicking driver in parallel mode")
+	}
+	if !errors.Is(err, ErrToolPanic) {
+		t.Fatalf("errors.Is(err, ErrToolPanic) = false, err = %v", err)
+	}
+}
 
 func TestMaxConcurrencyParallelToolsReduceLatency(t *testing.T) {
 	driver := &latencyDriver{name: "slow", latency: 20 * time.Millisecond}
