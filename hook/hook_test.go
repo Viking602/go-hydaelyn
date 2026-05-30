@@ -59,6 +59,76 @@ func (m *mockHandler) OnEvent(_ context.Context, _ provider.Event) error {
 	return nil
 }
 
+// panicHandler panics from exactly one hook stage, leaving the others as
+// no-ops, so a test can drive each Chain method into a recovered panic.
+type panicHandler struct{ stage string }
+
+func (h panicHandler) TransformContext(_ context.Context, m []message.Message) ([]message.Message, error) {
+	if h.stage == "TransformContext" {
+		panic("transform boom")
+	}
+	return m, nil
+}
+
+func (h panicHandler) BeforeModelCall(_ context.Context, _ *provider.Request) error {
+	if h.stage == "BeforeModelCall" {
+		panic("before-model boom")
+	}
+	return nil
+}
+
+func (h panicHandler) BeforeToolCall(_ context.Context, _ *tool.Call) error {
+	if h.stage == "BeforeToolCall" {
+		panic("before-tool boom")
+	}
+	return nil
+}
+
+func (h panicHandler) AfterToolCall(_ context.Context, _ *tool.Result) error {
+	if h.stage == "AfterToolCall" {
+		panic("after-tool boom")
+	}
+	return nil
+}
+
+func (h panicHandler) OnEvent(_ context.Context, _ provider.Event) error {
+	if h.stage == "OnEvent" {
+		panic("on-event boom")
+	}
+	return nil
+}
+
+// TestChainConvertsHandlerPanicToError pins the Chain's containment contract:
+// a caller-supplied handler that panics must not unwind the engine's stack.
+// Every Chain method recovers the panic and returns an ErrHandlerPanic-wrapped
+// error instead, so the agent loop can surface a typed failure. If any stage
+// failed to recover, this test would crash the package binary rather than fail.
+func TestChainConvertsHandlerPanicToError(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		stage string
+		call  func(Chain) error
+	}{
+		{"TransformContext", func(c Chain) error { _, err := c.TransformContext(ctx, nil); return err }},
+		{"BeforeModelCall", func(c Chain) error { return c.BeforeModelCall(ctx, &provider.Request{}) }},
+		{"BeforeToolCall", func(c Chain) error { return c.BeforeToolCall(ctx, &tool.Call{}) }},
+		{"AfterToolCall", func(c Chain) error { return c.AfterToolCall(ctx, &tool.Result{}) }},
+		{"OnEvent", func(c Chain) error { return c.OnEvent(ctx, provider.Event{}) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stage, func(t *testing.T) {
+			chain := NewChain(panicHandler{stage: tc.stage})
+			err := tc.call(chain)
+			if err == nil {
+				t.Fatalf("%s: expected an error from a panicking handler, got nil", tc.stage)
+			}
+			if !errors.Is(err, ErrHandlerPanic) {
+				t.Fatalf("%s: errors.Is(err, ErrHandlerPanic) = false, err = %v", tc.stage, err)
+			}
+		})
+	}
+}
+
 func TestNewChain(t *testing.T) {
 	handler1 := &mockHandler{}
 	handler2 := &mockHandler{}
