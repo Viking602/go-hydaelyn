@@ -23,6 +23,20 @@ var ErrToolBusMissing = errors.New("tool bus missing")
 // FailureKindBudgetExhausted Result.
 var ErrBudgetExhausted = errors.New("agent loop budget exhausted")
 
+// ErrPanicRecovered wraps a panic recovered by RunMessages. The loop invokes
+// caller-supplied extension code — guardrails, recorders, sinks, the OnEvent
+// callback, the provider stream, and sequential tool drivers — any of which may
+// panic on the loop's own goroutine. RunMessages recovers such a panic, returns
+// the partial trace accumulated so far, and surfaces it through this sentinel so
+// the panic degrades to a typed FailureKindEngineError instead of crashing the
+// worker process. Two panic sources are contained one level lower so they carry
+// more precise provenance and never reach this defer: hook handlers, guarded by
+// hook.Chain (hook.ErrHandlerPanic), and parallel tool drivers, which run on
+// bus-spawned goroutines the loop's recover cannot see and are contained by the
+// bus itself (tool.ErrToolPanic). errors.Is(err, ErrPanicRecovered) reports
+// whether a loop error originated from a panic recovered here.
+var ErrPanicRecovered = errors.New("agent loop recovered a panic")
+
 // LoopInput is the message-level input to Engine.RunMessages, the
 // low-level loop entry preserved from v0.7. Most callers should use
 // Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
@@ -37,8 +51,12 @@ type LoopInput struct {
 
 	// Sink, when set, receives a live stream.Frame for every provider
 	// event and tool result as the loop runs. It is a transient
-	// side-channel: the durable LoopOutput is unaffected by it, so
-	// streaming never changes what the runner persists or replays.
+	// side-channel: on success the durable LoopOutput is byte-for-byte
+	// identical to a run with no Sink, so streaming never changes what the
+	// runner persists or replays. A Sink.Emit error is not swallowed — it
+	// aborts the current turn and surfaces as the loop error, exactly like a
+	// failing OnEvent callback — so a Sink must absorb transient delivery
+	// hiccups it can tolerate rather than returning an error for them.
 	Sink stream.Sink
 
 	StopSequences  []string
@@ -124,7 +142,7 @@ type Engine struct {
 
 // RunMessages is the low-level loop that drives one LoopInput to
 // completion. Engine.Run is the task-level wrapper most callers want.
-func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, error) {
+func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutput, err error) {
 	if input.MaxIterations <= 0 {
 		// Default loop ceiling when the caller sets no bound. 12 sits above
 		// OpenAI's default of 10 and well below LangGraph's 25; the prior
@@ -140,7 +158,28 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 	totalUsage := provider.Usage{}
 	steps := make([]Step, 0, input.MaxIterations)
 	toolCallsUsed := 0
+	// Recover any panic raised by caller-supplied extension code the loop drives
+	// on this goroutine (guardrails, recorders, sinks, the OnEvent callback, the
+	// provider stream, and sequential tool drivers) so a misbehaving extension
+	// degrades to a typed failure instead of crashing the worker. The accumulated
+	// trace is preserved on the returned LoopOutput. Two panic sources never
+	// reach this defer and are contained closer to their origin: hook handlers,
+	// in hook.Chain, and parallel tool drivers, which run on bus-spawned
+	// goroutines this recover cannot observe and are contained by the tool bus.
+	defer func() {
+		if r := recover(); r != nil {
+			out = loopErrorOutput(current, totalUsage, steps, len(steps), toolCallsUsed)
+			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
+		}
+	}()
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
+		// A cancelled or expired context ends the loop promptly rather than
+		// issuing another model turn; the cause (context.Canceled or
+		// context.DeadlineExceeded) flows through loopErrorFailure, which maps a
+		// budget-driven deadline to FailureKindBudgetExhausted.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), ctxErr
+		}
 		// Enforce the per-loop budget before every turn after the first.
 		// Reaching iteration N>0 means a prior turn chose to continue, so this
 		// is exactly a "will continue" boundary; a run that finished earlier
@@ -152,9 +191,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 				return budgetAbort(current, totalUsage, steps, iteration, toolCallsUsed, dimension)
 			}
 		}
-		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
-		if err != nil {
-			return LoopOutput{}, err
+		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
+		if turnErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), turnErr
 		}
 		totalUsage = totalUsage.Add(usage)
 		modelCall := &ModelCall{
@@ -164,9 +203,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 			StopReason:   stopReason,
 		}
 		if len(assistant.ToolCalls) == 0 {
-			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
-			if err != nil {
-				return LoopOutput{}, err
+			finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
+			if guardErr != nil {
+				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), guardErr
 			}
 			if len(retryMessages) > 0 {
 				// A guardrail asked to retry: record the turn as a continue
@@ -201,7 +240,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 			current = append(current, assistant)
 		}
 		if e.Tools == nil {
-			return LoopOutput{}, ErrToolBusMissing
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ErrToolBusMissing
 		}
 		// Gate the batch against every budget dimension BEFORE dispatching it.
 		// The model turn just ran, so its token spend is now folded into
@@ -220,13 +259,14 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 			})
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
-		results, terminal, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
-		if err != nil {
-			return LoopOutput{}, err
+		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
+		if toolErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), toolErr
 		}
-		current, err = appendToolResults(ctx, current, results, input.Sink)
-		if err != nil {
-			return LoopOutput{}, err
+		var appendErr error
+		current, appendErr = appendToolResults(ctx, current, results, input.Sink)
+		if appendErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
 		}
 		toolCallsUsed += len(assistant.ToolCalls)
 		decision := StepDecisionContinue
@@ -335,6 +375,23 @@ func budgetAbort(current []message.Message, usage provider.Usage, steps []Step, 
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, fmt.Errorf("%w: %s", ErrBudgetExhausted, dimension)
+}
+
+// loopErrorOutput builds the partial LoopOutput returned alongside a
+// non-budget loop error. It mirrors budgetAbort for the error path: the
+// messages, usage, and steps accumulated before the failure are preserved
+// (StopReason is StopReasonError) so a scheduler and the durable record keep
+// the trace that led up to the error instead of discarding it. iterations is
+// the number of model turns that ran before the failure.
+func loopErrorOutput(current []message.Message, usage provider.Usage, steps []Step, iterations, toolCallsUsed int) LoopOutput {
+	return LoopOutput{
+		Messages:      current,
+		Usage:         usage,
+		StopReason:    provider.StopReasonError,
+		Iterations:    iterations,
+		Steps:         steps,
+		ToolCallsUsed: toolCallsUsed,
+	}
 }
 
 // appendRetryContext assembles the messages a guardrail retry feeds back into
@@ -555,6 +612,12 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
 	for {
+		// Stop draining the provider stream as soon as the context is done so a
+		// cancelled or timed-out turn returns promptly instead of blocking on
+		// the next event; the cause is surfaced for loopErrorFailure to classify.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return message.Message{}, provider.Usage{}, provider.StopReasonError, ctxErr
+		}
 		event, err := providerStream.Recv()
 		if err != nil {
 			if err == io.EOF {

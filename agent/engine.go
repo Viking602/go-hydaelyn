@@ -271,11 +271,18 @@ func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxS
 // (ErrToolBusMissing) — surfaces as FailureKindToolUnavailable, marked
 // retryable and escalatable so a scheduler applies the documented "retry with
 // backoff, then escalate" path (spec 03 §dispatch policy) instead of treating
-// an unavailable tool as an opaque engine error. Anything else is a generic
-// engine error. The Reason and cause mirror the source error so errors.Is /
-// errors.As still walk the chain across the boundary.
+// an unavailable tool as an opaque engine error. An output guardrail that
+// refuses the terminal output — a tripwire block or a retry the loop could not
+// satisfy within MaxIterations — surfaces as FailureKindUnsafeAction, marked
+// escalatable but not retryable, matching the spec's "request human approval;
+// do not retry automatically" semantics: the guardrail already withheld the
+// output, so an automated re-run is not the right next step. Anything else is a
+// generic engine error. The Reason and cause mirror the source error so
+// errors.Is / errors.As still walk the chain across the boundary.
 func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentFailure {
 	failure := &AgentFailure{Reason: err.Error()}
+	var tripwire *OutputGuardrailTripwireTriggeredError
+	var retryLimit *OutputGuardrailRetryLimitExceededError
 	switch {
 	case errors.Is(err, ErrBudgetExhausted):
 		failure.Kind = FailureKindBudgetExhausted
@@ -284,6 +291,9 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 	case errors.Is(err, ErrToolBusMissing) || errors.Is(err, tool.ErrToolNotFound):
 		failure.Kind = FailureKindToolUnavailable
 		failure.Retryable = true
+		failure.Escalatable = true
+	case errors.As(err, &tripwire), errors.As(err, &retryLimit):
+		failure.Kind = FailureKindUnsafeAction
 		failure.Escalatable = true
 	default:
 		failure.Kind = FailureKindEngineError

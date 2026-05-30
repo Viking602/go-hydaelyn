@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -120,7 +121,17 @@ func TestEngineRunBlockingGuardrailFailsRun(t *testing.T) {
 	if result.Failure == nil {
 		t.Fatal("expected a failure when a guardrail blocks the output")
 	}
-	if result.Failure.Kind != FailureKindEngineError {
-		t.Fatalf("Failure.Kind = %s, want engine_error", result.Failure.Kind)
+	// A guardrail block is a safety refusal, not an opaque engine fault: it
+	// surfaces as unsafe_action so a scheduler escalates for human review
+	// rather than blindly retrying. The typed cause stays on the chain.
+	if result.Failure.Kind != FailureKindUnsafeAction {
+		t.Fatalf("Failure.Kind = %s, want unsafe_action", result.Failure.Kind)
+	}
+	if !result.Failure.Escalatable || result.Failure.Retryable {
+		t.Fatalf("Failure = %#v, want escalatable and not retryable", result.Failure)
+	}
+	var tripwire *OutputGuardrailTripwireTriggeredError
+	if !errors.As(result.Failure, &tripwire) {
+		t.Fatalf("Failure cause = %v, want OutputGuardrailTripwireTriggeredError", result.Failure)
 	}
 }
