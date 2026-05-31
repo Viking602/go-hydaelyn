@@ -10,6 +10,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/stream"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
@@ -143,6 +144,61 @@ func TestRunMessagesPreservesTraceOnNonBudgetError(t *testing.T) {
 	}
 	if len(out.Steps) < 1 {
 		t.Fatalf("preserved steps = %d, want >= 1 (the completed first turn)", len(out.Steps))
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+}
+
+// TestRunMessagesPreservesTraceWhenSinkEmitFails pins the trace-preservation
+// contract for the one failure mode that previously broke it: when a Sink is
+// configured and Emit fails on the tool-result frame, appendToolResults must
+// return the history accumulated so far rather than nil, so the prompt, the
+// assistant tool call, and the tool result all survive on the returned
+// LoopOutput. Before the fix appendToolResults returned nil on an Emit failure,
+// clobbering current so the partial-trace error path preserved an empty history.
+func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+
+	sinkErr := errors.New("sink delivery failed")
+	failingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+		// Let the model turn stream cleanly; fail only on the tool result so the
+		// failure lands inside appendToolResults, the path under test.
+		if frame.Kind == stream.FrameToolResult {
+			return sinkErr
+		}
+		return nil
+	})
+
+	engine := Engine{
+		Provider: &erroringSecondTurnProvider{},
+		Tools:    tool.NewBus(driver),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 3,
+		ToolMode:      tool.ModeSequential,
+		Sink:          failingSink,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected the sink Emit failure to surface as the loop error")
+	}
+	if !errors.Is(runErr, sinkErr) {
+		t.Fatalf("errors.Is(runErr, sinkErr) = false, runErr = %v", runErr)
+	}
+	// prompt + assistant tool call + tool result must all survive the failure.
+	if len(out.Messages) < 3 {
+		t.Fatalf("preserved messages = %d, want >= 3 (prompt, assistant tool call, tool result)", len(out.Messages))
 	}
 	if out.StopReason != provider.StopReasonError {
 		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)

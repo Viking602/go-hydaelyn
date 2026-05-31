@@ -592,7 +592,12 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 
 // appendToolResults appends each tool result to the running history and,
 // when a sink is set, emits a FrameToolResult for it. Tool results are a
-// loop-level enrichment with no provider.Event equivalent.
+// loop-level enrichment with no provider.Event equivalent. On a sink Emit
+// failure it returns the history accumulated so far — not nil — so the caller's
+// partial-trace error path preserves the prompt, the assistant tool call, and
+// every tool result already appended (including the one whose streaming just
+// failed) rather than discarding the turn. Each result is appended before its
+// Emit, so it is real accumulated state; only the side-channel delivery hiccuped.
 func appendToolResults(ctx context.Context, current []message.Message, results []message.ToolResult, sink stream.Sink) ([]message.Message, error) {
 	for _, result := range results {
 		current = append(current, message.NewToolResult(result))
@@ -601,7 +606,7 @@ func appendToolResults(ctx context.Context, current []message.Message, results [
 		}
 		toolResult := result
 		if err := sink.Emit(ctx, stream.Frame{Kind: stream.FrameToolResult, ToolResult: &toolResult}); err != nil {
-			return nil, err
+			return current, err
 		}
 	}
 	return current, nil
