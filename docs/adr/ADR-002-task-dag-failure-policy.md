@@ -1,33 +1,33 @@
-# ADR-002 Task DAG 与 `FailurePolicy`
+# ADR-002 Task DAG and `FailurePolicy`
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-仓库原先存在三个语义缺口：
+The repository previously had three semantic gaps:
 
-- `executeTasks` 会执行全部 pending task，而不是只执行 runnable task
-- task 图没有系统化校验，循环依赖、缺失依赖、重复 ID 都可能悄悄进入运行态
-- task 失败后 pattern 仍可能继续 aggregate，形成静默降级
+- `executeTasks` would execute all pending tasks, rather than only runnable tasks
+- The task graph had no systematic validation; cyclic dependencies, missing dependencies, and duplicate IDs could all quietly slip into the running state
+- After a task failed, the pattern could still continue to aggregate, resulting in silent degradation
 
-## 决策
+## Decision
 
-- `RunState.Validate()` 负责校验 task graph 的重复 ID、缺失依赖、循环依赖与 assignee 合法性
-- `Runtime.executeTasks()` 只调度 `RunnableTasks()`
-- `Task` 引入 `FailurePolicy`
-- 当前支持四类策略：`fail_fast`、`retry`、`degrade`、`skip_optional`
-- 对于阻塞依赖失败的 pending task，运行时会先解析成 `failed` 或 `skipped`，避免团队卡死
-- 一旦出现 blocking failure，team 立即进入 failed，禁止继续 aggregate
+- `RunState.Validate()` is responsible for validating the task graph for duplicate IDs, missing dependencies, cyclic dependencies, and assignee validity
+- `Runtime.executeTasks()` only schedules `RunnableTasks()`
+- `Task` introduces `FailurePolicy`
+- Four policy classes are currently supported: `fail_fast`, `retry`, `degrade`, `skip_optional`
+- For a pending task whose blocking dependency has failed, the runtime first resolves it into `failed` or `skipped`, to avoid deadlocking the team
+- Once a blocking failure occurs, the team immediately enters `failed`, and further aggregation is prohibited
 
-## 影响
+## Impact
 
-- 线性、并行、diamond DAG 的执行语义可预测
-- 失败依赖不会被提前执行
-- 失败从 pattern 拼接层回收到 runtime 语义层
+- The execution semantics of linear, parallel, and diamond DAGs are predictable
+- Failed dependencies will not be executed prematurely
+- Failure is reclaimed from the pattern stitching layer back into the runtime semantic layer
 
-## 后续
+## Follow-up
 
-- `retry` 目前是基础能力，后续 v0.7 durable runtime 里要和 lease、idempotency、checkpoint 联动
-- `degrade` 与 `skip_optional` 后续还需要配合 verifier/synthesizer 做更细粒度输出控制
+- `retry` is currently a basic capability; later, in the v0.7 durable runtime, it must interlock with lease, idempotency, and checkpoint
+- `degrade` and `skip_optional` still need to coordinate with the verifier/synthesizer for finer-grained output control

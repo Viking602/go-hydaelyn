@@ -1,21 +1,21 @@
-# ADR-007 EventStore 与 Replay 语义
+# ADR-007 EventStore and Replay Semantics
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-在 v0.6 之前，team runtime 的状态主要依赖内存中的 `RunState` 与 `TeamStore` 快照。这样的问题是：
+Before v0.6, the state of the team runtime relied mainly on the in-memory `RunState` and `TeamStore` snapshots. The problems with this were:
 
-- 中断后缺少可重建的事件流
-- pause / approval / abort 只有终态，没有过程证据
-- admin inspect 无法回放任务生命周期
+- After an interruption, there was no reconstructable event stream
+- pause / approval / abort only had terminal states, with no evidence of the process
+- admin inspect could not replay the task lifecycle
 
-## 决策
+## Decision
 
-- 引入 `storage.EventStore`
-- 首批事件类型：
+- Introduce `storage.EventStore`
+- The first batch of event types:
   - `TeamStarted`
   - `PlanCreated`
   - `TaskScheduled`
@@ -25,22 +25,22 @@
   - `ApprovalRequested`
   - `CheckpointSaved`
   - `TeamCompleted`
-- runtime 在 team/task 生命周期中同步写事件
-- `ReplayTeamState` 通过事件流重建 `RunState`
+- The runtime writes events synchronously during the team/task lifecycle
+- `ReplayTeamState` reconstructs `RunState` from the event stream
 
-## 当前语义
+## Current Semantics
 
-- team 创建时会记录 `TeamStarted`
-- planner 存在时会记录 `PlanCreated`
-- task 初始生成时会记录 `TaskScheduled`
-- task 进入执行时会记录 `TaskStarted`
-- task 成功/失败时会记录 `TaskCompleted` / `TaskFailed`
-- `ask-human` 会记录 `ApprovalRequested`
-- `AbortTeam` 会落 `CheckpointSaved`
-- team 正常完成会落 `TeamCompleted`
+- Creating a team records `TeamStarted`
+- When a planner exists, `PlanCreated` is recorded
+- When tasks are initially generated, `TaskScheduled` is recorded
+- When a task enters execution, `TaskStarted` is recorded
+- When a task succeeds/fails, `TaskCompleted` / `TaskFailed` is recorded
+- `ask-human` records `ApprovalRequested`
+- `AbortTeam` writes `CheckpointSaved`
+- When a team completes normally, `TeamCompleted` is written
 
-## 影响
+## Impact
 
-- pause / resume / replay / abort 已经有了可持久化基础
-- admin 可以查看 team events 并回放 team 状态
-- 后续 v0.7 的 checkpoint / idempotency / lease 机制可以继续在这套事件模型上扩展
+- pause / resume / replay / abort now have a persistable foundation
+- admin can view team events and replay team state
+- The subsequent v0.7 checkpoint / idempotency / lease mechanisms can continue to extend on this event model

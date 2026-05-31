@@ -1,31 +1,31 @@
-# ADR-001 `Profile` 与 `AgentInstance` 分离
+# ADR-001 Separating `Profile` and `AgentInstance`
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-仓库原先把 task assignee 直接写成 profile 名。这会导致两个问题：
+The repository originally wrote the task assignee directly as the profile name. This caused two problems:
 
-- 运行中身份和能力模板混在一起，无法表达同 profile 多 worker 并发
-- session、task、共享消息都只能挂在 profile 上，无法保证身份一致性
+- Runtime identity and the capability template were mixed together, making it impossible to express multiple concurrent workers under the same profile
+- session, task, and shared messages could only be attached to a profile, so identity consistency could not be guaranteed
 
-## 决策
+## Decision
 
-- 保留 `Profile` 作为能力模板
-- 引入 `AgentInstance` 作为运行时实体
-- `RunState.Supervisor` 与 `RunState.Workers` 改为保存 `AgentInstance`
-- `Task` 不再以 profile 名直接承载 assignee，而是绑定 `AssigneeAgentID`
-- session 与 shared message 统一写入真实 `AgentInstance.ID`
+- Keep `Profile` as the capability template
+- Introduce `AgentInstance` as the runtime entity
+- Change `RunState.Supervisor` and `RunState.Workers` to hold `AgentInstance`
+- `Task` no longer carries the assignee directly via the profile name; instead it binds an `AssigneeAgentID`
+- session and shared message are uniformly written with the real `AgentInstance.ID`
 
-## 影响
+## Impact
 
-- 同 profile 多 worker 现在可以拥有不同的 agent identity 与独立私有 session
-- 调度逻辑可以先按 agent 选执行体，再解析 profile 能力模板
-- 后续按 role、capability、budget 做 scheduler/router 扩展时，不需要再拆第二次模型
+- Multiple workers under the same profile can now have distinct agent identities and independent private sessions
+- The scheduling logic can first pick an executor by agent, then resolve the profile capability template
+- When later extending the scheduler/router by role, capability, or budget, the model does not need to be split a second time
 
-## 代价
+## Costs
 
-- 运行时与 pattern 的装配代码变复杂了一层
-- 现有数据结构保留了兼容字段，后续还需要继续清理旧字段
+- The assembly code for the runtime and patterns becomes one layer more complex
+- Existing data structures retain compatibility fields, so the old fields still need to be cleaned up later

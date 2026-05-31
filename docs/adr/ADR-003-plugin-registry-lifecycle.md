@@ -1,25 +1,25 @@
-# ADR-003 Plugin Registry 与生命周期
+# ADR-003 Plugin Registry and Lifecycle
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-仓库原先的扩展点是分散注册：
+The repository's original extension points used scattered registration:
 
 - `RegisterProvider`
 - `RegisterTool`
 - `RegisterHook`
 - `RegisterWorkflow`
 
-这种方式的问题是扩展面不统一，也无法表达插件级配置与治理边界。
+The problem with this approach is that the extension surface is not unified, and it cannot express plugin-level configuration and governance boundaries.
 
-## 决策
+## Decision
 
-- 引入 `plugin.Registry`
-- 注册键固定为 `type/name`
-- 首批统一插件类型：
+- Introduce `plugin.Registry`
+- The registration key is fixed as `type/name`
+- The first batch of unified plugin types:
   - `provider`
   - `tool`
   - `planner`
@@ -29,20 +29,20 @@
   - `observer`
   - `scheduler`
   - `mcp_gateway`
-- `Runtime.RegisterPlugin` 成为统一入口
-- 原有 `RegisterProvider` / `RegisterTool` 保留为兼容 API，但底层同步写入插件注册表
+- `Runtime.RegisterPlugin` becomes the unified entry point
+- The existing `RegisterProvider` / `RegisterTool` are retained as compatibility APIs, but synchronously write into the plugin registry underneath
 
-## 生命周期
+## Lifecycle
 
-- 注册时先进入 registry
-- 对当前 runtime 已知的类型做接线：
-  - `provider` 接到 provider map
-  - `tool` 接到 tool bus
-  - `storage` 接到 runtime storage
-  - `observer` 接到 hook chain
-- 其他类型先进入 registry，等待后续里程碑把真实执行面接通
+- On registration, an entry is first placed into the registry
+- Wiring is performed for the types known to the current runtime:
+  - `provider` is wired to the provider map
+  - `tool` is wired to the tool bus
+  - `storage` is wired to runtime storage
+  - `observer` is wired to the hook chain
+- Other types first enter the registry, waiting for subsequent milestones to connect the real execution surface
 
-## 影响
+## Impact
 
-- 扩展面从散装注册转成统一控制面
-- 后续 plugin 配置、观测、治理和生态拆分有了稳定挂点
+- The extension surface shifts from loose registration to a unified control plane
+- Subsequent plugin configuration, observability, governance, and ecosystem decomposition now have a stable attachment point

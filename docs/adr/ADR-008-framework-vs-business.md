@@ -1,72 +1,72 @@
-# ADR-008 框架与业务的职责边界（P-1）
+# ADR-008 Responsibility Boundary Between Framework and Business (P-1)
 
-## 状态
+## Status
 
-已接受 — 自 v2.0 路线图（计划文件：`/Users/viking/.claude/plans/sunny-hugging-goose.md`）开始强制。
+Accepted — enforced starting from the v2.0 roadmap (plan file: `/Users/viking/.claude/plans/sunny-hugging-goose.md`).
 
 **Revised 2026-05-24:** v0.8.0 reconstruction (master spec `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md`, ADR-016) introduces a first-class `multiagent/` kernel package whose vocabulary includes terms like `Scheduler`, `Supervisor`, `Voting`, `Debate`. These are *framework primitives* for multi-agent coordination, not business vocabulary, and are explicitly exempted from the ban below. See *Revised — multi-agent primitive exception list* at the bottom of this ADR.
 
-## 背景
+## Context
 
-Hydaelyn 的目标是做"Go 原生多智能体运行时"框架，把"如何并发调度任务、协调多 Agent、传递证据、做审批与处置"这套**能力**做厚做正确，让开发者在其上自由定义自己的业务架构（用户给出的事故响应参考架构只是一种可能性）。
+Hydaelyn's goal is to be a "Go-native multi-agent runtime" framework: to make the **capabilities** of "how to schedule tasks concurrently, coordinate multiple Agents, pass evidence around, and perform approval and disposition" thick and correct, so that developers can freely define their own business architecture on top of it (the incident-response reference architecture the user provided is only one possibility).
 
-但当前 `internal/core/types.go` 直接定义了：
+But the current `internal/core/types.go` directly defines:
 
 - `TaskTypeSynthesis` / `TaskTypeReview` / `TaskTypeAction`
 - `BlackboardItemSynthesis` / `BlackboardItemReviewResult` / `BlackboardItemActionResult`
 
-并且 `internal/core/report.go` 用 `TaskTypeAction` 来分支判定行为、用 `BlackboardItemActionResult` 写黑板。这把"归因/评审/处置"这一套**业务语义**焊在了框架里。后果：
+And `internal/core/report.go` uses `TaskTypeAction` to branch its behavior decisions, and uses `BlackboardItemActionResult` to write the blackboard. This welds the **business semantics** of "attribution/review/disposition" into the framework. Consequences:
 
-- 任何不做事故响应的领域被迫要么忽略这些常量、要么被它们语义干扰；
-- 框架想增删一种业务流程都得改核心；
-- 用户写新场景时不知道哪些 API 是"框架"哪些是"业务示例"。
+- Any domain that does not do incident response is forced to either ignore these constants or be semantically disturbed by them;
+- The framework has to modify the core just to add or remove a business process;
+- When users write new scenarios, they don't know which APIs are "framework" and which are "business examples."
 
-## 决策
+## Decision
 
-划分两条不可越界的红线：
+Draw two red lines that must not be crossed:
 
-### 1. 框架职责（保留 / 补完）
+### 1. Framework Responsibilities (keep / complete)
 
-| 能力 | 形式 |
+| Capability | Form |
 | ---- | ---- |
-| Run / Task 状态机 | `Run`, `Task`, `RunStatus`, `TaskStatus`, `TaskType` 仅作为字符串别名（不绑定语义） |
-| Blackboard | 读写 + 过滤 + Subscribe（M2.2）；item kind 由调用方任意命名 |
-| Mailbox | 路由 + fan-out（M2.1）+ Lease + Ack/DeadLetter |
-| Handoff 协议 | owner 历史 + 深度限制 + 环检测 |
-| Approval 协议 | 请求 / 决策 / ResumeToken |
-| Trace | Span 生命周期 |
-| Tool 调用合约 | `Tool.RequiresActionTask`、参数/输出 schema、PolicyEngine 钩子 |
-| 聚合屏障 | `AwaitMode{All,Any,Quorum}` + `OnDependencyFailed{Skip,Fail,Continue}`（M2.3） |
+| Run / Task state machine | `Run`, `Task`, `RunStatus`, `TaskStatus`, `TaskType` serve only as string aliases (no semantics bound) |
+| Blackboard | read/write + filter + Subscribe (M2.2); item kind named arbitrarily by the caller |
+| Mailbox | routing + fan-out (M2.1) + Lease + Ack/DeadLetter |
+| Handoff protocol | owner history + depth limit + cycle detection |
+| Approval protocol | request / decision / ResumeToken |
+| Trace | Span lifecycle |
+| Tool invocation contract | `Tool.RequiresActionTask`, parameter/output schema, PolicyEngine hooks |
+| Aggregation barrier | `AwaitMode{All,Any,Quorum}` + `OnDependencyFailed{Skip,Fail,Continue}` (M2.3) |
 
-### 2. 业务职责（开发者侧 — 框架不可预设）
+### 2. Business Responsibilities (developer side — the framework must not preset)
 
-| 业务概念 | 实现方式（框架提供原料） |
+| Business concept | Implementation approach (framework provides the raw materials) |
 | -------- | ------------------------ |
-| 角色（Monitor / Reviewer / Hazard…） | `AgentProfile.Role` + `AgentProfile.Metadata` |
-| 任务种类语义 | `Task.Tags []string` + `Task.Type`（开发者自定字符串） |
-| 黑板条目种类 | 调用方传入 `BlackboardItemKind`（任意字符串） |
-| 归因 / 评审 / 处置流程 | 由开发者用 Tool + Handoff + Approval 组合编排 |
-| 是否触发审批 | `Tool.RequiresActionTask` 工具元数据驱动，框架不识别 "Action" 字面 |
+| Roles (Monitor / Reviewer / Hazard…) | `AgentProfile.Role` + `AgentProfile.Metadata` |
+| Task kind semantics | `Task.Tags []string` + `Task.Type` (developer-defined string) |
+| Blackboard item kinds | Caller passes in `BlackboardItemKind` (arbitrary string) |
+| Attribution / review / disposition processes | Orchestrated by the developer using a combination of Tool + Handoff + Approval |
+| Whether approval is triggered | Driven by the `Tool.RequiresActionTask` tool metadata; the framework does not recognize the literal "Action" |
 
-### 3. 立即生效的硬约束
+### 3. Hard Constraints Effective Immediately
 
-- 框架代码（`internal/core/**`、`orchestrator/**`、`agent/**`、`blackboard/**`、`mailbox/**`、`tool/**`、`flow/**`、`hook/**`、`message/**`、`policy/**`、`provider/**`）**不得**新增以下字面量：
-  `Synthesis` / `Review` / `ReviewResult` / `Action`（作类型词时）/ `ActionResult` / `Hazard` / `Incident`
-- 已有出现位置（M3 清理目标）由 `.sentrux/business-words.baseline` 锁定基线 = 45。CI 校验"实际计数 ≤ 基线"，仅允许下降。
-- 框架代码**不得** import `legacy/**`。`.sentrux/rules.toml` 用 `[[boundaries]]` 对每个干净模块逐条锁定（`internal/core`、`orchestrator`、`agent`、`blackboard`、`mailbox`、`tool`、`flow`、`hook`、`message`、`policy`、`provider`），任何 PR 引入新依赖即 CI 失败。
-- 不使用 sentrux 的 `[[layers]]` + `layer_direction`：在 0.5.7 中该规则太粗，会在过渡期内卡住合理的 façade→runtime 内部调用；用显式 `[[boundaries]]` 可以渐进收紧。
-- `no_god_files` 暂时关闭：`archive/legacy-v1 host runtime`（fan-out=17）是合法残留，等 M6 删除 `legacy/` 后重启该规则。
+- Framework code (`internal/core/**`, `orchestrator/**`, `agent/**`, `blackboard/**`, `mailbox/**`, `tool/**`, `flow/**`, `hook/**`, `message/**`, `policy/**`, `provider/**`) **must not** add the following literals:
+  `Synthesis` / `Review` / `ReviewResult` / `Action` (when used as a type word) / `ActionResult` / `Hazard` / `Incident`
+- Existing occurrences (M3 cleanup target) are locked by `.sentrux/business-words.baseline` with baseline = 45. CI verifies "actual count ≤ baseline", only decrease is allowed.
+- Framework code **must not** import `legacy/**`. `.sentrux/rules.toml` uses `[[boundaries]]` to lock down each clean module individually (`internal/core`, `orchestrator`, `agent`, `blackboard`, `mailbox`, `tool`, `flow`, `hook`, `message`, `policy`, `provider`); any PR that introduces a new dependency fails CI.
+- Do not use sentrux's `[[layers]]` + `layer_direction`: in 0.5.7 this rule is too coarse and would block legitimate façade→runtime internal calls during the transition period; using explicit `[[boundaries]]` allows tightening incrementally.
+- `no_god_files` is temporarily turned off: `archive/legacy-v1 host runtime` (fan-out=17) is legitimate residue; restart this rule after M6 removes `legacy/`.
 
-### 4. 范围内的合理例外
+### 4. Reasonable Exceptions Within Scope
 
-- `_examples/`、`docs/`、`legacy/`、`pattern/`（M4.5 迁出前）**允许**自由使用业务词与领域类型。
-- `internal/cli/`、`internal/slow/` 当前仍 import legacy，由 M4.2 / M4.3 切除；规则范围在 M4 结束后才扩展到全部 `internal/**`。
+- `_examples/`, `docs/`, `legacy/`, `pattern/` (before being moved out in M4.5) **are allowed** to freely use business words and domain types.
+- `internal/cli/`, `internal/slow/` currently still import legacy, to be excised by M4.2 / M4.3; the rule scope only expands to all of `internal/**` after M4 ends.
 
-## 影响
+## Impact
 
-- 任何 PR 在评审时引用本 ADR 即可作为拒绝业务词进入框架的依据。
-- M3（业务词剥离）成为 v2.0 的硬性 break change：剥离 `TaskTypeSynthesis/Review/Action` 与 `BlackboardItem*Result`，由开发者自定。
-- 评分回归：`sentrux session_end` 与 M0 baseline（quality_signal=6166, modularity=3233）对比；M5 拆分后 modularity 应回升。
+- Any PR can cite this ADR during review as grounds for rejecting business words from entering the framework.
+- M3 (business-word stripping) becomes a hard breaking change for v2.0: strip `TaskTypeSynthesis/Review/Action` and `BlackboardItem*Result`, leaving them to be defined by developers.
+- Score regression: compare `sentrux session_end` against the M0 baseline (quality_signal=6166, modularity=3233); modularity should recover after the M5 split.
 
 ## Revised 2026-05-24 — multi-agent primitive exception list
 
@@ -116,10 +116,10 @@ The original §1/§2/§3 split holds:
 
 The intent of ADR-008 — "framework primitives are mechanism, business concepts are policy" — is unchanged. The revision recognizes that multi-agent coordination *is* a framework mechanism, and gives it vocabulary accordingly.
 
-## 引用
+## References
 
-- 计划文件：`/Users/viking/.claude/plans/sunny-hugging-goose.md`
-- 强制配置：`.sentrux/rules.toml`、`.sentrux/business-words.baseline`、`.github/workflows/ci.yml`（`architecture-gate` job）
+- Plan file: `/Users/viking/.claude/plans/sunny-hugging-goose.md`
+- Enforcement config: `.sentrux/rules.toml`, `.sentrux/business-words.baseline`, `.github/workflows/ci.yml` (`architecture-gate` job)
 - Master spec: `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md`
 - Multi-agent layer design: `docs/product-spec/v0.8.0/05-multi-agent-layer.md`
 - Related ADRs: ADR-015 (Strong Bounded Agent Loop), ADR-016 (Explicit Multi-Agent Scheduler), ADR-017 (Durable Runner Boundary), ADR-014 (Agent Ontology Stance — revised)

@@ -1,45 +1,45 @@
-# ADR-006 Blackboard / Evidence 数据模型
+# ADR-006 Blackboard / Evidence Data Model
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-原先多 agent 协作只靠 `task.Result` 和最终 summary 拼接：
+Previously, multi-agent collaboration relied solely on `task.Result` and concatenating the final summary:
 
-- research task 直接把 summary 暴露给最终聚合
-- verify task 没有结构化输出
-- synthesizer 无法区分已验证和未验证结论
+- the research task exposed its summary directly to the final aggregation
+- the verify task had no structured output
+- the synthesizer could not distinguish verified from unverified conclusions
 
-这导致运行时无法表达 claim、evidence、verification 的真实关系。
+This left the runtime unable to express the real relationships between claim, evidence, and verification.
 
-## 决策
+## Decision
 
-- 引入 `blackboard` 包，定义：
+- Introduce the `blackboard` package, defining:
   - `Source`
   - `Artifact`
   - `Evidence`
   - `Claim`
   - `Finding`
   - `VerificationResult`
-- runtime 在 research task 完成后通过 publish pipeline 发布到 blackboard
-- publish pipeline 负责最小版：
+- after a research task completes, the runtime publishes to the blackboard through the publish pipeline
+- the publish pipeline handles the minimal version:
   - `normalize`
   - `dedupe`
   - `redact`
   - `score`
-- verify task 完成后产出结构化 `VerificationResult`
-- synthesizer 只消费 `supported` claim 对应的 finding
+- after a verify task completes, it produces a structured `VerificationResult`
+- the synthesizer only consumes the finding corresponding to a `supported` claim
 
-## 当前语义
+## Current Semantics
 
-- research task 会发布 source、artifact、evidence、claim、finding
-- verify task 会按依赖 research task 的 claim 写入 `VerificationResult`
-- deepsearch 在 requireVerification 场景下只聚合 supported finding
+- a research task publishes source, artifact, evidence, claim, and finding
+- a verify task writes a `VerificationResult` keyed to the claim of the research task it depends on
+- in the requireVerification scenario, deepsearch only aggregates supported findings
 
-## 影响
+## Impact
 
-- 最终输出不再直接依赖原始 worker summary
-- contradiction / insufficient 已进入可追踪状态模型
-- 后续 verifier plugin、approval、event replay 都有了稳定数据落点
+- the final output no longer depends directly on the raw worker summary
+- contradiction / insufficient have entered a trackable state model
+- subsequent verifier plugin, approval, and event replay now all have a stable place to land their data
