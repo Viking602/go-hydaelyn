@@ -23,6 +23,20 @@ var ErrToolBusMissing = errors.New("tool bus missing")
 // FailureKindBudgetExhausted Result.
 var ErrBudgetExhausted = errors.New("agent loop budget exhausted")
 
+// ErrPanicRecovered wraps a panic recovered by RunMessages. The loop invokes
+// caller-supplied extension code — guardrails, recorders, sinks, the OnEvent
+// callback, the provider stream, and sequential tool drivers — any of which may
+// panic on the loop's own goroutine. RunMessages recovers such a panic, returns
+// the partial trace accumulated so far, and surfaces it through this sentinel so
+// the panic degrades to a typed FailureKindEngineError instead of crashing the
+// worker process. Two panic sources are contained one level lower so they carry
+// more precise provenance and never reach this defer: hook handlers, guarded by
+// hook.Chain (hook.ErrHandlerPanic), and parallel tool drivers, which run on
+// bus-spawned goroutines the loop's recover cannot see and are contained by the
+// bus itself (tool.ErrToolPanic). errors.Is(err, ErrPanicRecovered) reports
+// whether a loop error originated from a panic recovered here.
+var ErrPanicRecovered = errors.New("agent loop recovered a panic")
+
 // LoopInput is the message-level input to Engine.RunMessages, the
 // low-level loop entry preserved from v0.7. Most callers should use
 // Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
@@ -37,8 +51,12 @@ type LoopInput struct {
 
 	// Sink, when set, receives a live stream.Frame for every provider
 	// event and tool result as the loop runs. It is a transient
-	// side-channel: the durable LoopOutput is unaffected by it, so
-	// streaming never changes what the runner persists or replays.
+	// side-channel: on success the durable LoopOutput is byte-for-byte
+	// identical to a run with no Sink, so streaming never changes what the
+	// runner persists or replays. A Sink.Emit error is not swallowed — it
+	// aborts the current turn and surfaces as the loop error, exactly like a
+	// failing OnEvent callback — so a Sink must absorb transient delivery
+	// hiccups it can tolerate rather than returning an error for them.
 	Sink stream.Sink
 
 	StopSequences  []string
@@ -124,7 +142,7 @@ type Engine struct {
 
 // RunMessages is the low-level loop that drives one LoopInput to
 // completion. Engine.Run is the task-level wrapper most callers want.
-func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, error) {
+func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutput, err error) {
 	if input.MaxIterations <= 0 {
 		// Default loop ceiling when the caller sets no bound. 12 sits above
 		// OpenAI's default of 10 and well below LangGraph's 25; the prior
@@ -140,7 +158,40 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 	totalUsage := provider.Usage{}
 	steps := make([]Step, 0, input.MaxIterations)
 	toolCallsUsed := 0
+	// turnsRun counts the model turns that have actually run (their usage folded
+	// into totalUsage). It is set once a turn completes, before the per-turn Step
+	// is recorded, so the panic path below reports Iterations consistently with
+	// the non-panic returns even when a panic strikes after a turn ran but before
+	// its Step exists (a guardrail/recorder panic or a sequential tool driver
+	// panic). Deriving Iterations from len(steps) there would under-report a turn
+	// whose usage and messages are already in the partial output.
+	turnsRun := 0
+	// Recover any panic raised by caller-supplied extension code the loop drives
+	// on this goroutine (guardrails, recorders, the sink when it emits tool-result
+	// frames, and sequential tool drivers) so a misbehaving extension degrades to a
+	// typed failure instead of crashing the worker. The accumulated trace is
+	// preserved on the returned LoopOutput. Several panic sources never reach this
+	// defer and are contained closer to their origin: hook handlers, in hook.Chain;
+	// parallel tool drivers, which run on bus-spawned goroutines this recover cannot
+	// observe and are contained by the tool bus; and the per-event callbacks
+	// (OnEvent, the hook chain, the sink on stream frames) and the provider stream,
+	// which panic inside collect — it recovers them itself and returns the partial
+	// turn as an ErrPanicRecovered error rather than unwinding here, so the streamed
+	// response survives. errors.Is(err, ErrPanicRecovered) holds for all of these.
+	defer func() {
+		if r := recover(); r != nil {
+			out = loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed)
+			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
+		}
+	}()
 	for iteration := 0; iteration < input.MaxIterations; iteration++ {
+		// A cancelled or expired context ends the loop promptly rather than
+		// issuing another model turn; the cause (context.Canceled or
+		// context.DeadlineExceeded) flows through loopErrorFailure, which maps a
+		// budget-driven deadline to FailureKindBudgetExhausted.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), ctxErr
+		}
 		// Enforce the per-loop budget before every turn after the first.
 		// Reaching iteration N>0 means a prior turn chose to continue, so this
 		// is exactly a "will continue" boundary; a run that finished earlier
@@ -152,11 +203,21 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 				return budgetAbort(current, totalUsage, steps, iteration, toolCallsUsed, dimension)
 			}
 		}
-		assistant, usage, stopReason, err := e.runTurn(ctx, current, input)
-		if err != nil {
-			return LoopOutput{}, err
+		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
+		if turnErr != nil {
+			// A turn can fail after the model already produced content: a per-event
+			// callback erroring or panicking mid-stream, which collect surfaces as an
+			// error carrying the partial assistant turn. Record that turn so the
+			// partial trace keeps the produced response and its usage rather than
+			// discarding the completed work along with the failure.
+			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+			return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), turnErr
 		}
 		totalUsage = totalUsage.Add(usage)
+		// The model turn ran and its usage is now counted, so a panic from here on
+		// (guardrails, recorders, sink, sequential tool drivers) must report this
+		// turn in Iterations rather than only the turns whose Step already exists.
+		turnsRun = iteration + 1
 		modelCall := &ModelCall{
 			Model:        input.Model,
 			InputTokens:  usage.InputTokens,
@@ -164,9 +225,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 			StopReason:   stopReason,
 		}
 		if len(assistant.ToolCalls) == 0 {
-			finalOutput, retryMessages, retryPolicy, err := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
-			if err != nil {
-				return LoopOutput{}, err
+			finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
+			if guardErr != nil {
+				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), guardErr
 			}
 			if len(retryMessages) > 0 {
 				// A guardrail asked to retry: record the turn as a continue
@@ -197,15 +258,28 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 				ToolCallsUsed: toolCallsUsed,
 			}, nil
 		}
-		if assistant.Text != "" || len(assistant.ToolCalls) > 0 {
-			current = append(current, assistant)
+		// Reaching here means this turn has tool calls: the no-tool-call branch
+		// above always returns or continues, so len(assistant.ToolCalls) > 0 is
+		// guaranteed and the assistant tool-call message is always recorded
+		// before dispatch.
+		current = append(current, assistant)
+		// Re-check the context before dispatching this turn's tools. collect
+		// preserves a turn that completed via EventDone even when the cancellation
+		// lands after the terminal event (a context-aware stream can return the
+		// context error from Recv), so a tool-use turn can arrive here under an
+		// already-cancelled context. A completed final-answer turn is a finished
+		// response and was already returned above; a tool-use turn is a request to
+		// perform side-effecting work that cancellation must forbid — and the bus
+		// dispatches to drivers without a pre-flight context check, so without this
+		// guard the work would run on a dead context, relying on every driver to
+		// notice. The assistant tool-call message is already appended, so the trace
+		// records the request that was deliberately not run.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ctxErr
 		}
-		if e.Tools == nil {
-			return LoopOutput{}, ErrToolBusMissing
-		}
-		// Gate the batch against every budget dimension BEFORE dispatching it.
-		// The model turn just ran, so its token spend is now folded into
-		// totalUsage: a turn that alone exhausts MaxTokens, or a batch that
+		// Gate the batch against every budget dimension BEFORE preparing or
+		// dispatching it. The model turn just ran, so its token spend is now folded
+		// into totalUsage: a turn that alone exhausts MaxTokens, or a batch that
 		// overflows MaxToolCalls, must abort here — otherwise the whole batch,
 		// including side-effecting calls the budget never authorized, executes
 		// and the overrun is only caught by the next turn's pre-turn check, one
@@ -220,15 +294,53 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (LoopOutput, e
 			})
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
-		results, terminal, err := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
-		if err != nil {
-			return LoopOutput{}, err
+		// Prepare the batch before charging or dispatching it. prepareToolCalls runs
+		// each call's BeforeToolCall hook — the documented place to rewrite a tool
+		// name, mapping a model-emitted alias or hallucinated name onto a real tool —
+		// and only then checks the prepared name is registered. The bus dispatches
+		// the prepared calls, so availability must be judged on them, not the raw
+		// model-emitted names: validating the raw names here would reject a name a
+		// hook was about to fix. A missing bus or an unregistered prepared tool is
+		// FailureKindToolUnavailable; none of these paths runs a driver, so they
+		// return before the charge below, leaving ToolCallsUsed untouched for a
+		// caller that registers the tool and resumes.
+		prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
+		if prepErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), prepErr
 		}
-		current, err = appendToolResults(ctx, current, results, input.Sink)
-		if err != nil {
-			return LoopOutput{}, err
-		}
+		// Charge this turn's tool batch BEFORE dispatching it, so the count
+		// survives every way dispatch can end. A sequential driver runs inline on
+		// this goroutine: a panic unwinds straight to the RunMessages recover defer
+		// without ever returning here, so a charge placed after dispatch would be
+		// skipped and the recovered partial output would under-report. Charging
+		// first also covers the returns below — a tool error or recovered parallel
+		// panic (dispErr), or a sink Emit failure on a result frame (appendErr).
+		// This mirrors the batch-level accounting of the pre-dispatch gate above,
+		// which reserves the whole batch against MaxToolCalls, so a caller that
+		// persists or resumes from any partial LoopOutput does not under-count and
+		// let later work exceed the budget. On the success path the count is
+		// unchanged. prepareToolCalls above already rejected any unregistered tool
+		// and ran the BeforeToolCall hooks, so this no longer counts a not-found
+		// call or a hook rejection; a registered batch that fails partway (a later
+		// sequential call left unrun after an earlier driver error) can still be
+		// over-counted, but for an upper-bound budget over-counting is the safe
+		// direction — it can only stop a resumed run sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
+		results, dispErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
+		// Append before surfacing a dispatch error: whether a tool driver failed
+		// mid-batch or an AfterToolCall rejected a result, dispatchPreparedTools still
+		// returns the results that ran and side-effected, so recording that prefix
+		// keeps the partial trace from dropping tool results a resuming caller would
+		// otherwise replay or leave as a dangling assistant tool call. dispErr is the
+		// root cause and is reported ahead of any secondary sink-emit failure on the
+		// prefix.
+		appendErr := appendToolResults(ctx, &current, results, input.Sink)
+		if dispErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
+		}
+		if appendErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
+		}
 		decision := StepDecisionContinue
 		if terminal {
 			decision = StepDecisionFinish
@@ -335,6 +447,38 @@ func budgetAbort(current []message.Message, usage provider.Usage, steps []Step, 
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, fmt.Errorf("%w: %s", ErrBudgetExhausted, dimension)
+}
+
+// loopErrorOutput builds the partial LoopOutput returned alongside a
+// non-budget loop error. It mirrors budgetAbort for the error path: the
+// messages, usage, and steps accumulated before the failure are preserved
+// (StopReason is StopReasonError) so a scheduler and the durable record keep
+// the trace that led up to the error instead of discarding it. iterations is
+// the number of model turns that ran before the failure.
+func loopErrorOutput(current []message.Message, usage provider.Usage, steps []Step, iterations, toolCallsUsed int) LoopOutput {
+	return LoopOutput{
+		Messages:      current,
+		Usage:         usage,
+		StopReason:    provider.StopReasonError,
+		Iterations:    iterations,
+		Steps:         steps,
+		ToolCallsUsed: toolCallsUsed,
+	}
+}
+
+// recordIncompleteTurn folds a failed turn's partial work into the running trace.
+// A turn can fail after the model already streamed content — a per-event callback
+// erroring or panicking, which collect surfaces as an error carrying the
+// normalized partial assistant turn. When that turn carries content, append it and
+// fold its usage so the partial LoopOutput keeps the produced response and its
+// token spend, and count the turn in Iterations; an empty turn leaves the trace,
+// usage, and turn count untouched so a failure before any content reports nothing
+// extra.
+func recordIncompleteTurn(current []message.Message, assistant message.Message, totalUsage, usage provider.Usage, iteration, turnsRun int) ([]message.Message, provider.Usage, int) {
+	if assistant.Text == "" && assistant.Thinking == "" && assistant.RedactedThinking == "" && len(assistant.ToolCalls) == 0 {
+		return current, totalUsage, turnsRun
+	}
+	return append(current, assistant), totalUsage.Add(usage), iteration + 1
 }
 
 // appendRetryContext assembles the messages a guardrail retry feeds back into
@@ -505,7 +649,19 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 	return e.collect(ctx, providerStream, input.OnEvent, input.Sink)
 }
 
-func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, bool, error) {
+// prepareToolCalls runs each call's BeforeToolCall hook — which may rewrite the
+// tool name — and verifies the resulting name is registered, returning the
+// prepared calls the bus will dispatch and whether any targets a terminal tool.
+// A nil bus yields ErrToolBusMissing and an unregistered prepared call yields
+// ErrToolNotFound; both are FailureKindToolUnavailable. Availability is judged on
+// the hook-mutated calls, not the raw model-emitted ones, because the hook is the
+// documented place to map a model alias or hallucinated name onto a real tool —
+// checking the raw name would reject one a hook was about to fix. None of these
+// paths dispatches a driver, so the loop returns before charging them.
+func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) ([]tool.Call, bool, error) {
+	if e.Tools == nil {
+		return nil, false, ErrToolBusMissing
+	}
 	prepared := make([]tool.Call, 0, len(calls))
 	terminal := false
 	for _, call := range calls {
@@ -513,80 +669,185 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
 			return nil, false, err
 		}
-		if e.Tools != nil && e.Tools.IsTerminal(item.Name) {
+		driver, ok := e.Tools.Driver(item.Name)
+		if !ok {
+			return nil, false, fmt.Errorf("%w: %s", tool.ErrToolNotFound, item.Name)
+		}
+		if driver.Definition().Terminal {
 			terminal = true
 		}
 		prepared = append(prepared, item)
 	}
-	results, err := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
-	if err != nil {
-		return nil, false, err
-	}
+	return prepared, terminal, nil
+}
+
+// dispatchPreparedTools executes the hook-prepared calls on the bus and runs
+// AfterToolCall on each result. prepareToolCalls already validated every call as
+// registered, so a dispatch error comes from a driver that actually ran (or, for a
+// sequential driver, a panic that unwinds inline to the RunMessages recover) —
+// which is why the loop charges the batch before calling this.
+//
+// Every result ExecuteBatch returns ran to completion and side-effected, even when
+// the batch reports an error: a later sequential call failing still yields the
+// earlier successes, and a parallel call erroring or panicking still yields the
+// completed slots. Those results are post-processed and returned alongside the
+// batch error so the caller records them, sparing a resuming caller from replaying
+// side-effecting calls or leaving the matching assistant tool calls dangling.
+//
+// If an AfterToolCall itself fails on one result (an error, or a panic hook.Chain
+// converts to ErrHandlerPanic), the results blessed before it are returned with
+// that error and the failing result and any after it are dropped — so the returned
+// results are always a prefix of what AfterToolCall post-processed. An AfterToolCall
+// failure takes precedence over a batch error because it is the earlier hook in the
+// pipeline; the loop surfaces whichever non-nil error this returns.
+func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
+	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
 		item := current
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
-			return nil, false, err
+			return items, err
 		}
 		items = append(items, item)
 	}
-	return items, terminal, nil
+	return items, batchErr
 }
 
-// appendToolResults appends each tool result to the running history and,
-// when a sink is set, emits a FrameToolResult for it. Tool results are a
-// loop-level enrichment with no provider.Event equivalent.
-func appendToolResults(ctx context.Context, current []message.Message, results []message.ToolResult, sink stream.Sink) ([]message.Message, error) {
+// appendToolResults appends each tool result to the running history through the
+// caller's slice pointer and, when a sink is set, emits a FrameToolResult for it.
+// Tool results are a loop-level enrichment with no provider.Event equivalent. It
+// appends each result to *current before emitting it, so the caller's history
+// reflects every produced result the instant it exists, not only on return. That
+// matters for both sink failure modes the loop's recover defer is meant to
+// salvage: a sink Emit that returns an error surfaces it here with *current
+// already holding the result, and a sink Emit that panics unwinds straight to the
+// recover defer, which reads the same caller variable and still finds the result.
+// A by-value return would lose the panic case, because the unwind skips the
+// caller's assignment of the return value. The prompt, the assistant tool call,
+// and every appended tool result thus survive on the partial LoopOutput rather
+// than being discarded.
+func appendToolResults(ctx context.Context, current *[]message.Message, results []message.ToolResult, sink stream.Sink) error {
 	for _, result := range results {
-		current = append(current, message.NewToolResult(result))
+		*current = append(*current, message.NewToolResult(result))
 		if sink == nil {
 			continue
 		}
 		toolResult := result
 		if err := sink.Emit(ctx, stream.Frame{Kind: stream.FrameToolResult, ToolResult: &toolResult}); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return current, nil
+	return nil
 }
 
-func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (message.Message, provider.Usage, provider.StopReason, error) {
+func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (assistant message.Message, usage provider.Usage, stop provider.StopReason, err error) {
 	defer func() { _ = providerStream.Close() }()
-	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
+	assistant = message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
+	sawTerminal := false
+	// A per-event callback (onEvent or the sink) can panic while handling an
+	// event. Each event is recorded before it is delivered, so normalize the
+	// events collected so far onto the assistant turn and surface the panic as an
+	// ErrPanicRecovered error carrying that partial turn, rather than letting it
+	// unwind to the loop's outer recover where the completed response would be
+	// lost. errors.Is(err, ErrPanicRecovered) still holds end-to-end.
+	defer func() {
+		if r := recover(); r != nil {
+			usage, _, _ = applyNormalized(&assistant, events)
+			stop = provider.StopReasonError
+			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
+		}
+	}()
 	for {
-		event, err := providerStream.Recv()
-		if err != nil {
-			if err == io.EOF {
+		// Stop draining the provider stream as soon as the context is done so a
+		// cancelled or timed-out turn returns promptly instead of blocking on
+		// the next event; the cause is surfaced for loopErrorFailure to classify.
+		// Once the provider has delivered its terminal EventDone the response is
+		// already complete (EventDone carries the StopReason), so a cancellation
+		// landing in the window before io.EOF must not discard it — fall through
+		// and normalize the events already collected rather than failing the turn.
+		if !sawTerminal {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return assistant, provider.Usage{}, provider.StopReasonError, ctxErr
+			}
+		}
+		event, recvErr := providerStream.Recv()
+		if recvErr != nil {
+			if recvErr == io.EOF {
 				break
 			}
-			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
-		}
-		if onEvent != nil {
-			if err := onEvent(event); err != nil {
-				return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+			// A context-aware stream (one that wraps a body read) can unblock Recv
+			// with the context error rather than io.EOF. If that lands after the
+			// terminal EventDone the response is already complete, so treat it like
+			// io.EOF: stop draining and normalize the events already collected
+			// instead of discarding the finished turn. Only context cancellation is
+			// tolerated here — any other post-terminal error is a genuine fault and
+			// still propagates.
+			if sawTerminal && (errors.Is(recvErr, context.Canceled) || errors.Is(recvErr, context.DeadlineExceeded)) {
+				break
 			}
+			return assistant, provider.Usage{}, provider.StopReasonError, recvErr
 		}
-		if err := e.Hooks.OnEvent(ctx, event); err != nil {
-			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		if event.Kind == provider.EventDone {
+			sawTerminal = true
 		}
-		if sink != nil {
-			if frame, ok := stream.FrameFromEvent(event); ok {
-				if err := sink.Emit(ctx, frame); err != nil {
-					return message.Message{}, provider.Usage{}, provider.StopReasonError, err
-				}
-			}
-		}
+		// Record the event before delivering it to the callbacks: a callback that
+		// errors or panics must not discard the response already streamed, so both
+		// the recover above and the error return below normalize the events held so
+		// far rather than starting from an empty turn.
 		events = append(events, event)
+		if cbErr := e.fanOutEvent(ctx, event, onEvent, sink); cbErr != nil {
+			usage, stop, _ = applyNormalized(&assistant, events)
+			return assistant, usage, stop, cbErr
+		}
 	}
+	usage, stop, err = applyNormalized(&assistant, events)
+	if err != nil {
+		return assistant, provider.Usage{}, provider.StopReasonError, err
+	}
+	return assistant, usage, stop, nil
+}
+
+// fanOutEvent delivers one provider event to the caller callback, the hook chain,
+// and the sink (frames only), returning the first error. collect records the
+// event before calling this, so a callback failure here ends the turn with the
+// response streamed so far already preserved for the partial trace.
+func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent func(provider.Event) error, sink stream.Sink) error {
+	if onEvent != nil {
+		if err := onEvent(event); err != nil {
+			return err
+		}
+	}
+	if err := e.Hooks.OnEvent(ctx, event); err != nil {
+		return err
+	}
+	if sink != nil {
+		if frame, ok := stream.FrameFromEvent(event); ok {
+			if err := sink.Emit(ctx, frame); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// applyNormalized copies the text, thinking, signatures, and tool calls from the
+// events collected so far onto the assistant turn, and reports the turn's usage
+// and stop reason. It centralizes the normalization collect performs on both its
+// success path and its failure paths (a callback error or a recovered panic),
+// where the partial turn must still carry whatever the model already produced. A
+// normalize error (a malformed stream prefix) leaves the assistant untouched and
+// reports StopReasonError, so a failure path never masks its original cause with a
+// normalize error.
+func applyNormalized(assistant *message.Message, events []provider.Event) (provider.Usage, provider.StopReason, error) {
 	normalized, err := provider.NormalizeEvents(events)
 	if err != nil {
-		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		return provider.Usage{}, provider.StopReasonError, err
 	}
 	assistant.Text = normalized.Text
 	assistant.Thinking = normalized.Thinking
 	assistant.ThinkingSignature = normalized.Signature
 	assistant.RedactedThinking = normalized.RedactedThinking
 	assistant.ToolCalls = normalized.ToolCalls
-	return assistant, normalized.Usage, normalized.StopReason, nil
+	return normalized.Usage, normalized.StopReason, nil
 }

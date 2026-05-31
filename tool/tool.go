@@ -48,6 +48,17 @@ type Driver interface {
 
 var ErrToolNotFound = errors.New("tool not found")
 
+// ErrToolPanic wraps a panic recovered from a tool driver running on a
+// goroutine the bus spawns for parallel execution. Such a panic cannot be
+// recovered by the caller's stack, so executeParallel recovers it in the
+// worker goroutine and records it as that call's error — surfaced by
+// errors.Join exactly like any other tool failure — rather than letting it
+// unwind the runtime and crash the process. In sequential mode a driver runs
+// inline on the caller's stack, so its panic propagates to the caller's own
+// recover instead. errors.Is(err, ErrToolPanic) reports whether a batch error
+// originated from a panicking driver.
+var ErrToolPanic = errors.New("tool driver panicked")
+
 // CallerInfo identifies the agent invoking a tool. It is plumbed via context
 // by the runtime so tools (e.g. send_message) can discover their caller
 // without forcing the LLM to pass teamId/agentId as explicit arguments.
@@ -160,7 +171,11 @@ func (b *Bus) ExecuteBatchWithOptions(ctx context.Context, calls []Call, mode Mo
 	for _, call := range calls {
 		result, err := b.Execute(ctx, call, sink)
 		if err != nil {
-			return nil, err
+			// Return the results that already ran rather than nil: in sequential mode
+			// every earlier call completed and side-effected before this one failed,
+			// so the caller can record those results and a resuming caller is spared
+			// from replaying them. The failed call and any after it are not included.
+			return results, err
 		}
 		results = append(results, result)
 	}
@@ -179,6 +194,14 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 		wg.Add(1)
 		go func(index int, current Call) {
 			defer wg.Done()
+			// A driver panic on this spawned goroutine cannot reach the
+			// caller's recover, so contain it here and record it as the call's
+			// error; errors.Join then surfaces it like any other tool failure.
+			defer func() {
+				if r := recover(); r != nil {
+					errs[index] = fmt.Errorf("%w: %s: %v", ErrToolPanic, current.Name, r)
+				}
+			}()
 			if sem != nil {
 				select {
 				case sem <- struct{}{}:
@@ -195,7 +218,18 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 	// errors.Join preserves call order and surfaces every failure rather
 	// than racing on whichever goroutine happened to enqueue first.
 	if err := errors.Join(errs...); err != nil {
-		return nil, err
+		// Return the results from the slots that ran to completion rather than
+		// nil: those tools side-effected, so the caller can record them and a
+		// resuming caller is spared from replaying them. Slots that errored,
+		// panicked, or never started leave errs[index] non-nil and carry no
+		// result, so excluding them keeps the survivors in call order.
+		succeeded := make([]Result, 0, len(results))
+		for index := range results {
+			if errs[index] == nil {
+				succeeded = append(succeeded, results[index])
+			}
+		}
+		return succeeded, err
 	}
 	return results, nil
 }

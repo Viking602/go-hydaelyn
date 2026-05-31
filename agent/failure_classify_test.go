@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -65,5 +66,41 @@ func TestEngineRunClassifiesUnavailableToolAsToolUnavailable(t *testing.T) {
 				t.Fatal("tool_unavailable must be escalatable (then escalate)")
 			}
 		})
+	}
+}
+
+// TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction pins the other
+// half of the guardrail-refusal contract (the block half lives in
+// engine_config_test.go): when an output guardrail keeps asking to retry but
+// the loop cannot satisfy it within MaxIterations, the run fails as
+// FailureKindUnsafeAction — escalatable, not retryable — rather than collapsing
+// into an opaque engine_error. The typed cause stays walkable across the
+// boundary so a scheduler can inspect which guardrail withheld the output.
+func TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction(t *testing.T) {
+	engine := Engine{
+		Provider:   singleTurnProvider("draft answer"),
+		Model:      "test-model",
+		LoopPolicy: LoopPolicy{MaxIterations: 1},
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("retry", func(_ context.Context, _ OutputGuardrailInput) (OutputGuardrailResult, error) {
+				return RetryOutput(message.NewText(message.RoleUser, "please revise")), nil
+			}),
+		},
+	}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+
+	if result.Failure == nil {
+		t.Fatal("expected a failure when guardrail retries are exhausted")
+	}
+	if result.Failure.Kind != FailureKindUnsafeAction {
+		t.Fatalf("Failure.Kind = %s, want unsafe_action", result.Failure.Kind)
+	}
+	if !result.Failure.Escalatable || result.Failure.Retryable {
+		t.Fatalf("Failure = %#v, want escalatable and not retryable", result.Failure)
+	}
+	var retryLimit *OutputGuardrailRetryLimitExceededError
+	if !errors.As(result.Failure, &retryLimit) {
+		t.Fatalf("Failure cause = %v, want OutputGuardrailRetryLimitExceededError", result.Failure)
 	}
 }

@@ -2,11 +2,21 @@ package hook
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
+
+// ErrHandlerPanic wraps a panic recovered from a caller-supplied Handler.
+// Handlers are extension points the engine invokes mid-loop; a handler that
+// panics must not unwind the engine's stack and crash the worker process.
+// The Chain recovers the panic and returns it as an error so the agent loop
+// surfaces a typed failure instead. errors.Is(err, ErrHandlerPanic) reports
+// whether a Chain error originated from a panicking handler.
+var ErrHandlerPanic = errors.New("hook handler panicked")
 
 type Handler interface {
 	TransformContext(ctx context.Context, messages []message.Message) ([]message.Message, error)
@@ -40,14 +50,31 @@ func (c Chain) Prepend(handler Handler) Chain {
 	return Chain{handlers: next}
 }
 
+// guard runs one handler invocation, converting a panic raised by the
+// caller-supplied handler into an ErrHandlerPanic-wrapped error tagged with
+// the hook stage. A handler is untrusted code from the loop's perspective, so
+// a panic in one must degrade to a typed failure rather than crash the engine.
+func guard(stage string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %s: %v", ErrHandlerPanic, stage, r)
+		}
+	}()
+	return fn()
+}
+
 func (c Chain) TransformContext(ctx context.Context, messages []message.Message) ([]message.Message, error) {
 	current := append([]message.Message{}, messages...)
 	for _, handler := range c.handlers {
 		if handler == nil {
 			continue
 		}
-		next, err := handler.TransformContext(ctx, current)
-		if err != nil {
+		var next []message.Message
+		if err := guard("TransformContext", func() error {
+			var e error
+			next, e = handler.TransformContext(ctx, current)
+			return e
+		}); err != nil {
 			return nil, err
 		}
 		if next != nil {
@@ -62,7 +89,9 @@ func (c Chain) BeforeModelCall(ctx context.Context, request *provider.Request) e
 		if handler == nil {
 			continue
 		}
-		if err := handler.BeforeModelCall(ctx, request); err != nil {
+		if err := guard("BeforeModelCall", func() error {
+			return handler.BeforeModelCall(ctx, request)
+		}); err != nil {
 			return err
 		}
 	}
@@ -74,7 +103,9 @@ func (c Chain) BeforeToolCall(ctx context.Context, call *tool.Call) error {
 		if handler == nil {
 			continue
 		}
-		if err := handler.BeforeToolCall(ctx, call); err != nil {
+		if err := guard("BeforeToolCall", func() error {
+			return handler.BeforeToolCall(ctx, call)
+		}); err != nil {
 			return err
 		}
 	}
@@ -86,7 +117,9 @@ func (c Chain) AfterToolCall(ctx context.Context, result *tool.Result) error {
 		if handler == nil {
 			continue
 		}
-		if err := handler.AfterToolCall(ctx, result); err != nil {
+		if err := guard("AfterToolCall", func() error {
+			return handler.AfterToolCall(ctx, result)
+		}); err != nil {
 			return err
 		}
 	}
@@ -98,7 +131,9 @@ func (c Chain) OnEvent(ctx context.Context, event provider.Event) error {
 		if handler == nil {
 			continue
 		}
-		if err := handler.OnEvent(ctx, event); err != nil {
+		if err := guard("OnEvent", func() error {
+			return handler.OnEvent(ctx, event)
+		}); err != nil {
 			return err
 		}
 	}
