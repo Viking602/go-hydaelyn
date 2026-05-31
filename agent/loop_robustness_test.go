@@ -288,6 +288,89 @@ func TestRunMessagesPreservesCompletedTurnWhenStreamUnblocksViaContext(t *testin
 	}
 }
 
+// recordingDriver records whether Execute was invoked. It deliberately does
+// not consult the context, modeling a side-effecting tool whose execution
+// under a cancelled context must be prevented by the loop rather than left to
+// the driver — the tool bus dispatches without a pre-flight context check.
+type recordingDriver struct{ invoked bool }
+
+func (*recordingDriver) Definition() tool.Definition {
+	return tool.Definition{Name: "side_effect"}
+}
+
+func (d *recordingDriver) Execute(_ context.Context, _ tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	d.invoked = true
+	return tool.Result{ToolCallID: "call-1", Name: "side_effect", Content: "ran"}, nil
+}
+
+// TestRunMessagesDoesNotDispatchToolsWhenCancelledAfterDone pins the boundary of
+// the completed-turn preservation: a turn whose terminal EventDone asks for
+// tools must NOT have those tools dispatched when the run context is already
+// cancelled. Preserving a completed final-answer turn under cancellation is
+// correct — the response is finished — but a tool-use turn is a request to
+// perform side-effecting work, and the bus dispatches to drivers without a
+// pre-flight context check, so the loop must refuse dispatch once the context is
+// done. Here OnEvent cancels the moment EventDone (StopReasonToolUse) is seen;
+// the recording driver must never run, and the assistant tool-call request must
+// still be preserved in the trace.
+func TestRunMessagesDoesNotDispatchToolsWhenCancelledAfterDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "side_effect",
+				Arguments: json.RawMessage(`{}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	sideEffect := &recordingDriver{}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(sideEffect),
+	}
+
+	out, runErr := engine.RunMessages(ctx, LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+		OnEvent: func(ev provider.Event) error {
+			// Cancel the instant the tool-use turn completes, landing the
+			// cancellation in the window before the loop dispatches its tools.
+			if ev.Kind == provider.EventDone {
+				cancel()
+			}
+			return nil
+		},
+	})
+
+	if sideEffect.invoked {
+		t.Fatal("a side-effecting tool must not be dispatched when the run context is cancelled before dispatch")
+	}
+	if runErr == nil {
+		t.Fatal("expected the cancellation to surface as the loop error")
+	}
+	if !errors.Is(runErr, context.Canceled) {
+		t.Fatalf("errors.Is(runErr, context.Canceled) = false, runErr = %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+	// The assistant tool-call request must survive: prompt + assistant tool call.
+	if len(out.Messages) < 2 {
+		t.Fatalf("preserved messages = %d, want >= 2 (prompt + the assistant tool-call request)", len(out.Messages))
+	}
+	if last := out.Messages[len(out.Messages)-1]; len(last.ToolCalls) == 0 {
+		t.Fatal("the assistant tool-call request must be preserved in the trace")
+	}
+}
+
 // TestRunFastExitsOnCancelledContext pins the loop-top context check: a context
 // that is already cancelled ends the run before any model turn is issued, and
 // the cancellation cause is preserved on the typed failure so errors.Is walks

@@ -236,8 +236,24 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				ToolCallsUsed: toolCallsUsed,
 			}, nil
 		}
-		if assistant.Text != "" || len(assistant.ToolCalls) > 0 {
-			current = append(current, assistant)
+		// Reaching here means this turn has tool calls: the no-tool-call branch
+		// above always returns or continues, so len(assistant.ToolCalls) > 0 is
+		// guaranteed and the assistant tool-call message is always recorded
+		// before dispatch.
+		current = append(current, assistant)
+		// Re-check the context before dispatching this turn's tools. collect
+		// preserves a turn that completed via EventDone even when the cancellation
+		// lands after the terminal event (a context-aware stream can return the
+		// context error from Recv), so a tool-use turn can arrive here under an
+		// already-cancelled context. A completed final-answer turn is a finished
+		// response and was already returned above; a tool-use turn is a request to
+		// perform side-effecting work that cancellation must forbid — and the bus
+		// dispatches to drivers without a pre-flight context check, so without this
+		// guard the work would run on a dead context, relying on every driver to
+		// notice. The assistant tool-call message is already appended, so the trace
+		// records the request that was deliberately not run.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ctxErr
 		}
 		if e.Tools == nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ErrToolBusMissing
