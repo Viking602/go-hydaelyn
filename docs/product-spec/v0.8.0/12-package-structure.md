@@ -66,6 +66,15 @@ github.com/Viking602/go-hydaelyn/
 ├── recipe/                       # Recipe / pattern surface (compiles to Run/Task)
 │   └── ...
 │
+├── flow/                         # Thin alias for api.Flow preset metadata
+│   └── flow.go
+│
+├── workflow/                     # User-facing workflow definitions compiled to multiagent.Graph
+│   ├── definition.go
+│   ├── compiler.go
+│   ├── engine.go
+│   └── doc.go
+│
 ├── contract/                     # Storage conformance suite (07-storage.md)
 │   ├── README.md
 │   ├── suite.go

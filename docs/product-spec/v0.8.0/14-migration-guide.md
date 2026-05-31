@@ -113,6 +113,19 @@ For multi-role workflows:
 
 Reference: `16-multi-agent-demo.md` (5-role incident triage).
 
+## Trigger transport and workflow modeling
+
+For schedule-based triggers, import `transport/cron`. The old
+`transport/scheduler` path remains as a deprecated compatibility shim.
+
+For multi-role workflows, use `workflow.New(...).Step(...).Then(...)`
+when you want a user-facing workflow definition. Use `multiagent.Graph`
+directly when you need lower-level graph control.
+
+`api.Flow` / `flow.Flow` remains preset metadata for planner/router/policy
+adapter selection. It is not a workflow definition and must not describe
+task graph execution.
+
 ## ent template (optional adapter migration)
 
 The framework ships no ent template; users wanting one in their fork can use this skeleton:

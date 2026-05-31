@@ -34,6 +34,12 @@ v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Mos
 > that re-exports `cron.Driver`, `cron.Options`, and `cron.New`; switch to
 > `transport/cron` and update your imports.
 
+Naming boundaries:
+- `transport/cron`: time-based trigger transport; decides when a run starts.
+- `workflow`: user-facing workflow definitions; compiles to `multiagent.Graph`.
+- `multiagent.Scheduler`: dispatch decision primitive; decides which agent/task runs next.
+- `flow` / `api.Flow`: preset adapter metadata; configures runtime adapters and never bypasses Runner invariants.
+
 ### What's not in v0.8.0 yet
 
 - OpenAPI / CLI renderers for `CapabilityManifest` (MCP renderer ships).
