@@ -339,6 +339,94 @@ func TestRunMessagesPreservesStreamedTurnWhenSinkPanicsOnDoneFrame(t *testing.T)
 	}
 }
 
+// afterToolCallFailOnSecond rejects the second result it post-processes, modeling
+// an AfterToolCall hook that fails partway through a multi-tool batch after the
+// tools have already side-effected. All Handler methods have pointer receivers so
+// the invocation counter persists across calls within one batch.
+type afterToolCallFailOnSecond struct{ seen int }
+
+func (*afterToolCallFailOnSecond) TransformContext(_ context.Context, m []message.Message) ([]message.Message, error) {
+	return m, nil
+}
+func (*afterToolCallFailOnSecond) BeforeModelCall(_ context.Context, _ *provider.Request) error {
+	return nil
+}
+func (*afterToolCallFailOnSecond) BeforeToolCall(_ context.Context, _ *tool.Call) error { return nil }
+func (h *afterToolCallFailOnSecond) AfterToolCall(_ context.Context, _ *tool.Result) error {
+	h.seen++
+	if h.seen >= 2 {
+		return errAfterToolCall
+	}
+	return nil
+}
+func (*afterToolCallFailOnSecond) OnEvent(_ context.Context, _ provider.Event) error { return nil }
+
+var errAfterToolCall = errors.New("after-tool-call rejected result")
+
+// TestRunMessagesPreservesPrefixWhenAfterToolCallFails pins the trace-preservation
+// contract for an AfterToolCall hook that fails partway through a batch. The whole
+// batch runs in ExecuteBatch before any after-hook, so when the hook rejects the
+// second result both tools have already side-effected. dispatchPreparedTools must
+// return the already-post-processed first result rather than discarding the whole
+// batch, and the loop must append it before surfacing the hook error, so the
+// partial trace records the produced tool result instead of leaving the assistant
+// tool calls dangling for a resuming caller to replay. Before the fix
+// dispatchPreparedTools returned nil on the after-hook error, so the partial output
+// carried the assistant tool calls and the charged count but no tool results.
+func TestRunMessagesPreservesPrefixWhenAfterToolCallFails(t *testing.T) {
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+
+	prov := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"query":"a"}`)}},
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-2", Name: "lookup", Arguments: json.RawMessage(`{"query":"b"}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		}},
+	}
+
+	engine := Engine{
+		Provider: prov,
+		Tools:    tool.NewBus(driver),
+		Hooks:    hook.NewChain(&afterToolCallFailOnSecond{}),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr == nil || !errors.Is(runErr, errAfterToolCall) {
+		t.Fatalf("expected the after-tool-call rejection to surface, got %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+	// The first result was post-processed before the second's hook failed, so it
+	// must survive on the partial output rather than being dropped with the batch.
+	toolResults := 0
+	for _, m := range out.Messages {
+		if m.Role == message.RoleTool {
+			toolResults++
+		}
+	}
+	if toolResults < 1 {
+		t.Fatalf("preserved tool results = %d, want >= 1 (the post-processed prefix must survive the after-hook failure); messages = %d", toolResults, len(out.Messages))
+	}
+	// Both calls were charged before dispatch, so the partial output reports them.
+	if out.ToolCallsUsed != 2 {
+		t.Fatalf("ToolCallsUsed = %d, want 2 (both calls were charged before dispatch)", out.ToolCallsUsed)
+	}
+}
+
 // ctxAwareStream models a real provider stream — anthropic and openai wrap an
 // HTTP body — whose Recv unblocks via the request context rather than io.EOF.
 // It replays its queued events in order; once they are drained it surfaces a

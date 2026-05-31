@@ -327,10 +327,17 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// direction — it can only stop a resumed run sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
 		results, dispErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
+		// Append before surfacing a dispatch error: when AfterToolCall fails partway,
+		// dispatchPreparedTools returns the results it already post-processed, and the
+		// whole batch has already side-effected, so recording that prefix keeps the
+		// partial trace from dropping tool results a resuming caller would otherwise
+		// replay or leave as a dangling assistant tool call. dispErr is the root cause
+		// and is reported ahead of any secondary sink-emit failure on the prefix.
+		appendErr := appendToolResults(ctx, &current, results, input.Sink)
 		if dispErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
 		}
-		if appendErr := appendToolResults(ctx, &current, results, input.Sink); appendErr != nil {
+		if appendErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
 		}
 		decision := StepDecisionContinue
@@ -675,9 +682,20 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 
 // dispatchPreparedTools executes the hook-prepared calls on the bus and runs
 // AfterToolCall on each result. prepareToolCalls already validated every call as
-// registered, so an error here comes from a driver that actually ran (or, for a
+// registered, so a dispatch error comes from a driver that actually ran (or, for a
 // sequential driver, a panic that unwinds inline to the RunMessages recover) —
 // which is why the loop charges the batch before calling this.
+//
+// The whole batch executes in ExecuteBatch before any AfterToolCall runs, so every
+// tool has already side-effected by the time post-processing begins. If an
+// AfterToolCall then fails on one result (an error, or a panic hook.Chain converts
+// to ErrHandlerPanic), the results processed before it are returned alongside the
+// error rather than discarded, so the caller can append them and the partial trace
+// keeps the tool results already produced — sparing a resuming caller from
+// replaying those side-effecting calls. The failing result and any after it are
+// omitted because their AfterToolCall never blessed them, so the returned results
+// are a prefix of the batch. An ExecuteBatch error yields no results at this layer
+// (the bus reports the batch atomically), so the prefix is empty there.
 func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
 	results, err := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	if err != nil {
@@ -687,7 +705,7 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 	for _, current := range results {
 		item := current
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
-			return nil, err
+			return items, err
 		}
 		items = append(items, item)
 	}
