@@ -267,20 +267,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ctxErr
 		}
-		// A missing bus and a call naming an unregistered tool are both
-		// FailureKindToolUnavailable: the tools the model asked for are not there,
-		// so fail the turn before charging or dispatching it. An unavailable tool
-		// runs no driver — ExecuteBatch would surface a not-found call only after
-		// the batch had already been charged — so accounting must reject it here,
-		// leaving ToolCallsUsed untouched for a caller that registers the tool and
-		// resumes. After this gate every requested tool exists, so the charge below
-		// can no longer count a not-found call against MaxToolCalls.
-		if err := unavailableTool(e.Tools, assistant.ToolCalls); err != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), err
-		}
-		// Gate the batch against every budget dimension BEFORE dispatching it.
-		// The model turn just ran, so its token spend is now folded into
-		// totalUsage: a turn that alone exhausts MaxTokens, or a batch that
+		// Gate the batch against every budget dimension BEFORE preparing or
+		// dispatching it. The model turn just ran, so its token spend is now folded
+		// into totalUsage: a turn that alone exhausts MaxTokens, or a batch that
 		// overflows MaxToolCalls, must abort here — otherwise the whole batch,
 		// including side-effecting calls the budget never authorized, executes
 		// and the overrun is only caught by the next turn's pre-turn check, one
@@ -295,27 +284,41 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			})
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
+		// Prepare the batch before charging or dispatching it. prepareToolCalls runs
+		// each call's BeforeToolCall hook — the documented place to rewrite a tool
+		// name, mapping a model-emitted alias or hallucinated name onto a real tool —
+		// and only then checks the prepared name is registered. The bus dispatches
+		// the prepared calls, so availability must be judged on them, not the raw
+		// model-emitted names: validating the raw names here would reject a name a
+		// hook was about to fix. A missing bus or an unregistered prepared tool is
+		// FailureKindToolUnavailable; none of these paths runs a driver, so they
+		// return before the charge below, leaving ToolCallsUsed untouched for a
+		// caller that registers the tool and resumes.
+		prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
+		if prepErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), prepErr
+		}
 		// Charge this turn's tool batch BEFORE dispatching it, so the count
 		// survives every way dispatch can end. A sequential driver runs inline on
 		// this goroutine: a panic unwinds straight to the RunMessages recover defer
-		// without ever returning here, so a charge placed after executeTools would
-		// be skipped and the recovered partial output would under-report. Charging
+		// without ever returning here, so a charge placed after dispatch would be
+		// skipped and the recovered partial output would under-report. Charging
 		// first also covers the returns below — a tool error or recovered parallel
-		// panic (toolErr), or a sink Emit failure on a result frame (appendErr).
+		// panic (dispErr), or a sink Emit failure on a result frame (appendErr).
 		// This mirrors the batch-level accounting of the pre-dispatch gate above,
 		// which reserves the whole batch against MaxToolCalls, so a caller that
 		// persists or resumes from any partial LoopOutput does not under-count and
 		// let later work exceed the budget. On the success path the count is
-		// unchanged. The availability gate above already rejected any batch naming
-		// an unregistered tool, so this no longer counts a not-found call; a
-		// registered batch that fails partway (a later sequential call left unrun
-		// after an earlier driver error, or a pre-dispatch hook rejection) can still
-		// be over-counted, but for an upper-bound budget over-counting is the safe
+		// unchanged. prepareToolCalls above already rejected any unregistered tool
+		// and ran the BeforeToolCall hooks, so this no longer counts a not-found
+		// call or a hook rejection; a registered batch that fails partway (a later
+		// sequential call left unrun after an earlier driver error) can still be
+		// over-counted, but for an upper-bound budget over-counting is the safe
 		// direction — it can only stop a resumed run sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
-		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
-		if toolErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), toolErr
+		results, dispErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
+		if dispErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
 		}
 		var appendErr error
 		current, appendErr = appendToolResults(ctx, current, results, input.Sink)
@@ -615,26 +618,19 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 	return e.collect(ctx, providerStream, input.OnEvent, input.Sink)
 }
 
-// unavailableTool reports why the bus cannot serve this batch, or nil when it
-// can: a nil bus yields ErrToolBusMissing and a call naming an unregistered tool
-// yields ErrToolNotFound. Both are FailureKindToolUnavailable — the tools the
-// model asked for are not there. The loop calls this before charging or
-// dispatching a batch: an unavailable tool runs no driver, so ExecuteBatch would
-// surface a not-found call only after the batch had already been charged against
-// MaxToolCalls, debiting a call that never dispatched.
-func unavailableTool(bus *tool.Bus, calls []message.ToolCall) error {
-	if bus == nil {
-		return ErrToolBusMissing
+// prepareToolCalls runs each call's BeforeToolCall hook — which may rewrite the
+// tool name — and verifies the resulting name is registered, returning the
+// prepared calls the bus will dispatch and whether any targets a terminal tool.
+// A nil bus yields ErrToolBusMissing and an unregistered prepared call yields
+// ErrToolNotFound; both are FailureKindToolUnavailable. Availability is judged on
+// the hook-mutated calls, not the raw model-emitted ones, because the hook is the
+// documented place to map a model alias or hallucinated name onto a real tool —
+// checking the raw name would reject one a hook was about to fix. None of these
+// paths dispatches a driver, so the loop returns before charging them.
+func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) ([]tool.Call, bool, error) {
+	if e.Tools == nil {
+		return nil, false, ErrToolBusMissing
 	}
-	for _, call := range calls {
-		if _, ok := bus.Driver(call.Name); !ok {
-			return fmt.Errorf("%w: %s", tool.ErrToolNotFound, call.Name)
-		}
-	}
-	return nil
-}
-
-func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, bool, error) {
 	prepared := make([]tool.Call, 0, len(calls))
 	terminal := false
 	for _, call := range calls {
@@ -642,24 +638,37 @@ func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
 			return nil, false, err
 		}
-		if e.Tools != nil && e.Tools.IsTerminal(item.Name) {
+		driver, ok := e.Tools.Driver(item.Name)
+		if !ok {
+			return nil, false, fmt.Errorf("%w: %s", tool.ErrToolNotFound, item.Name)
+		}
+		if driver.Definition().Terminal {
 			terminal = true
 		}
 		prepared = append(prepared, item)
 	}
+	return prepared, terminal, nil
+}
+
+// dispatchPreparedTools executes the hook-prepared calls on the bus and runs
+// AfterToolCall on each result. prepareToolCalls already validated every call as
+// registered, so an error here comes from a driver that actually ran (or, for a
+// sequential driver, a panic that unwinds inline to the RunMessages recover) —
+// which is why the loop charges the batch before calling this.
+func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
 	results, err := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
 		item := current
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		items = append(items, item)
 	}
-	return items, terminal, nil
+	return items, nil
 }
 
 // appendToolResults appends each tool result to the running history and,

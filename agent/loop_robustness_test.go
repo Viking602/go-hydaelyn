@@ -204,8 +204,8 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	if out.StopReason != provider.StopReasonError {
 		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
 	}
-	// The tool call was dispatched by executeTools before the sink failed on its
-	// result frame, so the partial output must charge it: a caller resuming from
+	// The tool call was dispatched by dispatchPreparedTools before the sink failed
+	// on its result frame, so the partial output must charge it: a caller resuming from
 	// this LoopOutput would otherwise under-count its MaxToolCalls budget.
 	if out.ToolCallsUsed < 1 {
 		t.Fatalf("ToolCallsUsed = %d, want >= 1 (the dispatched tool call must be charged on the partial output)", out.ToolCallsUsed)
@@ -404,6 +404,81 @@ func TestRunMessagesDoesNotChargeUnregisteredTool(t *testing.T) {
 	}
 }
 
+// aliasRewriteHook rewrites a model-emitted tool name to a registered one from
+// BeforeToolCall. tool.Call is passed by pointer precisely so a hook can remap an
+// alias or a hallucinated name onto a real tool before the bus looks it up, so
+// availability must be judged after this hook runs, not on the raw call.
+type aliasRewriteHook struct{ from, to string }
+
+func (aliasRewriteHook) TransformContext(_ context.Context, m []message.Message) ([]message.Message, error) {
+	return m, nil
+}
+func (aliasRewriteHook) BeforeModelCall(_ context.Context, _ *provider.Request) error { return nil }
+func (h aliasRewriteHook) BeforeToolCall(_ context.Context, call *tool.Call) error {
+	if call.Name == h.from {
+		call.Name = h.to
+	}
+	return nil
+}
+func (aliasRewriteHook) AfterToolCall(_ context.Context, _ *tool.Result) error { return nil }
+func (aliasRewriteHook) OnEvent(_ context.Context, _ provider.Event) error     { return nil }
+
+// TestRunMessagesValidatesAvailabilityAfterHookRewritesToolName pins the order of
+// the tool-call hooks and the availability check. A BeforeToolCall hook is the
+// documented way to rewrite a model-emitted alias or hallucinated tool name onto
+// a real tool, and the bus dispatches the hook-mutated call — so availability
+// must be judged after the hook runs. The model emits a call to "alias" (not
+// registered); the hook rewrites it to the registered "side_effect" tool. The
+// turn must dispatch that tool, not fail ErrToolNotFound on the raw name, and the
+// dispatched call must be charged. Checking the raw name before the hook would
+// reject a name the hook was about to fix.
+func TestRunMessagesValidatesAvailabilityAfterHookRewritesToolName(t *testing.T) {
+	sideEffect := &recordingDriver{} // registered name "side_effect"
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{
+				Kind: provider.EventToolCall,
+				ToolCall: &message.ToolCall{
+					ID:        "call-1",
+					Name:      "alias", // not registered; a hook rewrites it to "side_effect"
+					Arguments: json.RawMessage(`{}`),
+				},
+			},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+		{
+			{Kind: provider.EventTextDelta, Text: "done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		},
+	}}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(sideEffect),
+		Hooks:    hook.NewChain(aliasRewriteHook{from: "alias", to: "side_effect"}),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 3,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr != nil {
+		t.Fatalf("a BeforeToolCall hook rewriting alias->side_effect must let the tool dispatch, got error %v", runErr)
+	}
+	if !sideEffect.invoked {
+		t.Fatal("the hook-rewritten tool must have been dispatched, but the driver never ran")
+	}
+	if out.ToolCallsUsed != 1 {
+		t.Fatalf("ToolCallsUsed = %d, want 1 (the hook-rewritten tool dispatched, so it must be charged)", out.ToolCallsUsed)
+	}
+	if out.StopReason != provider.StopReasonComplete {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonComplete)
+	}
+}
+
 // TestRunMessagesChargesToolBatchWhenSequentialDriverPanics pins the panic-path
 // half of the tool-charge invariant. A sequential tool driver runs inline on the
 // loop's goroutine, so its panic unwinds straight to RunMessages' recover defer,
@@ -557,8 +632,8 @@ func TestRunFastExitsOnCancelledContext(t *testing.T) {
 
 // erroringToolDriver returns an error from Execute rather than a result. Run
 // sequentially through the bus it makes ExecuteBatch return that error, so
-// executeTools surfaces it and the loop takes the toolErr partial-error return —
-// the path that previously left the dispatched call uncharged. It models a tool
+// dispatchPreparedTools surfaces it and the loop takes the dispErr partial-error
+// return — the path that previously left the dispatched call uncharged. It models a tool
 // that runs and fails (a remote 500, a validation error) after a model turn has
 // already requested it.
 type erroringToolDriver struct{}
