@@ -103,7 +103,8 @@ github.com/Viking602/go-hydaelyn/
 │   ├── mcp/
 │   ├── openapi/                  # NEW (02-capability.md export)
 │   ├── webhook/                  # NEW (Outbox FIFO consumer)
-│   ├── scheduler/                # NEW (cron triggers)
+│   ├── cron/                     # NEW (cron triggers for api.TriggerSchedule)
+│   ├── scheduler/                # Deprecated compatibility shim for transport/cron
 │   └── event/                    # NEW (event bus consumers)
 │
 ├── observe/                      # Observability adapters
