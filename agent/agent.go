@@ -320,9 +320,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		if dispErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
 		}
-		var appendErr error
-		current, appendErr = appendToolResults(ctx, current, results, input.Sink)
-		if appendErr != nil {
+		if appendErr := appendToolResults(ctx, &current, results, input.Sink); appendErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
 		}
 		decision := StepDecisionContinue
@@ -671,26 +669,31 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 	return items, nil
 }
 
-// appendToolResults appends each tool result to the running history and,
-// when a sink is set, emits a FrameToolResult for it. Tool results are a
-// loop-level enrichment with no provider.Event equivalent. On a sink Emit
-// failure it returns the history accumulated so far — not nil — so the caller's
-// partial-trace error path preserves the prompt, the assistant tool call, and
-// every tool result already appended (including the one whose streaming just
-// failed) rather than discarding the turn. Each result is appended before its
-// Emit, so it is real accumulated state; only the side-channel delivery hiccuped.
-func appendToolResults(ctx context.Context, current []message.Message, results []message.ToolResult, sink stream.Sink) ([]message.Message, error) {
+// appendToolResults appends each tool result to the running history through the
+// caller's slice pointer and, when a sink is set, emits a FrameToolResult for it.
+// Tool results are a loop-level enrichment with no provider.Event equivalent. It
+// appends each result to *current before emitting it, so the caller's history
+// reflects every produced result the instant it exists, not only on return. That
+// matters for both sink failure modes the loop's recover defer is meant to
+// salvage: a sink Emit that returns an error surfaces it here with *current
+// already holding the result, and a sink Emit that panics unwinds straight to the
+// recover defer, which reads the same caller variable and still finds the result.
+// A by-value return would lose the panic case, because the unwind skips the
+// caller's assignment of the return value. The prompt, the assistant tool call,
+// and every appended tool result thus survive on the partial LoopOutput rather
+// than being discarded.
+func appendToolResults(ctx context.Context, current *[]message.Message, results []message.ToolResult, sink stream.Sink) error {
 	for _, result := range results {
-		current = append(current, message.NewToolResult(result))
+		*current = append(*current, message.NewToolResult(result))
 		if sink == nil {
 			continue
 		}
 		toolResult := result
 		if err := sink.Emit(ctx, stream.Frame{Kind: stream.FrameToolResult, ToolResult: &toolResult}); err != nil {
-			return current, err
+			return err
 		}
 	}
-	return current, nil
+	return nil
 }
 
 func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (message.Message, provider.Usage, provider.StopReason, error) {

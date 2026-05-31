@@ -212,6 +212,69 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	}
 }
 
+// TestRunMessagesPreservesTraceWhenSinkEmitPanics pins the panic twin of the
+// trace-preservation contract. A Sink whose Emit panics on the tool-result frame
+// is a recovered panic source the loop's recover defer is meant to salvage. The
+// defer reports the caller's current slice, and appendToolResults appends each
+// result to that slice before emitting it, so the produced tool result must
+// survive on the recovered LoopOutput. A by-value return would lose it: the panic
+// unwinds before the caller assigns appendToolResults' return value, leaving the
+// outer history one message short of the result it already produced.
+func TestRunMessagesPreservesTraceWhenSinkEmitPanics(t *testing.T) {
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	}) (string, error) {
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+
+	panickingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+		// Let the model turn stream cleanly; panic only on the tool result so the
+		// panic unwinds out of appendToolResults, the path under test.
+		if frame.Kind == stream.FrameToolResult {
+			panic("sink delivery panicked")
+		}
+		return nil
+	})
+
+	engine := Engine{
+		Provider: &erroringSecondTurnProvider{},
+		Tools:    tool.NewBus(driver),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 3,
+		ToolMode:      tool.ModeSequential,
+		Sink:          panickingSink,
+	})
+
+	if runErr == nil || !errors.Is(runErr, ErrPanicRecovered) {
+		t.Fatalf("expected the sink Emit panic to be recovered as ErrPanicRecovered, got %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+	// The tool result was appended before the panicking Emit, so it must survive on
+	// the recovered partial output rather than being lost with the unwound call.
+	toolResults := 0
+	for _, m := range out.Messages {
+		if m.Role == message.RoleTool {
+			toolResults++
+		}
+	}
+	if toolResults < 1 {
+		t.Fatalf("recovered messages have %d tool results, want >= 1 (the produced result must survive the sink panic); messages = %d", toolResults, len(out.Messages))
+	}
+	// The dispatched call is charged on the partial output, same as the error path.
+	if out.ToolCallsUsed < 1 {
+		t.Fatalf("ToolCallsUsed = %d, want >= 1 (the dispatched tool call must be charged on the partial output)", out.ToolCallsUsed)
+	}
+}
+
 // ctxAwareStream models a real provider stream — anthropic and openai wrap an
 // HTTP body — whose Recv unblocks via the request context rather than io.EOF.
 // It replays its queued events in order; once they are drained it surfaces a
