@@ -94,3 +94,20 @@ func TestRegistry_NilDriverIgnored(t *testing.T) {
 		t.Fatalf("Driver after registering nil err = %v, want ErrNoDriverForModel", err)
 	}
 }
+
+// TestRegistry_ZeroValueRegisterDoesNotPanic pins that the exported Register
+// path lazily allocates byModel: a zero-value Registry (not built via
+// NewRegistry) must accept registrations and resolve them, not panic on a nil
+// map write.
+func TestRegistry_ZeroValueRegisterDoesNotPanic(t *testing.T) {
+	var registry provider.Registry // zero value: byModel is nil
+	registry.Register(fakeDriver{name: "anthropic", models: []string{"opus"}})
+
+	got, err := registry.Driver("opus")
+	if err != nil {
+		t.Fatalf("Driver(opus) on zero-value registry returned error: %v", err)
+	}
+	if got.Metadata().Name != "anthropic" {
+		t.Fatalf("Driver(opus) = %q, want anthropic", got.Metadata().Name)
+	}
+}

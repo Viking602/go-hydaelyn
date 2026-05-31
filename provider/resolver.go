@@ -71,14 +71,19 @@ func NewRegistry(drivers ...Driver) *Registry {
 }
 
 // Register indexes d under every model name in d.Metadata().Models. A nil
-// driver is ignored. A driver that declares no models is recorded in
-// matches no lookup. A nil driver is ignored.
+// driver is ignored, and a driver that declares no models is indexed under no
+// key, so it matches no lookup. The byModel map is allocated lazily, so a
+// zero-value Registry (&Registry{} or var r Registry) is safe to Register into
+// without NewRegistry.
 func (r *Registry) Register(d Driver) {
 	if d == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.byModel == nil {
+		r.byModel = make(map[string]Driver)
+	}
 	for _, model := range d.Metadata().Models {
 		r.byModel[model] = d
 	}
