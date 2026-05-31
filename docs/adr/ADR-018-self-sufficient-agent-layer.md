@@ -157,7 +157,11 @@ subordinate to the parent.** Concretely:
   with no trailing assistant text and (under the empty per-delegation
   `OutputPolicy`) no structured output — the wrapper falls back to that terminal
   tool's own content and structured payload rather than returning a blank
-  result.
+  result. Only a **terminal** tool result is promoted: a non-terminal tool
+  observation is mid-run state, never the final answer. A child that runs out of
+  iterations (`StopReasonMaxTurns`) without producing any answer returns an
+  **error tool result**, so a truncated, non-converged run is never reported to
+  the parent as a completed delegation.
 - `MaxDepth` (default 4) caps subagent nesting via a context-carried depth
   counter; exceeding it returns an error tool result rather than recursing.
 - The child runs under `SubagentDef.Budget` when set, else its own `Engine`

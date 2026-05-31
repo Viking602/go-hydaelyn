@@ -256,6 +256,43 @@ func TestAsTool_AssistantTextWinsOverTerminalFallback(t *testing.T) {
 	}
 }
 
+// TestAsTool_TruncatedRunDoesNotReportNonTerminalToolAsAnswer pins that a child
+// which stops on its iteration budget (StopReasonMaxTurns) after only a
+// non-terminal tool call — leaving no assistant text — is not reported as a
+// completed delegation carrying that mid-run tool output. The non-terminal
+// lookup result is not a final answer, and the truncation surfaces as an error.
+func TestAsTool_TruncatedRunDoesNotReportNonTerminalToolAsAnswer(t *testing.T) {
+	lookup := staticTool{def: tool.Definition{Name: "lookup", InputSchema: tool.Schema{Type: "object"}}}
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "l1", Name: "lookup", Arguments: json.RawMessage(`{}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+	}}
+	child := Engine{
+		Provider:   driver,
+		Tools:      tool.NewBus(lookup),
+		Model:      "child",
+		LoopPolicy: LoopPolicy{MaxIterations: 1}, // one turn: calls lookup, then runs out
+	}
+	sub := AsTool(child, SubagentDef{Name: "sub"})
+
+	call := tool.Call{ID: "c", Name: "sub", Arguments: json.RawMessage(`{"input":"go"}`)}
+	result, err := sub.Execute(context.Background(), call, nil)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Content == "ok" {
+		t.Fatal("subagent promoted the non-terminal lookup output to the final answer")
+	}
+	if !result.IsError {
+		t.Fatalf("a truncated, non-converged child run must surface as an error result, got success: %+v", result)
+	}
+	if !strings.Contains(result.Content, "without a final answer") {
+		t.Fatalf("Content = %q, want a truncation explanation", result.Content)
+	}
+}
+
 func TestAsTool_GoalFromInputField(t *testing.T) {
 	var captured string
 	child := Engine{

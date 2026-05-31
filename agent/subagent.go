@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
@@ -80,7 +81,11 @@ type SubagentDef struct {
 //     and whose Structured carries any structured child output. When the child
 //     instead submits its answer through a terminal tool — so it completes with
 //     no trailing assistant text — the wrapper surfaces that terminal tool
-//     result's content and structured payload instead of a blank result.
+//     result's content and structured payload instead of a blank result. A
+//     non-terminal tool observation is never promoted to the final answer.
+//   - A child that stops on its turn budget (StopReasonMaxTurns) without any
+//     final answer returns an error tool result, so a truncated, non-converged
+//     run is not reported to the parent as a completed delegation.
 //   - A child failure (a non-nil Result.Failure) returns an error tool result
 //     (IsError) carrying the failure reason and its typed classification, never
 //     a Go error — so a subagent failure never hard-aborts the parent loop. The
@@ -287,14 +292,26 @@ func (s *subagentTool) subagentSuccessResult(call tool.Call, result Result) tool
 	// with no trailing assistant text, so result.Text is empty and (because the
 	// child runs under an empty OutputPolicy) result.Structured is nil. Fall back
 	// to the terminal tool's own result so the delegation surfaces the child's
-	// answer instead of a blank tool result.
+	// answer instead of a blank tool result. Only a terminal tool result is a
+	// final answer; a non-terminal tool observation is mid-run state, never the
+	// child's conclusion, so it is never promoted here.
 	if content == "" {
-		if final := s.childFinalToolResult(result); final != nil {
+		if final := s.childTerminalToolResult(result); final != nil {
 			content = final.Content
 			if len(structured) == 0 {
 				structured = final.Structured
 			}
 		}
+	}
+	// With no assistant text and no terminal answer, a child that stopped on its
+	// turn budget (StopReasonMaxTurns) did not converge — it ran out of
+	// iterations mid-task. Surface that as an error result so the parent does not
+	// mistake a truncated run for a completed, empty delegation; without it,
+	// AsTool would drop the stop reason and report success. Failure-bearing stops
+	// (aborted/error) never reach here — they become a failure result upstream.
+	if content == "" && len(structured) == 0 && result.StopReason == provider.StopReasonMaxTurns {
+		return subagentErrorResult(call, s.def.Name,
+			fmt.Sprintf("subagent %q stopped without a final answer (%s): the child ran out of iterations", s.def.Name, result.StopReason))
 	}
 	return tool.Result{
 		ToolCallID: call.ID,
@@ -304,29 +321,27 @@ func (s *subagentTool) subagentSuccessResult(call tool.Call, result Result) tool
 	}
 }
 
-// childFinalToolResult returns the tool result the child's run ended on when it
-// finished by calling a terminal tool. It scans the child's messages
-// back-to-front for the last tool result whose tool the child bus marks
-// Terminal; when terminality is not statically determinable (the bus is absent
-// or the tool is gone), it falls back to the last tool result in the run.
-// Returns nil when the child produced no tool result at all.
-func (s *subagentTool) childFinalToolResult(result Result) *message.ToolResult {
-	var lastToolResult *message.ToolResult
+// childTerminalToolResult returns the terminal tool result the child's run
+// ended on, or nil when the child did not finish through a terminal tool. It
+// scans the child's messages back-to-front for the last tool result whose tool
+// the child bus marks Terminal. A non-terminal tool observation is mid-run
+// state, not the child's final answer, so it is never returned — and a result
+// whose tool is not statically known to be terminal (absent bus, tool gone) is
+// treated as non-terminal rather than guessed.
+func (s *subagentTool) childTerminalToolResult(result Result) *message.ToolResult {
+	if s.child.Tools == nil {
+		return nil
+	}
 	for i := len(result.Messages) - 1; i >= 0; i-- {
 		m := result.Messages[i]
 		if m.Role != message.RoleTool || m.ToolResult == nil {
 			continue
 		}
-		if lastToolResult == nil {
-			lastToolResult = m.ToolResult
-		}
-		if s.child.Tools != nil {
-			if driver, ok := s.child.Tools.Driver(m.ToolResult.Name); ok && driver.Definition().Terminal {
-				return m.ToolResult
-			}
+		if driver, ok := s.child.Tools.Driver(m.ToolResult.Name); ok && driver.Definition().Terminal {
+			return m.ToolResult
 		}
 	}
-	return lastToolResult
+	return nil
 }
 
 func subagentFailureResult(call tool.Call, name string, failure *AgentFailure) tool.Result {
