@@ -235,6 +235,39 @@ func TestAsTool_TerminalToolResultSurfacesAsContent(t *testing.T) {
 	}
 }
 
+// TestAsTool_TerminalToolErrorStatusPropagates pins that a child which ends by
+// calling a terminal tool that rejects its input (an IsError tool result) is
+// surfaced as an error delegation, not a completed one: RunMessages still
+// finishes through the terminal path with no Failure, so the wrapper must carry
+// the terminal result's IsError status itself.
+func TestAsTool_TerminalToolErrorStatusPropagates(t *testing.T) {
+	reject := terminalAnswerTool{
+		name:    "finish",
+		content: "submission rejected: missing required field",
+		isError: true,
+	}
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "f1", Name: "finish", Arguments: json.RawMessage(`{}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+	}}
+	child := Engine{Provider: driver, Tools: tool.NewBus(reject), Model: "child"}
+	sub := AsTool(child, SubagentDef{Name: "sub"})
+
+	call := tool.Call{ID: "c", Name: "sub", Arguments: json.RawMessage(`{"input":"go"}`)}
+	result, err := sub.Execute(context.Background(), call, nil)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("a failed terminal submission must surface as an error result, got success: %+v", result)
+	}
+	if result.Content != "submission rejected: missing required field" {
+		t.Fatalf("Content = %q, want the terminal error content", result.Content)
+	}
+}
+
 // TestAsTool_AssistantTextWinsOverTerminalFallback pins that the fallback only
 // fires when there is no assistant text: a child that ends with assistant text
 // surfaces that text, not a trailing tool result.
@@ -519,6 +552,7 @@ type terminalAnswerTool struct {
 	name       string
 	content    string
 	structured json.RawMessage
+	isError    bool
 }
 
 func (t terminalAnswerTool) Definition() tool.Definition {
@@ -526,5 +560,5 @@ func (t terminalAnswerTool) Definition() tool.Definition {
 }
 
 func (t terminalAnswerTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
-	return tool.Result{ToolCallID: call.ID, Name: t.name, Content: t.content, Structured: t.structured}, nil
+	return tool.Result{ToolCallID: call.ID, Name: t.name, Content: t.content, Structured: t.structured, IsError: t.isError}, nil
 }

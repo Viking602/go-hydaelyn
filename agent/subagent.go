@@ -81,7 +81,8 @@ type SubagentDef struct {
 //     and whose Structured carries any structured child output. When the child
 //     instead submits its answer through a terminal tool — so it completes with
 //     no trailing assistant text — the wrapper surfaces that terminal tool
-//     result's content and structured payload instead of a blank result. A
+//     result's content and structured payload instead of a blank result, and
+//     carries its IsError status so a rejected submission stays an error. A
 //     non-terminal tool observation is never promoted to the final answer.
 //   - A child that stops on its turn budget (StopReasonMaxTurns) without any
 //     final answer returns an error tool result, so a truncated, non-converged
@@ -288,20 +289,24 @@ func subagentGoal(args json.RawMessage) string {
 func (s *subagentTool) subagentSuccessResult(call tool.Call, result Result) tool.Result {
 	content := result.Text
 	structured := result.Structured
-	// A child that submits its final answer through a terminal tool completes
-	// with no trailing assistant text, so result.Text is empty and (because the
-	// child runs under an empty OutputPolicy) result.Structured is nil. Fall back
-	// to the terminal tool's own result so the delegation surfaces the child's
-	// answer instead of a blank tool result. Only a terminal tool result is a
-	// final answer; a non-terminal tool observation is mid-run state, never the
-	// child's conclusion, so it is never promoted here.
-	if content == "" {
-		if final := s.childTerminalToolResult(result); final != nil {
+	isError := false
+	// When the child finished through a terminal tool, that tool call is its
+	// final act, so the wrapper reflects it: carry the terminal result's error
+	// status, and fall back to its content/structured payload when the child left
+	// no trailing assistant text/output (it submitted its answer through the tool,
+	// so result.Text is empty and — under the empty per-delegation OutputPolicy —
+	// result.Structured is nil). A terminal submit tool that rejects its input
+	// returns an error result; without carrying IsError the parent would read a
+	// failed submission as a completed delegation. A non-terminal tool observation
+	// is mid-run state, never the child's conclusion, so it is never promoted.
+	if final := s.childTerminalToolResult(result); final != nil {
+		if content == "" {
 			content = final.Content
-			if len(structured) == 0 {
-				structured = final.Structured
-			}
 		}
+		if len(structured) == 0 {
+			structured = final.Structured
+		}
+		isError = final.IsError
 	}
 	// With no assistant text and no terminal answer, a child that stopped on its
 	// turn budget (StopReasonMaxTurns) did not converge — it ran out of
@@ -318,6 +323,7 @@ func (s *subagentTool) subagentSuccessResult(call tool.Call, result Result) tool
 		Name:       s.def.Name,
 		Content:    content,
 		Structured: structured,
+		IsError:    isError,
 	}
 }
 
