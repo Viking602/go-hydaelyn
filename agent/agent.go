@@ -288,16 +288,24 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
 		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
+		// Charge this turn's tool batch as soon as dispatch is attempted, before
+		// inspecting the outcome, so every partial-error return below — a tool
+		// driver error or recovered parallel panic (toolErr), or a sink Emit
+		// failure while streaming a result frame (appendErr) — reports a
+		// ToolCallsUsed consistent with the dispatch that happened. This mirrors
+		// the batch-level accounting of the pre-dispatch gate above, which reserves
+		// the whole batch against MaxToolCalls: a parallel batch dispatches every
+		// call and a sequential batch dispatches through its first failure, so a
+		// caller that persists or resumes from the partial LoopOutput must not
+		// under-count and let later work exceed the budget. On the success path the
+		// count is unchanged from before. Charging the whole batch can over-count an
+		// early sequential failure or a pre-dispatch hook rejection, but for an
+		// upper-bound budget over-counting is the safe direction — it can only stop
+		// a resumed run sooner, never let it overrun.
+		toolCallsUsed += len(assistant.ToolCalls)
 		if toolErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), toolErr
 		}
-		// executeTools dispatched every call in this turn, so charge them now —
-		// before appending results and emitting their frames. If a sink Emit then
-		// fails, appendToolResults returns the partial trace and the loop returns
-		// it as the error output; charging here keeps ToolCallsUsed consistent with
-		// the calls that actually ran, so a caller that persists or resumes from the
-		// partial LoopOutput does not under-count its MaxToolCalls budget.
-		toolCallsUsed += len(assistant.ToolCalls)
 		var appendErr error
 		current, appendErr = appendToolResults(ctx, current, results, input.Sink)
 		if appendErr != nil {

@@ -460,6 +460,70 @@ func TestRunFastExitsOnCancelledContext(t *testing.T) {
 	}
 }
 
+// erroringToolDriver returns an error from Execute rather than a result. Run
+// sequentially through the bus it makes ExecuteBatch return that error, so
+// executeTools surfaces it and the loop takes the toolErr partial-error return —
+// the path that previously left the dispatched call uncharged. It models a tool
+// that runs and fails (a remote 500, a validation error) after a model turn has
+// already requested it.
+type erroringToolDriver struct{}
+
+func (erroringToolDriver) Definition() tool.Definition {
+	return tool.Definition{Name: "explode"}
+}
+
+func (erroringToolDriver) Execute(_ context.Context, _ tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	return tool.Result{}, errors.New("tool driver failed")
+}
+
+// TestRunMessagesChargesToolBatchWhenDriverErrors pins that a tool-execution
+// error charges this turn's dispatched batch against ToolCallsUsed before the
+// partial-error return. The bus dispatched the call before the driver failed, so
+// a caller that persists or resumes from the returned partial LoopOutput must
+// see it counted — otherwise the failed call escapes MaxToolCalls and later work
+// can overrun the budget. The increment previously sat only on the success path
+// below the toolErr check, so this output reported ToolCallsUsed = 0; the loop
+// now charges the batch as soon as dispatch is attempted, mirroring the
+// batch-level reservation the pre-dispatch budget gate already makes.
+func TestRunMessagesChargesToolBatchWhenDriverErrors(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "explode",
+				Arguments: json.RawMessage(`{}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(erroringToolDriver{}),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected the tool driver error to surface as the loop error")
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+	// The bus dispatched the call before the driver returned its error, so the
+	// partial output must charge it against MaxToolCalls; reporting 0 would let a
+	// resuming caller exceed its tool-call budget.
+	if out.ToolCallsUsed < 1 {
+		t.Fatalf("ToolCallsUsed = %d, want >= 1 (the dispatched tool call must be charged on the toolErr partial output)", out.ToolCallsUsed)
+	}
+}
+
 // TestRunMessagesPreservesCompletedTurnWhenCancelledAfterDone pins that a
 // context cancellation landing AFTER the provider delivered its terminal
 // EventDone (which already carries the StopReason) but before the stream
