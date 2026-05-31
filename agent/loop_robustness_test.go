@@ -353,6 +353,57 @@ func TestRunMessagesReportsIterationWhenToolDriverPanics(t *testing.T) {
 	}
 }
 
+// TestRunMessagesDoesNotChargeUnregisteredTool pins that a model turn naming a
+// tool the bus does not have is treated as tool_unavailable: nothing is
+// dispatched, so nothing is charged. ExecuteBatch returns ErrToolNotFound before
+// entering any driver, so charging the batch would debit MaxToolCalls for a call
+// that never ran — a caller that registers the tool and resumes would then
+// under-budget. The loop must validate availability before charging, mirroring
+// its existing ErrToolBusMissing check, so this dispatched-nothing turn leaves
+// ToolCallsUsed at zero.
+func TestRunMessagesDoesNotChargeUnregisteredTool(t *testing.T) {
+	realDriver, err := kit.Tool("real", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "ghost", // not registered on the bus
+				Arguments: json.RawMessage(`{}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(realDriver),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr == nil || !errors.Is(runErr, tool.ErrToolNotFound) {
+		t.Fatalf("expected ErrToolNotFound for an unregistered tool, got %v", runErr)
+	}
+	// No driver was entered, so the budget must not be debited.
+	if out.ToolCallsUsed != 0 {
+		t.Fatalf("ToolCallsUsed = %d, want 0 (an unregistered tool is never dispatched, so it must not be charged)", out.ToolCallsUsed)
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+}
+
 // TestRunMessagesChargesToolBatchWhenSequentialDriverPanics pins the panic-path
 // half of the tool-charge invariant. A sequential tool driver runs inline on the
 // loop's goroutine, so its panic unwinds straight to RunMessages' recover defer,

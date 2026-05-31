@@ -267,8 +267,16 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ctxErr
 		}
-		if e.Tools == nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ErrToolBusMissing
+		// A missing bus and a call naming an unregistered tool are both
+		// FailureKindToolUnavailable: the tools the model asked for are not there,
+		// so fail the turn before charging or dispatching it. An unavailable tool
+		// runs no driver — ExecuteBatch would surface a not-found call only after
+		// the batch had already been charged — so accounting must reject it here,
+		// leaving ToolCallsUsed untouched for a caller that registers the tool and
+		// resumes. After this gate every requested tool exists, so the charge below
+		// can no longer count a not-found call against MaxToolCalls.
+		if err := unavailableTool(e.Tools, assistant.ToolCalls); err != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), err
 		}
 		// Gate the batch against every budget dimension BEFORE dispatching it.
 		// The model turn just ran, so its token spend is now folded into
@@ -298,10 +306,12 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// which reserves the whole batch against MaxToolCalls, so a caller that
 		// persists or resumes from any partial LoopOutput does not under-count and
 		// let later work exceed the budget. On the success path the count is
-		// unchanged. Charging the whole batch can over-count an early sequential
-		// failure or a pre-dispatch hook rejection, but for an upper-bound budget
-		// over-counting is the safe direction — it can only stop a resumed run
-		// sooner, never let it overrun.
+		// unchanged. The availability gate above already rejected any batch naming
+		// an unregistered tool, so this no longer counts a not-found call; a
+		// registered batch that fails partway (a later sequential call left unrun
+		// after an earlier driver error, or a pre-dispatch hook rejection) can still
+		// be over-counted, but for an upper-bound budget over-counting is the safe
+		// direction — it can only stop a resumed run sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
 		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
 		if toolErr != nil {
@@ -603,6 +613,25 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
 	}
 	return e.collect(ctx, providerStream, input.OnEvent, input.Sink)
+}
+
+// unavailableTool reports why the bus cannot serve this batch, or nil when it
+// can: a nil bus yields ErrToolBusMissing and a call naming an unregistered tool
+// yields ErrToolNotFound. Both are FailureKindToolUnavailable — the tools the
+// model asked for are not there. The loop calls this before charging or
+// dispatching a batch: an unavailable tool runs no driver, so ExecuteBatch would
+// surface a not-found call only after the batch had already been charged against
+// MaxToolCalls, debiting a call that never dispatched.
+func unavailableTool(bus *tool.Bus, calls []message.ToolCall) error {
+	if bus == nil {
+		return ErrToolBusMissing
+	}
+	for _, call := range calls {
+		if _, ok := bus.Driver(call.Name); !ok {
+			return fmt.Errorf("%w: %s", tool.ErrToolNotFound, call.Name)
+		}
+	}
+	return nil
 }
 
 func (e Engine) executeTools(ctx context.Context, calls []message.ToolCall, mode tool.Mode) ([]message.ToolResult, bool, error) {
