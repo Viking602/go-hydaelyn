@@ -616,12 +616,19 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 	defer func() { _ = providerStream.Close() }()
 	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
+	sawTerminal := false
 	for {
 		// Stop draining the provider stream as soon as the context is done so a
 		// cancelled or timed-out turn returns promptly instead of blocking on
 		// the next event; the cause is surfaced for loopErrorFailure to classify.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return message.Message{}, provider.Usage{}, provider.StopReasonError, ctxErr
+		// Once the provider has delivered its terminal EventDone the response is
+		// already complete (EventDone carries the StopReason), so a cancellation
+		// landing in the window before io.EOF must not discard it — fall through
+		// and normalize the events already collected rather than failing the turn.
+		if !sawTerminal {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return message.Message{}, provider.Usage{}, provider.StopReasonError, ctxErr
+			}
 		}
 		event, err := providerStream.Recv()
 		if err != nil {
@@ -629,6 +636,9 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 				break
 			}
 			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		}
+		if event.Kind == provider.EventDone {
+			sawTerminal = true
 		}
 		if onEvent != nil {
 			if err := onEvent(event); err != nil {

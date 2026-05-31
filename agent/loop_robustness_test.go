@@ -228,3 +228,42 @@ func TestRunFastExitsOnCancelledContext(t *testing.T) {
 		t.Fatalf("provider was called %d time(s); the loop must fast-exit before any model turn", len(driver.requests))
 	}
 }
+
+// TestRunMessagesPreservesCompletedTurnWhenCancelledAfterDone pins that a
+// context cancellation landing AFTER the provider delivered its terminal
+// EventDone (which already carries the StopReason) but before the stream
+// returns io.EOF does not discard the already-complete turn. collect's pre-Recv
+// context check exists to avoid blocking on a slow provider, but a response that
+// has finished must not be turned into a failure solely because EOF has not been
+// read yet. Here an OnEvent callback cancels the context the moment it observes
+// EventDone, deterministically landing the cancellation in that window.
+func TestRunMessagesPreservesCompletedTurnWhenCancelledAfterDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	driver := singleTurnProvider("done")
+	engine := Engine{Provider: driver, Model: "test-model"}
+
+	out, runErr := engine.RunMessages(ctx, LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 1,
+		OnEvent: func(ev provider.Event) error {
+			if ev.Kind == provider.EventDone {
+				cancel()
+			}
+			return nil
+		},
+	})
+
+	if runErr != nil {
+		t.Fatalf("a turn completed via EventDone must not fail when the context is cancelled before EOF: %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonComplete {
+		t.Fatalf("StopReason = %s, want %s (the completed turn's terminal reason)", out.StopReason, provider.StopReasonComplete)
+	}
+	last := out.Messages[len(out.Messages)-1]
+	if last.Text != "done" {
+		t.Fatalf("assistant text = %q, want %q (the completed response must be preserved)", last.Text, "done")
+	}
+}
