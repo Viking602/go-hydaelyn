@@ -7,6 +7,7 @@
 - [Runner Runtime](orchestrator-runtime.md)
 - [Task Dataflow](task-dataflow.md)
 - [Recipe Compiler](recipe.md)
+- [Workflow](workflow.md)
 - [Evaluation](evaluation.md)
 - [Migration Notes](migration.md)
 - [SemVer And Compatibility](semver.md)

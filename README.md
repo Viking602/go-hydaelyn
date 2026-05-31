@@ -105,6 +105,12 @@ one below it — no upward imports.
   framework ships no built-in backend.
 - **Product Packs** (`packs/`, `_examples/`) — vertical scenarios. Free
   to encode domain vocabulary; the kernel never does.
+- **Workflow Modeling** (`workflow/`) — a user-facing modeling layer that
+  sits with Packs, not below `multiagent/`. A `workflow.Definition` compiles
+  to `multiagent.Graph` and runs through `multiagent.Scheduler` decisions; it
+  adds no second durable runtime and depends on existing Runner durability.
+  `flow` / `api.Flow` remains preset adapter metadata, distinct from
+  `workflow/`.
 
 ## Packages
 
@@ -114,6 +120,7 @@ one below it — no upward imports.
 | `api/` | Public contracts: `Config`, commands, `Task`, `Run`, interfaces |
 | `agent/` | Strong bounded agent loop: `Engine`, `Step`, `OutputPolicy`, `ToolSafety`, `ContextManager`, `AgentFailure`, `LoopPolicy` |
 | `multiagent/` | Multi-agent primitives: `AgentClass`, `AgentInstance`, `Team`, `Scheduler`, `Dispatch`, `Handoff`, `BlackboardEntry`, `Voting`, `Supervisor` |
+| `workflow/` | User-facing workflow definitions that compile to `multiagent.Graph` / `multiagent.Scheduler`; no second durable runtime |
 | `memory/` | Optional-plugin `Memory[T]` interface (no backend ships) |
 | `worker/` | Optional glue from `TaskEnvelope` execution to `agent.Engine` |
 | `packs/` | Skeleton vertical packs: `research`, `customersupport`, `devops`, `aiops` |
