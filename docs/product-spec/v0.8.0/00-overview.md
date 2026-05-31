@@ -99,7 +99,7 @@ Additive (no break):
 Package path changes:
 
 - `internal/memory` stays internal (no move).
-- New top-level packages: `agent/` (extended), `multiagent/` (NEW), `memory/` (interface only), `artifact/`, `eval/`, `recipe/`, `contract/`, `packs/`, `transport/openapi/`, `transport/webhook/`, `transport/scheduler/`, `transport/event/`, `observe/otel/`.
+- New top-level packages: `agent/` (extended), `multiagent/` (NEW), `memory/` (interface only), `artifact/`, `eval/`, `recipe/`, `contract/`, `packs/`, `transport/openapi/`, `transport/webhook/`, `transport/cron/`, `transport/event/`, `observe/otel/`.
 - `storage/` does NOT exist — Position D (ADR-012 revised).
 
 ## Theme statement (for README and release notes)

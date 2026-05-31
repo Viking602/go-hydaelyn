@@ -166,7 +166,7 @@ Unchanged from prior spec. `BackoffStrategy` interface and
 
 ## Trigger Runtime
 
-`transport/scheduler/`, `transport/webhook/`, `transport/event/`
+`transport/cron/`, `transport/webhook/`, `transport/event/`
 carry forward from the prior `04-execution-layer.md`. They translate
 declarative `AgentProfile.Triggers` into `Runner.RunFromProfile` calls
 (for single-agent runs) or `Team.Start` calls (for Pack-managed teams).

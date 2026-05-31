@@ -12,7 +12,7 @@ const (
 	TriggerManual TriggerType = "manual"
 
 	// TriggerSchedule fires on a cron expression. Dispatched by
-	// transport/scheduler.
+	// transport/cron.
 	TriggerSchedule TriggerType = "schedule"
 
 	// TriggerWebhook fires on an inbound HTTP request. Dispatched by
