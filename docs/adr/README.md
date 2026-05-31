@@ -13,7 +13,7 @@ Architecture Decision Records, landed by milestone.
 - [ADR-007 EventStore and replay semantics](ADR-007-eventstore-replay-semantics.md)
 - [ADR-008 Framework vs business boundary](ADR-008-framework-vs-business.md)
 
-ADR-001 through ADR-008 are preserved in their original wording (these were authored in Chinese before the English-only docs convention was adopted; they are kept verbatim for historical fidelity).
+ADR-001 through ADR-008 were originally authored in Chinese (before the English-only docs convention was adopted) and have since been translated to English to match the rest of the repository.
 
 ## v0.8.0 (complete)
 
@@ -28,7 +28,7 @@ All six v0.8.0 ADRs are locked before Phase 1 implementation begins. Each carrie
 
 ## Convention
 
-All new ADRs MUST be written in English. Conversation language with users may be Chinese, but the artifact in the repo is English. Pre-v0.8.0 ADRs (ADR-001..008) are exempt to avoid silently rewriting history.
+All ADRs MUST be written in English. Conversation language with users may be Chinese, but the artifact in the repo is English.
 
 ## Format
 

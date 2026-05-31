@@ -1,34 +1,34 @@
-# ADR-005 `CapabilityInvoker` 统一治理层
+# ADR-005 `CapabilityInvoker` Unified Governance Layer
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-在 v0.5 之前，LLM 和 Tool 虽然都能通过 runtime 执行，但它们走的是两条不同的调用路径：
+Before v0.5, although both LLM and Tool could be executed through the runtime, they followed two different invocation paths:
 
-- LLM 直接通过 `provider.Driver.Stream`
-- Tool 直接通过 `tool.Driver.Execute`
+- LLM was invoked directly through `provider.Driver.Stream`
+- Tool was invoked directly through `tool.Driver.Execute`
 
-这会让 timeout、retry、permission、approval、rate limit 这些治理能力无法在统一层收口。
+This prevented governance capabilities such as timeout, retry, permission, approval, and rate limit from being consolidated in a unified layer.
 
-## 决策
+## Decision
 
-- 引入 `capability` 包
-- 用 `CapabilityInvoker` 统一 capability 调用入口
-- capability 当前覆盖：
+- Introduce the `capability` package
+- Use `CapabilityInvoker` as the unified entry point for capability invocation
+- capability currently covers:
   - `llm`
   - `tool`
-- runtime 通过 adapter 把 provider/tool 调用接到 invoker：
+- The runtime connects provider/tool calls into the invoker through adapters:
   - `capabilityProviderDriver`
   - `capabilityToolDriver`
-- capability 结果统一收敛为：
+- capability results are uniformly consolidated into:
   - `Result`
   - `Usage`
   - `Error`
 
-## 当前能力
+## Current Capabilities
 
 - timeout
 - retry
@@ -36,10 +36,10 @@
 - approval
 - rate limit
 
-这些能力都通过 capability policy 注入，而不是分散到 provider/tool 各自实现里。
+These capabilities are all injected through capability policy, rather than being scattered across the individual implementations of provider/tool.
 
-## 影响
+## Impact
 
-- runtime 已经可以在同一层观察和治理 llm/tool 调用
-- 后续把 MCP、search、remote agent 接进来时，不需要再建第三套治理模型
-- usage / timeout / error type 已经有统一结构，后续只需继续补 cost 和外部 capability 覆盖面
+- The runtime can now observe and govern llm/tool calls in the same layer
+- When MCP, search, and remote agent are connected later, there is no need to build a third governance model
+- usage / timeout / error type already have a unified structure; going forward we only need to continue filling in cost and the coverage of external capabilities

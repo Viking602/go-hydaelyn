@@ -1,32 +1,32 @@
-# ADR-004 Middleware 执行顺序与短路机制
+# ADR-004 Middleware Execution Order and Short-Circuit Mechanism
 
-## 状态
+## Status
 
-已接受
+Accepted
 
-## 背景
+## Context
 
-原有 `hook.Chain` 只覆盖模型调用和工具调用前后，无法表达 team、task、agent、memory 等更高层级的治理链路。
+The original `hook.Chain` only covered before and after model calls and tool calls, and could not express higher-level governance pipelines such as team, task, agent, and memory.
 
-## 决策
+## Decision
 
-- 引入统一 `middleware.Chain`
-- 采用 onion 顺序：
-  - 先注册的 middleware 先进入 before
-  - 后注册的 middleware 先进入 after
-- `next` 不调用即视为短路
-- runtime 现阶段接入以下阶段：
+- Introduce a unified `middleware.Chain`
+- Adopt onion ordering:
+  - Middleware registered earlier enters `before` first
+  - Middleware registered later enters `after` first
+- Not calling `next` is treated as a short-circuit
+- The runtime currently wires in the following stages:
   - `team`
   - `task`
   - `agent`
   - `llm`
   - `tool`
   - `memory`
-  - phase 映射出来的 `planner` / `verify` / `synthesize`
-- `llm` / `tool` 通过 hook adapter 复用现有 agent engine 接口
+  - `planner` / `verify` / `synthesize` derived from the phase mapping
+- `llm` / `tool` reuse the existing agent engine interfaces via the hook adapter
 
-## 影响
+## Impact
 
-- timeout、retry、logging、tracing、permission 等治理逻辑不再需要分别嵌进每个子模块
-- 中间件已具备独立启停能力
-- 后续 capability 层和 durable runtime 可继续复用同一条链路
+- Governance logic such as timeout, retry, logging, tracing, and permission no longer needs to be embedded separately into each submodule
+- Middleware now has independent start/stop capability
+- The capability layer and durable runtime can continue to reuse the same pipeline going forward
