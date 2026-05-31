@@ -33,3 +33,27 @@ type AgentClass struct {
 	LoopPolicy   agent.LoopPolicy `json:"loopPolicy,omitempty"`
 	Capabilities []api.Capability `json:"capabilities,omitempty"`
 }
+
+// ToSpec projects this class onto the neutral agent.Spec the agent layer
+// materializes through agent.Build. It carries only the executable fields a
+// Spec defines — instructions, model, tools, loop policy, and the typed-handoff
+// schemas — and deliberately drops the multiagent-only ontology (Name,
+// Description, Capabilities), which describes the role's position in a Team, not
+// how to run one loop.
+//
+// ToSpec is materialization, not positioning (ADR-018): it does not decide
+// whether the resulting agent runs as a standalone agent, a subagent tool, or a
+// team member. A Team member and a standalone agent built from the same class
+// therefore share an identical Spec — and so an identical Engine once Build
+// resolves the model and tools — which is what lets an application move a role
+// between single-agent and multi-agent deployments without re-describing it.
+func (c AgentClass) ToSpec() agent.Spec {
+	return agent.Spec{
+		Instructions: c.Instructions,
+		Model:        c.Model,
+		Tools:        c.Tools,
+		LoopPolicy:   c.LoopPolicy,
+		InputSchema:  c.InputSchema,
+		OutputSchema: c.OutputSchema,
+	}
+}
