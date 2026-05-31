@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -49,6 +51,17 @@ type SubagentDef struct {
 	// child's token spend is bounded here but is not folded back into the
 	// parent's token budget (see ADR-018 §"Known limitation").
 	Budget *api.TaskBudget
+
+	// Effect raises the advertised effect floor for the delegation. AsTool
+	// already aggregates the effect, approval, and action-task metadata of the
+	// child engine's tools onto Definition(), so the wrapper is never advertised
+	// as safer than the most dangerous tool the child can call — a tool-less,
+	// pure-reasoning child aggregates to read-only, which is the genuinely safe
+	// case. Set Effect when a child's tools are registered lazily or are
+	// otherwise not statically visible and you need to assert a higher floor;
+	// the advertised effect is the maximum of this floor and the aggregated
+	// child effect, so it can only raise the risk, never lower it.
+	Effect tool.EffectType
 }
 
 // AsTool wraps an already-materialized child Engine as a tool.Driver the parent
@@ -80,11 +93,107 @@ type subagentTool struct {
 }
 
 func (s *subagentTool) Definition() tool.Definition {
+	risk := s.childRisk()
 	return tool.Definition{
-		Name:        s.def.Name,
-		Description: s.def.Description,
-		InputSchema: s.def.InputSchema,
-		EffectType:  tool.EffectReadOnly,
+		Name:               s.def.Name,
+		Description:        s.def.Description,
+		InputSchema:        s.def.InputSchema,
+		EffectType:         risk.effect,
+		RequiresApproval:   risk.requiresApproval,
+		RequiresActionTask: risk.requiresActionTask,
+		RiskLevel:          risk.riskLevel,
+		PolicyTags:         risk.policyTags,
+	}
+}
+
+// childRisk aggregates the governance-relevant metadata of every tool the child
+// engine may call, so the delegation advertises a risk at least as high as the
+// most dangerous action the child can take. A subagent is never safer than its
+// child: advertising a fixed read-only effect would let the parent's tool-gate
+// wave the whole delegation through without the approval a side-effecting child
+// tool would otherwise demand, because the runner derives the persisted tool
+// policy from Definition() and only gates write/external/action-task tools. A
+// tool-less (pure-reasoning) child aggregates to read-only — the genuinely safe
+// case — and SubagentDef.Effect can raise the floor when the child's tools are
+// not statically visible.
+func (s *subagentTool) childRisk() subagentRisk {
+	risk := subagentRisk{effect: s.def.Effect}
+	if s.child.Tools != nil {
+		for _, def := range s.child.Tools.Definitions() {
+			risk.absorb(def)
+		}
+	}
+	if effectRank(risk.effect) == 0 {
+		risk.effect = tool.EffectReadOnly
+	}
+	slices.Sort(risk.policyTags)
+	return risk
+}
+
+// subagentRisk accumulates the worst-case governance metadata across the child
+// engine's tools.
+type subagentRisk struct {
+	effect             tool.EffectType
+	requiresApproval   bool
+	requiresActionTask bool
+	riskLevel          string
+	policyTags         []string
+}
+
+func (r *subagentRisk) absorb(def tool.Definition) {
+	requiresApproval := def.RequiresApproval || def.Security.RequiresApproval
+	effect := def.EffectType
+	if effect == "" && requiresApproval {
+		// Mirror worker.toolDefinitionToRunnerTool: an approval-gated tool that
+		// declares no effect is treated as an external side effect, so the
+		// aggregate ranks it the same way the runner's tool-gate will.
+		effect = tool.EffectExternalSideEffect
+	}
+	if effectRank(effect) > effectRank(r.effect) {
+		r.effect = effect
+	}
+	r.requiresApproval = r.requiresApproval || requiresApproval
+	r.requiresActionTask = r.requiresActionTask || def.RequiresActionTask
+	if riskLevelRank(def.RiskLevel) > riskLevelRank(r.riskLevel) {
+		r.riskLevel = def.RiskLevel
+	}
+	if rl := def.Security.RiskLevel; riskLevelRank(rl) > riskLevelRank(r.riskLevel) {
+		r.riskLevel = rl
+	}
+	for _, tag := range def.PolicyTags {
+		if !slices.Contains(r.policyTags, tag) {
+			r.policyTags = append(r.policyTags, tag)
+		}
+	}
+}
+
+// effectRank orders tool effects by escalating risk so aggregation can take the
+// maximum. An empty effect ranks with read-only.
+func effectRank(e tool.EffectType) int {
+	switch e {
+	case tool.EffectExternalSideEffect:
+		return 2
+	case tool.EffectWrite:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// riskLevelRank orders the common free-form risk-level strings so aggregation
+// can keep the highest. Unknown values rank with the unset level.
+func riskLevelRank(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium", "moderate":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
 	}
 }
 

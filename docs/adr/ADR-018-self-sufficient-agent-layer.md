@@ -116,6 +116,7 @@ type SubagentDef struct {
     InputSchema tool.Schema
     MaxDepth    int            // 0 → DefaultSubagentMaxDepth (4)
     Budget      *api.TaskBudget
+    Effect      tool.EffectType // optional floor; aggregation can only raise it
 }
 ```
 
@@ -154,6 +155,22 @@ subordinate to the parent.** Concretely:
   counter; exceeding it returns an error tool result rather than recursing.
 - The child runs under `SubagentDef.Budget` when set, else its own `Engine`
   `LoopPolicy`.
+
+A subagent must also be **no safer to the parent's governance than its child.**
+`AsTool.Definition()` aggregates the governance metadata of every tool the child
+engine may call — effect type, approval requirement, action-task requirement,
+risk level, and policy tags — and advertises the worst case. The aggregation
+mirrors `worker.toolDefinitionToRunnerTool`: an approval-gated child tool that
+declares no explicit effect normalizes to an external side effect, so the
+parent's tool-gate derives the same persisted policy it would for a direct tool.
+A tool-less (pure-reasoning) child aggregates to read-only — the genuinely safe
+case. `SubagentDef.Effect` sets an optional floor for children whose tools are
+not statically visible (registered lazily); aggregation takes the maximum of the
+floor and the child effect, so the floor can only **raise** the advertised risk,
+never lower it. Policy tags are deduplicated and sorted because `Bus`
+enumeration is map-ordered and the advertised definition must be replay-stable
+(ADR-007). Without this, advertising a fixed read-only effect would let a
+side-effecting delegation bypass the approval the child's own tools require.
 
 ### 4. `multiagent.AgentClass.ToSpec()` — the bridge, materialization not positioning
 

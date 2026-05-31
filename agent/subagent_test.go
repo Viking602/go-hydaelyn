@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,8 +29,152 @@ func TestAsTool_DefinitionAdvertisesIdentityAndSchema(t *testing.T) {
 	if def.InputSchema.Type != "object" {
 		t.Fatalf("Definition().InputSchema.Type = %q, want object", def.InputSchema.Type)
 	}
+	// A tool-less, pure-reasoning child aggregates to read-only — the genuinely
+	// safe case. Children that can call side-effecting tools are covered below.
 	if def.EffectType != tool.EffectReadOnly {
 		t.Fatalf("Definition().EffectType = %q, want read_only", def.EffectType)
+	}
+}
+
+func TestAsTool_AggregatesChildWriteEffect(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(staticTool{def: tool.Definition{
+			Name: "writer", InputSchema: tool.Schema{Type: "object"}, EffectType: tool.EffectWrite,
+		}}),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	if def.EffectType != tool.EffectWrite {
+		t.Fatalf("EffectType = %q, want write (a child that can write must not advertise read_only)", def.EffectType)
+	}
+}
+
+func TestAsTool_AggregatesChildExternalEffect(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(staticTool{def: tool.Definition{
+			Name: "caller", InputSchema: tool.Schema{Type: "object"}, EffectType: tool.EffectExternalSideEffect,
+		}}),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	if def.EffectType != tool.EffectExternalSideEffect {
+		t.Fatalf("EffectType = %q, want external_side_effect", def.EffectType)
+	}
+}
+
+func TestAsTool_TakesMaxEffectAcrossChildTools(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(
+			staticTool{def: tool.Definition{Name: "reader", InputSchema: tool.Schema{Type: "object"}, EffectType: tool.EffectReadOnly}},
+			staticTool{def: tool.Definition{Name: "writer", InputSchema: tool.Schema{Type: "object"}, EffectType: tool.EffectWrite}},
+		),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	if def.EffectType != tool.EffectWrite {
+		t.Fatalf("EffectType = %q, want write (the max across a read-only and a write tool)", def.EffectType)
+	}
+}
+
+// TestAsTool_AggregatesApprovalAndRisk pins the core Codex finding: an
+// approval-gated child tool that declares no explicit effect must surface as an
+// approval-required external side effect on the wrapper, mirroring how the
+// worker derives a runner tool. Risk level and policy tags ride along.
+func TestAsTool_AggregatesApprovalAndRisk(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(staticTool{def: tool.Definition{
+			Name:             "danger",
+			InputSchema:      tool.Schema{Type: "object"},
+			RequiresApproval: true, // no explicit effect — must normalize to external
+			RiskLevel:        "high",
+			PolicyTags:       []string{"pii"},
+		}}),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	if !def.RequiresApproval {
+		t.Fatal("RequiresApproval = false, want true (a child approval tool must surface on the wrapper)")
+	}
+	if def.EffectType != tool.EffectExternalSideEffect {
+		t.Fatalf("EffectType = %q, want external_side_effect (approval with no effect mirrors the worker)", def.EffectType)
+	}
+	if def.RiskLevel != "high" {
+		t.Fatalf("RiskLevel = %q, want high", def.RiskLevel)
+	}
+	if !reflect.DeepEqual(def.PolicyTags, []string{"pii"}) {
+		t.Fatalf("PolicyTags = %v, want [pii]", def.PolicyTags)
+	}
+}
+
+// TestAsTool_AbsorbsSecuritySubfield pins that approval/risk declared on the
+// nested Security struct (not the flat fields) is also aggregated.
+func TestAsTool_AbsorbsSecuritySubfield(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(staticTool{def: tool.Definition{
+			Name:        "danger",
+			InputSchema: tool.Schema{Type: "object"},
+			Security:    message.ToolSecurity{RequiresApproval: true, RiskLevel: "critical"},
+		}}),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	if !def.RequiresApproval {
+		t.Fatal("RequiresApproval = false, want true (Security.RequiresApproval must surface)")
+	}
+	if def.EffectType != tool.EffectExternalSideEffect {
+		t.Fatalf("EffectType = %q, want external_side_effect", def.EffectType)
+	}
+	if def.RiskLevel != "critical" {
+		t.Fatalf("RiskLevel = %q, want critical (from Security.RiskLevel)", def.RiskLevel)
+	}
+}
+
+// TestAsTool_PolicyTagsAreDedupedAndSorted pins replay determinism: Bus
+// iteration order is map-based, so aggregated tags must be deduped and sorted.
+func TestAsTool_PolicyTagsAreDedupedAndSorted(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(
+			staticTool{def: tool.Definition{Name: "a", InputSchema: tool.Schema{Type: "object"}, PolicyTags: []string{"net", "pii"}}},
+			staticTool{def: tool.Definition{Name: "b", InputSchema: tool.Schema{Type: "object"}, PolicyTags: []string{"pii", "fs"}}},
+		),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub"}).Definition()
+	want := []string{"fs", "net", "pii"}
+	if !reflect.DeepEqual(def.PolicyTags, want) {
+		t.Fatalf("PolicyTags = %v, want %v (deduped and sorted for replay determinism)", def.PolicyTags, want)
+	}
+}
+
+// TestAsTool_EffectFloorRaisesToollessChild pins that SubagentDef.Effect raises
+// the floor when a child's tools are not statically visible.
+func TestAsTool_EffectFloorRaisesToollessChild(t *testing.T) {
+	child := Engine{Provider: singleTurnProvider("ok"), Model: "child"} // no tools
+	def := AsTool(child, SubagentDef{Name: "sub", Effect: tool.EffectWrite}).Definition()
+	if def.EffectType != tool.EffectWrite {
+		t.Fatalf("EffectType = %q, want write (the declared floor on a tool-less child)", def.EffectType)
+	}
+}
+
+// TestAsTool_EffectFloorNeverLowersChildRisk pins that the floor can only raise
+// risk: a lower declared floor never masks a more dangerous child tool.
+func TestAsTool_EffectFloorNeverLowersChildRisk(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("ok"),
+		Model:    "child",
+		Tools: tool.NewBus(staticTool{def: tool.Definition{
+			Name: "caller", InputSchema: tool.Schema{Type: "object"}, EffectType: tool.EffectExternalSideEffect,
+		}}),
+	}
+	def := AsTool(child, SubagentDef{Name: "sub", Effect: tool.EffectWrite}).Definition()
+	if def.EffectType != tool.EffectExternalSideEffect {
+		t.Fatalf("EffectType = %q, want external_side_effect (a lower floor must not mask a more dangerous child)", def.EffectType)
 	}
 }
 
@@ -255,4 +400,17 @@ func (failingProvider) Metadata() provider.Metadata { return provider.Metadata{N
 
 func (failingProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
 	return nil, errors.New("provider unavailable")
+}
+
+// staticTool is a tool.Driver with a fixed Definition and a no-op Execute, used
+// to give a child engine tools of a known governance shape so a test can assert
+// how AsTool aggregates child risk onto the wrapper.
+type staticTool struct {
+	def tool.Definition
+}
+
+func (s staticTool) Definition() tool.Definition { return s.def }
+
+func (s staticTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	return tool.Result{ToolCallID: call.ID, Name: s.def.Name, Content: "ok"}, nil
 }
