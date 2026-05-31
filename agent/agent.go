@@ -287,22 +287,23 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			})
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
-		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
-		// Charge this turn's tool batch as soon as dispatch is attempted, before
-		// inspecting the outcome, so every partial-error return below — a tool
-		// driver error or recovered parallel panic (toolErr), or a sink Emit
-		// failure while streaming a result frame (appendErr) — reports a
-		// ToolCallsUsed consistent with the dispatch that happened. This mirrors
-		// the batch-level accounting of the pre-dispatch gate above, which reserves
-		// the whole batch against MaxToolCalls: a parallel batch dispatches every
-		// call and a sequential batch dispatches through its first failure, so a
-		// caller that persists or resumes from the partial LoopOutput must not
-		// under-count and let later work exceed the budget. On the success path the
-		// count is unchanged from before. Charging the whole batch can over-count an
-		// early sequential failure or a pre-dispatch hook rejection, but for an
-		// upper-bound budget over-counting is the safe direction — it can only stop
-		// a resumed run sooner, never let it overrun.
+		// Charge this turn's tool batch BEFORE dispatching it, so the count
+		// survives every way dispatch can end. A sequential driver runs inline on
+		// this goroutine: a panic unwinds straight to the RunMessages recover defer
+		// without ever returning here, so a charge placed after executeTools would
+		// be skipped and the recovered partial output would under-report. Charging
+		// first also covers the returns below — a tool error or recovered parallel
+		// panic (toolErr), or a sink Emit failure on a result frame (appendErr).
+		// This mirrors the batch-level accounting of the pre-dispatch gate above,
+		// which reserves the whole batch against MaxToolCalls, so a caller that
+		// persists or resumes from any partial LoopOutput does not under-count and
+		// let later work exceed the budget. On the success path the count is
+		// unchanged. Charging the whole batch can over-count an early sequential
+		// failure or a pre-dispatch hook rejection, but for an upper-bound budget
+		// over-counting is the safe direction — it can only stop a resumed run
+		// sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
+		results, terminal, toolErr := e.executeTools(ctx, assistant.ToolCalls, input.ToolMode)
 		if toolErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), toolErr
 		}

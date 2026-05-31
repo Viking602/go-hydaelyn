@@ -353,6 +353,50 @@ func TestRunMessagesReportsIterationWhenToolDriverPanics(t *testing.T) {
 	}
 }
 
+// TestRunMessagesChargesToolBatchWhenSequentialDriverPanics pins the panic-path
+// half of the tool-charge invariant. A sequential tool driver runs inline on the
+// loop's goroutine, so its panic unwinds straight to RunMessages' recover defer,
+// bypassing any charge placed after the dispatch call. The dispatched batch must
+// still be counted against ToolCallsUsed on the recovered partial output, or a
+// caller resuming from it under-counts MaxToolCalls — the same invariant the
+// tool-error and recovered parallel-panic paths already preserve. Charging the
+// batch before dispatch is what makes the recovered output report it.
+func TestRunMessagesChargesToolBatchWhenSequentialDriverPanics(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "boom",
+				Arguments: json.RawMessage(`{}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(panicToolDriver{}),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr == nil || !errors.Is(runErr, ErrPanicRecovered) {
+		t.Fatalf("expected ErrPanicRecovered from the panicking tool driver, got %v", runErr)
+	}
+	// The bus dispatched the call inline before the driver panicked, so the
+	// recovered partial output must charge it; reporting 0 would let a resuming
+	// caller exceed its MaxToolCalls budget.
+	if out.ToolCallsUsed < 1 {
+		t.Fatalf("ToolCallsUsed = %d, want >= 1 (the dispatched tool call must be charged on the panic-recovered output)", out.ToolCallsUsed)
+	}
+}
+
 // recordingDriver records whether Execute was invoked. It deliberately does
 // not consult the context, modeling a side-effecting tool whose execution
 // under a cancelled context must be prevented by the loop rather than left to
