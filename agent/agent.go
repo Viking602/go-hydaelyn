@@ -635,6 +635,16 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 			if err == io.EOF {
 				break
 			}
+			// A context-aware stream (one that wraps a body read) can unblock Recv
+			// with the context error rather than io.EOF. If that lands after the
+			// terminal EventDone the response is already complete, so treat it like
+			// io.EOF: stop draining and normalize the events already collected
+			// instead of discarding the finished turn. Only context cancellation is
+			// tolerated here — any other post-terminal error is a genuine fault and
+			// still propagates.
+			if sawTerminal && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				break
+			}
 			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
 		}
 		if event.Kind == provider.EventDone {

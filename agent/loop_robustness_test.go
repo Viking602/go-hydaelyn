@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -202,6 +203,88 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	}
 	if out.StopReason != provider.StopReasonError {
 		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+}
+
+// ctxAwareStream models a real provider stream — anthropic and openai wrap an
+// HTTP body — whose Recv unblocks via the request context rather than io.EOF.
+// It replays its queued events in order; once they are drained it surfaces a
+// cancelled context as ctx.Err() (the way a body read does) instead of io.EOF.
+// This is the one termination style SliceStream cannot model, because
+// SliceStream ignores the context and always ends a drained stream with io.EOF.
+type ctxAwareStream struct {
+	ctx    context.Context
+	events []provider.Event
+	pos    int
+}
+
+func (s *ctxAwareStream) Recv() (provider.Event, error) {
+	if s.pos < len(s.events) {
+		event := s.events[s.pos]
+		s.pos++
+		return event, nil
+	}
+	if err := s.ctx.Err(); err != nil {
+		return provider.Event{}, err
+	}
+	return provider.Event{}, io.EOF
+}
+
+func (*ctxAwareStream) Close() error { return nil }
+
+// ctxAwareProvider hands collect a ctxAwareStream wired to the request context,
+// so a cancellation that lands after the terminal EventDone reaches Recv as
+// ctx.Err() rather than io.EOF.
+type ctxAwareProvider struct{ events []provider.Event }
+
+func (ctxAwareProvider) Metadata() provider.Metadata { return provider.Metadata{Name: "ctx-aware"} }
+
+func (p ctxAwareProvider) Stream(ctx context.Context, _ provider.Request) (provider.Stream, error) {
+	return &ctxAwareStream{ctx: ctx, events: p.events}, nil
+}
+
+// TestRunMessagesPreservesCompletedTurnWhenStreamUnblocksViaContext pins the
+// companion case to the io.EOF one: when a context-aware provider stream has
+// already delivered its terminal EventDone and the context is then cancelled,
+// the next Recv returns context.Canceled rather than io.EOF. collect must treat
+// that as the end of an already-complete turn and normalize the events it holds,
+// not discard the turn as a failure. The bundled anthropic/openai streams
+// short-circuit to io.EOF after EventDone so they never hit this path, but the
+// public provider.Stream contract permits a stream that unblocks Recv through
+// the context, and the trace-preservation guarantee must hold for it too.
+func TestRunMessagesPreservesCompletedTurnWhenStreamUnblocksViaContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	driver := ctxAwareProvider{events: []provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}
+	engine := Engine{Provider: driver, Model: "test-model"}
+
+	out, runErr := engine.RunMessages(ctx, LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 1,
+		OnEvent: func(ev provider.Event) error {
+			// Cancel the moment the terminal event is observed so the NEXT Recv,
+			// on this context-aware stream, returns context.Canceled not io.EOF.
+			if ev.Kind == provider.EventDone {
+				cancel()
+			}
+			return nil
+		},
+	})
+
+	if runErr != nil {
+		t.Fatalf("a turn completed via EventDone must survive a context-cancelled Recv, not only an io.EOF one: %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonComplete {
+		t.Fatalf("StopReason = %s, want %s (the completed turn's terminal reason)", out.StopReason, provider.StopReasonComplete)
+	}
+	last := out.Messages[len(out.Messages)-1]
+	if last.Text != "done" {
+		t.Fatalf("assistant text = %q, want %q (the completed response must be preserved)", last.Text, "done")
 	}
 }
 
