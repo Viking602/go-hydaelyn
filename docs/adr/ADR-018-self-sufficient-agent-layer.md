@@ -151,6 +151,13 @@ subordinate to the parent.** Concretely:
   hard-aborts the parent loop; the parent observes the error result and decides
   (mirrors boundaries Principle 6: a failure crosses as typed data, not a bare
   error).
+- A child success surfaces the child's final answer. When the child ends with
+  trailing assistant text, that text is the tool result's content. When the
+  child instead submits its answer through a **terminal tool** — so it completes
+  with no trailing assistant text and (under the empty per-delegation
+  `OutputPolicy`) no structured output — the wrapper falls back to that terminal
+  tool's own content and structured payload rather than returning a blank
+  result.
 - `MaxDepth` (default 4) caps subagent nesting via a context-carried depth
   counter; exceeding it returns an error tool result rather than recursing.
 - The child runs under `SubagentDef.Budget` when set, else its own `Engine`

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
@@ -76,7 +77,10 @@ type SubagentDef struct {
 //     arguments are a JSON object with a string "input" field, that field is
 //     the goal; otherwise the raw arguments JSON becomes the goal.
 //   - A child success returns a tool result whose Content is the child's text
-//     and whose Structured carries any structured child output.
+//     and whose Structured carries any structured child output. When the child
+//     instead submits its answer through a terminal tool — so it completes with
+//     no trailing assistant text — the wrapper surfaces that terminal tool
+//     result's content and structured payload instead of a blank result.
 //   - A child failure (a non-nil Result.Failure) returns an error tool result
 //     (IsError) carrying the failure reason and its typed classification, never
 //     a Go error — so a subagent failure never hard-aborts the parent loop. The
@@ -221,7 +225,7 @@ func (s *subagentTool) Execute(ctx context.Context, call tool.Call, _ tool.Updat
 	if result.Failure != nil {
 		return subagentFailureResult(call, s.def.Name, result.Failure), nil
 	}
-	return subagentSuccessResult(call, s.def.Name, result), nil
+	return s.subagentSuccessResult(call, result), nil
 }
 
 // validateArguments checks the parent's arguments against the input schema when
@@ -276,13 +280,53 @@ func subagentGoal(args json.RawMessage) string {
 	return string(args)
 }
 
-func subagentSuccessResult(call tool.Call, name string, result Result) tool.Result {
+func (s *subagentTool) subagentSuccessResult(call tool.Call, result Result) tool.Result {
+	content := result.Text
+	structured := result.Structured
+	// A child that submits its final answer through a terminal tool completes
+	// with no trailing assistant text, so result.Text is empty and (because the
+	// child runs under an empty OutputPolicy) result.Structured is nil. Fall back
+	// to the terminal tool's own result so the delegation surfaces the child's
+	// answer instead of a blank tool result.
+	if content == "" {
+		if final := s.childFinalToolResult(result); final != nil {
+			content = final.Content
+			if len(structured) == 0 {
+				structured = final.Structured
+			}
+		}
+	}
 	return tool.Result{
 		ToolCallID: call.ID,
-		Name:       name,
-		Content:    result.Text,
-		Structured: result.Structured,
+		Name:       s.def.Name,
+		Content:    content,
+		Structured: structured,
 	}
+}
+
+// childFinalToolResult returns the tool result the child's run ended on when it
+// finished by calling a terminal tool. It scans the child's messages
+// back-to-front for the last tool result whose tool the child bus marks
+// Terminal; when terminality is not statically determinable (the bus is absent
+// or the tool is gone), it falls back to the last tool result in the run.
+// Returns nil when the child produced no tool result at all.
+func (s *subagentTool) childFinalToolResult(result Result) *message.ToolResult {
+	var lastToolResult *message.ToolResult
+	for i := len(result.Messages) - 1; i >= 0; i-- {
+		m := result.Messages[i]
+		if m.Role != message.RoleTool || m.ToolResult == nil {
+			continue
+		}
+		if lastToolResult == nil {
+			lastToolResult = m.ToolResult
+		}
+		if s.child.Tools != nil {
+			if driver, ok := s.child.Tools.Driver(m.ToolResult.Name); ok && driver.Definition().Terminal {
+				return m.ToolResult
+			}
+		}
+	}
+	return lastToolResult
 }
 
 func subagentFailureResult(call tool.Call, name string, failure *AgentFailure) tool.Result {

@@ -198,6 +198,64 @@ func TestAsTool_SuccessMapsTextAndCarriesIdentifiers(t *testing.T) {
 	}
 }
 
+// TestAsTool_TerminalToolResultSurfacesAsContent pins the fix for a child that
+// submits its final answer through a terminal tool: the child completes with no
+// trailing assistant text (result.Text == "") and, under the empty OutputPolicy
+// the subagent runs it with, no structured output — so without the fallback the
+// wrapper would return a blank, useless result. It must instead surface the
+// terminal tool's content and structured payload.
+func TestAsTool_TerminalToolResultSurfacesAsContent(t *testing.T) {
+	finish := terminalAnswerTool{
+		name:       "finish",
+		content:    "the child's final answer",
+		structured: json.RawMessage(`{"answer":42}`),
+	}
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "f1", Name: "finish", Arguments: json.RawMessage(`{}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+	}}
+	child := Engine{Provider: driver, Tools: tool.NewBus(finish), Model: "child"}
+	sub := AsTool(child, SubagentDef{Name: "sub"})
+
+	call := tool.Call{ID: "c", Name: "sub", Arguments: json.RawMessage(`{"input":"go"}`)}
+	result, err := sub.Execute(context.Background(), call, nil)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("terminal-tool child surfaced as error: %+v", result)
+	}
+	if result.Content != "the child's final answer" {
+		t.Fatalf("Content = %q, want the terminal tool's content (not blank)", result.Content)
+	}
+	if string(result.Structured) != `{"answer":42}` {
+		t.Fatalf("Structured = %s, want the terminal tool's payload", result.Structured)
+	}
+}
+
+// TestAsTool_AssistantTextWinsOverTerminalFallback pins that the fallback only
+// fires when there is no assistant text: a child that ends with assistant text
+// surfaces that text, not a trailing tool result.
+func TestAsTool_AssistantTextWinsOverTerminalFallback(t *testing.T) {
+	child := Engine{
+		Provider: singleTurnProvider("assistant final answer"),
+		Model:    "child",
+		Tools:    tool.NewBus(staticTool{def: tool.Definition{Name: "noop", InputSchema: tool.Schema{Type: "object"}}}),
+	}
+	sub := AsTool(child, SubagentDef{Name: "sub"})
+
+	call := tool.Call{ID: "c", Name: "sub", Arguments: json.RawMessage(`{"input":"go"}`)}
+	result, err := sub.Execute(context.Background(), call, nil)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Content != "assistant final answer" {
+		t.Fatalf("Content = %q, want the assistant text", result.Content)
+	}
+}
+
 func TestAsTool_GoalFromInputField(t *testing.T) {
 	var captured string
 	child := Engine{
@@ -413,4 +471,23 @@ func (s staticTool) Definition() tool.Definition { return s.def }
 
 func (s staticTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
 	return tool.Result{ToolCallID: call.ID, Name: s.def.Name, Content: "ok"}, nil
+}
+
+// terminalAnswerTool is a terminal tool.Driver whose Execute returns a fixed
+// content and structured payload, simulating a child that submits its final
+// answer through a terminal tool rather than as trailing assistant text. (The
+// shared terminalTool in agent_test.go sets no Content, so it cannot pin the
+// blank-Content regression this test guards.)
+type terminalAnswerTool struct {
+	name       string
+	content    string
+	structured json.RawMessage
+}
+
+func (t terminalAnswerTool) Definition() tool.Definition {
+	return tool.Definition{Name: t.name, InputSchema: tool.Schema{Type: "object"}, Terminal: true}
+}
+
+func (t terminalAnswerTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	return tool.Result{ToolCallID: call.ID, Name: t.name, Content: t.content, Structured: t.structured}, nil
 }
