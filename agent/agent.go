@@ -167,13 +167,17 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	// whose usage and messages are already in the partial output.
 	turnsRun := 0
 	// Recover any panic raised by caller-supplied extension code the loop drives
-	// on this goroutine (guardrails, recorders, sinks, the OnEvent callback, the
-	// provider stream, and sequential tool drivers) so a misbehaving extension
-	// degrades to a typed failure instead of crashing the worker. The accumulated
-	// trace is preserved on the returned LoopOutput. Two panic sources never
-	// reach this defer and are contained closer to their origin: hook handlers,
-	// in hook.Chain, and parallel tool drivers, which run on bus-spawned
-	// goroutines this recover cannot observe and are contained by the tool bus.
+	// on this goroutine (guardrails, recorders, the sink when it emits tool-result
+	// frames, and sequential tool drivers) so a misbehaving extension degrades to a
+	// typed failure instead of crashing the worker. The accumulated trace is
+	// preserved on the returned LoopOutput. Several panic sources never reach this
+	// defer and are contained closer to their origin: hook handlers, in hook.Chain;
+	// parallel tool drivers, which run on bus-spawned goroutines this recover cannot
+	// observe and are contained by the tool bus; and the per-event callbacks
+	// (OnEvent, the hook chain, the sink on stream frames) and the provider stream,
+	// which panic inside collect — it recovers them itself and returns the partial
+	// turn as an ErrPanicRecovered error rather than unwinding here, so the streamed
+	// response survives. errors.Is(err, ErrPanicRecovered) holds for all of these.
 	defer func() {
 		if r := recover(); r != nil {
 			out = loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed)
@@ -201,7 +205,13 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		}
 		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), turnErr
+			// A turn can fail after the model already produced content: a per-event
+			// callback erroring or panicking mid-stream, which collect surfaces as an
+			// error carrying the partial assistant turn. Record that turn so the
+			// partial trace keeps the produced response and its usage rather than
+			// discarding the completed work along with the failure.
+			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+			return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), turnErr
 		}
 		totalUsage = totalUsage.Add(usage)
 		// The model turn ran and its usage is now counted, so a panic from here on
@@ -446,6 +456,21 @@ func loopErrorOutput(current []message.Message, usage provider.Usage, steps []St
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}
+}
+
+// recordIncompleteTurn folds a failed turn's partial work into the running trace.
+// A turn can fail after the model already streamed content — a per-event callback
+// erroring or panicking, which collect surfaces as an error carrying the
+// normalized partial assistant turn. When that turn carries content, append it and
+// fold its usage so the partial LoopOutput keeps the produced response and its
+// token spend, and count the turn in Iterations; an empty turn leaves the trace,
+// usage, and turn count untouched so a failure before any content reports nothing
+// extra.
+func recordIncompleteTurn(current []message.Message, assistant message.Message, totalUsage, usage provider.Usage, iteration, turnsRun int) ([]message.Message, provider.Usage, int) {
+	if assistant.Text == "" && assistant.Thinking == "" && assistant.RedactedThinking == "" && len(assistant.ToolCalls) == 0 {
+		return current, totalUsage, turnsRun
+	}
+	return append(current, assistant), totalUsage.Add(usage), iteration + 1
 }
 
 // appendRetryContext assembles the messages a guardrail retry feeds back into
@@ -696,11 +721,24 @@ func appendToolResults(ctx context.Context, current *[]message.Message, results 
 	return nil
 }
 
-func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (message.Message, provider.Usage, provider.StopReason, error) {
+func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (assistant message.Message, usage provider.Usage, stop provider.StopReason, err error) {
 	defer func() { _ = providerStream.Close() }()
-	assistant := message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
+	assistant = message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
 	sawTerminal := false
+	// A per-event callback (onEvent or the sink) can panic while handling an
+	// event. Each event is recorded before it is delivered, so normalize the
+	// events collected so far onto the assistant turn and surface the panic as an
+	// ErrPanicRecovered error carrying that partial turn, rather than letting it
+	// unwind to the loop's outer recover where the completed response would be
+	// lost. errors.Is(err, ErrPanicRecovered) still holds end-to-end.
+	defer func() {
+		if r := recover(); r != nil {
+			usage, _, _ = applyNormalized(&assistant, events)
+			stop = provider.StopReasonError
+			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
+		}
+	}()
 	for {
 		// Stop draining the provider stream as soon as the context is done so a
 		// cancelled or timed-out turn returns promptly instead of blocking on
@@ -711,12 +749,12 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 		// and normalize the events already collected rather than failing the turn.
 		if !sawTerminal {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return message.Message{}, provider.Usage{}, provider.StopReasonError, ctxErr
+				return assistant, provider.Usage{}, provider.StopReasonError, ctxErr
 			}
 		}
-		event, err := providerStream.Recv()
-		if err != nil {
-			if err == io.EOF {
+		event, recvErr := providerStream.Recv()
+		if recvErr != nil {
+			if recvErr == io.EOF {
 				break
 			}
 			// A context-aware stream (one that wraps a body read) can unblock Recv
@@ -726,39 +764,71 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 			// instead of discarding the finished turn. Only context cancellation is
 			// tolerated here — any other post-terminal error is a genuine fault and
 			// still propagates.
-			if sawTerminal && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if sawTerminal && (errors.Is(recvErr, context.Canceled) || errors.Is(recvErr, context.DeadlineExceeded)) {
 				break
 			}
-			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+			return assistant, provider.Usage{}, provider.StopReasonError, recvErr
 		}
 		if event.Kind == provider.EventDone {
 			sawTerminal = true
 		}
-		if onEvent != nil {
-			if err := onEvent(event); err != nil {
-				return message.Message{}, provider.Usage{}, provider.StopReasonError, err
-			}
-		}
-		if err := e.Hooks.OnEvent(ctx, event); err != nil {
-			return message.Message{}, provider.Usage{}, provider.StopReasonError, err
-		}
-		if sink != nil {
-			if frame, ok := stream.FrameFromEvent(event); ok {
-				if err := sink.Emit(ctx, frame); err != nil {
-					return message.Message{}, provider.Usage{}, provider.StopReasonError, err
-				}
-			}
-		}
+		// Record the event before delivering it to the callbacks: a callback that
+		// errors or panics must not discard the response already streamed, so both
+		// the recover above and the error return below normalize the events held so
+		// far rather than starting from an empty turn.
 		events = append(events, event)
+		if cbErr := e.fanOutEvent(ctx, event, onEvent, sink); cbErr != nil {
+			usage, stop, _ = applyNormalized(&assistant, events)
+			return assistant, usage, stop, cbErr
+		}
 	}
+	usage, stop, err = applyNormalized(&assistant, events)
+	if err != nil {
+		return assistant, provider.Usage{}, provider.StopReasonError, err
+	}
+	return assistant, usage, stop, nil
+}
+
+// fanOutEvent delivers one provider event to the caller callback, the hook chain,
+// and the sink (frames only), returning the first error. collect records the
+// event before calling this, so a callback failure here ends the turn with the
+// response streamed so far already preserved for the partial trace.
+func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent func(provider.Event) error, sink stream.Sink) error {
+	if onEvent != nil {
+		if err := onEvent(event); err != nil {
+			return err
+		}
+	}
+	if err := e.Hooks.OnEvent(ctx, event); err != nil {
+		return err
+	}
+	if sink != nil {
+		if frame, ok := stream.FrameFromEvent(event); ok {
+			if err := sink.Emit(ctx, frame); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// applyNormalized copies the text, thinking, signatures, and tool calls from the
+// events collected so far onto the assistant turn, and reports the turn's usage
+// and stop reason. It centralizes the normalization collect performs on both its
+// success path and its failure paths (a callback error or a recovered panic),
+// where the partial turn must still carry whatever the model already produced. A
+// normalize error (a malformed stream prefix) leaves the assistant untouched and
+// reports StopReasonError, so a failure path never masks its original cause with a
+// normalize error.
+func applyNormalized(assistant *message.Message, events []provider.Event) (provider.Usage, provider.StopReason, error) {
 	normalized, err := provider.NormalizeEvents(events)
 	if err != nil {
-		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		return provider.Usage{}, provider.StopReasonError, err
 	}
 	assistant.Text = normalized.Text
 	assistant.Thinking = normalized.Thinking
 	assistant.ThinkingSignature = normalized.Signature
 	assistant.RedactedThinking = normalized.RedactedThinking
 	assistant.ToolCalls = normalized.ToolCalls
-	return assistant, normalized.Usage, normalized.StopReason, nil
+	return normalized.Usage, normalized.StopReason, nil
 }

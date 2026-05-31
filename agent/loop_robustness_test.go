@@ -275,6 +275,70 @@ func TestRunMessagesPreservesTraceWhenSinkEmitPanics(t *testing.T) {
 	}
 }
 
+// TestRunMessagesPreservesStreamedTurnWhenSinkPanicsOnDoneFrame pins the
+// trace-preservation contract for a panic that strikes inside collect while the
+// model turn is still streaming, rather than later in appendToolResults. A Sink
+// whose Emit panics on the terminal done frame (EventDone maps to FrameDone) blows
+// up after the assistant text has streamed but before collect used to append its
+// events, so the produced response lived only in collect's local slice and the
+// loop's outer recover salvaged a turn with only the prompt. collect now records
+// each event before delivering it and recovers the panic itself, normalizing the
+// events held so far into the partial assistant turn; RunMessages then records that
+// turn. The recovered LoopOutput must therefore carry the assistant message with
+// its streamed text. Before this fix the panic unwound to the outer recover with
+// the events discarded, leaving only the prompt in Messages.
+func TestRunMessagesPreservesStreamedTurnWhenSinkPanicsOnDoneFrame(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "streamed answer"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	}
+
+	panickingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+		// Let the text frames stream cleanly; panic on the terminal done frame so
+		// the panic unwinds from inside collect, after the response has streamed.
+		if frame.Kind == stream.FrameDone {
+			panic("sink panicked on done frame")
+		}
+		return nil
+	})
+
+	engine := Engine{Provider: driver, Model: "test-model"}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 1,
+		Sink:          panickingSink,
+	})
+
+	if runErr == nil || !errors.Is(runErr, ErrPanicRecovered) {
+		t.Fatalf("expected the sink done-frame panic to be recovered as ErrPanicRecovered, got %v", runErr)
+	}
+	if out.StopReason != provider.StopReasonError {
+		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+	}
+	// The assistant turn streamed its text before the sink panicked on the done
+	// frame, so the recovered output must carry that turn, not only the prompt.
+	var assistant *message.Message
+	for i := range out.Messages {
+		if out.Messages[i].Role == message.RoleAssistant {
+			assistant = &out.Messages[i]
+		}
+	}
+	if assistant == nil {
+		t.Fatalf("recovered messages carry no assistant turn, want the streamed response preserved; messages = %d", len(out.Messages))
+	}
+	if assistant.Text != "streamed answer" {
+		t.Fatalf("preserved assistant text = %q, want %q (the streamed response must survive the sink panic)", assistant.Text, "streamed answer")
+	}
+	// The turn ran and produced content, so the partial output must count it.
+	if out.Iterations < 1 {
+		t.Fatalf("Iterations = %d, want >= 1 (the streamed turn must be counted on the partial output)", out.Iterations)
+	}
+}
+
 // ctxAwareStream models a real provider stream — anthropic and openai wrap an
 // HTTP body — whose Recv unblocks via the request context rather than io.EOF.
 // It replays its queued events in order; once they are drained it surfaces a
