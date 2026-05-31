@@ -327,12 +327,13 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// direction — it can only stop a resumed run sooner, never let it overrun.
 		toolCallsUsed += len(assistant.ToolCalls)
 		results, dispErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
-		// Append before surfacing a dispatch error: when AfterToolCall fails partway,
-		// dispatchPreparedTools returns the results it already post-processed, and the
-		// whole batch has already side-effected, so recording that prefix keeps the
-		// partial trace from dropping tool results a resuming caller would otherwise
-		// replay or leave as a dangling assistant tool call. dispErr is the root cause
-		// and is reported ahead of any secondary sink-emit failure on the prefix.
+		// Append before surfacing a dispatch error: whether a tool driver failed
+		// mid-batch or an AfterToolCall rejected a result, dispatchPreparedTools still
+		// returns the results that ran and side-effected, so recording that prefix
+		// keeps the partial trace from dropping tool results a resuming caller would
+		// otherwise replay or leave as a dangling assistant tool call. dispErr is the
+		// root cause and is reported ahead of any secondary sink-emit failure on the
+		// prefix.
 		appendErr := appendToolResults(ctx, &current, results, input.Sink)
 		if dispErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
@@ -686,21 +687,21 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 // sequential driver, a panic that unwinds inline to the RunMessages recover) —
 // which is why the loop charges the batch before calling this.
 //
-// The whole batch executes in ExecuteBatch before any AfterToolCall runs, so every
-// tool has already side-effected by the time post-processing begins. If an
-// AfterToolCall then fails on one result (an error, or a panic hook.Chain converts
-// to ErrHandlerPanic), the results processed before it are returned alongside the
-// error rather than discarded, so the caller can append them and the partial trace
-// keeps the tool results already produced — sparing a resuming caller from
-// replaying those side-effecting calls. The failing result and any after it are
-// omitted because their AfterToolCall never blessed them, so the returned results
-// are a prefix of the batch. An ExecuteBatch error yields no results at this layer
-// (the bus reports the batch atomically), so the prefix is empty there.
+// Every result ExecuteBatch returns ran to completion and side-effected, even when
+// the batch reports an error: a later sequential call failing still yields the
+// earlier successes, and a parallel call erroring or panicking still yields the
+// completed slots. Those results are post-processed and returned alongside the
+// batch error so the caller records them, sparing a resuming caller from replaying
+// side-effecting calls or leaving the matching assistant tool calls dangling.
+//
+// If an AfterToolCall itself fails on one result (an error, or a panic hook.Chain
+// converts to ErrHandlerPanic), the results blessed before it are returned with
+// that error and the failing result and any after it are dropped — so the returned
+// results are always a prefix of what AfterToolCall post-processed. An AfterToolCall
+// failure takes precedence over a batch error because it is the earlier hook in the
+// pipeline; the loop surfaces whichever non-nil error this returns.
 func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
-	results, err := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
-	if err != nil {
-		return nil, err
-	}
+	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
 		item := current
@@ -709,7 +710,7 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return items, batchErr
 }
 
 // appendToolResults appends each tool result to the running history through the

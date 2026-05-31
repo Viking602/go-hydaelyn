@@ -909,6 +909,84 @@ func TestRunMessagesChargesToolBatchWhenDriverErrors(t *testing.T) {
 	}
 }
 
+// TestRunMessagesPreservesSucceededResultsWhenBatchFails pins that a batch with
+// mixed success and failure keeps the results that already ran on the partial
+// LoopOutput. The model requests two tools in one turn — one that side-effects
+// and succeeds, one that fails — and the loop surfaces the failure. Because the
+// bus dispatched and ran the successful tool before its sibling failed, dropping
+// that result would leave the assistant's tool-call message dangling (a tool_use
+// with no matching tool_result, which the provider rejects on replay) and a
+// resuming caller would re-run the side-effecting call. Both dispatch modes must
+// preserve the survivor: sequential ExecuteBatch returns the earlier success, and
+// parallel executeParallel returns the slot that completed before the join.
+func TestRunMessagesPreservesSucceededResultsWhenBatchFails(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode tool.Mode
+	}{
+		{"sequential", tool.ModeSequential},
+		{"parallel", tool.ModeParallel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// side_effect is requested first so it runs and succeeds before explode
+			// fails; in parallel mode both run to completion before the error joins.
+			prov := &scriptedProvider{turns: [][]provider.Event{{
+				{
+					Kind: provider.EventToolCall,
+					ToolCall: &message.ToolCall{
+						ID:        "call-1",
+						Name:      "side_effect",
+						Arguments: json.RawMessage(`{}`),
+					},
+				},
+				{
+					Kind: provider.EventToolCall,
+					ToolCall: &message.ToolCall{
+						ID:        "call-2",
+						Name:      "explode",
+						Arguments: json.RawMessage(`{}`),
+					},
+				},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+			}}}
+			sideEffect := &recordingDriver{}
+			engine := Engine{
+				Provider: prov,
+				Model:    "test-model",
+				Tools:    tool.NewBus(sideEffect, erroringToolDriver{}),
+			}
+
+			out, runErr := engine.RunMessages(context.Background(), LoopInput{
+				Model:         "test-model",
+				Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+				MaxIterations: 2,
+				ToolMode:      tc.mode,
+			})
+
+			if runErr == nil {
+				t.Fatal("expected the failing tool driver error to surface as the loop error")
+			}
+			if !sideEffect.invoked {
+				t.Fatal("the succeeding tool must have run (and side-effected) before the batch error")
+			}
+			if out.StopReason != provider.StopReasonError {
+				t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
+			}
+			// The succeeded tool's result must survive on the partial trace as a
+			// RoleTool message; discarding it would dangle the assistant tool call.
+			toolResults := 0
+			for _, m := range out.Messages {
+				if m.Role == message.RoleTool {
+					toolResults++
+				}
+			}
+			if toolResults < 1 {
+				t.Fatalf("preserved tool results = %d, want >= 1 (the succeeded tool's result must survive the sibling failure); messages = %d", toolResults, len(out.Messages))
+			}
+		})
+	}
+}
+
 // TestRunMessagesPreservesCompletedTurnWhenCancelledAfterDone pins that a
 // context cancellation landing AFTER the provider delivered its terminal
 // EventDone (which already carries the StopReason) but before the stream

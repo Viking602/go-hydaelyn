@@ -171,7 +171,11 @@ func (b *Bus) ExecuteBatchWithOptions(ctx context.Context, calls []Call, mode Mo
 	for _, call := range calls {
 		result, err := b.Execute(ctx, call, sink)
 		if err != nil {
-			return nil, err
+			// Return the results that already ran rather than nil: in sequential mode
+			// every earlier call completed and side-effected before this one failed,
+			// so the caller can record those results and a resuming caller is spared
+			// from replaying them. The failed call and any after it are not included.
+			return results, err
 		}
 		results = append(results, result)
 	}
@@ -214,7 +218,18 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 	// errors.Join preserves call order and surfaces every failure rather
 	// than racing on whichever goroutine happened to enqueue first.
 	if err := errors.Join(errs...); err != nil {
-		return nil, err
+		// Return the results from the slots that ran to completion rather than
+		// nil: those tools side-effected, so the caller can record them and a
+		// resuming caller is spared from replaying them. Slots that errored,
+		// panicked, or never started leave errs[index] non-nil and carry no
+		// result, so excluding them keeps the survivors in call order.
+		succeeded := make([]Result, 0, len(results))
+		for index := range results {
+			if errs[index] == nil {
+				succeeded = append(succeeded, results[index])
+			}
+		}
+		return succeeded, err
 	}
 	return results, nil
 }
