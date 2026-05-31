@@ -1,0 +1,165 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/go-hydaelyn/hook"
+	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/tool"
+)
+
+// ErrProviderResolverMissing is returned by Build when BuildDeps carries no
+// provider.Resolver — the Engine cannot issue a model call without one.
+var ErrProviderResolverMissing = errors.New("agent: build deps missing provider resolver")
+
+// Spec is the neutral, executable declaration of a single agent: how to run one
+// bounded loop. It says nothing about how the agent is used — the same Spec can
+// be materialized and then driven as a standalone agent, wrapped as a subagent
+// tool (AsTool), or executed as a member of a multi-agent team. Positioning is
+// the caller's choice, never a property of the Spec.
+//
+// Build is the sole materialization path from a Spec to an Engine. Keeping
+// construction in one place means every usage — single agent, subagent, team
+// member — resolves models, selects tools, and wires instructions identically.
+//
+// Spec anchor: docs/adr/ADR-018-self-sufficient-agent-layer.md.
+type Spec struct {
+	// Instructions is the agent's system prompt. When BuildDeps supplies no
+	// ContextManager, Build wires a default one that seeds the loop with
+	// Instructions as the system message and the task goal as the user message.
+	Instructions string
+
+	// Model is the model name passed to the provider on every turn and the key
+	// BuildDeps.Providers resolves to a concrete driver. Two Specs with
+	// different Model values can therefore run on different models — and, when
+	// the resolver is a multi-vendor Registry, different providers.
+	Model string
+
+	// Tools names the tools this agent may call. Build selects exactly this
+	// subset from BuildDeps.Tools; an empty slice yields a tool-less agent.
+	Tools []string
+
+	// LoopPolicy bounds one Engine.Run (iterations, wall-clock, budget). A
+	// per-Task Budget still overrides it at run time.
+	LoopPolicy LoopPolicy
+
+	// ThinkingBudget caps provider reasoning tokens per turn; zero leaves the
+	// provider default in place. StopSequences are forwarded to every turn.
+	ThinkingBudget int
+	StopSequences  []string
+
+	// godoc-allow-any: provider-specific request extensions are intentionally open.
+	ExtraBody map[string]any
+
+	// InputSchema and OutputSchema are the declared typed-handoff contract.
+	// They travel with the Spec for callers that create tasks or advertise the
+	// agent; Build does not bake them into the Engine, because input/output
+	// validation is a per-task concern (api.Task.OutputSchema drives the
+	// OutputPolicy at Run time), not an Engine field.
+	InputSchema  json.RawMessage
+	OutputSchema json.RawMessage
+}
+
+// BuildDeps carries the live runtime dependencies a Spec cannot hold by value:
+// the provider resolver, the master tool registry, the hook chain, and an
+// optional ContextManager override. These are wired once per deployment and
+// reused across every Build.
+type BuildDeps struct {
+	// Providers resolves Spec.Model to the driver that serves it. Required.
+	// A single-provider deployment passes provider.Single(driver).
+	Providers provider.Resolver
+
+	// Tools is the master registry Build selects each Spec's named subset from.
+	// May be nil only when every Spec being built declares no tools.
+	Tools *tool.Bus
+
+	// Hooks is the hook chain installed on the materialized Engine. The zero
+	// value is a valid empty chain.
+	Hooks hook.Chain
+
+	// ContextManager, when set, overrides the default instructions-based
+	// context builder for every Engine built with these deps.
+	ContextManager ContextManager
+}
+
+// Build materializes a Spec into an Engine using the supplied dependencies. It
+// is the single construction entry point for the agent layer.
+//
+// Build resolves Spec.Model through deps.Providers to pick the driver, selects
+// the named tool subset from deps.Tools (failing if a named tool is absent, so
+// a misdeclared tool fails at construction rather than mid-run), and wires
+// Spec.Instructions into a default ContextManager unless deps overrides it. A
+// missing resolver or an unservable model fails here rather than at the first
+// model call.
+func Build(spec Spec, deps BuildDeps) (Engine, error) {
+	if deps.Providers == nil {
+		return Engine{}, ErrProviderResolverMissing
+	}
+	driver, err := deps.Providers.Driver(spec.Model)
+	if err != nil {
+		return Engine{}, fmt.Errorf("agent: resolve provider for model %q: %w", spec.Model, err)
+	}
+
+	var bus *tool.Bus
+	if len(spec.Tools) > 0 {
+		if deps.Tools == nil {
+			return Engine{}, fmt.Errorf("agent: spec lists %d tool(s) but build deps carry no tool bus", len(spec.Tools))
+		}
+		for _, name := range spec.Tools {
+			if _, ok := deps.Tools.Driver(name); !ok {
+				return Engine{}, fmt.Errorf("agent: tool %q named by spec is not registered in build deps", name)
+			}
+		}
+		bus = deps.Tools.Subset(spec.Tools)
+	}
+
+	contextManager := deps.ContextManager
+	if contextManager == nil {
+		contextManager = instructionsContext{instructions: spec.Instructions}
+	}
+
+	return Engine{
+		Provider:       driver,
+		Tools:          bus,
+		Hooks:          deps.Hooks,
+		Model:          spec.Model,
+		LoopPolicy:     spec.LoopPolicy,
+		ContextBuilder: contextManager,
+		ThinkingBudget: spec.ThinkingBudget,
+		StopSequences:  spec.StopSequences,
+		ExtraBody:      spec.ExtraBody,
+	}, nil
+}
+
+// instructionsContext is the default ContextManager Build installs when none is
+// supplied: it seeds the loop with the Spec's instructions as the system
+// message and the task goal as the user message. Compact is a pass-through;
+// tightening it lands when LoopPolicy.MaxTokens is wired.
+type instructionsContext struct {
+	instructions string
+}
+
+func (c instructionsContext) Build(_ context.Context, task api.Task) ([]message.Message, error) {
+	system := strings.TrimSpace(c.instructions)
+	if system == "" {
+		system = "You are a Hydaelyn agent."
+	}
+	goal := strings.TrimSpace(task.Goal)
+	if goal == "" {
+		goal = "Complete the assigned task and return a concise result."
+	}
+	return []message.Message{
+		message.NewText(message.RoleSystem, system),
+		message.NewText(message.RoleUser, goal),
+	}, nil
+}
+
+func (instructionsContext) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
+	return history, nil
+}
