@@ -18,6 +18,7 @@ package cron
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,7 +99,7 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if t.ID == "" {
 		return trigger.Registration{}, fmt.Errorf("scheduler: trigger ID required")
 	}
-	spec := t.Config["cron"]
+	spec := strings.TrimSpace(t.Config["cron"])
 	if spec == "" {
 		return trigger.Registration{}, fmt.Errorf("scheduler: trigger %q missing config[\"cron\"]", t.ID)
 	}
@@ -108,9 +109,13 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if _, dup := d.jobs[t.ID]; dup {
 		return trigger.Registration{}, fmt.Errorf("scheduler: trigger %q already registered", t.ID)
 	}
+	scheduledSpec, err := scheduleSpec(spec, t.Config)
+	if err != nil {
+		return trigger.Registration{}, fmt.Errorf("scheduler: trigger %q %w", t.ID, err)
+	}
 
 	reg := trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}
-	id, err := d.cron.AddFunc(spec, func() {
+	id, err := d.cron.AddFunc(scheduledSpec, func() {
 		ctx := context.Background()
 		tc := trigger.TriggerContext{
 			Trigger:    t,
@@ -124,12 +129,23 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 		}
 	})
 	if err != nil {
-		return trigger.Registration{}, fmt.Errorf("scheduler: cron parse %q: %w", spec, err)
+		return trigger.Registration{}, fmt.Errorf("scheduler: cron parse %q: %w", scheduledSpec, err)
 	}
 	d.jobs[t.ID] = id
 	d.regs[t.ID] = reg
-	d.logger("scheduler: registered %s with spec %q", t.ID, spec)
+	d.logger("scheduler: registered %s with spec %q", t.ID, scheduledSpec)
 	return reg, nil
+}
+
+func scheduleSpec(spec string, config map[string]string) (string, error) {
+	zone := strings.TrimSpace(config["timezone"])
+	if zone == "" {
+		return spec, nil
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return "", fmt.Errorf("invalid timezone %q: %w", zone, err)
+	}
+	return "CRON_TZ=" + zone + " " + spec, nil
 }
 
 // Deregister removes a previously-registered trigger by ID. Returns
