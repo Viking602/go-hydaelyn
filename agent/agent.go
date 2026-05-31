@@ -158,6 +158,14 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	totalUsage := provider.Usage{}
 	steps := make([]Step, 0, input.MaxIterations)
 	toolCallsUsed := 0
+	// turnsRun counts the model turns that have actually run (their usage folded
+	// into totalUsage). It is set once a turn completes, before the per-turn Step
+	// is recorded, so the panic path below reports Iterations consistently with
+	// the non-panic returns even when a panic strikes after a turn ran but before
+	// its Step exists (a guardrail/recorder panic or a sequential tool driver
+	// panic). Deriving Iterations from len(steps) there would under-report a turn
+	// whose usage and messages are already in the partial output.
+	turnsRun := 0
 	// Recover any panic raised by caller-supplied extension code the loop drives
 	// on this goroutine (guardrails, recorders, sinks, the OnEvent callback, the
 	// provider stream, and sequential tool drivers) so a misbehaving extension
@@ -168,7 +176,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	// goroutines this recover cannot observe and are contained by the tool bus.
 	defer func() {
 		if r := recover(); r != nil {
-			out = loopErrorOutput(current, totalUsage, steps, len(steps), toolCallsUsed)
+			out = loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed)
 			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
 		}
 	}()
@@ -196,6 +204,10 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), turnErr
 		}
 		totalUsage = totalUsage.Add(usage)
+		// The model turn ran and its usage is now counted, so a panic from here on
+		// (guardrails, recorders, sink, sequential tool drivers) must report this
+		// turn in Iterations rather than only the turns whose Step already exists.
+		turnsRun = iteration + 1
 		modelCall := &ModelCall{
 			Model:        input.Model,
 			InputTokens:  usage.InputTokens,
@@ -279,12 +291,18 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		if toolErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), toolErr
 		}
+		// executeTools dispatched every call in this turn, so charge them now —
+		// before appending results and emitting their frames. If a sink Emit then
+		// fails, appendToolResults returns the partial trace and the loop returns
+		// it as the error output; charging here keeps ToolCallsUsed consistent with
+		// the calls that actually ran, so a caller that persists or resumes from the
+		// partial LoopOutput does not under-count its MaxToolCalls budget.
+		toolCallsUsed += len(assistant.ToolCalls)
 		var appendErr error
 		current, appendErr = appendToolResults(ctx, current, results, input.Sink)
 		if appendErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
 		}
-		toolCallsUsed += len(assistant.ToolCalls)
 		decision := StepDecisionContinue
 		if terminal {
 			decision = StepDecisionFinish

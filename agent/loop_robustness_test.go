@@ -204,6 +204,12 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	if out.StopReason != provider.StopReasonError {
 		t.Fatalf("StopReason = %s, want %s", out.StopReason, provider.StopReasonError)
 	}
+	// The tool call was dispatched by executeTools before the sink failed on its
+	// result frame, so the partial output must charge it: a caller resuming from
+	// this LoopOutput would otherwise under-count its MaxToolCalls budget.
+	if out.ToolCallsUsed < 1 {
+		t.Fatalf("ToolCallsUsed = %d, want >= 1 (the dispatched tool call must be charged on the partial output)", out.ToolCallsUsed)
+	}
 }
 
 // ctxAwareStream models a real provider stream — anthropic and openai wrap an
@@ -285,6 +291,65 @@ func TestRunMessagesPreservesCompletedTurnWhenStreamUnblocksViaContext(t *testin
 	last := out.Messages[len(out.Messages)-1]
 	if last.Text != "done" {
 		t.Fatalf("assistant text = %q, want %q (the completed response must be preserved)", last.Text, "done")
+	}
+}
+
+// panicToolDriver panics from Execute. Run sequentially it executes inline on
+// the loop's goroutine, so its panic propagates to RunMessages' own recover
+// (parallel drivers are contained by the bus instead). It models a misbehaving
+// tool driver that crashes after a model turn has already run.
+type panicToolDriver struct{}
+
+func (panicToolDriver) Definition() tool.Definition {
+	return tool.Definition{Name: "boom"}
+}
+
+func (panicToolDriver) Execute(_ context.Context, _ tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	panic("tool driver exploded")
+}
+
+// TestRunMessagesReportsIterationWhenToolDriverPanics pins that the panic
+// backstop reports Iterations from the turns that actually ran, not from the
+// completed-Step count. A sequential tool driver panics after the model turn has
+// run and its assistant tool-call message is already in the partial trace, but
+// before this turn's Step is recorded. Deriving Iterations from len(steps) would
+// report 0 while the partial output carries the turn's messages — an
+// inconsistency for a direct RunMessages consumer. Iterations must be >= 1.
+func TestRunMessagesReportsIterationWhenToolDriverPanics(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "boom",
+				Arguments: json.RawMessage(`{}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	engine := Engine{
+		Provider: driver,
+		Model:    "test-model",
+		Tools:    tool.NewBus(panicToolDriver{}),
+	}
+
+	out, runErr := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxIterations: 2,
+		ToolMode:      tool.ModeSequential,
+	})
+
+	if runErr == nil || !errors.Is(runErr, ErrPanicRecovered) {
+		t.Fatalf("expected ErrPanicRecovered from the panicking tool driver, got %v", runErr)
+	}
+	// The assistant tool-call message is preserved, so reporting Iterations=0
+	// would contradict the partial trace.
+	if len(out.Messages) < 2 {
+		t.Fatalf("preserved messages = %d, want >= 2 (prompt + assistant tool call)", len(out.Messages))
+	}
+	if out.Iterations < 1 {
+		t.Fatalf("Iterations = %d, want >= 1 (the model turn ran before the tool-driver panic)", out.Iterations)
 	}
 }
 
