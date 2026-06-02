@@ -1,5 +1,5 @@
 // Package packs is the v0.8.0 "vertical pack" registry root. A pack is a
-// curated bundle of AgentDefinitions, Capabilities, eval Suites, and
+// curated bundle of AgentDefinitions, Capabilities, eval cases, and
 // recipes for one application domain. Packs MUST NOT touch the Hydaelyn
 // kernel surface — they only consume the public api/* and runtime/* types
 // and re-export configuration the host application can mount into its
@@ -53,8 +53,9 @@ type Pack struct {
 	// catalog without breaking pack authors.
 	Recipes []Recipe
 
-	// EvalSuites grade agents in this pack. Hosts MAY run them in CI.
-	EvalSuites []eval.Suite
+	// EvalCases grade agents in this pack. Hosts MAY run them in CI via
+	// eval.RunSuite(t, pack.EvalCases).
+	EvalCases []eval.EvalCase
 }
 
 // Recipe is a minimal descriptor for a documented "how to use this pack"
