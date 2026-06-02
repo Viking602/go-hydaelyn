@@ -213,7 +213,8 @@ Two constraints worth knowing:
 | `memory/` | Optional-plugin `Memory[T]` interface (no backend ships) |
 | `worker/` | Optional glue from `TaskEnvelope` execution to `agent.Engine` |
 | `packs/` | Skeleton vertical packs: `research`, `customersupport`, `devops`, `aiops` |
-| `eval/`, `contract/` | Evaluation framework and storage-contract conformance suite |
+| `eval/` | Evaluation framework — `EvalCase` / `Harness` / `Run` / `RunSuite`, typed assertions, matchers, reporters ([docs](docs/evaluation.md)) |
+| `contract/` | Storage-contract conformance suite |
 
 ## Examples
 

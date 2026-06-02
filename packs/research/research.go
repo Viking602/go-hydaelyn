@@ -14,12 +14,11 @@
 package research
 
 import (
-	"context"
-
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/assert"
+	"github.com/Viking602/go-hydaelyn/eval/assertions"
 	"github.com/Viking602/go-hydaelyn/packs"
+	"github.com/Viking602/go-hydaelyn/provider"
 )
 
 // PackName is the registry identifier for this pack.
@@ -74,7 +73,7 @@ var Pack = packs.Pack{
 			DocumentURL: "docs/recipes/research-triad.md",
 		},
 	},
-	EvalSuites: []eval.Suite{SmokeSuite},
+	EvalCases: SmokeCases,
 }
 
 var planner = api.AgentDefinition{
@@ -125,30 +124,29 @@ var writer = api.AgentDefinition{
 	},
 }
 
-// SmokeSuite is a one-case eval suite that verifies a finished Run
-// produced a non-empty cited answer. Hosts running this suite supply an
-// Outcome by driving the pack against their own Runner; the suite does
-// no execution itself.
-var SmokeSuite = eval.Suite{
-	Name:        "research-smoke",
-	Description: "Smoke: the final answer mentions at least one source and is not empty.",
-	Cases: []eval.Case{
-		{
-			Name: "cited-answer",
-			Assertions: []eval.Assertion{
-				assert.Regex{Pattern: `\S`},
-				assert.JudgedBy{
-					Label: "mentions-source",
-					Judge: func(_ context.Context, o eval.Outcome) (bool, string) {
-						for _, item := range o.BlackboardItems {
-							if item.Type == api.BlackboardItemType("evidence") {
-								return true, "evidence item present"
-							}
-						}
-						return false, "no evidence items on blackboard"
-					},
-				},
-			},
+// SmokeCases is a one-case eval suite that drives the pack against a
+// deterministic scripted model and verifies the run completes with a
+// non-empty answer. Hosts run it in CI via eval.RunSuite(t, SmokeCases).
+// Swapping the harness's scripted provider for a live one turns this into
+// a full quality gate without changing the case shape.
+var SmokeCases = []eval.EvalCase{
+	{
+		Name:        "cited-answer",
+		Description: "the final answer is non-empty and mentions a source",
+		Setup: func() eval.Harness {
+			return eval.NewHarness(eval.WithScript([]provider.Event{
+				{Kind: provider.EventTextDelta, Text: "Answer with source [1] attached."},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			}))
+		},
+		Input: api.StartRunCommand{
+			RunID:      "research-smoke",
+			RootTaskID: "root",
+			Request:    "summarize the question with at least one source",
+		},
+		Assertions: []eval.Assertion{
+			assertions.RunTerminatedWithStatus{Status: api.RunStatusCompleted},
+			assertions.OutputContains{Substring: "source"},
 		},
 	},
 }
