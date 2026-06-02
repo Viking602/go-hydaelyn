@@ -70,6 +70,29 @@ func TestJSONContains_Match(t *testing.T) {
 	}
 }
 
+func TestJSONContains_RejectsTrailingData(t *testing.T) {
+	// A valid JSON object followed by garbage must not pass as the object:
+	// decodeJSON should reject the trailing tokens, leaving the input as a
+	// raw string that cannot contain an object partial.
+	m := matcher.JSONContains(map[string]any{"status": "ok"})
+	if ok, _ := m.Match(`{"status":"ok"} not-json`); ok {
+		t.Fatalf("expected trailing data to fail containment")
+	}
+	// A plain string that merely starts with a JSON token must stay a string,
+	// not normalize to the leading scalar (e.g. "true story" -> bool true).
+	if ok, _ := matcher.JSONContains(map[string]any{"a": 1}).Match(`true story`); ok {
+		t.Fatalf("expected JSON-leading plain string not to match object partial")
+	}
+}
+
+func TestJSONMatchSchema_RejectsTrailingData(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","required":["status"],"properties":{"status":{"type":"string"}}}`)
+	m := matcher.JSONMatchSchema(schema)
+	if ok, _ := m.Match(`{"status":"ok"} not-json`); ok {
+		t.Fatalf("expected trailing data to fail schema validation")
+	}
+}
+
 func TestJSONContains_ArrayContainment(t *testing.T) {
 	m := matcher.JSONContains([]any{map[string]any{"id": 2}})
 	if ok, detail := m.Match(`[{"id":1},{"id":2,"name":"x"}]`); !ok {

@@ -115,6 +115,12 @@ func decodeJSON(data []byte) (any, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
+	// Reject trailing tokens after the first value so inputs like
+	// `{"status":"ok"} not-json` are treated as malformed rather than
+	// silently passing as the leading object.
+	if decoder.More() {
+		return nil, fmt.Errorf("unexpected trailing data after JSON value")
+	}
 	return value, nil
 }
 
