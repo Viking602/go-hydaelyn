@@ -295,11 +295,29 @@ func (p *Patcher) Commit(ctx context.Context, prepared []PreparedSection) (Apply
 	return ApplyPatchResult{Sections: results}, nil
 }
 
+// restorer is an optional Filesystem capability used only by rollback. Its
+// RestoreText writes bytes that were previously READ from the same file,
+// bypassing any forward write-size cap WriteText enforces. The original bytes
+// were already on disk (the read succeeded under the larger read cap), so
+// restoring them must always be allowed: otherwise a multi-section edit that
+// first shrinks an over-write-cap file and then fails on a later section could
+// not be rolled back through the capped WriteText, leaving the earlier file
+// modified and breaking Commit's all-or-nothing contract. A Filesystem that
+// does not implement restorer falls back to WriteText (best-effort, as before).
+type restorer interface {
+	RestoreText(ctx context.Context, path, text string) error
+}
+
 // rollback restores already-written files to their original raw bytes. Any
 // restore error is best-effort; the original write failure is the reported
-// cause.
+// cause. Restoration prefers the uncapped restorer path so an original that
+// exceeds the forward write cap is still put back (see restorer).
 func (p *Patcher) rollback(ctx context.Context, written []PreparedSection) {
 	for i := len(written) - 1; i >= 0; i-- {
+		if r, ok := p.FS.(restorer); ok {
+			_ = r.RestoreText(ctx, written[i].Path, written[i].originalRaw)
+			continue
+		}
 		_ = p.FS.WriteText(ctx, written[i].Path, written[i].originalRaw)
 	}
 }

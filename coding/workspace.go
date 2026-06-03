@@ -581,6 +581,31 @@ func (w *localWorkspace) WriteText(ctx context.Context, path, text string) error
 	if len(text) > w.maxWriteBytes {
 		return fmt.Errorf("coding: write %q: content exceeds %d bytes", canon, w.maxWriteBytes)
 	}
+	return writeResolved(abs, canon, text)
+}
+
+// RestoreText writes content back to a file WITHOUT the maxWriteBytes cap. It
+// exists solely for the patcher's all-or-nothing rollback: the bytes restored
+// were previously read from this same file (already on disk, within the larger
+// read cap), so refusing to put them back merely because they exceed the
+// smaller forward write cap would leave a half-applied multi-file patch. It must
+// never carry new or model-supplied content — WriteText is the capped forward
+// path; this only ever replays a prior original.
+func (w *localWorkspace) RestoreText(ctx context.Context, path, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	abs, canon, err := w.resolve(path)
+	if err != nil {
+		return err
+	}
+	return writeResolved(abs, canon, text)
+}
+
+// writeResolved writes text to an already-resolved absolute path, preserving
+// the existing file's mode when present. Shared by WriteText (capped forward
+// path) and RestoreText (uncapped rollback restore).
+func writeResolved(abs, canon, text string) error {
 	mode := os.FileMode(0o644)
 	if fi, statErr := os.Stat(abs); statErr == nil {
 		mode = fi.Mode().Perm()

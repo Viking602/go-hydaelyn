@@ -187,6 +187,49 @@ func TestEditHashline_RecoversStaleBlockEditAgainstBase(t *testing.T) {
 	}
 }
 
+// TestEditHashline_RollbackRestoresOverCapOriginal proves Commit's
+// all-or-nothing rollback holds even when a section's original content exceeds
+// the forward write cap. Section A shrinks an over-cap (but readable) file so
+// its own write succeeds; section B's result exceeds the cap so its write fails
+// and triggers rollback. Restoring A's original (still over-cap) goes through
+// the uncapped restorer path, so A is put back rather than left shrunk.
+func TestEditHashline_RollbackRestoresOverCapOriginal(t *testing.T) {
+	// A is ~98 bytes — above the 64-byte write cap below, but well within the
+	// (default) read cap, so it reads cleanly and mints a tag.
+	aOriginal := "keepme\n" + strings.Repeat("b", 90) + "\n"
+	_, root := newTestWorkspace(t, map[string]string{
+		"a.txt": aOriginal,
+		"b.txt": "hello\n",
+	})
+	// Re-open the same root with a tiny write cap (newTestWorkspace uses defaults).
+	capped := NewLocalWorkspace(root, WithMaxWriteBytes(64))
+	set := NewToolSet(capped)
+
+	headerA := readHeader(t, set, "a.txt")
+	headerB := readHeader(t, set, "b.txt")
+
+	// Section A shrinks the big file (write succeeds); section B's replacement is
+	// 81 bytes > 64, so committing B fails and rolls A back.
+	long := strings.Repeat("Z", 80)
+	patch := headerA + "\nreplace 2:\n+x\n" +
+		headerB + "\nreplace 1:\n+" + long + "\n"
+	res, _ := callJSON(t, driverByName(t, set, ToolEditHashline), editHashlineInput{Input: patch})
+	if !res.IsError {
+		t.Fatalf("over-cap section B should fail the commit, got success: %s", res.Content)
+	}
+
+	// A must be rolled back to its original over-cap content, not left shrunk.
+	gotA, _ := os.ReadFile(filepath.Join(root, "a.txt"))
+	if string(gotA) != aOriginal {
+		t.Errorf("rollback did not restore the over-cap original:\n got %q\nwant %q", gotA, aOriginal)
+	}
+	// B was never written (cap rejected before the write), so it is untouched.
+	gotB, _ := os.ReadFile(filepath.Join(root, "b.txt"))
+	if string(gotB) != "hello\n" {
+		t.Errorf("b.txt should be untouched, got %q", gotB)
+	}
+}
+
 // TestEditHashline_BlockReplaceFunc proves block edit flows end-to-end through
 // coding.edit_hashline: "replace block N" pointed at a func's line replaces the
 // whole function on a real Go file in a temp workspace.

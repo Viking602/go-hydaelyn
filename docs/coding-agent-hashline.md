@@ -318,7 +318,9 @@ func (p *Patcher) Apply(ctx context.Context, patch Patch) (ApplyPatchResult, err
                  mismatch ⇒ ErrSnapshotMismatch (stale-reject)
 4 each section: Apply in memory; keep new text + original text (rollback buffer)
 5 only after ALL sections succeed: PreflightWrite each, then WriteText each
-6 if any WriteText fails: restore already-written files from the rollback buffer; fail
+6 if any WriteText fails: restore already-written files from the rollback buffer
+                 (via the uncapped restore path so an original above the forward
+                 write cap is still put back); fail
 7 build per-section result: new header (recompute tag of new text), compact diff, firstChangedLine
 ```
 

@@ -127,10 +127,15 @@ var Pack = packs.Pack{
 					Name:        toolGoTest,
 					Version:     "1",
 					Description: "Run an allowlisted `go test` invocation in the workspace (no shell; bounded output and timeout).",
-					EffectType:  api.ToolEffectReadOnly,
-					RiskLevel:   "low",
-					Idempotent:  false,
-					Tags:        []string{"coding", "test"},
+					// go_test never mutates workspace files (ReadOnly), but `go test`
+					// compiles and executes the workspace's own code, so it carries the
+					// run tag at medium risk to mirror the runtime driver — hosts that
+					// build governance from this manifest escalate it to require
+					// approval just like coding.PolicyEngine does.
+					EffectType: api.ToolEffectReadOnly,
+					RiskLevel:  "medium",
+					Idempotent: false,
+					Tags:       []string{"coding", "test", "run"},
 				},
 			},
 		},
