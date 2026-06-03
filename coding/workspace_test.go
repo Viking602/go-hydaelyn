@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,6 +13,16 @@ import (
 	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
 	"github.com/Viking602/go-hydaelyn/coding/internal/workspace"
 )
+
+// gitRepoCmd runs a git command in dir for test setup, failing on error.
+func gitRepoCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 // newTestWorkspace creates a temp directory, seeds it with the given files
 // (relative path -> content), and returns a local workspace over it plus the
@@ -276,6 +287,108 @@ func TestLocalWorkspace_GitDiffPathspecSymlinkRejected(t *testing.T) {
 		if err := lw.guardCommandGitPaths(diffArgs(pathspec)); err != nil {
 			t.Errorf("git diff pathspec %q should be allowed by the git-paths guard, got %v", pathspec, err)
 		}
+	}
+}
+
+// TestLocalWorkspace_GitFilterAttributeRefused proves a hostile gitattributes
+// clean filter cannot turn the read-only git diff/status path into command
+// execution. git normalizes worktree files through filter.<driver>.clean while
+// computing a diff or status, and --no-ext-diff/--no-textconv do NOT disable
+// that, so the workspace must refuse any diff/status whose paths carry a filter
+// attribute — from either the worktree .gitattributes or .git/info/attributes —
+// before git runs the filter.
+func TestLocalWorkspace_GitFilterAttributeRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hostile clean filter uses sh -c; not portable to Windows")
+	}
+	marker := filepath.Join(t.TempDir(), "PWNED")
+
+	setup := func(t *testing.T, attrsInGitDir bool) Workspace {
+		ws, root := newTestWorkspace(t, map[string]string{"f.txt": "hello\n"})
+		gitRepoCmd(t, root, "init", "-q")
+		gitRepoCmd(t, root, "config", "user.email", "t@t.t")
+		gitRepoCmd(t, root, "config", "user.name", "t")
+		// Hostile clean filter: a marker write stands in for arbitrary command
+		// execution; `cat` passes the content through so git is otherwise happy.
+		gitRepoCmd(t, root, "config", "filter.evil.clean", "sh -c 'echo PWNED > "+marker+"; cat'")
+		attrLine := []byte("* filter=evil\n")
+		dest := filepath.Join(root, ".gitattributes")
+		if attrsInGitDir {
+			dest = filepath.Join(root, ".git", "info", "attributes")
+		}
+		if err := os.WriteFile(dest, attrLine, 0o644); err != nil {
+			t.Fatalf("write %s: %v", dest, err)
+		}
+		gitRepoCmd(t, root, "add", "-A")
+		gitRepoCmd(t, root, "commit", "-qm", "init")
+		// Modify the worktree so diff/status have content to normalize.
+		if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello world\n"), 0o644); err != nil {
+			t.Fatalf("modify f.txt: %v", err)
+		}
+		return ws
+	}
+
+	gitDiff := []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "."}
+	gitStatus := []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "."}
+
+	for _, tc := range []struct {
+		name          string
+		attrsInGitDir bool
+	}{
+		{"worktree .gitattributes", false},
+		{".git/info/attributes", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := setup(t, tc.attrsInGitDir)
+			ctx := context.Background()
+			assertRefused := func(label string, run func() error) {
+				_ = os.Remove(marker)
+				err := run()
+				if !errors.Is(err, workspace.ErrCommandNotAllowed) {
+					t.Fatalf("%s: want ErrCommandNotAllowed, got %v", label, err)
+				}
+				if _, statErr := os.Stat(marker); statErr == nil {
+					t.Fatalf("%s: clean filter executed (marker created)", label)
+				}
+			}
+			assertRefused("RunCommand git diff", func() error {
+				_, err := ws.RunCommand(ctx, RunCommandRequest{Args: gitDiff})
+				return err
+			})
+			assertRefused("RunCommand git status", func() error {
+				_, err := ws.RunCommand(ctx, RunCommandRequest{Args: gitStatus})
+				return err
+			})
+			assertRefused("Diff driver", func() error {
+				_, err := ws.Diff(ctx, DiffRequest{})
+				return err
+			})
+		})
+	}
+}
+
+// TestLocalWorkspace_GitDiffNoFilterAllowed is the negative control: the filter
+// guard must not break a normal diff in a repo with no filter attributes.
+func TestLocalWorkspace_GitDiffNoFilterAllowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git diff worktree semantics vary on Windows CI")
+	}
+	ws, root := newTestWorkspace(t, map[string]string{"f.txt": "hello\n"})
+	gitRepoCmd(t, root, "init", "-q")
+	gitRepoCmd(t, root, "config", "user.email", "t@t.t")
+	gitRepoCmd(t, root, "config", "user.name", "t")
+	gitRepoCmd(t, root, "add", "-A")
+	gitRepoCmd(t, root, "commit", "-qm", "init")
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatalf("modify f.txt: %v", err)
+	}
+
+	res, err := ws.Diff(context.Background(), DiffRequest{})
+	if err != nil {
+		t.Fatalf("Diff on filter-free repo: %v", err)
+	}
+	if !strings.Contains(res.Diff, "hello world") {
+		t.Errorf("diff missing the worktree change: %q", res.Diff)
 	}
 }
 

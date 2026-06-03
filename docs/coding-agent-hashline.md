@@ -449,6 +449,21 @@ rejects an in-root symlink whose target points outside the sandbox (the
 filesystem-aware check the lexical screen cannot perform). The `git_diff` driver
 already supplies `.` or resolved paths, so it is unaffected.
 
+Both read-only git forms are additionally vetted for a `filter` gitattribute
+before they run. `git diff` and `git status` normalize each worktree file through
+its configured clean/process filter (`filter.<driver>.clean`/`.process`) while
+computing their output, and `--no-ext-diff`/`--no-textconv` do NOT disable those
+filters — so a repo whose `.gitattributes` *or* `$GIT_DIR/info/attributes`
+assigns such a filter, with a `.git/config` defining its command, could turn the
+read-only command into execution of that command. `localWorkspace.guardCommandGitFilters`
+calls `workspace.CheckGitDiffFilters`, which enumerates the tracked paths under
+the command's pathspecs with `git ls-files -z` and reports their `filter`
+attribute with `git check-attr filter -z` — both read-only probes that never run
+the filter and that see attributes from every source — and refuses the command
+(`ErrCommandNotAllowed`) when any covered path carries a clean/process filter.
+The probe is fail-closed: a probe error, or output past its 16 MiB cap, refuses
+the command. See §6.6.
+
 The argv allowlist screens a `go test` package pattern only lexically (it rejects
 a `..` traversal segment). A directory symlink inside the workspace that points
 outward — e.g. `go test ./link` where `link → /outside` — has no `..` segment and
@@ -552,6 +567,18 @@ calling `RunCommand` directly cannot read or enumerate a parent repository when
 the workspace root is a repo subdirectory. The `git_diff` driver scopes itself —
 it appends `.` when no paths are given and resolves every caller-supplied path
 through the workspace boundary before invoking git.
+
+Finally, both read forms are vetted for a `filter` gitattribute (§5.3). git
+normalizes worktree files through any configured `filter.<driver>.clean`/`.process`
+while computing a diff or status, and `--no-ext-diff`/`--no-textconv` do not
+disable that — so a hostile repo (a `filter=<driver>` assignment in worktree
+`.gitattributes` *or* `.git/info/attributes`, plus a `.git/config` defining the
+driver's command) could otherwise turn this read-only, approval-free path into
+command execution, exactly like the `fsmonitor`/`diff.external` vectors above.
+`localWorkspace.RunCommand` therefore probes the covered paths with read-only
+`git ls-files`/`git check-attr` (which report attributes from every source
+without ever running the filter) and refuses the command when any path carries a
+clean/process filter; the probe fails closed.
 
 ## 7. Policy & audit
 
@@ -664,6 +691,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
 | repo config → command exec on a read-only git command | every allowlisted `git` form (both `diff` and `status`) requires the leading `-c core.fsmonitor=false` override, disabling a `.git/config` filesystem-monitor hook git would otherwise run while refreshing the index; the `diff` form additionally requires both `--no-ext-diff` and `--no-textconv`, neutralizing a `diff.external`/textconv helper, so a host driving `RunCommand` directly cannot omit them; the allowlist admits only the exact `core.fsmonitor=false` override |
 | git command reads/enumerates a parent repo | git operates on the whole containing repository, so when the workspace root is a repo subdirectory an unscoped `git status`/`git diff` would expose files outside the sandbox; the allowlist requires `status -- .` and ≥1 `diff` pathspec, screens each `diff` pathspec lexically (no `..`, absolute, or `:` pathspec magic), and resolves it through the workspace boundary (`localWorkspace.guardCommandGitPaths`) to reject an in-root symlink pointing outward |
+| gitattributes clean filter → command exec on a read-only git command | `git diff`/`git status` normalize worktree files through any configured `filter.<driver>.clean`/`.process` while computing output, which `--no-ext-diff`/`--no-textconv` do not disable; a hostile `filter=` assignment in worktree `.gitattributes` or `.git/info/attributes` (plus a `.git/config` defining the driver) could otherwise run a command. `localWorkspace.guardCommandGitFilters` probes the covered paths with read-only `git ls-files`/`git check-attr` (`workspace.CheckGitDiffFilters`) — which report the attribute from every source without running the filter — and refuses the command when any path carries a clean/process filter; the probe fails closed |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |

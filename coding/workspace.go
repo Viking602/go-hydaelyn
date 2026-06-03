@@ -496,6 +496,14 @@ func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) 
 	if err := w.guardCommandGitPaths(req.Args); err != nil {
 		return RunCommandResult{}, err
 	}
+	// git diff/status normalize worktree files through any configured clean/
+	// process filter (filter.<driver>.clean/.process) to compute their output,
+	// and --no-ext-diff/--no-textconv do NOT disable those filters. Reject the
+	// command if any covered path carries a filter gitattribute so a hostile
+	// .gitattributes/.git config cannot turn this read-only path into execution.
+	if err := w.guardCommandGitFilters(ctx, req.Args); err != nil {
+		return RunCommandResult{}, err
+	}
 	res, err := workspace.RunCommand(ctx, workspace.RunCommandRequest{
 		Args:           req.Args,
 		WorkingDir:     w.root,
@@ -545,6 +553,32 @@ func (w *localWorkspace) guardCommandPackagePath(args []string) error {
 	return nil
 }
 
+// gitReadPathspecs returns the pathspecs after the "--" separator for an
+// allowlisted read-only git form (diff or status) and reports whether args is
+// such a form. Both forms place their workspace-scoped pathspecs after "--", so
+// the path-safety and filter guards share this extractor. Non-git or
+// non-read-form argv yields ok == false and is left to the other guards.
+func gitReadPathspecs(args []string) (pathspecs []string, ok bool) {
+	if len(args) < 2 || args[0] != "git" {
+		return nil, false
+	}
+	sep := -1
+	isRead := false
+	for i, a := range args {
+		if a == "diff" || a == "status" {
+			isRead = true
+		}
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	if !isRead || sep < 0 {
+		return nil, false
+	}
+	return args[sep+1:], true
+}
+
 // guardCommandGitPaths rejects a `git diff` invocation whose pathspecs resolve
 // outside the workspace through a symlink. The lexical argv allowlist
 // (workspace.ValidateCommand) already screens each pathspec for "..", absolute
@@ -553,33 +587,46 @@ func (w *localWorkspace) guardCommandPackagePath(args []string) error {
 // Resolving each pathspec through w.resolve (the same ResolveWorkspacePath
 // boundary every read/write path uses) canonicalizes symlinks and rejects an
 // escape. The "." pathspec denotes the workspace root and is trivially in-bounds;
-// `git status` is fixed to "-- ." by the allowlist and needs no per-path check.
-// Non-git-diff argv is left to ValidateCommand and the other guards.
+// `git status` is fixed to "-- ." by the allowlist, so its only pathspec is "."
+// and the loop is a no-op for it. Non-git-read argv is left to the other guards.
 func (w *localWorkspace) guardCommandGitPaths(args []string) error {
-	if len(args) < 2 || args[0] != "git" {
+	pathspecs, ok := gitReadPathspecs(args)
+	if !ok {
 		return nil
 	}
-	sep := -1
-	isDiff := false
-	for i, a := range args {
-		if a == "diff" {
-			isDiff = true
-		}
-		if a == "--" {
-			sep = i
-			break
-		}
-	}
-	if !isDiff || sep < 0 {
-		return nil
-	}
-	for _, p := range args[sep+1:] {
+	for _, p := range pathspecs {
 		if p == "." {
 			continue
 		}
 		if _, _, err := w.resolve(p); err != nil {
 			return fmt.Errorf("coding: git diff pathspec %q escapes the workspace: %w", p, err)
 		}
+	}
+	return nil
+}
+
+// guardCommandGitFilters rejects an allowlisted read-only git command (diff or
+// status) whose pathspecs cover a tracked file carrying a clean/process `filter`
+// gitattribute. Both forms normalize worktree files — converting each through
+// the configured filter.<driver>.clean/.process — to compute their output, and
+// the --no-ext-diff/--no-textconv flags do NOT disable those filters. A repo
+// whose .gitattributes or .git/info/attributes assigns such a filter (with a
+// .git/config defining its command) could otherwise turn this read-only,
+// approval-free command into execution. workspace.CheckGitDiffFilters detects
+// the attribute from every source without ever running the filter (see there);
+// any probe failure is treated as a refusal (fail closed).
+func (w *localWorkspace) guardCommandGitFilters(ctx context.Context, args []string) error {
+	pathspecs, ok := gitReadPathspecs(args)
+	if !ok {
+		return nil
+	}
+	filtered, err := workspace.CheckGitDiffFilters(ctx, w.root, pathspecs)
+	if err != nil {
+		return fmt.Errorf("coding: vetting git filter attributes: %w", err)
+	}
+	if len(filtered) > 0 {
+		return fmt.Errorf("coding: git command refused: %d workspace path(s) carry a clean/process filter attribute (e.g. %q) that git would execute while normalizing the worktree; remove the filter attribute before diffing: %w",
+			len(filtered), filtered[0], workspace.ErrCommandNotAllowed)
 	}
 	return nil
 }

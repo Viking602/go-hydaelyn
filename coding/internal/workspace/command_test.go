@@ -8,6 +8,44 @@ import (
 	"time"
 )
 
+func TestFilteredPathsFromCheckAttr(t *testing.T) {
+	// `git check-attr filter -z` emits NUL-separated (path, "filter", value)
+	// triplets. Only a value naming a driver (not unspecified/unset) is a filter
+	// git would execute.
+	out := []byte("a.txt\x00filter\x00evil\x00" +
+		"b.bin\x00filter\x00unspecified\x00" +
+		"c.txt\x00filter\x00lfs\x00" +
+		"d.txt\x00filter\x00unset\x00")
+	got := filteredPathsFromCheckAttr(out)
+	want := []string{"a.txt", "c.txt"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	if filteredPathsFromCheckAttr(nil) != nil {
+		t.Errorf("empty input should yield no filtered paths")
+	}
+}
+
+func TestSplitNUL(t *testing.T) {
+	// Trailing and doubled NULs (as ls-files -z emits) must not produce empty
+	// fields, since those would desync the check-attr triplet stride.
+	got := splitNUL([]byte("a\x00b\x00\x00c\x00"))
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestValidateCommand_Allowlist(t *testing.T) {
 	cases := []struct {
 		name    string

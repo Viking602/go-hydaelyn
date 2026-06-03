@@ -372,6 +372,113 @@ func RunCommand(ctx context.Context, req RunCommandRequest) (RunCommandResult, e
 	return result, nil
 }
 
+// gitProbeMaxOutput caps the NUL-separated output of the ls-files/check-attr
+// probes below. A diff/status whose tracked file set is larger than this is
+// refused rather than vetted partially (fail closed).
+const gitProbeMaxOutput = 16 << 20 // 16 MiB
+
+// CheckGitDiffFilters returns the tracked workspace paths under pathspecs that
+// carry a `filter` gitattribute, without ever executing that filter.
+//
+// git diff and git status both normalize worktree files — converting each
+// through any configured clean/process filter (filter.<driver>.clean or
+// .process) — to compute their output, and --no-ext-diff/--no-textconv do NOT
+// disable those filters. So a repo whose .gitattributes or $GIT_DIR/info/
+// attributes assigns `filter=<driver>` to a path, with a .git/config defining
+// that driver's command, would otherwise turn a read-only, approval-free diff or
+// status into execution of the driver. `git check-attr` reports the attribute
+// from every source (worktree, info/attributes, config) but never runs the
+// filter, and `git ls-files` enumerates the tracked set without running it
+// either — together they let the caller refuse the command before any filter
+// executes. root must be the workspace root; pathspecs are the already-validated
+// diff/status pathspecs (".", or workspace-relative files). A non-nil error
+// means the probe itself failed (or overflowed its output cap) and the caller
+// must refuse the command.
+func CheckGitDiffFilters(ctx context.Context, root string, pathspecs []string) ([]string, error) {
+	if root == "" {
+		return nil, errors.New("workspace: check git filters: working directory must be set")
+	}
+	lsArgs := append([]string{"-c", gitFSMonitorOff, "ls-files", "-z", "--"}, pathspecs...)
+	lsOut, err := runTrustedGit(ctx, root, nil, lsArgs)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: list tracked files: %w", err)
+	}
+	if len(lsOut) == 0 {
+		// Nothing tracked under the pathspecs, so git converts (and filters)
+		// nothing — the command is safe.
+		return nil, nil
+	}
+	caOut, err := runTrustedGit(ctx, root, lsOut,
+		[]string{"-c", gitFSMonitorOff, "check-attr", "filter", "-z", "--stdin"})
+	if err != nil {
+		return nil, fmt.Errorf("workspace: check filter attributes: %w", err)
+	}
+	return filteredPathsFromCheckAttr(caOut), nil
+}
+
+// runTrustedGit runs a framework-controlled git invocation that is NOT subject
+// to the argv allowlist — args is built by the framework (CheckGitDiffFilters),
+// not the model — but carries the same hardening RunCommand applies: the working
+// directory is pinned to root, the environment is scrubbed to a minimal base, a
+// timeout bounds the process, and stdout is captured into a bounded buffer.
+// stdin, when non-nil, is streamed to the process. It returns the raw stdout
+// bytes, or an error if the process fails to start, exits non-zero, times out,
+// or overflows the output cap.
+func runTrustedGit(ctx context.Context, root string, stdin []byte, args []string) ([]byte, error) {
+	runCtx, cancel := context.WithTimeout(ctx, DefaultCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, "git", args...)
+	cmd.Dir = root
+	cmd.Env = scrubEnv(nil)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var stdout, stderr capWriter
+	stdout.limit = gitProbeMaxOutput
+	stderr.limit = DefaultMaxOutputBytes
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if runCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("git probe timed out after %s", DefaultCommandTimeout)
+		}
+		return nil, fmt.Errorf("git probe %v: %w: %s", args, err, strings.TrimSpace(stderr.buf.String()))
+	}
+	if stdout.truncated {
+		return nil, fmt.Errorf("git probe output exceeded %d bytes", gitProbeMaxOutput)
+	}
+	return stdout.buf.Bytes(), nil
+}
+
+// filteredPathsFromCheckAttr parses `git check-attr filter -z` output — a stream
+// of NUL-separated (path, "filter", value) triplets — and returns the paths
+// whose filter value names an actual driver, i.e. anything other than
+// "unspecified" or "unset" (a clean/process filter git would run).
+func filteredPathsFromCheckAttr(out []byte) []string {
+	fields := splitNUL(out)
+	var filtered []string
+	for i := 0; i+2 < len(fields); i += 3 {
+		if value := fields[i+2]; value != "unspecified" && value != "unset" {
+			filtered = append(filtered, fields[i])
+		}
+	}
+	return filtered
+}
+
+// splitNUL splits a NUL-separated byte stream into its non-empty string fields.
+func splitNUL(b []byte) []string {
+	parts := bytes.Split(b, []byte{0})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if len(p) > 0 {
+			out = append(out, string(p))
+		}
+	}
+	return out
+}
+
 // scrubEnv builds a minimal environment for a sandboxed command. It does not
 // pass through the parent process environment (no tokens or secrets); only a
 // short whitelist needed by the Go toolchain plus the caller-supplied req.Env
