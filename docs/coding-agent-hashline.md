@@ -373,9 +373,13 @@ Allowlist only (matched on argv, never via a shell):
 
 ```text
 go test ./...        go test ./<pkg>...     go test ./<pkg> -run <Name>
-go vet ./...         git status --short
-git diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
+go vet ./...         git [-c core.fsmonitor=false] status --short
+git [-c core.fsmonitor=false] diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
 ```
+
+The only `-c key=value` override the allowlist accepts is the exact pair
+`-c core.fsmonitor=false`, and only as a leading global flag before the
+subcommand — see §6.6 for why.
 
 `gofmt` is NOT a subprocess — see §6.5. Forbid `sh -c`, `bash -c`, `curl`, `wget`,
 `rm`, `python`, `node`, `npm`, `bun`, `git commit`, `git push`.
@@ -445,9 +449,14 @@ test cache/temp files stay under the toolchain's own directories) but `go test`
 compiles and *executes* the workspace's own code, so it carries the `run` tag and
 `coding.PolicyEngine()` escalates it to `EffectRequireApproval` (§7.1) — execution
 goes behind the same explicit-allowance gate as the writes, not the free read
-path. `git_diff` runs with `--no-ext-diff --no-textconv` so a repo-local
-`diff.external`/textconv helper cannot turn the read-only diff into command
-execution, and returns bounded output.
+path. `git_diff` runs with `-c core.fsmonitor=false --no-ext-diff --no-textconv`:
+`--no-ext-diff`/`--no-textconv` neutralize a repo-local `diff.external`/textconv
+helper, and `-c core.fsmonitor=false` disables any configured filesystem-monitor
+hook that git would otherwise execute while refreshing the index — without it, a
+hostile `.git/config` pointing `core.fsmonitor` at a script could turn this
+read-only diff into command execution. It returns bounded output. The allowlist
+admits that single `-c` override (only the exact `core.fsmonitor=false` value)
+and nothing else.
 
 ## 7. Policy & audit
 
@@ -553,6 +562,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
 | path escape | resolver + parent-dir symlink check |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
+| repo config → command exec on a read-only diff | `git_diff` runs `-c core.fsmonitor=false --no-ext-diff --no-textconv`, disabling a `.git/config` filesystem-monitor hook, `diff.external`, and textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |

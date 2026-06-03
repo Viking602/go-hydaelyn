@@ -497,10 +497,12 @@ func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) 
 
 func (w *localWorkspace) Diff(ctx context.Context, req DiffRequest) (DiffResult, error) {
 	// --no-ext-diff / --no-textconv disable any repo-configured external diff or
-	// textconv helper (diff.external, a textconv attribute), so this read-only
-	// path cannot be turned into command execution by a hostile .git/config or
-	// .gitattributes inside the workspace.
-	args := []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}
+	// textconv helper (diff.external, a textconv attribute), and
+	// -c core.fsmonitor=false disables any configured filesystem-monitor hook that
+	// git would otherwise execute while refreshing the index. Together they ensure
+	// this read-only path cannot be turned into command execution by a hostile
+	// .git/config or .gitattributes inside the workspace.
+	args := []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}
 	if len(req.Paths) == 0 {
 		args = append(args, ".")
 	} else {

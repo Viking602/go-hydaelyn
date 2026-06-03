@@ -26,6 +26,13 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "git diff hardened", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--", "."}},
 		{name: "git diff hardened no paths", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}},
 		{name: "git status short", args: []string{"git", "status", "--short"}},
+		// The fsmonitor-off global override is accepted before the subcommand: it
+		// disables a repo-configured filesystem-monitor hook git would run while
+		// refreshing the index for a read-only diff/status. This is the form the
+		// git_diff tool actually emits.
+		{name: "git diff fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}},
+		{name: "git diff fsmonitor off with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--", "a.go"}},
+		{name: "git status fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"}},
 
 		// Rejected forms.
 		{name: "empty", args: nil, wantErr: ErrEmptyCommand},
@@ -43,6 +50,15 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "git diff flag without sep", args: []string{"git", "diff", "--no-ext-diff"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff unknown flag", args: []string{"git", "diff", "--stat", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
 		{name: "bare git", args: []string{"git"}, wantErr: ErrCommandNotAllowed},
+		// Only the exact `-c core.fsmonitor=false` override is allowed: any other
+		// -c key=value (or a different fsmonitor value) is rejected so the global
+		// flag cannot become a generic config-injection vector.
+		{name: "git -c arbitrary config", args: []string{"git", "-c", "core.pager=evil", "diff", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git -c fsmonitor true", args: []string{"git", "-c", "core.fsmonitor=true", "diff", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git -c fsmonitor path", args: []string{"git", "-c", "core.fsmonitor=/evil.sh", "diff", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git -c without value", args: []string{"git", "-c", "diff", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git -c fsmonitor off no subcommand", args: []string{"git", "-c", "core.fsmonitor=false"}, wantErr: ErrCommandNotAllowed},
+		{name: "git double -c", args: []string{"git", "-c", "core.fsmonitor=false", "-c", "core.pager=evil", "diff", "--"}, wantErr: ErrCommandNotAllowed},
 
 		// Package-pattern escapes: a "./..": prefix must not let ".." traverse
 		// out of the workspace (go test compiles and runs the package code).

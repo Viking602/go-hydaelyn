@@ -20,6 +20,11 @@ const (
 
 	// truncationMarker is appended to a captured stream that hit the cap.
 	truncationMarker = "\n[truncated]"
+
+	// gitFSMonitorOff is the sole `-c key=value` override git_diff may pass. It
+	// disables any repo-configured filesystem-monitor hook, which git would
+	// otherwise execute while refreshing the index for a read-only diff/status.
+	gitFSMonitorOff = "core.fsmonitor=false"
 )
 
 // Command validation errors.
@@ -59,8 +64,8 @@ type RunCommandResult struct {
 //	go test ./<pkg>...            (any single ./-prefixed package pattern)
 //	go test ./<pkg> -run <Name>
 //	go vet ./...
-//	git diff [--no-ext-diff] [--no-textconv] -- <paths...>
-//	git status --short
+//	git [-c core.fsmonitor=false] diff [--no-ext-diff] [--no-textconv] -- <paths...>
+//	git [-c core.fsmonitor=false] status --short
 //
 // Everything else is rejected, including shell wrappers, network tools, and
 // destructive or history-mutating git verbs.
@@ -115,6 +120,16 @@ func validateGoTest(args []string) error {
 
 func validateGit(args []string) error {
 	rest := args[1:]
+	// Optional global config override, accepted only as the exact leading pair
+	// `-c core.fsmonitor=false` before the subcommand. A repo-configured
+	// filesystem monitor (core.fsmonitor pointing at a program/hook) is executed
+	// by git while it refreshes the index for a read-only `git diff`/`git status`,
+	// so a hostile .git/config could turn that path into command execution.
+	// Pinning it off neutralizes that vector. No other `-c key=value` is allowed —
+	// only this specific, execution-disabling override.
+	if len(rest) >= 2 && rest[0] == "-c" && rest[1] == gitFSMonitorOff {
+		rest = rest[2:]
+	}
 	if len(rest) == 0 {
 		return fmt.Errorf("%w: bare git", ErrCommandNotAllowed)
 	}
