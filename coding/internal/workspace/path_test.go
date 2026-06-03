@@ -129,6 +129,62 @@ func TestResolveWorkspacePath_SymlinkWithinRoot(t *testing.T) {
 	}
 }
 
+// TestResolveWorkspacePath_SymlinkAliasIntoGit covers the deny-tree bypass: a
+// symlink alias such as "g -> .git" has a benign cleaned path, so the lexical
+// .git deny check passes, and the alias resolves *inside* the in-bounds .git
+// tree, so the containment check passes too. The resolver must still deny it so
+// read/write tools cannot reach .git through the link.
+func TestResolveWorkspacePath_SymlinkAliasIntoGit(t *testing.T) {
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n"), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "g")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	// Also a nested alias pointing back up at the root .git.
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("..", ".git"), filepath.Join(sub, "g")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	for _, rel := range []string{"g", "g/config", "g/hooks/pre-commit", "sub/g/config"} {
+		if _, _, err := ResolveWorkspacePath(root, rel); !errors.Is(err, ErrDeniedPath) {
+			t.Errorf("ResolveWorkspacePath(%q) err = %v, want ErrDeniedPath", rel, err)
+		}
+	}
+}
+
+// TestResolveWorkspacePath_SymlinkAliasOutsideGitOK confirms the deny-tree check
+// does not over-reach: a symlink to an ordinary in-root directory whose name
+// merely starts with ".git" (here ".gitkeep-data") is still allowed, since only
+// the actual .git tree is denied.
+func TestResolveWorkspacePath_SymlinkAliasOutsideGitOK(t *testing.T) {
+	root := t.TempDir()
+	// A real .git is present so the deny-tree check is actually consulted; the
+	// alias targets a sibling whose name only shares the ".git" prefix.
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	dataDir := filepath.Join(root, ".gitkeep-data")
+	if err := os.Mkdir(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(".gitkeep-data", filepath.Join(root, "alias")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if _, _, err := ResolveWorkspacePath(root, "alias/inner.go"); err != nil {
+		t.Fatalf("alias to non-.git dir should be allowed, got %v", err)
+	}
+}
+
 // TestResolveWorkspacePath_DanglingLeafSymlinkEscape covers a leaf symlink whose
 // target does NOT yet exist but points outside the workspace. EvalSymlinks
 // reports such a link as not-existing, so a naive ancestor walk would skip past

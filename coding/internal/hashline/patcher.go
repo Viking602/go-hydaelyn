@@ -131,6 +131,20 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 			recovered bool
 		)
 		if liveTag == sec.Tag {
+			// Guard the 16-bit tag against a fingerprint collision before trusting
+			// the fast path. sec.Tag is only the low 16 bits of FNV, so a different
+			// out-of-band file version can share it with the version the edit was
+			// built on. Every read_file/search/edit records the content its tag was
+			// minted from (§4.8), so when that snapshot is still retained, require
+			// the live content to equal it: an inequality under equal tags means the
+			// file changed to a colliding version, so reject as stale and force a
+			// re-read instead of applying an edit built for different content. When
+			// no snapshot is retained (lazy store, or evicted history) the tag is the
+			// only available check, exactly as before.
+			if snap, ok := p.store().ByHash(canon, sec.Tag); ok && snap.Text != nf.Text {
+				return nil, fmt.Errorf("hashline: section %q: %w (tag %s matches the live file only by its 16-bit fingerprint; the recorded content for that tag differs, so the file changed out of band — re-read it before editing)",
+					canon, ErrSnapshotMismatch, sec.Tag)
+			}
 			// Fast path: the tag matches the live file, so it IS the version the
 			// edit was built on. Resolve any go/ast block ops (replace/delete
 			// block N) to concrete line-range ops against it, then apply; resolved

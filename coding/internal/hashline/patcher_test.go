@@ -469,3 +469,75 @@ func TestPatcher_NilSnapshotStoreIsSafe(t *testing.T) {
 		t.Fatalf("nil snapshot store should be safe: %v", err)
 	}
 }
+
+// collisionStore reports, for any ByHash lookup, a snapshot whose content
+// differs from the live file. It models a 16-bit tag collision: the live file
+// and the recorded version the tag was minted from share the four-hex tag but
+// are not the same content.
+type collisionStore struct{ recorded string }
+
+func (collisionStore) Head(string) (Snapshot, bool) { return Snapshot{}, false }
+func (c collisionStore) ByHash(path, hash string) (Snapshot, bool) {
+	return Snapshot{Path: path, Text: c.recorded, Hash: hash}, true
+}
+func (collisionStore) Record(_, fullText string) string {
+	return ComputeFileHash(Normalize(fullText).Text)
+}
+func (collisionStore) Invalidate(string) {}
+func (collisionStore) Clear()            {}
+
+// TestPatcher_RejectsTagCollisionAgainstSnapshot proves the fast path does not
+// trust the 16-bit tag alone: when the recorded snapshot for the section's tag
+// differs from the live content (a tag collision), Preflight rejects the edit as
+// stale and writes nothing, instead of applying an edit built for a different
+// file version.
+func TestPatcher_RejectsTagCollisionAgainstSnapshot(t *testing.T) {
+	const live = "package foo\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	fs := newFakeFS(map[string]string{"foo.go": live})
+	// The store reports a *different* recorded content for foo.go's tag.
+	p := &Patcher{FS: fs, Snapshots: collisionStore{recorded: "package foo\n\nvar X = 1\n"}}
+
+	patch := Patch{Sections: []Section{{
+		Path: "foo.go",
+		Tag:  tagFor(live), // equals the live tag, so we enter the fast path
+		Ops:  []Op{{Kind: OpReplace, Start: 4, End: 4, Body: []string{"\treturn a + b"}}},
+	}}}
+
+	_, err := p.Apply(context.Background(), patch)
+	if !errors.Is(err, ErrSnapshotMismatch) {
+		t.Fatalf("Apply err = %v, want ErrSnapshotMismatch", err)
+	}
+	if fs.files["foo.go"] != live {
+		t.Errorf("file modified despite collision rejection: %q", fs.files["foo.go"])
+	}
+}
+
+// TestPatcher_FastPathAcceptsMatchingSnapshot is the companion: when the
+// recorded snapshot for the tag equals the live content (the ordinary
+// read-then-edit flow), the collision guard does not fire and the fast path
+// applies the edit cleanly (not via recovery).
+func TestPatcher_FastPathAcceptsMatchingSnapshot(t *testing.T) {
+	const live = "package foo\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	fs := newFakeFS(map[string]string{"foo.go": live})
+	store := NewMemorySnapshotStore()
+	store.Record("foo.go", live) // the model read exactly this content
+	p := &Patcher{FS: fs, Snapshots: store}
+
+	patch := Patch{Sections: []Section{{
+		Path: "foo.go",
+		Tag:  tagFor(live),
+		Ops:  []Op{{Kind: OpReplace, Start: 4, End: 4, Body: []string{"\treturn a + b"}}},
+	}}}
+
+	res, err := p.Apply(context.Background(), patch)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Sections[0].Recovered {
+		t.Errorf("matching snapshot should be a clean fast-path apply, not recovery")
+	}
+	want := "package foo\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if fs.files["foo.go"] != want {
+		t.Errorf("file = %q, want %q", fs.files["foo.go"], want)
+	}
+}

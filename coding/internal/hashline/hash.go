@@ -25,10 +25,13 @@ func NormalizeForHash(text string) string {
 //
 // Caveat: Hashline syntax-compatible; tag is a Go-internal FNV
 // fingerprint, not cross-language compatible. The 4-hex value is only the
-// model-facing handle — the patcher always compares the section tag
-// against the tag of the full live file, so the comparison is exact and a
-// 16-bit collision cannot silently apply a stale patch (it would have to
-// collide against the same path's full content).
+// model-facing handle. Because it is just the low 16 bits, two different file
+// versions can share a tag, so the patcher does not trust the tag alone: when
+// the snapshot the tag was minted from is still recorded (every read/search/edit
+// records one, §4.8), Patcher.Preflight also requires the live content to equal
+// that snapshot before taking the fast path and rejects a colliding out-of-band
+// change as stale. The tag is the cheap pre-check; the recorded-content equality
+// is the backstop that makes a 16-bit collision unable to apply a stale patch.
 func ComputeFileHash(text string) string {
 	n := NormalizeForHash(text)
 	h := fnv.New32a()

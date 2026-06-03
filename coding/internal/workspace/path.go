@@ -88,7 +88,39 @@ func ResolveWorkspacePath(root, rel string) (abs string, canonicalRel string, er
 		return "", "", ErrPathEscape
 	}
 
+	// Denied-tree symlink check. The lexical isDeniedRel guard above only catches
+	// a path whose cleaned form is ".git" or starts with ".git/". A symlink alias
+	// such as "g -> .git" has a benign cleaned path ("g/config") yet resolves
+	// *inside* the .git tree, which is in-bounds and so survives the containment
+	// check above — letting read/write tools reach the denied tree through the
+	// link. Reject when the canonical target lands inside the canonical .git
+	// directory so the deny boundary cannot be bypassed by aliasing.
+	denied, err := resolvesIntoDeniedTree(resolvedRoot, resolvedAncestor)
+	if err != nil {
+		return "", "", err
+	}
+	if denied {
+		return "", "", ErrDeniedPath
+	}
+
 	return abs, clean, nil
+}
+
+// resolvesIntoDeniedTree reports whether the canonical target lands inside the
+// workspace's denied .git tree. isDeniedRel only inspects the lexical path, so a
+// symlink alias resolves into .git undetected; this checks the canonical
+// location. The .git entry is itself canonicalized (it may be a symlink) before
+// the containment test, and a workspace with no .git entry (a dangling or
+// missing link) has nothing in-bounds to alias into.
+func resolvesIntoDeniedTree(resolvedRoot, resolvedTarget string) (bool, error) {
+	resolvedGit, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, ".git"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("workspace: resolve .git: %w", err)
+	}
+	return withinRoot(resolvedGit, resolvedTarget), nil
 }
 
 // isDeniedRel reports whether a cleaned workspace-relative path targets a denied

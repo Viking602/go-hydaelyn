@@ -242,8 +242,14 @@ ComputeFileHash(text):
 ```
 
 Document verbatim: `Hashline syntax-compatible; tag is a Go-internal FNV fingerprint,
-not cross-language compatible.` Tag validation always compares against the **full**
-live file content (the 4-hex is the model-facing handle; the comparison is exact).
+not cross-language compatible.` The 4-hex value is only the model-facing handle.
+Because it is just the low 16 bits, two different file versions can share a tag, so
+the patcher does not trust it alone: when the snapshot the tag was minted from is
+still recorded (every read/search/edit records one — §4.8), `Patcher.Preflight`
+also requires the live content to equal that snapshot before taking the fast path,
+and rejects a colliding out-of-band change as stale. The tag is the cheap
+pre-check; the recorded-content equality is the backstop that stops a 16-bit
+collision from applying a stale patch.
 
 ### 4.4 format.go
 
@@ -365,6 +371,11 @@ abs := filepath.Join(root, clean)
 resolvedAncestor := EvalSymlinks(deepest existing ancestor of abs)
 reject if resolvedAncestor escapes EvalSymlinks(root)
 deny .git/** by default; deny obvious binary/large files for read/search
+// The .git deny is also enforced on the CANONICAL target, not just the lexical
+// path: a symlink alias such as "g -> .git" has a benign cleaned path ("g/config")
+// yet resolves inside the in-bounds .git tree, so reject when the resolved target
+// lands under EvalSymlinks(root/.git).
+reject if resolvedAncestor is within EvalSymlinks(root/.git)
 ```
 
 ### 5.3 Command safety
@@ -556,11 +567,12 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 
 | Risk | Mitigation |
 |---|---|
-| 4-hex tag collision | per-path comparison against full live content; tag is only the handle |
+| 4-hex tag collision | tag is only the model-facing handle; the fast path additionally requires the live content to equal the recorded snapshot the tag was minted from (every read/search/edit records one), so a 16-bit collision against a different out-of-band version is rejected as stale rather than applied |
 | stale line numbers | stale-reject + prompt rule + tests |
 | multi-file partial write | preflight all + rollback buffer (§4.7) |
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
 | path escape | resolver + parent-dir symlink check |
+| symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
 | repo config → command exec on a read-only diff | `git_diff` runs `-c core.fsmonitor=false --no-ext-diff --no-textconv`, disabling a `.git/config` filesystem-monitor hook, `diff.external`, and textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
