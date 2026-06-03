@@ -266,6 +266,77 @@ func TestMemorySnapshotStore_SatisfiesInterface(t *testing.T) {
 	var _ SnapshotStore = NewMemorySnapshotStore()
 }
 
+// findTagCollision brute-forces two distinct short strings whose 16-bit
+// hashline tags are equal. The tag space is only 2^16, so a colliding pair
+// turns up well before the pigeonhole bound.
+func findTagCollision(t *testing.T) (a, b string) {
+	t.Helper()
+	seen := make(map[string]string)
+	for i := 0; i <= 1<<17; i++ {
+		s := "// variant " + strconv.Itoa(i) + "\npackage p\n"
+		tag := ComputeFileHash(Normalize(s).Text)
+		if prev, ok := seen[tag]; ok {
+			return prev, s
+		}
+		seen[tag] = s
+	}
+	t.Fatal("no 16-bit tag collision found within the search bound")
+	return "", ""
+}
+
+func TestMemorySnapshotStore_RetainsCollidingContents(t *testing.T) {
+	a, b := findTagCollision(t)
+	if Normalize(a).Text == Normalize(b).Text {
+		t.Fatal("collision helper returned identical content")
+	}
+
+	s := NewMemorySnapshotStore()
+	tagA := s.Record("f.go", a)
+	tagB := s.Record("f.go", b)
+	if tagA != tagB {
+		t.Fatalf("helper did not produce a tag collision: %q vs %q", tagA, tagB)
+	}
+
+	// Both distinct contents are retained side by side despite sharing the tag —
+	// the second must not collapse onto (and erase) the first.
+	if !s.ContainsText("f.go", a) {
+		t.Error("first colliding version was lost")
+	}
+	if !s.ContainsText("f.go", b) {
+		t.Error("second colliding version was lost")
+	}
+
+	// ByHash resolves the tag to the most recently recorded colliding version.
+	got, ok := s.ByHash("f.go", tagB)
+	if !ok {
+		t.Fatalf("ByHash(%q) missing", tagB)
+	}
+	if got.Text != Normalize(b).Text {
+		t.Errorf("ByHash text = %q, want latest %q", got.Text, Normalize(b).Text)
+	}
+
+	// Content that was never recorded is reported absent (the guard's whole
+	// point: a colliding-but-unseen live file is not mistaken for a known one).
+	if s.ContainsText("f.go", "// never recorded\npackage q\n") {
+		t.Error("ContainsText reported unrecorded content as present")
+	}
+}
+
+func TestMemorySnapshotStore_ExactContentDeduplicates(t *testing.T) {
+	// Recording identical content twice must NOT create a second version — only
+	// distinct content (including tag collisions) is retained separately.
+	s := NewMemorySnapshotStore()
+	s.Record("f.go", "a\nb\n")
+	s.Record("f.go", "a\nb\n")
+	h := s.paths["f.go"]
+	if h == nil {
+		t.Fatal("path history missing")
+	}
+	if len(h.versions) != 1 {
+		t.Errorf("versions = %d, want 1 (identical content must dedup)", len(h.versions))
+	}
+}
+
 func TestMemorySnapshotStore_ConcurrentAccess(t *testing.T) {
 	// The race detector (make test-race) is the real check; this exercises the
 	// locking under contention so a missing lock surfaces.

@@ -185,7 +185,8 @@ type Snapshot struct {
 
 type SnapshotStore interface { // M1/M2 may use a no-op/lazy impl; history impl is M6
     Head(path string) (Snapshot, bool)
-    ByHash(path, hash string) (Snapshot, bool)
+    ByHash(path, hash string) (Snapshot, bool)   // latest version whose tag == hash
+    ContainsText(path, text string) bool         // exact-content membership (tag-collision guard)
     Record(path, fullText string) string
     Invalidate(path string)
     Clear()
@@ -244,12 +245,14 @@ ComputeFileHash(text):
 Document verbatim: `Hashline syntax-compatible; tag is a Go-internal FNV fingerprint,
 not cross-language compatible.` The 4-hex value is only the model-facing handle.
 Because it is just the low 16 bits, two different file versions can share a tag, so
-the patcher does not trust it alone: when the snapshot the tag was minted from is
-still recorded (every read/search/edit records one — §4.8), `Patcher.Preflight`
-also requires the live content to equal that snapshot before taking the fast path,
-and rejects a colliding out-of-band change as stale. The tag is the cheap
-pre-check; the recorded-content equality is the backstop that stops a 16-bit
-collision from applying a stale patch.
+the patcher does not trust it alone: every read/search/edit records the content its
+tag was minted from (§4.8) and the store retains colliding versions distinctly
+(§4.8), so when any history is recorded for the path under that tag,
+`Patcher.Preflight` requires the live content to be one of the recorded versions
+(`SnapshotStore.ContainsText`) before taking the fast path, and rejects a colliding
+out-of-band change — one that shares the tag but was never recorded — as stale. The
+tag is the cheap pre-check; the recorded-content membership is the backstop that
+stops a 16-bit collision from applying a stale patch.
 
 ### 4.4 format.go
 
@@ -333,12 +336,27 @@ func (p *Patcher) Apply(ctx context.Context, patch Patch) (ApplyPatchResult, err
 Stale handling, first release: hash match ⇒ apply; mismatch ⇒ `ErrSnapshotMismatch`
 with a message instructing the agent to re-read. (3-way recovery is M6.)
 
+Duplicate-section guard: two sections that target the same file are rejected up
+front (each is preflighted against the original content, so a second `Commit` write
+would clobber the first's edit — fold the ops into one `¶PATH#TAG` section instead).
+The guard keys on the file's resolved on-disk identity when the `Filesystem`
+implements the optional `identityResolver` (`ResolveIdentity(path) (string, error)`,
+returning the symlink-resolved absolute path), so two in-root symlink aliases for
+the same file (e.g. `a.go` and `link.go → a.go`) collapse to one key; without that
+capability it falls back to the canonical path. (Rollback uses the same optional-
+capability pattern via `restorer`, see step 6.)
+
 ### 4.8 snapshot.go
 
 Define the `SnapshotStore` interface now. For M1–M5 a lazy/no-op implementation is
 sufficient (stale-reject reads live files). `MemorySnapshotStore` with bounded
 per-path history (`maxPaths=64`, `maxVersionsPerPath=8`, LRU) is implemented in M6 to
-back 3-way recovery and `ByHash`.
+back 3-way recovery and `ByHash`. Versions are keyed by exact content, not by tag:
+recording identical content deduplicates, but two distinct contents that collide on
+the 16-bit tag are retained side by side (the index maps a tag to every version
+sharing it, newest last). `ByHash` returns the newest version for a tag;
+`ContainsText` answers exact-content membership and is what the fast-path collision
+guard consults so a colliding-but-unrecorded live file cannot pass as a known one.
 
 ## 5. Workspace sandbox (`coding/internal/workspace` + `coding/workspace.go`)
 
@@ -567,9 +585,10 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 
 | Risk | Mitigation |
 |---|---|
-| 4-hex tag collision | tag is only the model-facing handle; the fast path additionally requires the live content to equal the recorded snapshot the tag was minted from (every read/search/edit records one), so a 16-bit collision against a different out-of-band version is rejected as stale rather than applied |
+| 4-hex tag collision | tag is only the model-facing handle; the fast path additionally requires the live content to be one of the recorded versions for that tag (every read/search/edit records one, and the store keeps colliding contents distinctly), so a 16-bit collision against an out-of-band version that was never recorded is rejected as stale rather than applied |
 | stale line numbers | stale-reject + prompt rule + tests |
 | multi-file partial write | preflight all + rollback buffer (§4.7) |
+| duplicate sections aliasing one file | the duplicate-section guard keys on the resolved on-disk identity (`identityResolver.ResolveIdentity`), so two in-root symlink aliases for the same file (e.g. `a.go` and `link.go → a.go`) are rejected up front instead of the second `Commit` write clobbering the first's edit |
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
 | path escape | resolver + parent-dir symlink check |
 | symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |

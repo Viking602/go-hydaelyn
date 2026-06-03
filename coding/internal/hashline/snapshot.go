@@ -14,7 +14,15 @@ type SnapshotStore interface {
 	// Head returns the most recently recorded snapshot for path.
 	Head(path string) (Snapshot, bool)
 	// ByHash returns the snapshot for path with the given hash, if known.
+	// When distinct contents collide on the 16-bit tag, the most recently
+	// recorded version with that tag is returned; callers needing exact
+	// identity must use ContainsText.
 	ByHash(path, hash string) (Snapshot, bool)
+	// ContainsText reports whether path has a retained snapshot whose
+	// normalized text exactly equals text. It disambiguates a 16-bit tag
+	// collision: the patcher uses it to confirm the live file is a version the
+	// caller actually recorded before trusting the matching-tag fast path.
+	ContainsText(path, text string) bool
 	// Record stores fullText for path and returns its computed tag.
 	Record(path, fullText string) string
 	// Invalidate forgets all snapshots for path.
@@ -39,6 +47,9 @@ func (LazySnapshotStore) Head(string) (Snapshot, bool) { return Snapshot{}, fals
 
 // ByHash always reports no match.
 func (LazySnapshotStore) ByHash(string, string) (Snapshot, bool) { return Snapshot{}, false }
+
+// ContainsText always reports false: the lazy store retains nothing.
+func (LazySnapshotStore) ContainsText(string, string) bool { return false }
 
 // Record computes and returns the tag for fullText without retaining it.
 func (LazySnapshotStore) Record(path, fullText string) string {
@@ -75,12 +86,14 @@ const (
 
 // pathHistory is the bounded per-path version ring. versions holds distinct
 // recorded snapshots oldest-first; the last element is the head (the most
-// recently recorded). byHash indexes versions by tag for O(1) ByHash. seq is
-// the global recency stamp of the most recent Record for this path, used for
-// cross-path LRU eviction.
+// recently recorded). byHash indexes versions by tag: because the tag is only
+// the low 16 bits of FNV, distinct contents can collide, so each tag maps to
+// the slice of version indices sharing it (oldest-first). seq is the global
+// recency stamp of the most recent Record for this path, used for cross-path
+// LRU eviction.
 type pathHistory struct {
 	versions []Snapshot
-	byHash   map[string]int
+	byHash   map[string][]int
 	seq      uint64
 }
 
@@ -117,10 +130,12 @@ func (s *MemorySnapshotStore) tick() uint64 {
 }
 
 // Record stores fullText for path and returns its computed tag. The text is
-// normalized (LF, BOM-stripped) before hashing and storage. Recording the
-// same content again does not duplicate it: the existing version is promoted
-// to head and its tag returned. Recording bumps the path's recency so it is
-// the last to be evicted.
+// normalized (LF, BOM-stripped) before hashing and storage. Recording content
+// that exactly equals a retained version does not duplicate it: that version is
+// promoted to head and its tag returned. Distinct content that merely collides
+// on the 16-bit tag with a retained version is kept as a separate version, so a
+// colliding out-of-band file can never masquerade as the version a caller read.
+// Recording bumps the path's recency so it is the last to be evicted.
 func (s *MemorySnapshotStore) Record(path, fullText string) string {
 	snap := newSnapshot(path, fullText)
 
@@ -134,39 +149,49 @@ func (s *MemorySnapshotStore) Record(path, fullText string) string {
 		if len(s.paths) >= maxPaths {
 			s.evictLRULocked()
 		}
-		h = &pathHistory{byHash: make(map[string]int)}
+		h = &pathHistory{byHash: make(map[string][]int)}
 		s.paths[path] = h
 	}
 
-	if idx, ok := h.byHash[snap.Hash]; ok {
+	// Look for an existing version with the SAME content (not merely the same
+	// tag): only exact-text matches are deduplicated; a tag collision keeps both.
+	idx := -1
+	for _, i := range h.byHash[snap.Hash] {
+		if h.versions[i].Text == snap.Text {
+			idx = i
+			break
+		}
+	}
+	if idx >= 0 {
 		// Same content already recorded: promote it to head so it remains the
 		// most recent version (and survives version-count eviction longest).
 		existing := h.versions[idx]
 		existing.RecordedAt = snap.RecordedAt
 		h.versions = append(h.versions[:idx], h.versions[idx+1:]...)
 		h.versions = append(h.versions, existing)
-		s.reindexLocked(h)
 	} else {
 		h.versions = append(h.versions, snap)
 		// Trim oldest versions beyond the per-path cap.
 		if len(h.versions) > maxVersionsPerPath {
 			h.versions = h.versions[len(h.versions)-maxVersionsPerPath:]
 		}
-		s.reindexLocked(h)
 	}
+	s.reindexLocked(h)
 
 	h.seq = s.tick()
 	return snap.Hash
 }
 
 // reindexLocked rebuilds h.byHash from h.versions. Callers must hold the
-// mutex. The index maps a tag to the position of its (single) version; if
-// two versions ever shared a tag they share content, so collapsing to the
-// latest position is correct.
+// mutex. Each tag maps to every version index sharing it: distinct contents can
+// collide on the 16-bit tag, so colliding versions are retained side by side
+// rather than collapsed. Versions are appended chronologically, so each tag's
+// index slice is oldest-first and its last entry is the most recent version
+// with that tag.
 func (s *MemorySnapshotStore) reindexLocked(h *pathHistory) {
-	h.byHash = make(map[string]int, len(h.versions))
+	h.byHash = make(map[string][]int, len(h.versions))
 	for i, v := range h.versions {
-		h.byHash[v.Hash] = i
+		h.byHash[v.Hash] = append(h.byHash[v.Hash], i)
 	}
 }
 
@@ -198,8 +223,11 @@ func (s *MemorySnapshotStore) Head(path string) (Snapshot, bool) {
 }
 
 // ByHash returns the historical snapshot for path whose tag equals hash, if
-// it is still retained. A read does not change recency (only Record does), so
-// looking up an old version never rescues it from version-count eviction.
+// it is still retained. When distinct contents collide on the tag, the most
+// recently recorded colliding version is returned (its slice is oldest-first,
+// so the last index is newest). A read does not change recency (only Record
+// does), so looking up an old version never rescues it from version-count
+// eviction.
 func (s *MemorySnapshotStore) ByHash(path, hash string) (Snapshot, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,11 +235,31 @@ func (s *MemorySnapshotStore) ByHash(path, hash string) (Snapshot, bool) {
 	if h == nil {
 		return Snapshot{}, false
 	}
-	idx, ok := h.byHash[hash]
-	if !ok {
+	idxs, ok := h.byHash[hash]
+	if !ok || len(idxs) == 0 {
 		return Snapshot{}, false
 	}
-	return h.versions[idx], true
+	return h.versions[idxs[len(idxs)-1]], true
+}
+
+// ContainsText reports whether path has a retained snapshot whose normalized
+// text exactly equals text. It scopes the scan to the versions sharing text's
+// tag, so a 16-bit collision is resolved by exact content, not fingerprint.
+func (s *MemorySnapshotStore) ContainsText(path, text string) bool {
+	norm := Normalize(text).Text
+	tag := ComputeFileHash(norm)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.paths[path]
+	if h == nil {
+		return false
+	}
+	for _, i := range h.byHash[tag] {
+		if h.versions[i].Text == norm {
+			return true
+		}
+	}
+	return false
 }
 
 // Invalidate forgets all snapshots for path.

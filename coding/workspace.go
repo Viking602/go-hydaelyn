@@ -534,6 +534,24 @@ func (w *localWorkspace) CanonicalPath(path string) (string, error) {
 	return canon, err
 }
 
+// ResolveIdentity returns a stable on-disk identity for a workspace-relative
+// path: its symlink-resolved absolute path. The patcher's duplicate-section
+// guard uses it to detect two edit sections that target the same underlying
+// file through different in-root symlink aliases. For a path that does not yet
+// resolve on disk (e.g. a not-yet-created file, which is not a valid edit
+// target anyway) the lexical absolute path is returned, which still gives
+// distinct new files distinct identities.
+func (w *localWorkspace) ResolveIdentity(path string) (string, error) {
+	abs, _, err := w.resolve(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+		return resolved, nil
+	}
+	return abs, nil
+}
+
 // ReadText reads the full raw bytes of a workspace-relative file.
 func (w *localWorkspace) ReadText(ctx context.Context, path string) (string, error) {
 	if err := ctx.Err(); err != nil {

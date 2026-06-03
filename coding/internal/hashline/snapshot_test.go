@@ -10,6 +10,9 @@ func TestLazySnapshotStore_NoOpBehavior(t *testing.T) {
 	if _, ok := s.ByHash("x", "0000"); ok {
 		t.Error("ByHash should report no match")
 	}
+	if s.ContainsText("x", "anything\n") {
+		t.Error("ContainsText should report nothing retained")
+	}
 	// Invalidate and Clear must not panic.
 	s.Invalidate("x")
 	s.Clear()

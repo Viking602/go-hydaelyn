@@ -189,6 +189,35 @@ func TestLocalWorkspace_SymlinkEscapeRejected(t *testing.T) {
 	}
 }
 
+func TestLocalWorkspace_ResolveIdentity_AliasesCollapse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	ws, root := newTestWorkspace(t, map[string]string{"a.txt": "hi\n"})
+	// link.txt is an in-root symlink pointing at a.txt; both names resolve to the
+	// same underlying file, so they must share a ResolveIdentity result.
+	if err := os.Symlink("a.txt", filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	resolver, ok := ws.(interface {
+		ResolveIdentity(string) (string, error)
+	})
+	if !ok {
+		t.Fatal("local workspace must expose ResolveIdentity")
+	}
+	idA, err := resolver.ResolveIdentity("a.txt")
+	if err != nil {
+		t.Fatalf("ResolveIdentity(a.txt): %v", err)
+	}
+	idLink, err := resolver.ResolveIdentity("link.txt")
+	if err != nil {
+		t.Fatalf("ResolveIdentity(link.txt): %v", err)
+	}
+	if idA != idLink {
+		t.Errorf("aliases resolved to distinct identities: %q vs %q", idA, idLink)
+	}
+}
+
 func TestLocalWorkspace_WriteFile_NewFileAndExistingRejected(t *testing.T) {
 	ws, root := newTestWorkspace(t, map[string]string{"existing.go": "package a\n"})
 	ctx := context.Background()

@@ -11,10 +11,11 @@ import (
 // and can be configured to fail a specific path's write or preflight.
 type fakeFS struct {
 	files          map[string]string
-	missing        map[string]bool // paths that don't exist (ReadText error)
-	failWriteOn    string          // path whose WriteText returns an error
-	failPreflight  string          // path whose PreflightWrite returns an error
-	failCanonical  string          // path whose CanonicalPath returns an error
+	missing        map[string]bool   // paths that don't exist (ReadText error)
+	identity       map[string]string // canonical path -> resolved on-disk identity
+	failWriteOn    string            // path whose WriteText returns an error
+	failPreflight  string            // path whose PreflightWrite returns an error
+	failCanonical  string            // path whose CanonicalPath returns an error
 	writeCallOrder []string
 }
 
@@ -29,6 +30,17 @@ func newFakeFS(files map[string]string) *fakeFS {
 func (f *fakeFS) CanonicalPath(path string) (string, error) {
 	if path == f.failCanonical {
 		return "", errors.New("path escapes workspace")
+	}
+	return path, nil
+}
+
+// ResolveIdentity maps a canonical path to its on-disk identity when one is
+// configured (modeling symlink aliases), otherwise the path is its own
+// identity. This makes fakeFS satisfy the patcher's identityResolver so the
+// duplicate-section guard keys on resolved identity.
+func (f *fakeFS) ResolveIdentity(path string) (string, error) {
+	if id, ok := f.identity[path]; ok {
+		return id, nil
 	}
 	return path, nil
 }
@@ -443,6 +455,32 @@ func TestPatcher_DuplicateSectionKeysOnCanonicalPath(t *testing.T) {
 	}
 }
 
+func TestPatcher_DuplicateSectionKeysOnResolvedIdentity(t *testing.T) {
+	// "a.go" and "link.go" are distinct lexical paths that resolve to the same
+	// underlying file (link.go -> a.go). Keyed lexically they slip past the
+	// duplicate-section guard and the second Commit clobbers the first's edit;
+	// keyed by resolved identity the patch is rejected up front, untouched.
+	const orig = "package p\n\nvar X = 1\n"
+	fs := newFakeFS(map[string]string{"a.go": orig, "link.go": orig})
+	fs.identity = map[string]string{"a.go": "id:a", "link.go": "id:a"}
+	p := &Patcher{FS: fs}
+	tag := tagFor(orig)
+	patch := Patch{Sections: []Section{
+		{Path: "a.go", Tag: tag, Ops: []Op{{Kind: OpReplace, Start: 3, End: 3, Body: []string{"var X = 2"}}}},
+		{Path: "link.go", Tag: tag, Ops: []Op{{Kind: OpReplace, Start: 3, End: 3, Body: []string{"var X = 3"}}}},
+	}}
+	_, err := p.Apply(context.Background(), patch)
+	if !errors.Is(err, ErrDuplicateSection) {
+		t.Fatalf("want ErrDuplicateSection for symlink alias, got %v", err)
+	}
+	if fs.files["a.go"] != orig || fs.files["link.go"] != orig {
+		t.Errorf("files mutated on alias reject: a=%q link=%q", fs.files["a.go"], fs.files["link.go"])
+	}
+	if len(fs.writeCallOrder) != 0 {
+		t.Errorf("no writes should occur on a rejected patch: %v", fs.writeCallOrder)
+	}
+}
+
 func TestPatcher_DistinctPathsNotFlaggedAsDuplicate(t *testing.T) {
 	// Sanity: the guard must not false-positive on genuinely distinct files.
 	a := "a1\n"
@@ -479,6 +517,12 @@ type collisionStore struct{ recorded string }
 func (collisionStore) Head(string) (Snapshot, bool) { return Snapshot{}, false }
 func (c collisionStore) ByHash(path, hash string) (Snapshot, bool) {
 	return Snapshot{Path: path, Text: c.recorded, Hash: hash}, true
+}
+
+// ContainsText reports membership against the single retained content, so a
+// live file that differs from c.recorded is correctly reported absent.
+func (c collisionStore) ContainsText(_, text string) bool {
+	return Normalize(text).Text == Normalize(c.recorded).Text
 }
 func (collisionStore) Record(_, fullText string) string {
 	return ComputeFileHash(Normalize(fullText).Text)

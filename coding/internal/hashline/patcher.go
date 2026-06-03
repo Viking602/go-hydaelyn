@@ -98,11 +98,15 @@ func (p *Patcher) store() SnapshotStore {
 // whole preflight (nothing is written and Commit is never reached).
 func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection, error) {
 	prepared := make([]PreparedSection, 0, len(patch.Sections))
-	// seen guards against two sections targeting the same canonical path.
+	// seen guards against two sections targeting the same underlying file.
 	// Each section is validated and written against the live file
 	// independently, so a second section for the same file would clobber the
 	// first's edits during Commit; reject the patch and tell the agent to
-	// fold the edits into a single section (a section may carry many ops).
+	// fold the edits into a single section (a section may carry many ops). The
+	// key is the file's resolved on-disk identity when the Filesystem can
+	// supply one (identityResolver), so two sections that alias the same file
+	// through different in-root symlinks (e.g. "a.go" and "link.go" -> "a.go")
+	// collapse to one key; otherwise it falls back to the canonical path.
 	seen := make(map[string]int, len(patch.Sections))
 	for _, sec := range patch.Sections {
 		canon, err := p.FS.CanonicalPath(sec.Path)
@@ -110,11 +114,17 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 			return nil, fmt.Errorf("hashline: section %q: %w", sec.Path, err)
 		}
 
-		if first, dup := seen[canon]; dup {
+		key := canon
+		if ir, ok := p.FS.(identityResolver); ok {
+			if id, idErr := ir.ResolveIdentity(canon); idErr == nil {
+				key = id
+			}
+		}
+		if first, dup := seen[key]; dup {
 			return nil, fmt.Errorf("hashline: section %q (also at section %d): %w; combine the operations into one ¶PATH#TAG section",
 				canon, first+1, ErrDuplicateSection)
 		}
-		seen[canon] = len(prepared)
+		seen[key] = len(prepared)
 
 		raw, err := p.FS.ReadText(ctx, canon)
 		if err != nil {
@@ -135,14 +145,16 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 			// the fast path. sec.Tag is only the low 16 bits of FNV, so a different
 			// out-of-band file version can share it with the version the edit was
 			// built on. Every read_file/search/edit records the content its tag was
-			// minted from (§4.8), so when that snapshot is still retained, require
-			// the live content to equal it: an inequality under equal tags means the
-			// file changed to a colliding version, so reject as stale and force a
-			// re-read instead of applying an edit built for different content. When
-			// no snapshot is retained (lazy store, or evicted history) the tag is the
-			// only available check, exactly as before.
-			if snap, ok := p.store().ByHash(canon, sec.Tag); ok && snap.Text != nf.Text {
-				return nil, fmt.Errorf("hashline: section %q: %w (tag %s matches the live file only by its 16-bit fingerprint; the recorded content for that tag differs, so the file changed out of band — re-read it before editing)",
+			// minted from (§4.8) and the store retains colliding versions distinctly,
+			// so when any history is retained for this path under the tag (ByHash ok),
+			// require the live content to be one of the recorded versions: a live file
+			// that merely shares the tag but was never recorded is an out-of-band
+			// change, so reject as stale and force a re-read instead of applying an
+			// edit built for different content. When no history is retained (lazy
+			// store, or evicted) the tag is the only available check, as before.
+			st := p.store()
+			if _, known := st.ByHash(canon, sec.Tag); known && !st.ContainsText(canon, nf.Text) {
+				return nil, fmt.Errorf("hashline: section %q: %w (tag %s matches the live file only by its 16-bit fingerprint; no recorded snapshot has this content, so the file changed out of band — re-read it before editing)",
 					canon, ErrSnapshotMismatch, sec.Tag)
 			}
 			// Fast path: the tag matches the live file, so it IS the version the
@@ -307,6 +319,20 @@ func (p *Patcher) Commit(ctx context.Context, prepared []PreparedSection) (Apply
 		})
 	}
 	return ApplyPatchResult{Sections: results}, nil
+}
+
+// identityResolver is an optional Filesystem capability used by Preflight's
+// duplicate-section guard to key on a file's resolved on-disk identity rather
+// than its lexical canonical path. Two sections can name the same underlying
+// file through different in-root symlink aliases (e.g. "a.go" and a "link.go"
+// that points at it); keyed lexically they slip past the guard and the second
+// Commit write clobbers the first section's edit. When the Filesystem
+// implements identityResolver, the guard dedups on the resolved identity so
+// aliases collapse to one key; a Filesystem that does not implement it falls
+// back to the canonical path (no alias detection). ResolveIdentity receives the
+// already-canonicalized path.
+type identityResolver interface {
+	ResolveIdentity(path string) (string, error)
 }
 
 // restorer is an optional Filesystem capability used only by rollback. Its
