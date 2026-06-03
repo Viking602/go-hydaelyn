@@ -20,18 +20,13 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "go test single pkg", args: []string{"go", "test", "./coding"}},
 		{name: "go test run", args: []string{"go", "test", "./coding", "-run", "TestThing"}},
 		{name: "go vet all", args: []string{"go", "vet", "./..."}},
-		{name: "git diff with paths", args: []string{"git", "diff", "--", "a.go", "b.go"}},
-		{name: "git diff no paths", args: []string{"git", "diff", "--"}},
-		{name: "git diff no-ext-diff", args: []string{"git", "diff", "--no-ext-diff", "--", "a.go"}},
-		{name: "git diff hardened", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--", "."}},
-		{name: "git diff hardened no paths", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}},
-		{name: "git status short", args: []string{"git", "status", "--short"}},
-		// The fsmonitor-off global override is accepted before the subcommand: it
+		// The fsmonitor-off global override is MANDATORY before the subcommand: it
 		// disables a repo-configured filesystem-monitor hook git would run while
 		// refreshing the index for a read-only diff/status. This is the form the
-		// git_diff tool actually emits.
+		// git_diff tool actually emits; the un-hardened forms are rejected below.
 		{name: "git diff fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}},
-		{name: "git diff fsmonitor off with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--", "a.go"}},
+		{name: "git diff fsmonitor off with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--", "a.go", "b.go"}},
+		{name: "git diff fsmonitor off no-ext-diff", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--", "a.go"}},
 		{name: "git status fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"}},
 
 		// Rejected forms.
@@ -43,13 +38,19 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "go test extra flag", args: []string{"go", "test", "./...", "-count=1"}, wantErr: ErrCommandNotAllowed},
 		{name: "go test bad run shape", args: []string{"go", "test", "./pkg", "-bench", "."}, wantErr: ErrCommandNotAllowed},
 		{name: "go vet pkg", args: []string{"go", "vet", "./pkg"}, wantErr: ErrCommandNotAllowed},
-		{name: "git commit", args: []string{"git", "commit", "-m", "x"}, wantErr: ErrCommandNotAllowed},
-		{name: "git push", args: []string{"git", "push"}, wantErr: ErrCommandNotAllowed},
-		{name: "git status no flag", args: []string{"git", "status"}, wantErr: ErrCommandNotAllowed},
-		{name: "git diff missing sep", args: []string{"git", "diff"}, wantErr: ErrCommandNotAllowed},
-		{name: "git diff flag without sep", args: []string{"git", "diff", "--no-ext-diff"}, wantErr: ErrCommandNotAllowed},
-		{name: "git diff unknown flag", args: []string{"git", "diff", "--stat", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
+		{name: "git commit", args: []string{"git", "-c", "core.fsmonitor=false", "commit", "-m", "x"}, wantErr: ErrCommandNotAllowed},
+		{name: "git push", args: []string{"git", "-c", "core.fsmonitor=false", "push"}, wantErr: ErrCommandNotAllowed},
+		{name: "git status no flag", args: []string{"git", "-c", "core.fsmonitor=false", "status"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff unknown flag", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--stat", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
 		{name: "bare git", args: []string{"git"}, wantErr: ErrCommandNotAllowed},
+		// The fsmonitor-off override is mandatory: the un-hardened diff/status
+		// forms are rejected so a repo-configured fsmonitor hook can never run
+		// during the index refresh of a read-only git invocation.
+		{name: "git diff without override", args: []string{"git", "diff", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff hardened without override", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git status without override", args: []string{"git", "status", "--short"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff missing sep with override", args: []string{"git", "-c", "core.fsmonitor=false", "diff"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff flag without sep with override", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff"}, wantErr: ErrCommandNotAllowed},
 		// Only the exact `-c core.fsmonitor=false` override is allowed: any other
 		// -c key=value (or a different fsmonitor value) is rejected so the global
 		// flag cannot become a generic config-injection vector.
@@ -209,7 +210,7 @@ func TestRunCommand_SuccessAndExitCode(t *testing.T) {
 		t.Skipf("cannot locate repo root: %v", err)
 	}
 	res, err := RunCommand(context.Background(), RunCommandRequest{
-		Args:       []string{"git", "status", "--short"},
+		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
 		WorkingDir: root,
 	})
 	if err != nil {
@@ -260,7 +261,7 @@ func containsKV(env []string, kv string) bool {
 // starts.
 func TestRunCommand_RequiresWorkingDir(t *testing.T) {
 	_, err := RunCommand(context.Background(), RunCommandRequest{
-		Args: []string{"git", "status", "--short"},
+		Args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
 	})
 	if err == nil {
 		t.Fatalf("RunCommand with empty WorkingDir must error")
@@ -275,7 +276,7 @@ func TestRunCommand_RequiresWorkingDir(t *testing.T) {
 // argv and working directory. The rejection happens before exec.
 func TestRunCommand_RejectsNonAllowlistedEnvKey(t *testing.T) {
 	_, err := RunCommand(context.Background(), RunCommandRequest{
-		Args:       []string{"git", "status", "--short"},
+		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
 		WorkingDir: t.TempDir(),
 		Env:        map[string]string{"GOFLAGS": "-toolexec=/bin/false"},
 	})

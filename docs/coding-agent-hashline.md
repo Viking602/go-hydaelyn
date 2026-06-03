@@ -407,13 +407,17 @@ Allowlist only (matched on argv, never via a shell):
 
 ```text
 go test ./...        go test ./<pkg>...     go test ./<pkg> -run <Name>
-go vet ./...         git [-c core.fsmonitor=false] status --short
-git [-c core.fsmonitor=false] diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
+go vet ./...         git -c core.fsmonitor=false status --short
+git -c core.fsmonitor=false diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
 ```
 
-The only `-c key=value` override the allowlist accepts is the exact pair
-`-c core.fsmonitor=false`, and only as a leading global flag before the
-subcommand — see §6.6 for why.
+Every `git` invocation MUST carry the exact leading pair `-c core.fsmonitor=false`
+as a global flag before the subcommand; the allowlist rejects a bare `git status`
+or `git diff` without it. It is the only `-c key=value` override accepted. The
+override is mandatory for the whole git surface — not just `diff` — because both
+`git diff` and `git status` refresh the index and a `.git/config` pointing
+`core.fsmonitor` at a script would execute it during that refresh, turning a
+nominally read-only command into code execution — see §6.6.
 
 The argv allowlist screens a `go test` package pattern only lexically (it rejects
 a `..` traversal segment). A directory symlink inside the workspace that points
@@ -505,8 +509,9 @@ helper, and `-c core.fsmonitor=false` disables any configured filesystem-monitor
 hook that git would otherwise execute while refreshing the index — without it, a
 hostile `.git/config` pointing `core.fsmonitor` at a script could turn this
 read-only diff into command execution. It returns bounded output. The allowlist
-admits that single `-c` override (only the exact `core.fsmonitor=false` value)
-and nothing else.
+*requires* that single `-c` override (only the exact `core.fsmonitor=false` value,
+as a leading global flag) on every git form — `status` as well as `diff`, since
+both refresh the index and share the fsmonitor vector — and admits nothing else.
 
 ## 7. Policy & audit
 
@@ -608,6 +613,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 |---|---|
 | 4-hex tag collision | tag is only the model-facing handle; the fast path (and recovery base) resolve via `UniqueByHash`, which yields a version only when the tag pins to a single recorded content equal to the live file. An out-of-band version that shares the tag but was never recorded, or a tag that maps to two distinct recorded versions (making the edit's line numbers ambiguous), is rejected as stale rather than applied against the wrong version |
 | stale line numbers | stale-reject + prompt rule + tests |
+| search snapshot ≠ exposed header | `search` records the full text from the same read that minted the header tag and line numbers (carried in `SearchFileResult.Text`), never a second `ReadFile` — so a concurrent change that shares the 16-bit tag cannot make the recorded base diverge from the header the model received (§5.3) |
 | multi-file partial write | preflight all + rollback buffer (§4.7) |
 | duplicate sections aliasing one file | the duplicate-section guard keys on the resolved on-disk identity (`identityResolver.ResolveIdentity`), so two in-root symlink aliases for the same file (e.g. `a.go` and `link.go → a.go`) are rejected up front instead of the second `Commit` write clobbering the first's edit |
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
@@ -615,7 +621,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |
 | `go test` package symlink escape | the argv allowlist screens a package pattern only lexically (no `..`); `localWorkspace.RunCommand` additionally resolves a `./<pkg>` directory through `ResolveWorkspacePath` and rejects `go test ./link` when `link` symlinks outside the workspace, before the toolchain can execute out-of-sandbox code (§5.3) |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
-| repo config → command exec on a read-only diff | `git_diff` runs `-c core.fsmonitor=false --no-ext-diff --no-textconv`, disabling a `.git/config` filesystem-monitor hook, `diff.external`, and textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
+| repo config → command exec on a read-only git command | every allowlisted `git` form (both `diff` and `status`) requires the leading `-c core.fsmonitor=false` override, disabling a `.git/config` filesystem-monitor hook git would otherwise run while refreshing the index; `git_diff` additionally passes `--no-ext-diff --no-textconv` to neutralize `diff.external`/textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |

@@ -87,12 +87,15 @@ func (d searchDriver) Execute(ctx context.Context, call tool.Call, _ tool.Update
 		result.Files = append(result.Files, buildSearchFile(f.Path, f.Tag, f.Matches))
 		// Record the matched file's full normalized content so a later edit can
 		// recover a stale tag against this version (the same history read_file
-		// records). Search surfaces only matched lines, so re-read the whole
-		// file here; a read failure is non-fatal to the search result.
+		// records). Use the text from the SAME read that minted f.Tag and the
+		// match line numbers — carried in f.Text — rather than a second ReadFile:
+		// a follow-up read could observe a changed file and, if the new content
+		// shared the 16-bit tag, record a snapshot whose tag matches the header
+		// but whose lines do not, letting a later edit fast-path against the wrong
+		// version. Recording the exact searched content keeps the snapshot's tag
+		// equal to the header's tag.
 		if d.store != nil {
-			if full, rerr := d.ws.ReadFile(ctx, ReadFileRequest{Path: f.Path}); rerr == nil {
-				d.store.Record(full.Path, full.Text)
-			}
+			d.store.Record(f.Path, f.Text)
 		}
 	}
 	result.Content = renderSearch(result.Files)

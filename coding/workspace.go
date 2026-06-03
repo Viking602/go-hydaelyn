@@ -113,8 +113,14 @@ type SearchMatch struct {
 
 // SearchFileResult groups matches for a single file under its minted tag.
 type SearchFileResult struct {
-	Path    string        `json:"path"`
-	Tag     string        `json:"tag"`
+	Path string `json:"path"`
+	Tag  string `json:"tag"`
+	// Text is the full normalized (LF, BOM-free) content of the file as read
+	// when Tag and the match line numbers were computed. It lets a caller record
+	// the exact version the result exposes (so the recorded snapshot's tag equals
+	// Tag) without a second read that could observe a changed file. Not surfaced
+	// to the model — only matched lines are.
+	Text    string        `json:"text"`
 	Matches []SearchMatch `json:"matches"`
 }
 
@@ -428,13 +434,13 @@ walk:
 			matches = append(matches, SearchMatch{LineNumber: i + 1, Line: line})
 			total++
 			if total >= maxResults {
-				result.Files = append(result.Files, SearchFileResult{Path: read.Path, Tag: read.Tag, Matches: matches})
+				result.Files = append(result.Files, SearchFileResult{Path: read.Path, Tag: read.Tag, Text: read.Text, Matches: matches})
 				result.Truncated = true
 				break walk
 			}
 		}
 		if len(matches) > 0 {
-			result.Files = append(result.Files, SearchFileResult{Path: read.Path, Tag: read.Tag, Matches: matches})
+			result.Files = append(result.Files, SearchFileResult{Path: read.Path, Tag: read.Tag, Text: read.Text, Matches: matches})
 		}
 	}
 	if listed.Truncated {

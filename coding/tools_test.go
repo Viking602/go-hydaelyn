@@ -334,6 +334,58 @@ func TestGofmt_RejectsNonGo(t *testing.T) {
 	}
 }
 
+// fakeSearchWorkspace lets a test drive searchDriver with a Search result whose
+// full text is known, while a follow-up ReadFile (which the driver must NOT make)
+// would return different content. The embedded nil Workspace provides the methods
+// searchDriver never calls; they panic if exercised, which is the intent.
+type fakeSearchWorkspace struct {
+	Workspace
+	searchText     string
+	searchTag      string
+	readFileCalled bool
+}
+
+func (w *fakeSearchWorkspace) Search(_ context.Context, _ SearchRequest) (SearchResult, error) {
+	return SearchResult{Files: []SearchFileResult{{
+		Path:    "f.go",
+		Tag:     w.searchTag,
+		Text:    w.searchText,
+		Matches: []SearchMatch{{LineNumber: 1, Line: "match"}},
+	}}}, nil
+}
+
+func (w *fakeSearchWorkspace) ReadFile(_ context.Context, req ReadFileRequest) (ReadFileResult, error) {
+	w.readFileCalled = true
+	return ReadFileResult{Path: req.Path, Text: "DIFFERENT-OUT-OF-BAND\n", Tag: "FFFF"}, nil
+}
+
+// TestSearch_RecordsExactSearchedSnapshot proves coding.search records the exact
+// content the search result exposed (the text from the same read that minted the
+// header tag) rather than re-reading the file, so a concurrent out-of-band change
+// cannot make the recorded snapshot diverge from the header the model received.
+func TestSearch_RecordsExactSearchedSnapshot(t *testing.T) {
+	const searched = "package a\n\nfunc match() {}\n"
+	tag := hashline.ComputeFileHash(hashline.Normalize(searched).Text)
+	ws := &fakeSearchWorkspace{searchText: searched, searchTag: tag}
+	store := hashline.NewMemorySnapshotStore()
+	d := searchDriver{ws: ws, store: store}
+
+	res, _ := callJSON(t, d, searchInput{Query: "match"})
+	if res.IsError {
+		t.Fatalf("search errored: %s", res.Content)
+	}
+	if ws.readFileCalled {
+		t.Error("search must record the searched text, not re-read the file")
+	}
+	snap, ok := store.UniqueByHash("f.go", tag)
+	if !ok {
+		t.Fatalf("search did not record a unique snapshot for the searched tag %s", tag)
+	}
+	if want := hashline.Normalize(searched).Text; snap.Text != want {
+		t.Errorf("recorded snapshot text = %q, want the searched content %q", snap.Text, want)
+	}
+}
+
 // TestWriteFile_RecordsSnapshot proves coding.write_file records the new file's
 // content into the shared snapshot store, so the ¶PATH#TAG it mints is backed by
 // recorded history (UniqueByHash) and collision-guarded rather than fast-pathed
