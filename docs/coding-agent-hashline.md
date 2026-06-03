@@ -394,11 +394,18 @@ abs := filepath.Join(root, clean)
 resolvedAncestor := EvalSymlinks(deepest existing ancestor of abs)
 reject if resolvedAncestor escapes EvalSymlinks(root)
 deny .git/** by default; deny obvious binary/large files for read/search
-// The .git deny is also enforced on the CANONICAL target, not just the lexical
-// path: a symlink alias such as "g -> .git" has a benign cleaned path ("g/config")
-// yet resolves inside the in-bounds .git tree, so reject when the resolved target
-// lands under EvalSymlinks(root/.git).
-reject if resolvedAncestor is within EvalSymlinks(root/.git)
+// The .git deny is matched case-INSENSITIVELY on the leading path component, and
+// is also enforced on the CANONICAL target, not just the lexical path:
+//  - On a case-insensitive filesystem (default macOS, Windows) ".GIT/config"
+//    reaches the same tree as ".git/config", so the leading-component deny folds
+//    case and rejects every variant uniformly on all platforms.
+//  - A symlink alias such as "g -> .git" has a benign cleaned path ("g/config")
+//    yet resolves inside the in-bounds .git tree, so reject when the resolved
+//    target lands under EvalSymlinks(root/.git). That containment compare is also
+//    case-insensitive (a "g -> .GIT" alias on a case-insensitive FS resolves into
+//    the same tree while EvalSymlinks preserves the target's case).
+reject if leading component of clean equals ".git" (case-insensitive)
+reject if resolvedAncestor is within EvalSymlinks(root/.git) (case-insensitive)
 ```
 
 ### 5.3 Command safety
@@ -408,7 +415,7 @@ Allowlist only (matched on argv, never via a shell):
 ```text
 go test ./...        go test ./<pkg>...     go test ./<pkg> -run <Name>
 go vet ./...         git -c core.fsmonitor=false status --short
-git -c core.fsmonitor=false diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
+git -c core.fsmonitor=false diff --no-ext-diff --no-textconv -- <paths>   (see §6.6)
 ```
 
 Every `git` invocation MUST carry the exact leading pair `-c core.fsmonitor=false`
@@ -417,7 +424,12 @@ or `git diff` without it. It is the only `-c key=value` override accepted. The
 override is mandatory for the whole git surface — not just `diff` — because both
 `git diff` and `git status` refresh the index and a `.git/config` pointing
 `core.fsmonitor` at a script would execute it during that refresh, turning a
-nominally read-only command into code execution — see §6.6.
+nominally read-only command into code execution — see §6.6. `git diff`
+additionally REQUIRES both `--no-ext-diff` and `--no-textconv` (in either order,
+each at most once, before the `--` separator); omitting either would leave a
+repo-configured `diff.external` driver or textconv filter reachable, so the
+allowlist rejects the partially-hardened forms even though the `git_diff` driver
+always supplies both.
 
 The argv allowlist screens a `go test` package pattern only lexically (it rejects
 a `..` traversal segment). A directory symlink inside the workspace that points
@@ -512,6 +524,10 @@ read-only diff into command execution. It returns bounded output. The allowlist
 *requires* that single `-c` override (only the exact `core.fsmonitor=false` value,
 as a leading global flag) on every git form — `status` as well as `diff`, since
 both refresh the index and share the fsmonitor vector — and admits nothing else.
+The `diff` form additionally *requires* both `--no-ext-diff` and `--no-textconv`:
+the allowlist rejects a `diff` missing either flag so that a host driving
+`RunCommand` directly cannot reach a `diff.external` or textconv helper, not just
+the bundled `git_diff` driver which already passes both.
 
 ## 7. Policy & audit
 
@@ -619,9 +635,10 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
 | path escape | resolver + parent-dir symlink check |
 | symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |
+| `.git` deny bypass via case variant | the `.git` deny folds case on the leading lexical component (`.GIT/config` rejected on every platform) and the canonical-target containment compare is case-insensitive too, so on a case-insensitive filesystem (default macOS, Windows) a differently-cased path or a `g -> .GIT` alias cannot slip past the sandbox boundary |
 | `go test` package symlink escape | the argv allowlist screens a package pattern only lexically (no `..`); `localWorkspace.RunCommand` additionally resolves a `./<pkg>` directory through `ResolveWorkspacePath` and rejects `go test ./link` when `link` symlinks outside the workspace, before the toolchain can execute out-of-sandbox code (§5.3) |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
-| repo config → command exec on a read-only git command | every allowlisted `git` form (both `diff` and `status`) requires the leading `-c core.fsmonitor=false` override, disabling a `.git/config` filesystem-monitor hook git would otherwise run while refreshing the index; `git_diff` additionally passes `--no-ext-diff --no-textconv` to neutralize `diff.external`/textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
+| repo config → command exec on a read-only git command | every allowlisted `git` form (both `diff` and `status`) requires the leading `-c core.fsmonitor=false` override, disabling a `.git/config` filesystem-monitor hook git would otherwise run while refreshing the index; the `diff` form additionally requires both `--no-ext-diff` and `--no-textconv`, neutralizing a `diff.external`/textconv helper, so a host driving `RunCommand` directly cannot omit them; the allowlist admits only the exact `core.fsmonitor=false` override |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |

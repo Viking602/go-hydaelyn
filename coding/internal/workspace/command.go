@@ -64,10 +64,11 @@ type RunCommandResult struct {
 //	go test ./<pkg>...            (any single ./-prefixed package pattern)
 //	go test ./<pkg> -run <Name>
 //	go vet ./...
-//	git -c core.fsmonitor=false diff [--no-ext-diff] [--no-textconv] -- <paths...>
+//	git -c core.fsmonitor=false diff --no-ext-diff --no-textconv -- <paths...>
 //	git -c core.fsmonitor=false status --short
 //
-// The `-c core.fsmonitor=false` override is mandatory before any git subcommand
+// The `-c core.fsmonitor=false` override is mandatory before any git subcommand,
+// and `git diff` additionally requires both `--no-ext-diff` and `--no-textconv`
 // (see validateGit). Everything else is rejected, including shell wrappers,
 // network tools, and destructive or history-mutating git verbs.
 func ValidateCommand(args []string) error {
@@ -144,25 +145,45 @@ func validateGit(args []string) error {
 			return nil
 		}
 	case "diff":
-		// git diff [--no-ext-diff] [--no-textconv] -- <paths...>
-		// The hardening flags disable any repo-configured external diff/textconv
-		// helper, so a hostile .git/config or .gitattributes cannot turn the
-		// read-only git_diff tool into arbitrary command execution. They are
-		// optional and may appear in any order before the "--" separator.
+		// git diff --no-ext-diff --no-textconv -- <paths...>
+		// Both hardening flags are MANDATORY (not optional): --no-ext-diff disables
+		// a repo-configured diff.external driver and --no-textconv disables textconv
+		// filters (which git diff enables by default), either of which a hostile
+		// .git/config or .gitattributes could otherwise use to execute a helper
+		// while the read-only diff refreshes the index and renders output. Requiring
+		// them — like the fsmonitor override above — means no accepted diff form can
+		// run an external helper, for every caller of the allowlist, not just the
+		// git_diff driver (which already passes both). They may appear in either
+		// order before the "--" separator; each is accepted at most once.
+		var sawExtDiff, sawTextconv bool
 		i := 1
 		for i < len(rest) && isAllowedDiffFlag(rest[i]) {
+			switch rest[i] {
+			case "--no-ext-diff":
+				if sawExtDiff {
+					return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
+				}
+				sawExtDiff = true
+			case "--no-textconv":
+				if sawTextconv {
+					return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
+				}
+				sawTextconv = true
+			}
 			i++
 		}
-		if i < len(rest) && rest[i] == "--" {
+		if sawExtDiff && sawTextconv && i < len(rest) && rest[i] == "--" {
 			return nil
 		}
 	}
 	return fmt.Errorf("%w: %v", ErrCommandNotAllowed, args)
 }
 
-// isAllowedDiffFlag reports whether s is one of the hardening flags git_diff may
+// isAllowedDiffFlag reports whether s is one of the hardening flags git_diff must
 // pass before the "--" path separator. Only flags that disable external-helper
-// execution are permitted — no value-taking or behavior-broadening flags.
+// execution are permitted — no value-taking or behavior-broadening flags. Both
+// flags are required (see validateGit); this only screens which flag tokens may
+// appear in the pre-separator run.
 func isAllowedDiffFlag(s string) bool {
 	switch s {
 	case "--no-ext-diff", "--no-textconv":

@@ -112,6 +112,14 @@ func ResolveWorkspacePath(root, rel string) (abs string, canonicalRel string, er
 // location. The .git entry is itself canonicalized (it may be a symlink) before
 // the containment test, and a workspace with no .git entry (a dangling or
 // missing link) has nothing in-bounds to alias into.
+//
+// The containment test is case-insensitive (withinRootFold): on a case-
+// insensitive filesystem a symlink whose target is a case variant such as
+// "g -> .GIT" resolves into the same on-disk tree as ".git", yet Go's
+// EvalSymlinks preserves the target's case, so a byte-for-byte compare against
+// the lowercase resolved .git would miss it. Folding case here matches the deny
+// guard in isDeniedRel; over-denying a genuinely distinct ".GIT" on a case-
+// sensitive filesystem is a safe, conservative default for a sandbox boundary.
 func resolvesIntoDeniedTree(resolvedRoot, resolvedTarget string) (bool, error) {
 	resolvedGit, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, ".git"))
 	if err != nil {
@@ -120,16 +128,26 @@ func resolvesIntoDeniedTree(resolvedRoot, resolvedTarget string) (bool, error) {
 		}
 		return false, fmt.Errorf("workspace: resolve .git: %w", err)
 	}
-	return withinRoot(resolvedGit, resolvedTarget), nil
+	return withinRootFold(resolvedGit, resolvedTarget), nil
 }
 
 // isDeniedRel reports whether a cleaned workspace-relative path targets a denied
 // location. The .git tree is denied by default.
+//
+// The leading component is compared case-insensitively: on a case-insensitive
+// filesystem (the default on macOS and Windows) a request for ".GIT/config"
+// reaches the very same tree as ".git/config", and the canonical-containment
+// helper below compares paths byte-for-byte, so a case-variant would otherwise
+// slip past both guards. Denying every case fold of ".git" uniformly across
+// platforms closes that bypass; on a case-sensitive filesystem a genuinely
+// distinct ".GIT" entry is vanishingly rare and denying it is a safe,
+// conservative default for a sandbox boundary.
 func isDeniedRel(clean string) bool {
-	if clean == ".git" {
-		return true
+	first := clean
+	if i := strings.IndexByte(clean, filepath.Separator); i >= 0 {
+		first = clean[:i]
 	}
-	return strings.HasPrefix(clean, ".git"+string(filepath.Separator))
+	return strings.EqualFold(first, ".git")
 }
 
 // withinRoot reports whether target is root or lies beneath it, comparing whole
@@ -144,6 +162,26 @@ func withinRoot(root, target string) bool {
 		withSep += string(filepath.Separator)
 	}
 	return strings.HasPrefix(target, withSep)
+}
+
+// withinRootFold is withinRoot with case-insensitive, segment-aware comparison.
+// It is used ONLY for the denied .git tree check (resolvesIntoDeniedTree) so a
+// case-variant alias on a case-insensitive filesystem cannot reach the denied
+// tree. The generic withinRoot stays case-sensitive: folding case in the
+// root-escape containment check would be unsound, treating a genuinely distinct
+// directory as in-bounds and weakening escape detection.
+func withinRootFold(root, target string) bool {
+	if strings.EqualFold(root, target) {
+		return true
+	}
+	withSep := root
+	if !strings.HasSuffix(withSep, string(filepath.Separator)) {
+		withSep += string(filepath.Separator)
+	}
+	if len(target) < len(withSep) {
+		return false
+	}
+	return strings.EqualFold(target[:len(withSep)], withSep)
 }
 
 // evalDeepestExistingAncestor walks up from abs until it finds an existing path,

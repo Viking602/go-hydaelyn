@@ -55,6 +55,12 @@ func TestResolveWorkspacePath_Rejects(t *testing.T) {
 		{name: "git dir", rel: ".git", wantErr: ErrDeniedPath},
 		{name: "git child", rel: ".git/config", wantErr: ErrDeniedPath},
 		{name: "git nested", rel: ".git/hooks/pre-commit", wantErr: ErrDeniedPath},
+		// Case variants of .git reach the same tree on a case-insensitive
+		// filesystem (default macOS, Windows); the deny boundary is folded so they
+		// are rejected uniformly on every platform.
+		{name: "git dir upper", rel: ".GIT", wantErr: ErrDeniedPath},
+		{name: "git child upper", rel: ".GIT/config", wantErr: ErrDeniedPath},
+		{name: "git child mixed", rel: ".Git/config", wantErr: ErrDeniedPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -293,5 +299,37 @@ func TestResolveWorkspacePath_SiblingPrefix(t *testing.T) {
 	_, _, err := ResolveWorkspacePath(root, "out/x.go")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("err = %v, want ErrPathEscape", err)
+	}
+}
+
+// TestWithinRootFold covers the case-insensitive denied-tree containment used by
+// resolvesIntoDeniedTree. On a case-insensitive filesystem a symlink whose target
+// is a case variant (e.g. "g -> .GIT") resolves into the same on-disk tree as
+// ".git" while Go's EvalSymlinks preserves the target's case, so a byte-for-byte
+// compare would miss it; folding case catches it. It must still respect path
+// segment boundaries so a sibling like "/root/.gitx" is not treated as inside
+// "/root/.git".
+func TestWithinRootFold(t *testing.T) {
+	sep := string(filepath.Separator)
+	root := sep + "ws" + sep + ".git"
+	cases := []struct {
+		name   string
+		target string
+		want   bool
+	}{
+		{name: "identical", target: sep + "ws" + sep + ".git", want: true},
+		{name: "child same case", target: sep + "ws" + sep + ".git" + sep + "config", want: true},
+		{name: "child upper", target: sep + "ws" + sep + ".GIT" + sep + "config", want: true},
+		{name: "child mixed", target: sep + "ws" + sep + ".Git" + sep + "config", want: true},
+		{name: "sibling prefix", target: sep + "ws" + sep + ".gitx" + sep + "config", want: false},
+		{name: "outside", target: sep + "ws" + sep + "src" + sep + "main.go", want: false},
+		{name: "shorter", target: sep + "ws", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := withinRootFold(root, tc.target); got != tc.want {
+				t.Fatalf("withinRootFold(%q, %q) = %v, want %v", root, tc.target, got, tc.want)
+			}
+		})
 	}
 }

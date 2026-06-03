@@ -20,13 +20,15 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "go test single pkg", args: []string{"go", "test", "./coding"}},
 		{name: "go test run", args: []string{"go", "test", "./coding", "-run", "TestThing"}},
 		{name: "go vet all", args: []string{"go", "vet", "./..."}},
-		// The fsmonitor-off global override is MANDATORY before the subcommand: it
-		// disables a repo-configured filesystem-monitor hook git would run while
-		// refreshing the index for a read-only diff/status. This is the form the
-		// git_diff tool actually emits; the un-hardened forms are rejected below.
-		{name: "git diff fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}},
-		{name: "git diff fsmonitor off with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--", "a.go", "b.go"}},
-		{name: "git diff fsmonitor off no-ext-diff", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--", "a.go"}},
+		// The fsmonitor-off global override is MANDATORY before the subcommand, and
+		// git diff additionally REQUIRES both --no-ext-diff and --no-textconv: these
+		// disable a repo-configured filesystem-monitor hook, diff.external driver,
+		// and textconv filters git would otherwise run while refreshing the index
+		// and rendering a read-only diff. This is the form the git_diff tool emits;
+		// the un-hardened and partially-hardened forms are rejected below.
+		{name: "git diff hardened", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}},
+		{name: "git diff hardened with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "a.go", "b.go"}},
+		{name: "git diff hardened flags swapped", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-textconv", "--no-ext-diff", "--", "a.go"}},
 		{name: "git status fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"}},
 
 		// Rejected forms.
@@ -51,6 +53,12 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "git status without override", args: []string{"git", "status", "--short"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff missing sep with override", args: []string{"git", "-c", "core.fsmonitor=false", "diff"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff flag without sep with override", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff"}, wantErr: ErrCommandNotAllowed},
+		// git diff REQUIRES both hardening flags: omitting either leaves a
+		// diff.external or textconv helper reachable from a hostile repo config.
+		{name: "git diff no hardening flags", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff only no-ext-diff", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff only no-textconv", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-textconv", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff duplicate hardening flag", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-ext-diff", "--no-textconv", "--"}, wantErr: ErrCommandNotAllowed},
 		// Only the exact `-c core.fsmonitor=false` override is allowed: any other
 		// -c key=value (or a different fsmonitor value) is rejected so the global
 		// flag cannot become a generic config-injection vector.
