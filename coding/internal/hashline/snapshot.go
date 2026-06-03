@@ -15,14 +15,16 @@ type SnapshotStore interface {
 	Head(path string) (Snapshot, bool)
 	// ByHash returns the snapshot for path with the given hash, if known.
 	// When distinct contents collide on the 16-bit tag, the most recently
-	// recorded version with that tag is returned; callers needing exact
-	// identity must use ContainsText.
+	// recorded version with that tag is returned; callers that need an
+	// unambiguous base must use UniqueByHash.
 	ByHash(path, hash string) (Snapshot, bool)
-	// ContainsText reports whether path has a retained snapshot whose
-	// normalized text exactly equals text. It disambiguates a 16-bit tag
-	// collision: the patcher uses it to confirm the live file is a version the
-	// caller actually recorded before trusting the matching-tag fast path.
-	ContainsText(path, text string) bool
+	// UniqueByHash returns the snapshot for path with the given hash only when
+	// it is the single distinct content recorded under that tag. It reports
+	// false when nothing is recorded under the tag AND when two or more
+	// distinct contents collide on it (an ambiguous 16-bit handle that cannot
+	// identify which version an edit was built on). The patcher takes its
+	// fast path / recovers only against such an unambiguous base.
+	UniqueByHash(path, hash string) (Snapshot, bool)
 	// Record stores fullText for path and returns its computed tag.
 	Record(path, fullText string) string
 	// Invalidate forgets all snapshots for path.
@@ -48,8 +50,8 @@ func (LazySnapshotStore) Head(string) (Snapshot, bool) { return Snapshot{}, fals
 // ByHash always reports no match.
 func (LazySnapshotStore) ByHash(string, string) (Snapshot, bool) { return Snapshot{}, false }
 
-// ContainsText always reports false: the lazy store retains nothing.
-func (LazySnapshotStore) ContainsText(string, string) bool { return false }
+// UniqueByHash always reports no unique base: the lazy store retains nothing.
+func (LazySnapshotStore) UniqueByHash(string, string) (Snapshot, bool) { return Snapshot{}, false }
 
 // Record computes and returns the tag for fullText without retaining it.
 func (LazySnapshotStore) Record(path, fullText string) string {
@@ -242,24 +244,24 @@ func (s *MemorySnapshotStore) ByHash(path, hash string) (Snapshot, bool) {
 	return h.versions[idxs[len(idxs)-1]], true
 }
 
-// ContainsText reports whether path has a retained snapshot whose normalized
-// text exactly equals text. It scopes the scan to the versions sharing text's
-// tag, so a 16-bit collision is resolved by exact content, not fingerprint.
-func (s *MemorySnapshotStore) ContainsText(path, text string) bool {
-	norm := Normalize(text).Text
-	tag := ComputeFileHash(norm)
+// UniqueByHash returns the snapshot for path with the given hash only when it
+// is the sole distinct content recorded under that tag. Record deduplicates by
+// exact content, so each index under a tag is a distinct version; a tag with
+// exactly one index is therefore unambiguous, while zero (unknown) or two or
+// more (a 16-bit collision) are not. In the ambiguous case the tag cannot
+// identify which version an edit was built on, so it reports false.
+func (s *MemorySnapshotStore) UniqueByHash(path, hash string) (Snapshot, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h := s.paths[path]
 	if h == nil {
-		return false
+		return Snapshot{}, false
 	}
-	for _, i := range h.byHash[tag] {
-		if h.versions[i].Text == norm {
-			return true
-		}
+	idxs := h.byHash[hash]
+	if len(idxs) != 1 {
+		return Snapshot{}, false
 	}
-	return false
+	return h.versions[idxs[0]], true
 }
 
 // Invalidate forgets all snapshots for path.

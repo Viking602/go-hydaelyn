@@ -299,11 +299,8 @@ func TestMemorySnapshotStore_RetainsCollidingContents(t *testing.T) {
 
 	// Both distinct contents are retained side by side despite sharing the tag —
 	// the second must not collapse onto (and erase) the first.
-	if !s.ContainsText("f.go", a) {
-		t.Error("first colliding version was lost")
-	}
-	if !s.ContainsText("f.go", b) {
-		t.Error("second colliding version was lost")
+	if got := len(s.paths["f.go"].versions); got != 2 {
+		t.Fatalf("versions under colliding tag = %d, want 2 (both retained)", got)
 	}
 
 	// ByHash resolves the tag to the most recently recorded colliding version.
@@ -315,10 +312,27 @@ func TestMemorySnapshotStore_RetainsCollidingContents(t *testing.T) {
 		t.Errorf("ByHash text = %q, want latest %q", got.Text, Normalize(b).Text)
 	}
 
-	// Content that was never recorded is reported absent (the guard's whole
-	// point: a colliding-but-unseen live file is not mistaken for a known one).
-	if s.ContainsText("f.go", "// never recorded\npackage q\n") {
-		t.Error("ContainsText reported unrecorded content as present")
+	// The tag now maps to two distinct contents, so it is an ambiguous handle:
+	// UniqueByHash must refuse to resolve a base (this is what stops the patcher
+	// from applying an edit whose line numbers may target the other version).
+	if _, unique := s.UniqueByHash("f.go", tagB); unique {
+		t.Error("UniqueByHash must report a colliding tag as ambiguous")
+	}
+}
+
+func TestMemorySnapshotStore_UniqueByHash(t *testing.T) {
+	s := NewMemorySnapshotStore()
+	tag := s.Record("f.go", "a\nb\n")
+
+	snap, unique := s.UniqueByHash("f.go", tag)
+	if !unique || snap.Text != "a\nb\n" {
+		t.Errorf("UniqueByHash = (%q, %v), want unambiguous a\\nb\\n", snap.Text, unique)
+	}
+	if _, unique := s.UniqueByHash("f.go", "FFFF"); unique {
+		t.Error("an unknown tag must not be reported as a unique base")
+	}
+	if _, unique := s.UniqueByHash("missing.go", tag); unique {
+		t.Error("an unknown path must not be reported as a unique base")
 	}
 }
 

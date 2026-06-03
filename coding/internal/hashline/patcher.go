@@ -142,20 +142,26 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 		)
 		if liveTag == sec.Tag {
 			// Guard the 16-bit tag against a fingerprint collision before trusting
-			// the fast path. sec.Tag is only the low 16 bits of FNV, so a different
-			// out-of-band file version can share it with the version the edit was
-			// built on. Every read_file/search/edit records the content its tag was
-			// minted from (§4.8) and the store retains colliding versions distinctly,
-			// so when any history is retained for this path under the tag (ByHash ok),
-			// require the live content to be one of the recorded versions: a live file
-			// that merely shares the tag but was never recorded is an out-of-band
-			// change, so reject as stale and force a re-read instead of applying an
-			// edit built for different content. When no history is retained (lazy
+			// the fast path. sec.Tag is only the low 16 bits of FNV, so it is not a
+			// unique handle: a different out-of-band version can share it, and two
+			// distinct versions read in one session can collide on it. Every
+			// read_file/search/edit records the content its tag was minted from
+			// (§4.8) and the store retains colliding versions distinctly, so when any
+			// history is retained for this path under the tag (ByHash ok) take the
+			// fast path only against an UNAMBIGUOUS base: the tag must pin to a single
+			// recorded content (UniqueByHash) that equals the live file. If the tag is
+			// ambiguous (two distinct recorded versions collide on it) we cannot tell
+			// which one the edit's line numbers target, and if the single recorded
+			// content differs from live the file changed out of band — either way
+			// reject as stale and force a re-read. With no retained history (lazy
 			// store, or evicted) the tag is the only available check, as before.
 			st := p.store()
-			if _, known := st.ByHash(canon, sec.Tag); known && !st.ContainsText(canon, nf.Text) {
-				return nil, fmt.Errorf("hashline: section %q: %w (tag %s matches the live file only by its 16-bit fingerprint; no recorded snapshot has this content, so the file changed out of band — re-read it before editing)",
-					canon, ErrSnapshotMismatch, sec.Tag)
+			if _, known := st.ByHash(canon, sec.Tag); known {
+				base, unique := st.UniqueByHash(canon, sec.Tag)
+				if !unique || base.Text != nf.Text {
+					return nil, fmt.Errorf("hashline: section %q: %w (tag %s does not uniquely identify the live content — the file changed out of band, or its 16-bit tag collides with another version read this session, so the edit's line numbers cannot be trusted; re-read it before editing)",
+						canon, ErrSnapshotMismatch, sec.Tag)
+				}
 			}
 			// Fast path: the tag matches the live file, so it IS the version the
 			// edit was built on. Resolve any go/ast block ops (replace/delete
@@ -227,15 +233,16 @@ type recovered struct {
 //  3. if the merge is non-conflicting and changes the live file, returns the
 //     merged text with a recovery warning.
 //
-// If no matching base is known (including the nil/lazy store, whose ByHash
-// always reports false — preserving the first release's stale-reject), or the
-// merge conflicts, it returns an ErrSnapshotMismatch-wrapping error so the
-// agent re-reads. A merge that reproduces the live file exactly returns
-// ErrNoop.
+// If no unambiguous base is known (including the nil/lazy store, whose
+// UniqueByHash always reports false — preserving the first release's
+// stale-reject — and the ambiguous case where distinct versions collide on the
+// tag, which cannot identify the edit's base), or the merge conflicts, it
+// returns an ErrSnapshotMismatch-wrapping error so the agent re-reads. A merge
+// that reproduces the live file exactly returns ErrNoop.
 func (p *Patcher) recoverStale(canon string, sec Section, liveText, liveTag string) (recovered, error) {
-	base, ok := p.store().ByHash(canon, sec.Tag)
+	base, ok := p.store().UniqueByHash(canon, sec.Tag)
 	if !ok {
-		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; re-read the file before editing)",
+		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; no unique recorded base for that tag, re-read the file before editing)",
 			canon, ErrSnapshotMismatch, liveTag, sec.Tag)
 	}
 

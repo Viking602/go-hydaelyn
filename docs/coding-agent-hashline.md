@@ -185,8 +185,8 @@ type Snapshot struct {
 
 type SnapshotStore interface { // M1/M2 may use a no-op/lazy impl; history impl is M6
     Head(path string) (Snapshot, bool)
-    ByHash(path, hash string) (Snapshot, bool)   // latest version whose tag == hash
-    ContainsText(path, text string) bool         // exact-content membership (tag-collision guard)
+    ByHash(path, hash string) (Snapshot, bool)       // latest version whose tag == hash
+    UniqueByHash(path, hash string) (Snapshot, bool) // sole content for the tag, or false if 0 or ambiguous
     Record(path, fullText string) string
     Invalidate(path string)
     Clear()
@@ -248,11 +248,13 @@ Because it is just the low 16 bits, two different file versions can share a tag,
 the patcher does not trust it alone: every read/search/edit records the content its
 tag was minted from (§4.8) and the store retains colliding versions distinctly
 (§4.8), so when any history is recorded for the path under that tag,
-`Patcher.Preflight` requires the live content to be one of the recorded versions
-(`SnapshotStore.ContainsText`) before taking the fast path, and rejects a colliding
-out-of-band change — one that shares the tag but was never recorded — as stale. The
-tag is the cheap pre-check; the recorded-content membership is the backstop that
-stops a 16-bit collision from applying a stale patch.
+`Patcher.Preflight` takes the fast path only against an *unambiguous* base — the tag
+must pin to a single recorded content (`SnapshotStore.UniqueByHash`) that equals the
+live file. A live file that shares the tag but was never recorded, or a tag that
+maps to two distinct recorded versions (a genuine 16-bit collision, which would make
+the edit's line numbers ambiguous), is rejected as stale and forces a re-read. The
+tag is the cheap pre-check; unambiguous-base resolution is the backstop that stops a
+16-bit collision from applying a stale patch.
 
 ### 4.4 format.go
 
@@ -354,9 +356,12 @@ per-path history (`maxPaths=64`, `maxVersionsPerPath=8`, LRU) is implemented in 
 back 3-way recovery and `ByHash`. Versions are keyed by exact content, not by tag:
 recording identical content deduplicates, but two distinct contents that collide on
 the 16-bit tag are retained side by side (the index maps a tag to every version
-sharing it, newest last). `ByHash` returns the newest version for a tag;
-`ContainsText` answers exact-content membership and is what the fast-path collision
-guard consults so a colliding-but-unrecorded live file cannot pass as a known one.
+sharing it, newest last). `ByHash` returns the newest version for a tag, while
+`UniqueByHash` returns a version only when it is the *sole* content recorded under
+the tag — reporting failure both when nothing is recorded and when ≥2 distinct
+contents collide. The fast-path and recovery base lookups use `UniqueByHash`, so an
+ambiguous (collided) tag is treated as unidentifiable and rejected rather than
+applied against an arbitrarily-chosen colliding version.
 
 ## 5. Workspace sandbox (`coding/internal/workspace` + `coding/workspace.go`)
 
@@ -585,7 +590,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 
 | Risk | Mitigation |
 |---|---|
-| 4-hex tag collision | tag is only the model-facing handle; the fast path additionally requires the live content to be one of the recorded versions for that tag (every read/search/edit records one, and the store keeps colliding contents distinctly), so a 16-bit collision against an out-of-band version that was never recorded is rejected as stale rather than applied |
+| 4-hex tag collision | tag is only the model-facing handle; the fast path (and recovery base) resolve via `UniqueByHash`, which yields a version only when the tag pins to a single recorded content equal to the live file. An out-of-band version that shares the tag but was never recorded, or a tag that maps to two distinct recorded versions (making the edit's line numbers ambiguous), is rejected as stale rather than applied against the wrong version |
 | stale line numbers | stale-reject + prompt rule + tests |
 | multi-file partial write | preflight all + rollback buffer (§4.7) |
 | duplicate sections aliasing one file | the duplicate-section guard keys on the resolved on-disk identity (`identityResolver.ResolveIdentity`), so two in-root symlink aliases for the same file (e.g. `a.go` and `link.go → a.go`) are rejected up front instead of the second `Commit` write clobbering the first's edit |

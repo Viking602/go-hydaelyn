@@ -519,10 +519,10 @@ func (c collisionStore) ByHash(path, hash string) (Snapshot, bool) {
 	return Snapshot{Path: path, Text: c.recorded, Hash: hash}, true
 }
 
-// ContainsText reports membership against the single retained content, so a
-// live file that differs from c.recorded is correctly reported absent.
-func (c collisionStore) ContainsText(_, text string) bool {
-	return Normalize(text).Text == Normalize(c.recorded).Text
+// UniqueByHash reports the single recorded content as the unambiguous base. The
+// guard then rejects because that recorded content differs from the live file.
+func (c collisionStore) UniqueByHash(path, hash string) (Snapshot, bool) {
+	return Snapshot{Path: path, Text: c.recorded, Hash: hash}, true
 }
 func (collisionStore) Record(_, fullText string) string {
 	return ComputeFileHash(Normalize(fullText).Text)
@@ -553,6 +553,40 @@ func TestPatcher_RejectsTagCollisionAgainstSnapshot(t *testing.T) {
 	}
 	if fs.files["foo.go"] != live {
 		t.Errorf("file modified despite collision rejection: %q", fs.files["foo.go"])
+	}
+}
+
+// TestPatcher_RejectsAmbiguousCollidingTag proves the fast path refuses to
+// apply when two distinct versions read this session collide on the 16-bit tag.
+// Even though the live file IS a recorded version, the tag no longer identifies
+// which version the edit's line numbers were built against, so applying it could
+// misapply the edit. The patcher must reject as stale instead.
+func TestPatcher_RejectsAmbiguousCollidingTag(t *testing.T) {
+	a, b := findTagCollision(t)
+	if Normalize(a).Text == Normalize(b).Text {
+		t.Fatal("collision helper returned identical content")
+	}
+	// Live file is version b; the store has both a and b recorded under the same
+	// tag (the agent read a, then later read/searched b).
+	fs := newFakeFS(map[string]string{"f.go": b})
+	store := NewMemorySnapshotStore()
+	store.Record("f.go", a)
+	store.Record("f.go", b)
+	p := &Patcher{FS: fs, Snapshots: store}
+
+	tag := tagFor(b) // equals tagFor(a); also the live tag
+	patch := Patch{Sections: []Section{{
+		Path: "f.go",
+		Tag:  tag,
+		Ops:  []Op{{Kind: OpReplace, Start: 1, End: 1, Body: []string{"// edited"}}},
+	}}}
+
+	_, err := p.Apply(context.Background(), patch)
+	if !errors.Is(err, ErrSnapshotMismatch) {
+		t.Fatalf("ambiguous colliding tag must be rejected, got %v", err)
+	}
+	if fs.files["f.go"] != b {
+		t.Errorf("file mutated under an ambiguous tag: %q", fs.files["f.go"])
 	}
 }
 

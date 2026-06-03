@@ -28,10 +28,12 @@ func NormalizeForHash(text string) string {
 // model-facing handle. Because it is just the low 16 bits, two different file
 // versions can share a tag, so the patcher does not trust the tag alone: when
 // the snapshot the tag was minted from is still recorded (every read/search/edit
-// records one, §4.8), Patcher.Preflight also requires the live content to equal
-// that snapshot before taking the fast path and rejects a colliding out-of-band
-// change as stale. The tag is the cheap pre-check; the recorded-content equality
-// is the backstop that makes a 16-bit collision unable to apply a stale patch.
+// records one, §4.8), Patcher.Preflight takes the fast path only against an
+// unambiguous base — the tag must pin to a single recorded content (UniqueByHash)
+// equal to the live file. A live file that shares the tag but was never recorded,
+// or a tag that two distinct recorded versions collide on, is rejected as stale.
+// The tag is the cheap pre-check; unambiguous-base resolution is the backstop
+// that makes a 16-bit collision unable to apply a stale patch.
 func ComputeFileHash(text string) string {
 	n := NormalizeForHash(text)
 	h := fnv.New32a()
