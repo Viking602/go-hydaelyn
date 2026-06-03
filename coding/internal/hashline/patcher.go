@@ -359,7 +359,16 @@ type restorer interface {
 // restore error is best-effort; the original write failure is the reported
 // cause. Restoration prefers the uncapped restorer path so an original that
 // exceeds the forward write cap is still put back (see restorer).
+//
+// The rollback detaches cancellation and deadlines from ctx: a canceled or
+// timed-out edit context is itself a common cause of the write failure that
+// triggers rollback, and the workspace's WriteText/RestoreText short-circuit on
+// ctx.Err(). Reusing the canceled context would skip every restore and leave
+// the earlier sections modified, breaking Commit's all-or-nothing contract. The
+// restore writes are synchronous and bounded, so dropping cancellation here
+// cannot hang the rollback.
 func (p *Patcher) rollback(ctx context.Context, written []PreparedSection) {
+	ctx = context.WithoutCancel(ctx)
 	for i := len(written) - 1; i >= 0; i-- {
 		if r, ok := p.FS.(restorer); ok {
 			_ = r.RestoreText(ctx, written[i].Path, written[i].originalRaw)

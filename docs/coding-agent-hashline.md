@@ -331,7 +331,12 @@ func (p *Patcher) Apply(ctx context.Context, patch Patch) (ApplyPatchResult, err
 5 only after ALL sections succeed: PreflightWrite each, then WriteText each
 6 if any WriteText fails: restore already-written files from the rollback buffer
                  (via the uncapped restore path so an original above the forward
-                 write cap is still put back); fail
+                 write cap is still put back); the rollback detaches cancellation
+                 and deadlines from ctx (context.WithoutCancel) so a canceled or
+                 timed-out edit — itself a common cause of the triggering write
+                 failure, since WriteText/RestoreText short-circuit on ctx.Err() —
+                 still restores the saved originals rather than leaving them
+                 modified; fail
 7 build per-section result: new header (recompute tag of new text), compact diff, firstChangedLine
 ```
 

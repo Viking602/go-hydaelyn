@@ -213,6 +213,87 @@ func TestPatcher_WriteFailureRollsBack(t *testing.T) {
 	}
 }
 
+// cancelFS is a Filesystem whose forward writes and rollback restores both
+// honor ctx.Err(), like the real localWorkspace. It cancels its own context the
+// moment the first forward write lands, so a later section's WriteText fails on
+// ctx.Err() and rollback runs against an already-canceled context — exercising
+// that rollback restores the saved originals regardless of cancellation.
+type cancelFS struct {
+	files        map[string]string
+	cancel       context.CancelFunc
+	cancelAfter  string   // path after whose successful write the ctx is canceled
+	restoreCalls []string // paths restored during rollback
+}
+
+func (f *cancelFS) CanonicalPath(path string) (string, error) { return path, nil }
+
+func (f *cancelFS) ReadText(_ context.Context, path string) (string, error) {
+	text, ok := f.files[path]
+	if !ok {
+		return "", errors.New("no such file: " + path)
+	}
+	return text, nil
+}
+
+func (f *cancelFS) PreflightWrite(ctx context.Context, _ string) error { return ctx.Err() }
+
+func (f *cancelFS) WriteText(ctx context.Context, path, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.files[path] = text
+	if path == f.cancelAfter && f.cancel != nil {
+		f.cancel()
+	}
+	return nil
+}
+
+func (f *cancelFS) RestoreText(ctx context.Context, path, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.files[path] = text
+	f.restoreCalls = append(f.restoreCalls, path)
+	return nil
+}
+
+// TestPatcher_RollbackSurvivesCanceledContext guards the all-or-nothing contract
+// when the edit context is canceled mid-commit: the first section is written,
+// the context is canceled, the second section's write fails on ctx.Err(), and
+// rollback must still restore the first section even though ctx is canceled.
+func TestPatcher_RollbackSurvivesCanceledContext(t *testing.T) {
+	a := "a1\na2\n"
+	b := "b1\nb2\n"
+	fs := &cancelFS{
+		files:       map[string]string{"a.go": a, "b.go": b},
+		cancelAfter: "a.go",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fs.cancel = cancel
+	defer cancel()
+
+	p := &Patcher{FS: fs}
+	patch := Patch{Sections: []Section{
+		{Path: "a.go", Tag: tagFor(a), Ops: []Op{{Kind: OpReplace, Start: 1, End: 1, Body: []string{"A1"}}}},
+		{Path: "b.go", Tag: tagFor(b), Ops: []Op{{Kind: OpReplace, Start: 1, End: 1, Body: []string{"B1"}}}},
+	}}
+
+	_, err := p.Apply(ctx, patch)
+	if err == nil {
+		t.Fatal("expected a write error from the canceled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	// a.go was written then must be rolled back despite the canceled context.
+	if fs.files["a.go"] != a {
+		t.Errorf("a.go not rolled back under canceled context: %q, want %q", fs.files["a.go"], a)
+	}
+	if len(fs.restoreCalls) != 1 || fs.restoreCalls[0] != "a.go" {
+		t.Errorf("rollback restore calls = %v, want [a.go]", fs.restoreCalls)
+	}
+}
+
 func TestPatcher_PreflightWriteFailureWritesNothing(t *testing.T) {
 	a := "a1\n"
 	b := "b1\n"
