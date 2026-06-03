@@ -480,6 +480,20 @@ func (w *localWorkspace) WriteFile(ctx context.Context, req WriteFileRequest) (W
 }
 
 func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) (RunCommandResult, error) {
+	// Validate the argv against the lexical allowlist FIRST, before any guard
+	// below touches the filesystem or shells out to git. The guards resolve
+	// pathspecs and probe tracked files (guardCommandGitFilters runs
+	// `git ls-files`/`git check-attr`); without an up-front allowlist check a
+	// disallowed argv — e.g. a `git diff -- :/` whose pathspec magic
+	// guardCommandGitPaths treats as a plain filename — would reach that probe,
+	// and in a workspace nested inside a larger repo the probe could enumerate
+	// parent-repo paths and surface their names in the refusal error, leaking
+	// names outside the sandbox for an argv that should have been rejected
+	// outright. workspace.RunCommand validates again as its first step (defense
+	// in depth); this call just ensures rejection happens before the probes.
+	if err := workspace.ValidateCommand(req.Args); err != nil {
+		return RunCommandResult{}, err
+	}
 	// The argv allowlist (workspace.ValidateCommand) screens a `go test` package
 	// pattern only lexically — it rejects ".." traversal but not a directory
 	// symlink that points outside the root. Resolving the package directory

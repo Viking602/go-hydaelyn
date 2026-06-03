@@ -464,6 +464,19 @@ the filter and that see attributes from every source — and refuses the command
 The probe is fail-closed: a probe error, or output past its 16 MiB cap, refuses
 the command. See §6.6.
 
+These filesystem-aware guards (`guardCommandGitPaths`, `guardCommandGitFilters`,
+and the `go test` package-path check) all run *after* the lexical argv allowlist:
+`localWorkspace.RunCommand` calls `workspace.ValidateCommand` first, before any
+guard touches the filesystem or shells out to git. Order matters because the
+filter guard itself runs `git ls-files`/`git check-attr`. If a disallowed argv —
+for example a `git diff` carrying pathspec magic such as `:/`, which the
+filesystem-aware `guardCommandGitPaths` resolves as a plain in-root filename
+rather than rejecting — reached that probe, then in a workspace nested inside a
+larger repo the probe could enumerate parent-repo paths and surface their names
+in the refusal error, leaking names outside the sandbox for an argv that should
+have been rejected outright. Validating the allowlist first guarantees such an
+argv is refused (`ErrCommandNotAllowed`) before any probe runs.
+
 The argv allowlist screens a `go test` package pattern only lexically (it rejects
 a `..` traversal segment). A directory symlink inside the workspace that points
 outward — e.g. `go test ./link` where `link → /outside` — has no `..` segment and

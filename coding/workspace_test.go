@@ -392,6 +392,70 @@ func TestLocalWorkspace_GitDiffNoFilterAllowed(t *testing.T) {
 	}
 }
 
+// TestLocalWorkspace_RunCommandValidatesBeforeFilterProbe is a regression for a
+// P2 ordering bug: the filesystem/git guards — in particular
+// guardCommandGitFilters, which shells out to `git ls-files`/`git check-attr` —
+// used to run before the lexical argv allowlist. A disallowed pathspec-magic
+// argument like `:/` slipped past guardCommandGitPaths (which resolves it as a
+// plain in-root filename) and reached the probe; in a workspace nested inside a
+// larger repo the probe then enumerated parent-repo paths and surfaced their
+// names in the refusal error, leaking names outside the sandbox for an argv that
+// should have been rejected outright. ValidateCommand must reject the argv
+// before any probe runs, so no outside name can leak.
+func TestLocalWorkspace_RunCommandValidatesBeforeFilterProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git pathspec-magic semantics not portable to Windows")
+	}
+	parent := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		parent = resolved
+	}
+	// An outside (parent-repo) tracked file flagged with a filter attribute. If
+	// the probe ever ran for an argv it should have rejected, this name would
+	// surface in the refusal error.
+	if err := os.MkdirAll(filepath.Join(parent, "outside"), 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside", "secret.txt"), []byte("classified\n"), 0o644); err != nil {
+		t.Fatalf("write secret.txt: %v", err)
+	}
+	// Flag ONLY the outside file, so that if the probe runs its path is the one
+	// the filter guard reports (filtered[0]) — making the leak unambiguous.
+	if err := os.WriteFile(filepath.Join(parent, ".gitattributes"), []byte("secret.txt filter=evil\n"), 0o644); err != nil {
+		t.Fatalf("write .gitattributes: %v", err)
+	}
+	// The workspace is a subdirectory of the parent repo.
+	wsRoot := filepath.Join(parent, "ws")
+	if err := os.MkdirAll(wsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir ws: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsRoot, "f.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write f.txt: %v", err)
+	}
+	gitRepoCmd(t, parent, "init", "-q")
+	gitRepoCmd(t, parent, "config", "user.email", "t@t.t")
+	gitRepoCmd(t, parent, "config", "user.name", "t")
+	gitRepoCmd(t, parent, "add", "-A")
+	gitRepoCmd(t, parent, "commit", "-qm", "init")
+
+	ws := NewLocalWorkspace(wsRoot)
+
+	// An otherwise-valid git diff form whose ONLY illegal component is the
+	// pathspec magic `:/` (repo-root anchored). guardCommandGitPaths treats `:/`
+	// as a plain in-root filename and lets it through, so before the fix the
+	// filter probe ran against the parent repo.
+	argv := []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", ":/"}
+	_, err := ws.RunCommand(context.Background(), RunCommandRequest{Args: argv})
+	if !errors.Is(err, workspace.ErrCommandNotAllowed) {
+		t.Fatalf("want ErrCommandNotAllowed, got %v", err)
+	}
+	// The discriminating assertion: a leaked outside name proves the git probe
+	// ran before the argv was rejected.
+	if msg := err.Error(); strings.Contains(msg, "secret") || strings.Contains(msg, "outside") {
+		t.Fatalf("refusal error leaked an outside path: %v", err)
+	}
+}
+
 func TestLocalWorkspace_ResolveIdentity_AliasesCollapse(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")
