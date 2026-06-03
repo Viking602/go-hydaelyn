@@ -333,3 +333,119 @@ func TestGofmt_RejectsNonGo(t *testing.T) {
 		t.Fatal("gofmt must reject non-.go files")
 	}
 }
+
+// TestWriteFile_RecordsSnapshot proves coding.write_file records the new file's
+// content into the shared snapshot store, so the ¶PATH#TAG it mints is backed by
+// recorded history (UniqueByHash) and collision-guarded rather than fast-pathed
+// on the 16-bit hash alone.
+func TestWriteFile_RecordsSnapshot(t *testing.T) {
+	ws, _ := newTestWorkspace(t, nil)
+	store := hashline.NewMemorySnapshotStore()
+	set := NewToolSet(ws, WithSnapshotStore(store))
+
+	const content = "package fresh\n\nfunc F() {}\n"
+	res, _ := callJSON(t, driverByName(t, set, ToolWriteFile), writeFileInput{Path: "fresh.go", Content: content})
+	if res.IsError {
+		t.Fatalf("write_file errored: %s", res.Content)
+	}
+	var wr WriteFileToolResult
+	if err := json.Unmarshal(res.Structured, &wr); err != nil {
+		t.Fatalf("unmarshal write result: %v", err)
+	}
+
+	snap, ok := store.UniqueByHash(wr.Path, wr.Tag)
+	if !ok {
+		t.Fatalf("write_file did not record a unique snapshot for tag %s under %q", wr.Tag, wr.Path)
+	}
+	if want := hashline.Normalize(content).Text; snap.Text != want {
+		t.Errorf("recorded snapshot text = %q, want %q", snap.Text, want)
+	}
+}
+
+// TestGofmt_RecordsSnapshot proves coding.gofmt records the formatted content
+// into the shared snapshot store in both the changed and already-formatted
+// branches, so the tag it returns is backed by recorded history.
+func TestGofmt_RecordsSnapshot(t *testing.T) {
+	t.Run("changed", func(t *testing.T) {
+		const unformatted = "package a\nfunc  Add(a int,b int)int{return a+b}\n"
+		ws, _ := newTestWorkspace(t, map[string]string{"m.go": unformatted})
+		store := hashline.NewMemorySnapshotStore()
+		set := NewToolSet(ws, WithSnapshotStore(store))
+
+		res, _ := callJSON(t, driverByName(t, set, ToolGofmt), gofmtInput{Path: "m.go"})
+		if res.IsError {
+			t.Fatalf("gofmt errored: %s", res.Content)
+		}
+		var gr GofmtToolResult
+		if err := json.Unmarshal(res.Structured, &gr); err != nil {
+			t.Fatalf("unmarshal gofmt result: %v", err)
+		}
+		if !gr.Changed {
+			t.Fatal("expected a change for unformatted source")
+		}
+		if _, ok := store.UniqueByHash(gr.Path, gr.Tag); !ok {
+			t.Fatalf("gofmt (changed) did not record a unique snapshot for tag %s under %q", gr.Tag, gr.Path)
+		}
+	})
+
+	t.Run("already-formatted", func(t *testing.T) {
+		const formatted = "package a\n\nfunc Add(a, b int) int { return a + b }\n"
+		ws, _ := newTestWorkspace(t, map[string]string{"m.go": formatted})
+		store := hashline.NewMemorySnapshotStore()
+		set := NewToolSet(ws, WithSnapshotStore(store))
+
+		res, _ := callJSON(t, driverByName(t, set, ToolGofmt), gofmtInput{Path: "m.go"})
+		if res.IsError {
+			t.Fatalf("gofmt errored: %s", res.Content)
+		}
+		var gr GofmtToolResult
+		if err := json.Unmarshal(res.Structured, &gr); err != nil {
+			t.Fatalf("unmarshal gofmt result: %v", err)
+		}
+		if gr.Changed {
+			t.Fatal("expected no change for already-formatted source")
+		}
+		if _, ok := store.UniqueByHash(gr.Path, gr.Tag); !ok {
+			t.Fatalf("gofmt (already formatted) did not record a unique snapshot for tag %s under %q", gr.Tag, gr.Path)
+		}
+	})
+}
+
+// TestEditHashline_RecoversStaleTagAfterWriteFile proves the write_file→edit
+// recording is wired through the default NewToolSet store end-to-end: write_file
+// records the new file's base version, an out-of-band change to a DIFFERENT
+// region makes the minted tag stale, and an edit carrying that tag recovers via
+// a 3-way merge against the recorded base. Without the recording, recoverStale
+// would find no unique base for the tag and reject the edit with a re-read.
+func TestEditHashline_RecoversStaleTagAfterWriteFile(t *testing.T) {
+	ws, root := newTestWorkspace(t, nil)
+	set := NewToolSet(ws)
+
+	const content = "line1\nline2\nline3\nline4\nline5\n"
+	res, _ := callJSON(t, driverByName(t, set, ToolWriteFile), writeFileInput{Path: "f.txt", Content: content})
+	if res.IsError {
+		t.Fatalf("write_file errored: %s", res.Content)
+	}
+	var wr WriteFileToolResult
+	if err := json.Unmarshal(res.Structured, &wr); err != nil {
+		t.Fatalf("unmarshal write result: %v", err)
+	}
+
+	// Out-of-band change to a DIFFERENT region (line5) makes the minted tag stale.
+	const live = "line1\nline2\nline3\nline4\nLINE5-EXTERNAL\n"
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte(live), 0o644); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+
+	// Edit line2 with the now-stale write_file header; disjoint from line5, so the
+	// 3-way merge against the recorded base recovers.
+	edit, _ := editWith(t, set, wr.Header, "replace 2:\n+LINE2-EDITED\n", false)
+	if edit.IsError {
+		t.Fatalf("stale edit after write_file should recover against the recorded base, got: %s", edit.Content)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "f.txt"))
+	const want = "line1\nLINE2-EDITED\nline3\nline4\nLINE5-EXTERNAL\n"
+	if string(got) != want {
+		t.Errorf("merged file = %q, want %q", got, want)
+	}
+}

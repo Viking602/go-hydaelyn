@@ -23,9 +23,10 @@ type toolSetConfig struct {
 
 // WithSnapshotStore overrides the per-tool-set snapshot store. By default
 // NewToolSet creates one hashline.MemorySnapshotStore and shares it across the
-// read_file, search, and edit_hashline drivers so an edit can recover a stale
-// tag against the history those reads recorded. A host that wants to share one
-// store across several tool sets (e.g. one per run) can supply it here.
+// read_file, search, edit_hashline, write_file, and gofmt drivers so an edit
+// can recover a stale tag against the history those tools recorded, and so the
+// tags write_file/gofmt mint are collision-guarded. A host that wants to share
+// one store across several tool sets (e.g. one per run) can supply it here.
 func WithSnapshotStore(store hashline.SnapshotStore) ToolSetOption {
 	return func(c *toolSetConfig) {
 		if store != nil {
@@ -41,13 +42,15 @@ func WithSnapshotStore(store hashline.SnapshotStore) ToolSetOption {
 // GovernedToolBus, which is where policy is enforced).
 //
 // The tool set shares ONE hashline.MemorySnapshotStore (override via
-// WithSnapshotStore) across read_file, search, and edit_hashline: every read
-// records the file's full normalized content into the store, so a later edit
-// whose ¶PATH#TAG is stale (the file changed out-of-band, or after an earlier
-// edit) can recover via a three-way merge against that recorded history when
-// the changes do not conflict. Conflicting or unrecorded edits still get the
-// stale-reject re-read message. The store is per-tool-set so history does not
-// leak across runs.
+// WithSnapshotStore) across read_file, search, edit_hashline, write_file, and
+// gofmt: read/search/write/gofmt record the file's full normalized content into
+// the store, so a later edit whose ¶PATH#TAG is stale (the file changed
+// out-of-band, or after an earlier edit) can recover via a three-way merge
+// against that recorded history when the changes do not conflict, and so the
+// tags write_file/gofmt mint are collision-guarded against out-of-band change
+// instead of fast-pathing on the 16-bit hash alone. Conflicting or unrecorded
+// edits still get the stale-reject re-read message. The store is per-tool-set
+// so history does not leak across runs.
 func NewToolSet(ws Workspace, opts ...ToolSetOption) []tool.Driver {
 	cfg := toolSetConfig{store: hashline.NewMemorySnapshotStore()}
 	for _, opt := range opts {
@@ -69,8 +72,8 @@ func NewToolSet(ws Workspace, opts ...ToolSetOption) []tool.Driver {
 		readFileDriver{ws: ws, store: cfg.store},
 		searchDriver{ws: ws, store: cfg.store},
 		editHashlineDriver{ws: ws, patcher: patcher},
-		writeFileDriver{ws: ws},
-		gofmtDriver{ws: ws},
+		writeFileDriver{ws: ws, store: cfg.store},
+		gofmtDriver{ws: ws, store: cfg.store},
 		goTestDriver{ws: ws},
 		gitDiffDriver{ws: ws},
 	}

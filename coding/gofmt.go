@@ -27,9 +27,12 @@ type GofmtToolResult struct {
 
 // gofmtDriver formats a Go file in-process using go/format.Source. No
 // subprocess is launched and no import management is performed (goimports is
-// out of scope for v1).
+// out of scope for v1). It records the formatted content into the shared
+// snapshot store so the ¶PATH#TAG it returns is collision-guarded like a
+// read/search/edit tag.
 type gofmtDriver struct {
-	ws Workspace
+	ws    Workspace
+	store hashline.SnapshotStore
 }
 
 func (d gofmtDriver) Definition() tool.Definition {
@@ -68,6 +71,12 @@ func (d gofmtDriver) Execute(ctx context.Context, call tool.Call, _ tool.UpdateS
 	formattedText := string(formatted)
 
 	if formattedText == raw.Text {
+		// Already formatted: the returned tag is raw.Tag (over raw.Text). Record
+		// it so the tag is backed by history even when no prior read recorded
+		// this file, matching the collision guard's expectation.
+		if d.store != nil {
+			d.store.Record(raw.Path, raw.Text)
+		}
 		header := hashline.FormatHeader(raw.Path, raw.Tag)
 		structured := GofmtToolResult{Path: raw.Path, Changed: false, Tag: raw.Tag, Header: header}
 		return successResult(call, header+"\nalready formatted "+raw.Path, structured)
@@ -77,6 +86,13 @@ func (d gofmtDriver) Execute(ctx context.Context, call tool.Call, _ tool.UpdateS
 	// hashline.Filesystem path (WriteFile only creates new files).
 	if err := d.writeInPlace(ctx, raw.Path, formattedText); err != nil {
 		return errorResult(call, "coding.gofmt failed to write: "+err.Error()), nil
+	}
+
+	// Record the post-format content under its canonical path so newTag is
+	// backed by recorded history and a later edit keyed to it is collision-
+	// guarded. Record normalizes identically to the newTag computation below.
+	if d.store != nil {
+		d.store.Record(raw.Path, formattedText)
 	}
 
 	newTag := hashline.ComputeFileHash(hashline.Normalize(formattedText).Text)

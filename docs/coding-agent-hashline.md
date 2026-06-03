@@ -245,8 +245,8 @@ ComputeFileHash(text):
 Document verbatim: `Hashline syntax-compatible; tag is a Go-internal FNV fingerprint,
 not cross-language compatible.` The 4-hex value is only the model-facing handle.
 Because it is just the low 16 bits, two different file versions can share a tag, so
-the patcher does not trust it alone: every read/search/edit records the content its
-tag was minted from (§4.8) and the store retains colliding versions distinctly
+the patcher does not trust it alone: every read/search/edit/write/gofmt records the
+content its tag was minted from (§4.8) and the store retains colliding versions distinctly
 (§4.8), so when any history is recorded for the path under that tag,
 `Patcher.Preflight` takes the fast path only against an *unambiguous* base — the tag
 must pin to a single recorded content (`SnapshotStore.UniqueByHash`) that equals the
@@ -469,12 +469,17 @@ re-read before retrying. Emit an audit event (see §7) via `sink`.
 
 ### 6.4 write_file (create-new-file only)
 If the file exists → reject and tell the agent to use `coding.edit_hashline`. Else
-validate path, enforce max size, write, return `¶PATH#TAG`.
+validate path, enforce max size, write, record the new content in the shared snapshot
+store (§4.8), and return `¶PATH#TAG`. Recording means the minted tag is backed by
+history, so a later edit keyed to it is collision-guarded (§4.3) instead of
+fast-pathing on the 16-bit hash alone.
 
 ### 6.5 gofmt — in-process `go/format`
 Read file → `format.Source([]byte)` → if changed, write back, return the diff. Pure
 Go, no subprocess, no goimports (documented limitation; import management is out of
-scope for v1). Reject non-`.go` and out-of-workspace paths.
+scope for v1). Reject non-`.go` and out-of-workspace paths. Records the post-format
+content (in both the changed and already-formatted branches) in the shared snapshot
+store (§4.8) so the returned tag is collision-guarded like a read/search/edit tag.
 
 ### 6.6 go_test / git_diff
 Thin wrappers over `Workspace.RunCommand` with the allowlist in §5.3. `go_test` is
