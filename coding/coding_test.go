@@ -48,7 +48,7 @@ func TestToolMetadata_MatchesSpecTable(t *testing.T) {
 		ToolEditHashline: {tool.EffectWrite, true, riskMedium, []string{tagCoding, tagEdit, tagHashline, tagWorkspace}},
 		ToolWriteFile:    {tool.EffectWrite, true, riskMedium, []string{tagCoding, tagCreate}},
 		ToolGofmt:        {tool.EffectWrite, true, riskLow, []string{tagCoding, tagFormat}},
-		ToolGoTest:       {tool.EffectReadOnly, false, riskLow, []string{tagCoding, tagTest}},
+		ToolGoTest:       {tool.EffectReadOnly, false, riskMedium, []string{tagCoding, tagTest, tagRun}},
 	}
 	for name, w := range wants {
 		def := byName[name]
@@ -128,6 +128,41 @@ func TestPolicyEngine_DeleteRunTagRequiresApproval(t *testing.T) {
 			t.Errorf("tag %q effect = %q, want require_approval", tag, dec.Effect)
 		}
 	}
+}
+
+func TestPolicyEngine_GoTestRequiresApproval(t *testing.T) {
+	// go_test compiles and executes workspace code, so it carries the run tag
+	// and must be escalated to require approval by the coding policy engine —
+	// it must never run unattended just because it is classified read-only.
+	ws, _ := newTestWorkspace(t, nil)
+	set := NewToolSet(ws)
+	def := driverDefByName(set, ToolGoTest)
+
+	eng := PolicyEngine()
+	dec, err := eng.Authorize(context.Background(), policy.Request{
+		Operation: policy.OperationToolCall,
+		Tool: &api.Tool{
+			Name:       def.Name,
+			EffectType: api.ToolEffectReadOnly,
+			PolicyTags: def.PolicyTags,
+		},
+	})
+	if err != nil {
+		t.Fatalf("authorize go_test: %v", err)
+	}
+	if dec.Effect != policy.EffectRequireApproval {
+		t.Errorf("go_test effect = %q, want require_approval", dec.Effect)
+	}
+}
+
+// driverDefByName returns the tool.Definition for the named driver in set.
+func driverDefByName(set []tool.Driver, name string) tool.Definition {
+	for _, d := range set {
+		if def := d.Definition(); def.Name == name {
+			return def
+		}
+	}
+	return tool.Definition{}
 }
 
 func TestAgentClass_ShapeAndTools(t *testing.T) {

@@ -59,7 +59,7 @@ type RunCommandResult struct {
 //	go test ./<pkg>...            (any single ./-prefixed package pattern)
 //	go test ./<pkg> -run <Name>
 //	go vet ./...
-//	git diff -- <paths...>
+//	git diff [--no-ext-diff] [--no-textconv] -- <paths...>
 //	git status --short
 //
 // Everything else is rejected, including shell wrappers, network tools, and
@@ -125,12 +125,32 @@ func validateGit(args []string) error {
 			return nil
 		}
 	case "diff":
-		// git diff -- <paths...>
-		if len(rest) >= 2 && rest[1] == "--" {
+		// git diff [--no-ext-diff] [--no-textconv] -- <paths...>
+		// The hardening flags disable any repo-configured external diff/textconv
+		// helper, so a hostile .git/config or .gitattributes cannot turn the
+		// read-only git_diff tool into arbitrary command execution. They are
+		// optional and may appear in any order before the "--" separator.
+		i := 1
+		for i < len(rest) && isAllowedDiffFlag(rest[i]) {
+			i++
+		}
+		if i < len(rest) && rest[i] == "--" {
 			return nil
 		}
 	}
 	return fmt.Errorf("%w: %v", ErrCommandNotAllowed, args)
+}
+
+// isAllowedDiffFlag reports whether s is one of the hardening flags git_diff may
+// pass before the "--" path separator. Only flags that disable external-helper
+// execution are permitted — no value-taking or behavior-broadening flags.
+func isAllowedDiffFlag(s string) bool {
+	switch s {
+	case "--no-ext-diff", "--no-textconv":
+		return true
+	default:
+		return false
+	}
 }
 
 // isPackagePattern reports whether s is an accepted Go package pattern: the

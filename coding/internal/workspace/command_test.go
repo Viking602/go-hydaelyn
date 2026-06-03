@@ -22,6 +22,9 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "go vet all", args: []string{"go", "vet", "./..."}},
 		{name: "git diff with paths", args: []string{"git", "diff", "--", "a.go", "b.go"}},
 		{name: "git diff no paths", args: []string{"git", "diff", "--"}},
+		{name: "git diff no-ext-diff", args: []string{"git", "diff", "--no-ext-diff", "--", "a.go"}},
+		{name: "git diff hardened", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--", "."}},
+		{name: "git diff hardened no paths", args: []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}},
 		{name: "git status short", args: []string{"git", "status", "--short"}},
 
 		// Rejected forms.
@@ -37,6 +40,8 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "git push", args: []string{"git", "push"}, wantErr: ErrCommandNotAllowed},
 		{name: "git status no flag", args: []string{"git", "status"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff missing sep", args: []string{"git", "diff"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff flag without sep", args: []string{"git", "diff", "--no-ext-diff"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff unknown flag", args: []string{"git", "diff", "--stat", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
 		{name: "bare git", args: []string{"git"}, wantErr: ErrCommandNotAllowed},
 
 		// Package-pattern escapes: a "./..": prefix must not let ".." traverse

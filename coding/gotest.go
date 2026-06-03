@@ -29,9 +29,12 @@ type GoTestToolResult struct {
 	Duration  string   `json:"duration"`
 }
 
-// goTestDriver runs `go test` over the sandbox command allowlist. It is
-// classified read_only; the test cache and temp files it touches stay under
-// the toolchain's own cache directories.
+// goTestDriver runs `go test` over the sandbox command allowlist. It touches
+// only the toolchain's own cache/temp directories, but `go test` compiles and
+// executes the workspace's own test code — it is not a pure read. It therefore
+// carries the run PolicyTag so coding.PolicyEngine escalates it to require
+// approval, putting execution-capable tools behind the same explicit-allowance
+// gate as the workspace writes rather than letting them run unattended.
 type goTestDriver struct {
 	ws Workspace
 }
@@ -45,10 +48,13 @@ func (d goTestDriver) Definition() tool.Definition {
 			property{"package", stringSchema("Package pattern such as ./... or ./coding/... (default ./...).")},
 			property{"run", stringSchema("Optional -run test name filter.")},
 		),
+		// EffectReadOnly: go_test never mutates workspace files. The run tag is
+		// what gates it — coding.PolicyEngine escalates run-tagged tools to
+		// require approval because `go test` executes workspace code.
 		EffectType:         tool.EffectReadOnly,
 		RequiresActionTask: false,
-		RiskLevel:          riskLow,
-		PolicyTags:         []string{tagCoding, tagTest},
+		RiskLevel:          riskMedium,
+		PolicyTags:         []string{tagCoding, tagTest, tagRun},
 	}
 }
 

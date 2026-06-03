@@ -110,6 +110,83 @@ func TestEditHashline_RejectsStaleTagOnSameLines(t *testing.T) {
 	}
 }
 
+// TestEditHashline_RecoversStaleBlockEditAgainstBase proves the deferred
+// block-resolution fix: a "replace block N" edit whose tag is stale recovers
+// against the recorded base even when the block no longer resolves against the
+// LIVE file. Here an out-of-band insertion shifts the function down, so the
+// stale "block 4" lands on a blank line in the live file (no Go block starts
+// there). Block resolution is therefore deferred out of the unconditional
+// preflight path and run against the base the tag referred to inside
+// recoverStale, where line 4 still starts the function — so the edit applies to
+// the base and three-way merges cleanly with the disjoint insertion.
+//
+// Before the fix, Preflight resolved block ops against the live file first and
+// aborted with ErrBlockResolve, never reaching recovery; this test asserts the
+// edit instead recovers.
+func TestEditHashline_RecoversStaleBlockEditAgainstBase(t *testing.T) {
+	// Base has no blank line so every base line is distinct (the split's trailing
+	// "" is the only empty line); the merge needs that, since duplicate base lines
+	// make the LCS alignment ambiguous and force a conservative conflict. "func
+	// Add" keyword is line 4; its doc comment is line 3, so "replace block 4"
+	// covers lines 3..6.
+	const base = "package calc\nconst anchor = 0\n// Add sums two integers.\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	ws, root := newTestWorkspace(t, map[string]string{"calc.go": base})
+	set := NewToolSet(ws)
+
+	// 1. Read records the base under calc.go's canonical path and mints the tag.
+	header := readHeader(t, set, "calc.go")
+
+	// 2. Out-of-band insertion of two const decls plus a blank right after the
+	//    package clause. The function shifts down, so the original line 4 now
+	//    holds a blank line: "replace block 4" no longer resolves against live.
+	//    The insertion is disjoint from the edited function, so the merge is clean.
+	const live = "package calc\nconst c1 = 1\nconst c2 = 2\n\nconst anchor = 0\n// Add sums two integers.\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "calc.go"), []byte(live), 0o644); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+
+	// 3. Edit "block 4" with the now-stale header. Against live, line 4 starts no
+	//    Go block; recovery resolves it against the base (where line 4 is the func
+	//    keyword) and merges with the disjoint insertion.
+	body := "replace block 4:\n" +
+		"+// Add returns the sum of two integers.\n" +
+		"+func Add(a, b int) int {\n" +
+		"+\treturn a + b\n" +
+		"+}\n"
+	res, _ := editWith(t, set, header, body, false)
+	if res.IsError {
+		t.Fatalf("stale block edit should recover against the recorded base, got: %s", res.Content)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(root, "calc.go"))
+	gotStr := string(got)
+	// The out-of-band insertion survives.
+	for _, want := range []string{"const c1 = 1", "const c2 = 2", "const anchor = 0"} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("out-of-band line %q lost in merge:\n%s", want, gotStr)
+		}
+	}
+	// The model's edit applies.
+	if !strings.Contains(gotStr, "return a + b") || !strings.Contains(gotStr, "Add returns the sum of two integers.") {
+		t.Errorf("block edit was not applied:\n%s", gotStr)
+	}
+	if strings.Contains(gotStr, "return a - b") {
+		t.Errorf("stale Add body still present:\n%s", gotStr)
+	}
+
+	// The result is flagged as a recovery.
+	var er EditHashlineResult
+	if err := json.Unmarshal(res.Structured, &er); err != nil {
+		t.Fatalf("unmarshal edit result: %v", err)
+	}
+	if !er.Recovered || len(er.Sections) != 1 || !er.Sections[0].Recovered {
+		t.Errorf("edit should be flagged Recovered: %+v", er)
+	}
+	if !strings.Contains(res.Content, "recovered stale tag via 3-way merge") {
+		t.Errorf("content should announce the recovery:\n%s", res.Content)
+	}
+}
+
 // TestEditHashline_BlockReplaceFunc proves block edit flows end-to-end through
 // coding.edit_hashline: "replace block N" pointed at a func's line replaces the
 // whole function on a real Go file in a temp workspace.

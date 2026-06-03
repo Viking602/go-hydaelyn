@@ -371,7 +371,8 @@ Allowlist only (matched on argv, never via a shell):
 
 ```text
 go test ./...        go test ./<pkg>...     go test ./<pkg> -run <Name>
-go vet ./...         git diff -- <paths>     git status --short
+go vet ./...         git status --short
+git diff [--no-ext-diff] [--no-textconv] -- <paths>   (helpers off; see §6.6)
 ```
 
 `gofmt` is NOT a subprocess — see §6.5. Forbid `sh -c`, `bash -c`, `curl`, `wget`,
@@ -407,7 +408,7 @@ otherwise implement `tool.Driver` directly. Metadata uses the real fields on
 | `coding.edit_hashline` | write | true | medium | coding, edit, hashline, workspace-write |
 | `coding.write_file` | write | true | medium | coding, create-file |
 | `coding.gofmt` | write | true | low | coding, format |
-| `coding.go_test` | read_only | false | low | coding, test |
+| `coding.go_test` | read_only | false | medium | coding, test, run |
 
 ### 6.1 read_file
 1 validate path → 2 read full file → 3 normalize → 4 `tag = ComputeFileHash` →
@@ -437,8 +438,14 @@ scope for v1). Reject non-`.go` and out-of-workspace paths.
 
 ### 6.6 go_test / git_diff
 Thin wrappers over `Workspace.RunCommand` with the allowlist in §5.3. `go_test` is
-classified `read_only` (document the test-cache/temp-file caveat). `git_diff` returns
-bounded output.
+classified `read_only` for its file effect (it mutates no workspace files; the
+test cache/temp files stay under the toolchain's own directories) but `go test`
+compiles and *executes* the workspace's own code, so it carries the `run` tag and
+`coding.PolicyEngine()` escalates it to `EffectRequireApproval` (§7.1) — execution
+goes behind the same explicit-allowance gate as the writes, not the free read
+path. `git_diff` runs with `--no-ext-diff --no-textconv` so a repo-local
+`diff.external`/textconv helper cannot turn the read-only diff into command
+execution, and returns bounded output.
 
 ## 7. Policy & audit
 

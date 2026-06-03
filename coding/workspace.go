@@ -496,9 +496,13 @@ func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) 
 }
 
 func (w *localWorkspace) Diff(ctx context.Context, req DiffRequest) (DiffResult, error) {
-	args := []string{"git", "diff", "--"}
+	// --no-ext-diff / --no-textconv disable any repo-configured external diff or
+	// textconv helper (diff.external, a textconv attribute), so this read-only
+	// path cannot be turned into command execution by a hostile .git/config or
+	// .gitattributes inside the workspace.
+	args := []string{"git", "diff", "--no-ext-diff", "--no-textconv", "--"}
 	if len(req.Paths) == 0 {
-		args = []string{"git", "diff", "--", "."}
+		args = append(args, ".")
 	} else {
 		// Validate each path against the sandbox before handing it to git.
 		for _, p := range req.Paths {
@@ -561,7 +565,11 @@ func (w *localWorkspace) PreflightWrite(ctx context.Context, path string) error 
 }
 
 // WriteText writes the full content of a workspace-relative file, preserving
-// the existing file mode when the file already exists.
+// the existing file mode when the file already exists. This is the disk path
+// edit_hashline and gofmt write through, so the per-file write byte cap is
+// enforced here too: a patch that expands a file past maxWriteBytes (e.g. a
+// flood of +body rows) is rejected rather than silently committed, matching the
+// bound WriteFile applies to newly created files.
 func (w *localWorkspace) WriteText(ctx context.Context, path, text string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -569,6 +577,9 @@ func (w *localWorkspace) WriteText(ctx context.Context, path, text string) error
 	abs, canon, err := w.resolve(path)
 	if err != nil {
 		return err
+	}
+	if len(text) > w.maxWriteBytes {
+		return fmt.Errorf("coding: write %q: content exceeds %d bytes", canon, w.maxWriteBytes)
 	}
 	mode := os.FileMode(0o644)
 	if fi, statErr := os.Stat(abs); statErr == nil {

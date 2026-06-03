@@ -2,6 +2,7 @@ package coding
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
 	"github.com/Viking602/go-hydaelyn/multiagent"
@@ -57,9 +58,10 @@ func NewToolSet(ws Workspace, opts ...ToolSetOption) []tool.Driver {
 	if !ok {
 		// A Workspace that is not also a hashline.Filesystem cannot back the
 		// patcher. NewLocalWorkspace always satisfies both; a custom Workspace
-		// must too. Fall back to a nil-FS patcher so read-only tools still work
-		// and edit/gofmt surface a clear write error.
-		fs = nil
+		// must too. Install an error-returning FS (NOT a nil FS, which would
+		// panic in the patcher's preflight) so read-only tools still work and
+		// edit_hashline surfaces a clear write error instead of crashing.
+		fs = errFilesystem{}
 	}
 	patcher := &hashline.Patcher{FS: fs, Snapshots: cfg.store}
 	return []tool.Driver{
@@ -72,6 +74,35 @@ func NewToolSet(ws Workspace, opts ...ToolSetOption) []tool.Driver {
 		goTestDriver{ws: ws},
 		gitDiffDriver{ws: ws},
 	}
+}
+
+// ErrWorkspaceNotWritable is the error edit_hashline surfaces when the host's
+// Workspace does not also implement hashline.Filesystem, so no in-place write
+// boundary is available. NewLocalWorkspace always satisfies both interfaces; a
+// custom Workspace that omits the write methods hits this instead of a panic.
+var ErrWorkspaceNotWritable = errors.New("coding: workspace does not implement hashline.Filesystem; edit_hashline is unavailable")
+
+// errFilesystem is the hashline.Filesystem installed by NewToolSet when the
+// host's Workspace does not also satisfy hashline.Filesystem. Every method
+// returns ErrWorkspaceNotWritable, so an edit_hashline call fails fast in the
+// patcher's preflight with a clear, recoverable error rather than panicking on
+// a nil patcher FS.
+type errFilesystem struct{}
+
+func (errFilesystem) CanonicalPath(string) (string, error) {
+	return "", ErrWorkspaceNotWritable
+}
+
+func (errFilesystem) ReadText(context.Context, string) (string, error) {
+	return "", ErrWorkspaceNotWritable
+}
+
+func (errFilesystem) PreflightWrite(context.Context, string) error {
+	return ErrWorkspaceNotWritable
+}
+
+func (errFilesystem) WriteText(context.Context, string, string) error {
+	return ErrWorkspaceNotWritable
 }
 
 // ToolNames lists the coding tool names in the order NewToolSet returns them.

@@ -204,22 +204,26 @@ func reloadTask(ctx context.Context, runner *hydaelyn.Runner, runID, taskID stri
 }
 
 // hostPolicy composes the central coding policy engine with the host's
-// workspace-write allowance. coding.PolicyEngine() denies edit/gofmt by default
-// (they are side effects); the host clears that deny for the two write tools
-// this action task is allowed to use, and defers every other decision —
-// read-only tools, delete/run escalation, unknown tools — back to the coding
-// engine unchanged.
+// allowance for the side-effecting tools this task uses. coding.PolicyEngine()
+// denies edit/gofmt by default (they are workspace writes) and escalates
+// go_test to require approval (it executes workspace code via the run tag); the
+// host clears both for the specific tools this action task is allowed to use,
+// and defers every other decision — read-only tools, delete escalation, unknown
+// tools — back to the coding engine unchanged. Granting go_test here is the
+// same conscious, explicit allowance a host would give before letting an agent
+// compile and run code in the sandbox.
 func hostPolicy() policy.Engine {
 	coded := coding.PolicyEngine()
 	allowed := map[string]bool{
 		coding.ToolEditHashline: true,
 		coding.ToolGofmt:        true,
+		coding.ToolGoTest:       true,
 	}
 	return policy.EngineFunc(func(ctx context.Context, request policy.Request) (policy.Decision, error) {
 		if request.Operation == policy.OperationToolCall && request.Tool != nil && allowed[request.Tool.Name] {
 			return policy.Decision{
 				Effect: policy.EffectAllow,
-				Reason: "host: workspace-write allowance for the coding edit task",
+				Reason: "host: workspace-write/execution allowance for the coding task",
 			}, nil
 		}
 		return coded.Authorize(ctx, request)

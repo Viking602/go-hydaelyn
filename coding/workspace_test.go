@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
@@ -235,5 +236,96 @@ func TestLocalWorkspace_HashlineFilesystemRoundTrip(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(root, "x.go"))
 	if string(got) != "package x\n// edited\n" {
 		t.Errorf("WriteText result = %q", got)
+	}
+}
+
+// TestLocalWorkspace_WriteText_EnforcesWriteCap proves the in-place write path
+// (the one edit_hashline and gofmt use) is bounded by maxWriteBytes just like
+// WriteFile, so a patch that expands an existing file past the cap is rejected
+// and the original content is left untouched.
+func TestLocalWorkspace_WriteText_EnforcesWriteCap(t *testing.T) {
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	const original = "package x\n"
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte(original), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ws := NewLocalWorkspace(root, WithMaxWriteBytes(16))
+	fs := ws.(hashline.Filesystem)
+	ctx := context.Background()
+
+	// A write within the cap succeeds.
+	if err := fs.WriteText(ctx, "x.go", "package x\n//ok\n"); err != nil {
+		t.Fatalf("within-cap WriteText: %v", err)
+	}
+
+	// A write past the cap is rejected and the file keeps its prior content.
+	before, _ := os.ReadFile(filepath.Join(root, "x.go"))
+	oversize := "package x\n// " + strings.Repeat("A", 64) + "\n"
+	err := fs.WriteText(ctx, "x.go", oversize)
+	if err == nil {
+		t.Fatal("WriteText past maxWriteBytes must be rejected")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error should report the byte cap: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "x.go"))
+	if string(got) != string(before) {
+		t.Errorf("rejected oversize write mutated the file: got %q, want %q", got, before)
+	}
+}
+
+// nonWritableWorkspace implements coding.Workspace but deliberately omits the
+// hashline.Filesystem write methods (CanonicalPath/ReadText/PreflightWrite/
+// WriteText), modeling a custom host workspace that supports the read-only
+// tools but not in-place edits.
+type nonWritableWorkspace struct{ root string }
+
+func (w nonWritableWorkspace) Root() string { return w.root }
+func (nonWritableWorkspace) ListFiles(context.Context, ListFilesRequest) (ListFilesResult, error) {
+	return ListFilesResult{}, nil
+}
+func (nonWritableWorkspace) ReadFile(context.Context, ReadFileRequest) (ReadFileResult, error) {
+	return ReadFileResult{}, nil
+}
+func (nonWritableWorkspace) Search(context.Context, SearchRequest) (SearchResult, error) {
+	return SearchResult{}, nil
+}
+func (nonWritableWorkspace) WriteFile(context.Context, WriteFileRequest) (WriteFileResult, error) {
+	return WriteFileResult{}, nil
+}
+func (nonWritableWorkspace) RunCommand(context.Context, RunCommandRequest) (RunCommandResult, error) {
+	return RunCommandResult{}, nil
+}
+func (nonWritableWorkspace) Diff(context.Context, DiffRequest) (DiffResult, error) {
+	return DiffResult{}, nil
+}
+
+// TestNewToolSet_NonWritableWorkspace_EditErrorsNotPanic proves NewToolSet
+// installs an error-returning filesystem (not a nil one) when the host's
+// Workspace does not satisfy hashline.Filesystem: edit_hashline then fails fast
+// in the patcher's preflight with a clear ErrWorkspaceNotWritable result rather
+// than panicking on a nil patcher FS.
+func TestNewToolSet_NonWritableWorkspace_EditErrorsNotPanic(t *testing.T) {
+	var ws Workspace = nonWritableWorkspace{root: t.TempDir()}
+	// Guard: the stub must genuinely NOT satisfy hashline.Filesystem, else the
+	// test would exercise the real patcher path and prove nothing.
+	if _, ok := ws.(hashline.Filesystem); ok {
+		t.Fatal("test stub unexpectedly satisfies hashline.Filesystem")
+	}
+
+	set := NewToolSet(ws)
+	edit := driverByName(t, set, ToolEditHashline)
+
+	// A syntactically valid patch (tag is four hex digits) so parsing succeeds and
+	// the call reaches the patcher's preflight, where the error FS surfaces.
+	res, _ := callJSON(t, edit, editHashlineInput{Input: "¶f.go#0000\nreplace 1:\n+hello\n"})
+	if !res.IsError {
+		t.Fatalf("edit on a non-writable workspace must error, got: %s", res.Content)
+	}
+	if !strings.Contains(res.Content, "does not implement hashline.Filesystem") {
+		t.Errorf("error result should explain the missing write boundary:\n%s", res.Content)
 	}
 }

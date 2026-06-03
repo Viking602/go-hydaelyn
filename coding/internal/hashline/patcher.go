@@ -124,16 +124,6 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 		nf := Normalize(raw)
 		liveTag := ComputeFileHash(nf.Text)
 
-		// Resolve any go/ast block ops (replace/delete block N) to concrete
-		// line-range ops against the original file the tag refers to, before
-		// the line-based applier runs. Resolved block ops then compose with the
-		// applier's overlap/conflict detection exactly like hand-written range
-		// ops. Block edit is Go-only; an unresolvable block aborts the section.
-		resolvedSec, err := resolveBlockOps(nf.Text, sec)
-		if err != nil {
-			return nil, fmt.Errorf("hashline: %w", err)
-		}
-
 		var (
 			newText   string
 			fcl       int
@@ -141,7 +131,19 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 			recovered bool
 		)
 		if liveTag == sec.Tag {
-			// Fast path: the tag matches the live file; apply directly.
+			// Fast path: the tag matches the live file, so it IS the version the
+			// edit was built on. Resolve any go/ast block ops (replace/delete
+			// block N) to concrete line-range ops against it, then apply; resolved
+			// block ops compose with the applier's overlap/conflict detection
+			// exactly like hand-written range ops. Block resolution is deferred to
+			// this branch (rather than run against the live file unconditionally)
+			// so a STALE block edit can still recover against its recorded base in
+			// recoverStale, instead of aborting here when the live file no longer
+			// parses or the block has moved off the referenced line.
+			resolvedSec, err := resolveBlockOps(nf.Text, sec)
+			if err != nil {
+				return nil, fmt.Errorf("hashline: %w", err)
+			}
 			applied, err := Apply(nf.Text, resolvedSec)
 			if err != nil {
 				return nil, fmt.Errorf("hashline: apply %q: %w", canon, err)
