@@ -1,0 +1,317 @@
+package workspace
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestValidateCommand_Allowlist(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr error // nil means accept
+	}{
+		// Accepted forms.
+		{name: "go test all", args: []string{"go", "test", "./..."}},
+		{name: "go test pkg recursive", args: []string{"go", "test", "./coding/..."}},
+		{name: "go test single pkg", args: []string{"go", "test", "./coding"}},
+		{name: "go test run", args: []string{"go", "test", "./coding", "-run", "TestThing"}},
+		{name: "go vet all", args: []string{"go", "vet", "./..."}},
+		{name: "git diff with paths", args: []string{"git", "diff", "--", "a.go", "b.go"}},
+		{name: "git diff no paths", args: []string{"git", "diff", "--"}},
+		{name: "git status short", args: []string{"git", "status", "--short"}},
+
+		// Rejected forms.
+		{name: "empty", args: nil, wantErr: ErrEmptyCommand},
+		{name: "bare go", args: []string{"go"}, wantErr: ErrCommandNotAllowed},
+		{name: "go build", args: []string{"go", "build", "./..."}, wantErr: ErrCommandNotAllowed},
+		{name: "go run", args: []string{"go", "run", "."}, wantErr: ErrCommandNotAllowed},
+		{name: "go test absolute pkg", args: []string{"go", "test", "/etc"}, wantErr: ErrCommandNotAllowed},
+		{name: "go test extra flag", args: []string{"go", "test", "./...", "-count=1"}, wantErr: ErrCommandNotAllowed},
+		{name: "go test bad run shape", args: []string{"go", "test", "./pkg", "-bench", "."}, wantErr: ErrCommandNotAllowed},
+		{name: "go vet pkg", args: []string{"go", "vet", "./pkg"}, wantErr: ErrCommandNotAllowed},
+		{name: "git commit", args: []string{"git", "commit", "-m", "x"}, wantErr: ErrCommandNotAllowed},
+		{name: "git push", args: []string{"git", "push"}, wantErr: ErrCommandNotAllowed},
+		{name: "git status no flag", args: []string{"git", "status"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff missing sep", args: []string{"git", "diff"}, wantErr: ErrCommandNotAllowed},
+		{name: "bare git", args: []string{"git"}, wantErr: ErrCommandNotAllowed},
+
+		// Package-pattern escapes: a "./..": prefix must not let ".." traverse
+		// out of the workspace (go test compiles and runs the package code).
+		{name: "go test parent escape", args: []string{"go", "test", "./../foo"}, wantErr: ErrCommandNotAllowed},
+		{name: "go test parent escape recursive", args: []string{"go", "test", "./../..."}, wantErr: ErrCommandNotAllowed},
+		{name: "go test deep parent escape", args: []string{"go", "test", "./a/../../b"}, wantErr: ErrCommandNotAllowed},
+		{name: "go test run parent escape", args: []string{"go", "test", "./../pkg", "-run", "T"}, wantErr: ErrCommandNotAllowed},
+		{name: "go test bare dotdot", args: []string{"go", "test", ".."}, wantErr: ErrCommandNotAllowed},
+		{name: "go test no slash", args: []string{"go", "test", "."}, wantErr: ErrCommandNotAllowed},
+		{name: "go test run empty name", args: []string{"go", "test", "./pkg", "-run", ""}, wantErr: ErrCommandNotAllowed},
+
+		// Accepted: an interior "..." marker is a recursive wildcard, not a
+		// traversal, and a nested in-bounds package is fine.
+		{name: "go test nested recursive ok", args: []string{"go", "test", "./a/b/..."}},
+		{name: "go test nested pkg ok", args: []string{"go", "test", "./a/b/c"}},
+		{name: "sh -c", args: []string{"sh", "-c", "echo hi"}, wantErr: ErrCommandNotAllowed},
+		{name: "bash -c", args: []string{"bash", "-c", "echo hi"}, wantErr: ErrCommandNotAllowed},
+		{name: "curl", args: []string{"curl", "http://x"}, wantErr: ErrCommandNotAllowed},
+		{name: "wget", args: []string{"wget", "http://x"}, wantErr: ErrCommandNotAllowed},
+		{name: "rm", args: []string{"rm", "-rf", "/"}, wantErr: ErrCommandNotAllowed},
+		{name: "python", args: []string{"python", "-c", "x"}, wantErr: ErrCommandNotAllowed},
+		{name: "node", args: []string{"node", "x.js"}, wantErr: ErrCommandNotAllowed},
+		{name: "npm", args: []string{"npm", "install"}, wantErr: ErrCommandNotAllowed},
+		{name: "bun", args: []string{"bun", "run"}, wantErr: ErrCommandNotAllowed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommand(tc.args)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ValidateCommand(%v) = %v, want nil", tc.args, err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ValidateCommand(%v) = %v, want %v", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunCommand_RejectsNonAllowlisted(t *testing.T) {
+	_, err := RunCommand(context.Background(), RunCommandRequest{Args: []string{"rm", "-rf", "."}})
+	if !errors.Is(err, ErrCommandNotAllowed) {
+		t.Fatalf("err = %v, want ErrCommandNotAllowed", err)
+	}
+}
+
+// TestRunCommand_RejectsPackageEscape confirms the validator blocks (before any
+// process starts) a "go test" pattern that would traverse out of the working
+// directory and compile/run code outside the sandbox.
+func TestRunCommand_RejectsPackageEscape(t *testing.T) {
+	_, err := RunCommand(context.Background(), RunCommandRequest{
+		Args:       []string{"go", "test", "./../..."},
+		WorkingDir: t.TempDir(),
+	})
+	if !errors.Is(err, ErrCommandNotAllowed) {
+		t.Fatalf("err = %v, want ErrCommandNotAllowed", err)
+	}
+}
+
+// TestRunCommand_Timeout uses an allowlisted command that blocks until killed.
+// "go test" of a package whose test sleeps would require a fixture; instead we
+// exercise the timeout path through the validator allowance plus a long-running
+// argv by validating against a custom allowlist entry is not possible, so we use
+// "go test" with a tiny timeout against the whole module which reliably exceeds
+// the budget.
+func TestRunCommand_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timeout test in short mode")
+	}
+	// go test ./... over the whole module cannot finish within 1ms; this drives
+	// the DeadlineExceeded branch deterministically.
+	res, err := RunCommand(context.Background(), RunCommandRequest{
+		Args:       []string{"go", "test", "./..."},
+		WorkingDir: ".",
+		Timeout:    1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.TimedOut {
+		t.Fatalf("expected TimedOut=true, got %+v", res)
+	}
+	if res.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1 on timeout", res.ExitCode)
+	}
+}
+
+func TestRunCommand_OutputCap(t *testing.T) {
+	// A regular "go test" with no tests in an empty-ish dir would not emit much.
+	// We assert the cap logic directly via the capWriter, which RunCommand uses.
+	var w capWriter
+	w.limit = 10
+	big := strings.Repeat("a", 100)
+	n, err := w.Write([]byte(big))
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if n != len(big) {
+		t.Errorf("Write returned %d, want %d (process must not see backpressure)", n, len(big))
+	}
+	got := w.String()
+	if !w.truncated {
+		t.Fatalf("expected truncated=true")
+	}
+	wantPrefix := strings.Repeat("a", 10) + truncationMarker
+	if got != wantPrefix {
+		t.Errorf("String() = %q, want %q", got, wantPrefix)
+	}
+}
+
+func TestRunCommand_OutputCapNoTruncation(t *testing.T) {
+	var w capWriter
+	w.limit = 100
+	_, _ = w.Write([]byte("hello"))
+	if w.truncated {
+		t.Fatalf("did not expect truncation")
+	}
+	if got := w.String(); got != "hello" {
+		t.Errorf("String() = %q, want %q", got, "hello")
+	}
+}
+
+func TestRunCommand_OutputCapAcrossWrites(t *testing.T) {
+	var w capWriter
+	w.limit = 6
+	_, _ = w.Write([]byte("abcd"))
+	_, _ = w.Write([]byte("efgh"))
+	_, _ = w.Write([]byte("ijkl"))
+	if !w.truncated {
+		t.Fatalf("expected truncation across writes")
+	}
+	want := "abcdef" + truncationMarker
+	if got := w.String(); got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// TestRunCommand_SuccessAndExitCode runs an allowlisted command that succeeds
+// to confirm the happy path returns exit code 0 and captured output.
+func TestRunCommand_SuccessAndExitCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess test in short mode")
+	}
+	root, err := repoRoot()
+	if err != nil {
+		t.Skipf("cannot locate repo root: %v", err)
+	}
+	res, err := RunCommand(context.Background(), RunCommandRequest{
+		Args:       []string{"git", "status", "--short"},
+		WorkingDir: root,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.TimedOut {
+		t.Fatalf("did not expect timeout")
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("ExitCode = %d (stderr=%q), want 0", res.ExitCode, res.Stderr)
+	}
+}
+
+func TestScrubEnv_NoSecretPassthrough(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	t.Setenv("HOME", "/home/agent")
+
+	env := scrubEnv(map[string]string{"FOO": "bar"})
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") {
+			t.Errorf("scrubbed env leaked AWS secret: %q", kv)
+		}
+		if strings.HasPrefix(kv, "GITHUB_TOKEN=") {
+			t.Errorf("scrubbed env leaked github token: %q", kv)
+		}
+	}
+	if !containsKV(env, "HOME=/home/agent") {
+		t.Errorf("HOME should pass through; env=%v", env)
+	}
+	if !containsKV(env, "FOO=bar") {
+		t.Errorf("explicit Env entry should be present; env=%v", env)
+	}
+}
+
+func containsKV(env []string, kv string) bool {
+	for _, e := range env {
+		if e == kv {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunCommand_RequiresWorkingDir confirms an allowlisted command is still
+// refused when no working directory is set: an empty Dir would run in the
+// process CWD, outside the sandbox boundary. The check fires before any process
+// starts.
+func TestRunCommand_RequiresWorkingDir(t *testing.T) {
+	_, err := RunCommand(context.Background(), RunCommandRequest{
+		Args: []string{"git", "status", "--short"},
+	})
+	if err == nil {
+		t.Fatalf("RunCommand with empty WorkingDir must error")
+	}
+	if !strings.Contains(err.Error(), "working directory") {
+		t.Errorf("error = %v, want it to mention the working directory", err)
+	}
+}
+
+// TestRunCommand_RejectsNonAllowlistedEnvKey confirms a caller cannot inject an
+// execution-shaping variable (here GOFLAGS) through req.Env even with a valid
+// argv and working directory. The rejection happens before exec.
+func TestRunCommand_RejectsNonAllowlistedEnvKey(t *testing.T) {
+	_, err := RunCommand(context.Background(), RunCommandRequest{
+		Args:       []string{"git", "status", "--short"},
+		WorkingDir: t.TempDir(),
+		Env:        map[string]string{"GOFLAGS": "-toolexec=/bin/false"},
+	})
+	if err == nil {
+		t.Fatalf("RunCommand with a non-allowlisted Env key must error")
+	}
+	if !strings.Contains(err.Error(), "GOFLAGS") || !strings.Contains(err.Error(), "not permitted") {
+		t.Errorf("error = %v, want it to name GOFLAGS as not permitted", err)
+	}
+}
+
+// TestScrubEnv_ExcludesGOFLAGS pins the GOFLAGS exclusion: a poisoned host
+// GOFLAGS (which the toolchain honors and which can carry -exec/-toolexec/
+// -gcflags that spawn an arbitrary helper) must never leak into a sandboxed
+// command's environment.
+func TestScrubEnv_ExcludesGOFLAGS(t *testing.T) {
+	t.Setenv("GOFLAGS", "-toolexec=/usr/bin/evil")
+	env := scrubEnv(nil)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GOFLAGS=") {
+			t.Fatalf("scrubbed env leaked GOFLAGS: %q", kv)
+		}
+	}
+}
+
+// TestScrubEnv_PinsGOENVOff confirms the scrubbed env pins GOENV=off so the Go
+// toolchain ignores the per-user `go env` config file (under the passed-through
+// HOME). Without it, a GOFLAGS entry written into that file (via a prior `go env
+// -w`, or a poisoned HOME) would still be honored by the sandboxed go test/go
+// vet, defeating the GOFLAGS exclusion. The pin is authoritative: even an
+// attempt to set GOENV through extra is overridden.
+func TestScrubEnv_PinsGOENVOff(t *testing.T) {
+	if !containsKV(scrubEnv(nil), "GOENV=off") {
+		t.Errorf("scrubbed env must pin GOENV=off; env=%v", scrubEnv(nil))
+	}
+	env := scrubEnv(map[string]string{"GOENV": "/tmp/evil/go/env"})
+	if !containsKV(env, "GOENV=off") {
+		t.Errorf("GOENV pin must win over extra; env=%v", env)
+	}
+	for _, kv := range env {
+		if kv == "GOENV=/tmp/evil/go/env" {
+			t.Errorf("extra GOENV must not survive the pin: %q", kv)
+		}
+	}
+}
+
+// TestIsAllowedEnvKey checks the passthrough allowlist directly: locator
+// variables the toolchain needs are allowed, execution-shaping ones are not.
+func TestIsAllowedEnvKey(t *testing.T) {
+	for _, k := range []string{"HOME", "PATH", "GOPROXY", "GOCACHE"} {
+		if !isAllowedEnvKey(k) {
+			t.Errorf("isAllowedEnvKey(%q) = false, want true", k)
+		}
+	}
+	for _, k := range []string{"GOFLAGS", "GODEBUG", "AWS_SECRET_ACCESS_KEY", "LD_PRELOAD", ""} {
+		if isAllowedEnvKey(k) {
+			t.Errorf("isAllowedEnvKey(%q) = true, want false", k)
+		}
+	}
+}
