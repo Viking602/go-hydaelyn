@@ -169,11 +169,17 @@ func isAllowedDiffFlag(s string) bool {
 }
 
 // isPackagePattern reports whether s is an accepted Go package pattern: the
-// recursive root "./..." or any single "./"-prefixed import path that stays
-// inside the workspace. Patterns containing a ".." traversal segment are
-// rejected so the agent cannot run (and thereby compile and execute) test code
-// in sibling or ancestor directories outside the sandbox — "go test ./../foo"
-// would otherwise reach packages above the working directory.
+// recursive root "./..." or any single "./"-prefixed import path. Patterns
+// containing a ".." traversal segment are rejected so the agent cannot run (and
+// thereby compile and execute) test code in sibling or ancestor directories
+// outside the sandbox — "go test ./../foo" would otherwise reach packages above
+// the working directory.
+//
+// This screen is purely lexical: it cannot catch a directory symlink inside the
+// workspace that points outward (e.g. "./link"), because resolving that needs
+// the filesystem and the root. The symlink-containment boundary is enforced one
+// layer up by localWorkspace.guardCommandPackagePath, which resolves the package
+// directory through ResolveWorkspacePath before the command runs.
 func isPackagePattern(s string) bool {
 	if s == "./..." {
 		return true

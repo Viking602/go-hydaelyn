@@ -415,6 +415,17 @@ The only `-c key=value` override the allowlist accepts is the exact pair
 `-c core.fsmonitor=false`, and only as a leading global flag before the
 subcommand — see §6.6 for why.
 
+The argv allowlist screens a `go test` package pattern only lexically (it rejects
+a `..` traversal segment). A directory symlink inside the workspace that points
+outward — e.g. `go test ./link` where `link → /outside` — has no `..` segment and
+would otherwise pass, letting `go test` follow the link to compile and execute
+code beyond the sandbox. So `localWorkspace.RunCommand` resolves the package
+directory of a `./<pkg>` (or `./<pkg>/...`) pattern through the same
+`ResolveWorkspacePath` boundary the read/write tools use and rejects an escape
+(`ErrPathEscape`) before the toolchain runs. The recursive root `./...` is exempt:
+it denotes the workspace itself and the go tool does not descend into symlinked
+subdirectories while expanding `...`.
+
 `gofmt` is NOT a subprocess — see §6.5. Forbid `sh -c`, `bash -c`, `curl`, `wget`,
 `rm`, `python`, `node`, `npm`, `bun`, `git commit`, `git push`.
 
@@ -602,6 +613,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
 | path escape | resolver + parent-dir symlink check |
 | symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |
+| `go test` package symlink escape | the argv allowlist screens a package pattern only lexically (no `..`); `localWorkspace.RunCommand` additionally resolves a `./<pkg>` directory through `ResolveWorkspacePath` and rejects `go test ./link` when `link` symlinks outside the workspace, before the toolchain can execute out-of-sandbox code (§5.3) |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
 | repo config → command exec on a read-only diff | `git_diff` runs `-c core.fsmonitor=false --no-ext-diff --no-textconv`, disabling a `.git/config` filesystem-monitor hook, `diff.external`, and textconv helpers; the allowlist admits only the exact `core.fsmonitor=false` override |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |

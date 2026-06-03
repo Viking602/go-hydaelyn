@@ -189,6 +189,52 @@ func TestLocalWorkspace_SymlinkEscapeRejected(t *testing.T) {
 	}
 }
 
+// TestLocalWorkspace_GoTestPackageSymlinkRejected proves the command package-path
+// boundary: a directory symlink inside the workspace that points outward passes
+// the lexical argv allowlist (it has no ".." segment), but RunCommand resolves
+// the `go test` package directory through the path-safety boundary and rejects
+// the escape before the go toolchain can follow the link out of the sandbox. A
+// real in-workspace package and the recursive root "./..." are not rejected.
+func TestLocalWorkspace_GoTestPackageSymlinkRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	ws, root := newTestWorkspace(t, map[string]string{
+		"go.mod":          "module sample\n\ngo 1.25\n",
+		"pkg/pkg_test.go": "package pkg\n",
+		"keep.go":         "package sample\n",
+	})
+	outside := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(outside); err == nil {
+		outside = resolved
+	}
+	// A directory symlink inside the workspace pointing at an outside directory.
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// An explicit ./link package — and its recursive form — escape the sandbox.
+	for _, pattern := range []string{"./link", "./link/..."} {
+		_, err := ws.RunCommand(context.Background(), RunCommandRequest{Args: []string{"go", "test", pattern}})
+		if !errors.Is(err, workspace.ErrPathEscape) {
+			t.Errorf("go test %q: want ErrPathEscape, got %v", pattern, err)
+		}
+	}
+
+	// The guard must not false-reject in-workspace patterns: a real package
+	// directory and the recursive root resolve cleanly. (Checked at the guard so
+	// the assertion does not depend on invoking the go toolchain.)
+	lw, ok := ws.(*localWorkspace)
+	if !ok {
+		t.Fatal("NewLocalWorkspace must return *localWorkspace")
+	}
+	for _, pattern := range []string{"./pkg", "./pkg/...", "./..."} {
+		if err := lw.guardCommandPackagePath([]string{"go", "test", pattern}); err != nil {
+			t.Errorf("go test %q should be allowed by the package-path guard, got %v", pattern, err)
+		}
+	}
+}
+
 func TestLocalWorkspace_ResolveIdentity_AliasesCollapse(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")

@@ -474,6 +474,15 @@ func (w *localWorkspace) WriteFile(ctx context.Context, req WriteFileRequest) (W
 }
 
 func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) (RunCommandResult, error) {
+	// The argv allowlist (workspace.ValidateCommand) screens a `go test` package
+	// pattern only lexically — it rejects ".." traversal but not a directory
+	// symlink that points outside the root. Resolving the package directory
+	// through the same path-safety boundary the read/write tools use rejects
+	// `go test ./link` when ./link escapes the sandbox, so the command cannot
+	// compile and execute code outside the workspace.
+	if err := w.guardCommandPackagePath(req.Args); err != nil {
+		return RunCommandResult{}, err
+	}
 	res, err := workspace.RunCommand(ctx, workspace.RunCommandRequest{
 		Args:           req.Args,
 		WorkingDir:     w.root,
@@ -493,6 +502,34 @@ func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) 
 		TimedOut:  res.TimedOut,
 		Duration:  res.Duration,
 	}, nil
+}
+
+// guardCommandPackagePath rejects a `go test ./<pkg>` invocation whose package
+// directory resolves outside the workspace through a symlink. The lexical argv
+// allowlist (workspace.ValidateCommand) only screens the pattern for ".."
+// traversal, so a directory symlink inside the root that points outward — e.g.
+// `go test ./link` — would otherwise pass and let `go test` follow the link to
+// compile and execute code beyond the sandbox. Resolving the package directory
+// through w.resolve (the same ResolveWorkspacePath boundary every read/write
+// path uses) canonicalizes symlinks and rejects an escape with ErrPathEscape.
+//
+// The recursive root "./..." is skipped: it denotes the workspace itself, and
+// the go tool does not descend into symlinked subdirectories while expanding
+// "...", so only an explicit ./-prefixed package directory needs resolving.
+// Non-go-test argv and non-"./"-prefixed patterns are left to ValidateCommand.
+func (w *localWorkspace) guardCommandPackagePath(args []string) error {
+	if len(args) < 3 || args[0] != "go" || args[1] != "test" {
+		return nil
+	}
+	pattern := args[2]
+	if pattern == "./..." || !strings.HasPrefix(pattern, "./") {
+		return nil
+	}
+	rel := strings.TrimSuffix(pattern, "/...")
+	if _, _, err := w.resolve(rel); err != nil {
+		return fmt.Errorf("coding: go test package %q escapes the workspace: %w", pattern, err)
+	}
+	return nil
 }
 
 func (w *localWorkspace) Diff(ctx context.Context, req DiffRequest) (DiffResult, error) {
