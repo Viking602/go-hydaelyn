@@ -414,8 +414,8 @@ Allowlist only (matched on argv, never via a shell):
 
 ```text
 go test ./...        go test ./<pkg>...     go test ./<pkg> -run <Name>
-go vet ./...         git -c core.fsmonitor=false status --short
-git -c core.fsmonitor=false diff --no-ext-diff --no-textconv -- <paths>   (see §6.6)
+go vet ./...         git -c core.fsmonitor=false status --short -- .
+git -c core.fsmonitor=false diff --no-ext-diff --no-textconv -- <workspace paths>   (see §6.6)
 ```
 
 Every `git` invocation MUST carry the exact leading pair `-c core.fsmonitor=false`
@@ -430,6 +430,19 @@ each at most once, before the `--` separator); omitting either would leave a
 repo-configured `diff.external` driver or textconv filter reachable, so the
 allowlist rejects the partially-hardened forms even though the `git_diff` driver
 always supplies both.
+
+Both read-only git forms MUST also be scoped to the workspace subtree, because git
+operates on the whole containing repository — when the workspace root is a
+subdirectory of a larger repo, an unscoped `git status` enumerates and a pathless
+`git diff` patches files outside the sandbox. So `status` requires the trailing
+`-- .` pathspec, and `diff` requires at least one workspace-relative pathspec
+(`.` denotes the root). Each `diff` pathspec is screened lexically — rejecting
+`..` traversal, absolute paths, and git pathspec "magic" (a leading `:` such as
+`:/` or `:(top)`, which would re-anchor at the repo root) — and then resolved
+through the workspace boundary by `localWorkspace.guardCommandGitPaths`, which
+rejects an in-root symlink whose target points outside the sandbox (the
+filesystem-aware check the lexical screen cannot perform). The `git_diff` driver
+already supplies `.` or resolved paths, so it is unaffected.
 
 The argv allowlist screens a `go test` package pattern only lexically (it rejects
 a `..` traversal segment). A directory symlink inside the workspace that points
@@ -527,7 +540,13 @@ both refresh the index and share the fsmonitor vector — and admits nothing els
 The `diff` form additionally *requires* both `--no-ext-diff` and `--no-textconv`:
 the allowlist rejects a `diff` missing either flag so that a host driving
 `RunCommand` directly cannot reach a `diff.external` or textconv helper, not just
-the bundled `git_diff` driver which already passes both.
+the bundled `git_diff` driver which already passes both. Both read forms are
+additionally *workspace-scoped* (§5.3): `status` requires `-- .` and `diff`
+requires ≥1 lexically-screened, symlink-resolved workspace pathspec, so a host
+calling `RunCommand` directly cannot read or enumerate a parent repository when
+the workspace root is a repo subdirectory. The `git_diff` driver scopes itself —
+it appends `.` when no paths are given and resolves every caller-supplied path
+through the workspace boundary before invoking git.
 
 ## 7. Policy & audit
 
@@ -639,6 +658,7 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | `go test` package symlink escape | the argv allowlist screens a package pattern only lexically (no `..`); `localWorkspace.RunCommand` additionally resolves a `./<pkg>` directory through `ResolveWorkspacePath` and rejects `go test ./link` when `link` symlinks outside the workspace, before the toolchain can execute out-of-sandbox code (§5.3) |
 | arbitrary command exec | no shell, strict allowlist, timeout, output cap, env scrub (GOFLAGS excluded from passthrough; GOENV=off so the per-user `go env` file cannot reintroduce it) |
 | repo config → command exec on a read-only git command | every allowlisted `git` form (both `diff` and `status`) requires the leading `-c core.fsmonitor=false` override, disabling a `.git/config` filesystem-monitor hook git would otherwise run while refreshing the index; the `diff` form additionally requires both `--no-ext-diff` and `--no-textconv`, neutralizing a `diff.external`/textconv helper, so a host driving `RunCommand` directly cannot omit them; the allowlist admits only the exact `core.fsmonitor=false` override |
+| git command reads/enumerates a parent repo | git operates on the whole containing repository, so when the workspace root is a repo subdirectory an unscoped `git status`/`git diff` would expose files outside the sandbox; the allowlist requires `status -- .` and ≥1 `diff` pathspec, screens each `diff` pathspec lexically (no `..`, absolute, or `:` pathspec magic), and resolves it through the workspace boundary (`localWorkspace.guardCommandGitPaths`) to reject an in-root symlink pointing outward |
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |

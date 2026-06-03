@@ -235,6 +235,50 @@ func TestLocalWorkspace_GoTestPackageSymlinkRejected(t *testing.T) {
 	}
 }
 
+// TestLocalWorkspace_GitDiffPathspecSymlinkRejected proves the git-diff pathspec
+// boundary: a file symlink inside the workspace that points outward passes the
+// lexical argv allowlist (no "..", not absolute, no pathspec magic), but
+// RunCommand resolves each diff pathspec through the path-safety boundary and
+// rejects the escape before git can read the outside file. In-workspace paths and
+// the "." root pathspec are not rejected.
+func TestLocalWorkspace_GitDiffPathspecSymlinkRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	ws, root := newTestWorkspace(t, map[string]string{"keep.go": "package a\n"})
+	outside := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(outside); err == nil {
+		outside = resolved
+	}
+	secret := filepath.Join(outside, "secret")
+	if err := os.WriteFile(secret, []byte("top secret\n"), 0o600); err != nil {
+		t.Fatalf("write outside secret: %v", err)
+	}
+	// An in-workspace file symlink pointing at the outside secret.
+	if err := os.Symlink(secret, filepath.Join(root, "leak")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	diffArgs := func(pathspec string) []string {
+		return []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", pathspec}
+	}
+	_, err := ws.RunCommand(context.Background(), RunCommandRequest{Args: diffArgs("leak")})
+	if !errors.Is(err, workspace.ErrPathEscape) {
+		t.Errorf("git diff -- leak: want ErrPathEscape, got %v", err)
+	}
+
+	lw, ok := ws.(*localWorkspace)
+	if !ok {
+		t.Fatal("NewLocalWorkspace must return *localWorkspace")
+	}
+	// The guard must not false-reject in-workspace pathspecs or the "." root.
+	for _, pathspec := range []string{".", "keep.go"} {
+		if err := lw.guardCommandGitPaths(diffArgs(pathspec)); err != nil {
+			t.Errorf("git diff pathspec %q should be allowed by the git-paths guard, got %v", pathspec, err)
+		}
+	}
+}
+
 func TestLocalWorkspace_ResolveIdentity_AliasesCollapse(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")

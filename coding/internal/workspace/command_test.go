@@ -24,12 +24,16 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		// git diff additionally REQUIRES both --no-ext-diff and --no-textconv: these
 		// disable a repo-configured filesystem-monitor hook, diff.external driver,
 		// and textconv filters git would otherwise run while refreshing the index
-		// and rendering a read-only diff. This is the form the git_diff tool emits;
-		// the un-hardened and partially-hardened forms are rejected below.
-		{name: "git diff hardened", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}},
+		// and rendering a read-only diff. Both forms must also be scoped to the
+		// workspace subtree: diff needs >=1 workspace pathspec ("." is the root) and
+		// status needs the trailing "-- ." so neither enumerates a parent repo. This
+		// is the form the git_diff tool emits; the un-hardened, partially-hardened,
+		// and unscoped forms are rejected below.
+		{name: "git diff hardened dot", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "."}},
 		{name: "git diff hardened with paths", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "a.go", "b.go"}},
 		{name: "git diff hardened flags swapped", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-textconv", "--no-ext-diff", "--", "a.go"}},
-		{name: "git status fsmonitor off", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"}},
+		{name: "git diff hardened nested path", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "sub/a.go"}},
+		{name: "git status fsmonitor off scoped", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "."}},
 
 		// Rejected forms.
 		{name: "empty", args: nil, wantErr: ErrEmptyCommand},
@@ -59,6 +63,19 @@ func TestValidateCommand_Allowlist(t *testing.T) {
 		{name: "git diff only no-ext-diff", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff only no-textconv", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-textconv", "--", "a.go"}, wantErr: ErrCommandNotAllowed},
 		{name: "git diff duplicate hardening flag", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-ext-diff", "--no-textconv", "--"}, wantErr: ErrCommandNotAllowed},
+		// Both git read forms must be scoped to the workspace subtree: an unscoped
+		// status/diff reports the whole containing repo, and a pathspec may not
+		// escape via "..", an absolute path, or git pathspec magic. (Symlinked
+		// pathspecs are caught by localWorkspace.guardCommandGitPaths.)
+		{name: "git status no pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"}, wantErr: ErrCommandNotAllowed},
+		{name: "git status wrong pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "sub"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff no pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff parent escape pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "../secret"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff deep escape pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "a/../../secret"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff absolute pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "/etc/passwd"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff pathspec magic top", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", ":/secret"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff pathspec magic paren", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", ":(top)secret"}, wantErr: ErrCommandNotAllowed},
+		{name: "git diff empty pathspec", args: []string{"git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", ""}, wantErr: ErrCommandNotAllowed},
 		// Only the exact `-c core.fsmonitor=false` override is allowed: any other
 		// -c key=value (or a different fsmonitor value) is rejected so the global
 		// flag cannot become a generic config-injection vector.
@@ -218,7 +235,7 @@ func TestRunCommand_SuccessAndExitCode(t *testing.T) {
 		t.Skipf("cannot locate repo root: %v", err)
 	}
 	res, err := RunCommand(context.Background(), RunCommandRequest{
-		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
+		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "."},
 		WorkingDir: root,
 	})
 	if err != nil {
@@ -269,7 +286,7 @@ func containsKV(env []string, kv string) bool {
 // starts.
 func TestRunCommand_RequiresWorkingDir(t *testing.T) {
 	_, err := RunCommand(context.Background(), RunCommandRequest{
-		Args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
+		Args: []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "."},
 	})
 	if err == nil {
 		t.Fatalf("RunCommand with empty WorkingDir must error")
@@ -284,7 +301,7 @@ func TestRunCommand_RequiresWorkingDir(t *testing.T) {
 // argv and working directory. The rejection happens before exec.
 func TestRunCommand_RejectsNonAllowlistedEnvKey(t *testing.T) {
 	_, err := RunCommand(context.Background(), RunCommandRequest{
-		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short"},
+		Args:       []string{"git", "-c", "core.fsmonitor=false", "status", "--short", "--", "."},
 		WorkingDir: t.TempDir(),
 		Env:        map[string]string{"GOFLAGS": "-toolexec=/bin/false"},
 	})

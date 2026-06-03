@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -65,12 +66,15 @@ type RunCommandResult struct {
 //	go test ./<pkg> -run <Name>
 //	go vet ./...
 //	git -c core.fsmonitor=false diff --no-ext-diff --no-textconv -- <paths...>
-//	git -c core.fsmonitor=false status --short
+//	git -c core.fsmonitor=false status --short -- .
 //
 // The `-c core.fsmonitor=false` override is mandatory before any git subcommand,
-// and `git diff` additionally requires both `--no-ext-diff` and `--no-textconv`
-// (see validateGit). Everything else is rejected, including shell wrappers,
-// network tools, and destructive or history-mutating git verbs.
+// and `git diff` additionally requires both `--no-ext-diff` and `--no-textconv`.
+// Both read-only forms must be scoped to the workspace subtree: `status` requires
+// the trailing `-- .` pathspec and `diff` requires at least one workspace-relative
+// pathspec, so neither can enumerate a parent repository when the workspace root
+// is a repo subdirectory (see validateGit). Everything else is rejected, including
+// shell wrappers, network tools, and destructive or history-mutating git verbs.
 func ValidateCommand(args []string) error {
 	if len(args) == 0 {
 		return ErrEmptyCommand
@@ -140,43 +144,101 @@ func validateGit(args []string) error {
 	}
 	switch rest[0] {
 	case "status":
-		// git status --short
-		if len(rest) == 2 && rest[1] == "--short" {
-			return nil
-		}
+		return validateGitStatus(rest, args)
 	case "diff":
-		// git diff --no-ext-diff --no-textconv -- <paths...>
-		// Both hardening flags are MANDATORY (not optional): --no-ext-diff disables
-		// a repo-configured diff.external driver and --no-textconv disables textconv
-		// filters (which git diff enables by default), either of which a hostile
-		// .git/config or .gitattributes could otherwise use to execute a helper
-		// while the read-only diff refreshes the index and renders output. Requiring
-		// them — like the fsmonitor override above — means no accepted diff form can
-		// run an external helper, for every caller of the allowlist, not just the
-		// git_diff driver (which already passes both). They may appear in either
-		// order before the "--" separator; each is accepted at most once.
-		var sawExtDiff, sawTextconv bool
-		i := 1
-		for i < len(rest) && isAllowedDiffFlag(rest[i]) {
-			switch rest[i] {
-			case "--no-ext-diff":
-				if sawExtDiff {
-					return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
-				}
-				sawExtDiff = true
-			case "--no-textconv":
-				if sawTextconv {
-					return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
-				}
-				sawTextconv = true
-			}
-			i++
-		}
-		if sawExtDiff && sawTextconv && i < len(rest) && rest[i] == "--" {
-			return nil
-		}
+		return validateGitDiff(rest, args)
 	}
 	return fmt.Errorf("%w: %v", ErrCommandNotAllowed, args)
+}
+
+// validateGitStatus accepts only `status --short -- .`. The "-- ." pathspec
+// scopes the report to the workspace subtree: without a pathspec git status
+// reports the ENTIRE containing repository, so when the workspace root is a
+// subdirectory of a larger repo a bare `status` would enumerate paths outside the
+// sandbox. The pathspec resolves relative to the run's working directory, which is
+// always the workspace root. args is the full argv, for the error message.
+func validateGitStatus(rest, args []string) error {
+	if len(rest) == 4 && rest[1] == "--short" && rest[2] == "--" && rest[3] == "." {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrCommandNotAllowed, args)
+}
+
+// validateGitDiff accepts `diff --no-ext-diff --no-textconv -- <paths...>`. Both
+// hardening flags are MANDATORY (not optional): --no-ext-diff disables a
+// repo-configured diff.external driver and --no-textconv disables textconv filters
+// (which git diff enables by default), either of which a hostile .git/config or
+// .gitattributes could otherwise use to execute a helper while the read-only diff
+// refreshes the index and renders output. Requiring them — like the fsmonitor
+// override — means no accepted diff form can run an external helper, for every
+// caller of the allowlist, not just the git_diff driver (which already passes
+// both). The flags may appear in either order before the "--" separator; each is
+// accepted at most once. rest is the argv after the fsmonitor override; args is
+// the full argv, for the error message.
+func validateGitDiff(rest, args []string) error {
+	var sawExtDiff, sawTextconv bool
+	i := 1
+	for i < len(rest) && isAllowedDiffFlag(rest[i]) {
+		switch rest[i] {
+		case "--no-ext-diff":
+			if sawExtDiff {
+				return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
+			}
+			sawExtDiff = true
+		case "--no-textconv":
+			if sawTextconv {
+				return fmt.Errorf("%w: duplicate %q", ErrCommandNotAllowed, rest[i])
+			}
+			sawTextconv = true
+		}
+		i++
+	}
+	if !sawExtDiff || !sawTextconv || i >= len(rest) || rest[i] != "--" {
+		return fmt.Errorf("%w: %v", ErrCommandNotAllowed, args)
+	}
+	pathspecs := rest[i+1:]
+	// A diff with NO pathspec covers the whole repository — when the workspace root
+	// is a subdirectory of a larger repo that leaks changes outside the sandbox —
+	// so require at least one workspace-scoped pathspec (the git_diff driver always
+	// supplies "." or resolved paths). Each is screened lexically here; the
+	// symlink-aware check is applied by localWorkspace.guardCommandGitPaths.
+	if len(pathspecs) == 0 {
+		return fmt.Errorf("%w: git diff requires a workspace pathspec after --", ErrCommandNotAllowed)
+	}
+	for _, p := range pathspecs {
+		if err := validateGitPathspec(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateGitPathspec lexically screens a single `git diff` pathspec so it cannot
+// reach outside the workspace. "." (the workspace root) is always allowed. The
+// filesystem-aware symlink check is applied separately by
+// localWorkspace.guardCommandGitPaths, since resolving a symlinked pathspec needs
+// the real filesystem and the workspace root.
+func validateGitPathspec(p string) error {
+	if p == "." {
+		return nil
+	}
+	if p == "" {
+		return fmt.Errorf("%w: empty git pathspec", ErrCommandNotAllowed)
+	}
+	// Git pathspec "magic" (":/", ":(top)", ":!", ...) can re-anchor a path at the
+	// repository root, above the workspace, so reject any leading colon.
+	if strings.HasPrefix(p, ":") {
+		return fmt.Errorf("%w: git pathspec magic %q not allowed", ErrCommandNotAllowed, p)
+	}
+	// Reject absolute pathspecs (OS-absolute or a leading slash on any platform,
+	// since git accepts forward slashes everywhere).
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return fmt.Errorf("%w: absolute git pathspec %q not allowed", ErrCommandNotAllowed, p)
+	}
+	if containsParentTraversal(p) {
+		return fmt.Errorf("%w: git pathspec %q escapes the workspace", ErrCommandNotAllowed, p)
+	}
+	return nil
 }
 
 // isAllowedDiffFlag reports whether s is one of the hardening flags git_diff must

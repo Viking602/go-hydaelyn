@@ -489,6 +489,13 @@ func (w *localWorkspace) RunCommand(ctx context.Context, req RunCommandRequest) 
 	if err := w.guardCommandPackagePath(req.Args); err != nil {
 		return RunCommandResult{}, err
 	}
+	// The argv allowlist screens git diff pathspecs lexically (rejecting "..",
+	// absolute paths, and pathspec magic) but cannot see a symlinked pathspec that
+	// points outside the root. Resolve each through the same boundary so a diff
+	// cannot read a file outside the sandbox via an in-root symlink.
+	if err := w.guardCommandGitPaths(req.Args); err != nil {
+		return RunCommandResult{}, err
+	}
 	res, err := workspace.RunCommand(ctx, workspace.RunCommandRequest{
 		Args:           req.Args,
 		WorkingDir:     w.root,
@@ -534,6 +541,45 @@ func (w *localWorkspace) guardCommandPackagePath(args []string) error {
 	rel := strings.TrimSuffix(pattern, "/...")
 	if _, _, err := w.resolve(rel); err != nil {
 		return fmt.Errorf("coding: go test package %q escapes the workspace: %w", pattern, err)
+	}
+	return nil
+}
+
+// guardCommandGitPaths rejects a `git diff` invocation whose pathspecs resolve
+// outside the workspace through a symlink. The lexical argv allowlist
+// (workspace.ValidateCommand) already screens each pathspec for "..", absolute
+// paths, and pathspec magic, but a directory/file symlink inside the root that
+// points outward would otherwise let `git diff` read a file beyond the sandbox.
+// Resolving each pathspec through w.resolve (the same ResolveWorkspacePath
+// boundary every read/write path uses) canonicalizes symlinks and rejects an
+// escape. The "." pathspec denotes the workspace root and is trivially in-bounds;
+// `git status` is fixed to "-- ." by the allowlist and needs no per-path check.
+// Non-git-diff argv is left to ValidateCommand and the other guards.
+func (w *localWorkspace) guardCommandGitPaths(args []string) error {
+	if len(args) < 2 || args[0] != "git" {
+		return nil
+	}
+	sep := -1
+	isDiff := false
+	for i, a := range args {
+		if a == "diff" {
+			isDiff = true
+		}
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	if !isDiff || sep < 0 {
+		return nil
+	}
+	for _, p := range args[sep+1:] {
+		if p == "." {
+			continue
+		}
+		if _, _, err := w.resolve(p); err != nil {
+			return fmt.Errorf("coding: git diff pathspec %q escapes the workspace: %w", p, err)
+		}
 	}
 	return nil
 }
