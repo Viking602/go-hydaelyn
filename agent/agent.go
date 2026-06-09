@@ -37,6 +37,13 @@ var ErrBudgetExhausted = errors.New("agent loop budget exhausted")
 // whether a loop error originated from a panic recovered here.
 var ErrPanicRecovered = errors.New("agent loop recovered a panic")
 
+// ErrStepAborted is returned by RunMessages when a StepPolicy deliberately stops
+// the loop at a continue boundary — its Next returns StepDecisionFail or itself
+// errors. The accompanying LoopOutput is the partial trace accumulated so far.
+// Engine.run maps it to a FailureKindStepAborted Result. It is distinct from a
+// StepDecisionFinish/Handoff override, which stops the loop cleanly (no error).
+var ErrStepAborted = errors.New("agent loop aborted by step policy")
+
 // LoopInput is the message-level input to Engine.RunMessages, the
 // low-level loop entry preserved from v0.7. Most callers should use
 // Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
@@ -79,6 +86,30 @@ type LoopInput struct {
 	MaxTokens    int64
 	MaxToolCalls int
 	MaxSteps     int
+
+	// StepPolicy, when set, is consulted at each continue boundary (after a
+	// non-terminal tool turn) so a caller can override the loop's natural
+	// decision to iterate again — stopping early, diverting to a handoff, or
+	// failing the run once a predicate over the step trace holds. A nil policy
+	// leaves the loop's natural control flow unchanged. See StepPolicy.
+	StepPolicy StepPolicy
+
+	// Compact, when set, is invoked to shrink the running message history once
+	// the per-loop token budget is approached (MaxTokens > 0 and the consumed
+	// tokens leave one headroom band or less of it). It replaces the working
+	// history with the returned slice before the next turn, so subsequent turns
+	// send a smaller prompt. It never runs when MaxTokens is zero, so a run with
+	// no token budget never compacts. Engine.Run wires this from the Engine's
+	// ContextManager.Compact; the default context managers pass the history
+	// through unchanged, so compaction is opt-in via a real compactor.
+	//
+	// Determinism: the loop triggers Compact deterministically (the same trigger
+	// fires on replay), so a deterministic compactor keeps the run
+	// replay-faithful (ADR-007) while an LLM-backed one does not. Compact is
+	// also responsible for returning a coherent history (for example, not
+	// splitting a tool_use from its tool_result); the loop does not police what
+	// a compactor returns.
+	Compact func(ctx context.Context, history []message.Message) ([]message.Message, error)
 }
 
 // LoopOutput is the message-level result from Engine.RunMessages. The
@@ -138,6 +169,12 @@ type Engine struct {
 	// OutputRecorder, when set, receives a decision record for every
 	// non-allow guardrail action.
 	OutputRecorder OutputGuardrailRecorder
+
+	// StepPolicy, when set, Engine.Run threads into every LoopInput so the loop
+	// consults it at each continue boundary. Like OutputGuardrails it is an
+	// Engine-level field rather than a Spec field: set it on the built Engine.
+	// See StepPolicy and LoopInput.StepPolicy.
+	StepPolicy StepPolicy
 }
 
 // RunMessages is the low-level loop that drives one LoopInput to
@@ -197,11 +234,11 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// is exactly a "will continue" boundary; a run that finished earlier
 		// returned before reaching here and is never charged a budget failure.
 		if iteration > 0 {
-			if _, dimension := budgetRemaining(input, totalUsage, toolCallsUsed, len(steps)); dimension != "" {
-				// The current turn never ran, so iteration is the count of
-				// model turns actually issued.
-				return budgetAbort(current, totalUsage, steps, iteration, toolCallsUsed, dimension)
+			next, out, stop, preErr := loopTurnPreamble(ctx, input, current, totalUsage, steps, iteration, toolCallsUsed)
+			if stop {
+				return out, preErr
 			}
+			current = next
 		}
 		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
@@ -363,6 +400,15 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				ToolCallsUsed: toolCallsUsed,
 			}, nil
 		}
+		// Continue boundary: this non-terminal tool turn would loop again. When a
+		// StepPolicy is set, let it override that decision once a predicate over
+		// the step trace holds — stopping, diverting, or failing the loop. The
+		// natural Continue decision is already recorded on the step above;
+		// stepPolicyOverride updates it so the trace reflects the decision that
+		// actually ended the loop.
+		if out, stop, overrideErr := stepPolicyOverride(input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed); stop {
+			return out, overrideErr
+		}
 	}
 	return LoopOutput{
 		Messages:      current,
@@ -372,6 +418,61 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+// loopTurnPreamble runs the per-iteration preamble for turns after the first: it
+// stops the loop when a budget dimension is exhausted (budgetAbort) and compacts
+// the running history when the token budget is approached. When stop is true the
+// loop returns out/err as-is; otherwise next is the history — possibly
+// compacted — to drive the upcoming turn with. iteration is the count of model
+// turns already issued, matching the budget-abort contract.
+func loopTurnPreamble(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage, steps []Step, iteration, toolCallsUsed int) (next []message.Message, out LoopOutput, stop bool, err error) {
+	if _, dimension := budgetRemaining(input, usage, toolCallsUsed, len(steps)); dimension != "" {
+		out, err = budgetAbort(current, usage, steps, iteration, toolCallsUsed, dimension)
+		return current, out, true, err
+	}
+	// The budget still has room for this turn. Compacting after the budget check
+	// means a turn that would abort never pays for a compaction it cannot use.
+	compacted, compactErr := maybeCompactHistory(ctx, input, current, usage)
+	if compactErr != nil {
+		return current, loopErrorOutput(current, usage, steps, iteration, toolCallsUsed), true, compactErr
+	}
+	return compacted, LoopOutput{}, false, nil
+}
+
+// stepPolicyOverride consults input.StepPolicy at a continue boundary and reports
+// whether it stopped the loop. A nil policy, or a Continue/"" decision, returns
+// stop=false so the loop keeps iterating. A Finish/Handoff override stops the
+// loop cleanly (StopReasonComplete), recording the decision on the final step; a
+// Fail decision, or a Next error, stops it with ErrStepAborted. iterations is the
+// count of model turns that ran.
+func stepPolicyOverride(input LoopInput, current []message.Message, usage provider.Usage, steps []Step, thinking string, iterations, toolCallsUsed int) (out LoopOutput, stop bool, err error) {
+	if input.StepPolicy == nil {
+		return LoopOutput{}, false, nil
+	}
+	decision, policyErr := input.StepPolicy.Next(LoopSnapshot{Steps: steps})
+	if policyErr != nil {
+		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
+			fmt.Errorf("%w: step policy: %v", ErrStepAborted, policyErr)
+	}
+	switch decision {
+	case StepDecisionFinish, StepDecisionHandoff:
+		steps[len(steps)-1].Decision = decision
+		return LoopOutput{
+			Messages:      current,
+			Usage:         usage,
+			StopReason:    provider.StopReasonComplete,
+			Iterations:    iterations,
+			Thinking:      thinking,
+			Steps:         steps,
+			ToolCallsUsed: toolCallsUsed,
+		}, true, nil
+	case StepDecisionFail:
+		steps[len(steps)-1].Decision = StepDecisionFail
+		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
+			fmt.Errorf("%w: step policy returned fail", ErrStepAborted)
+	}
+	return LoopOutput{}, false, nil
 }
 
 // budgetRemaining returns a copy of input whose budget ceilings are reduced by
@@ -401,6 +502,37 @@ func budgetRemaining(input LoopInput, usage provider.Usage, toolCallsUsed, steps
 		}
 	}
 	return next, ""
+}
+
+// compactionBudgetHeadroomDivisor sets the token-budget headroom below which the
+// loop compacts the running history: when MaxTokens is set and the remaining
+// budget falls to MaxTokens/compactionBudgetHeadroomDivisor or less (one band of
+// ~20% left), the next turn's history is compacted first. A divisor keeps the
+// trigger in integer arithmetic, off the floating-point path.
+const compactionBudgetHeadroomDivisor = 5
+
+// maybeCompactHistory returns the history to drive the next turn with, compacted
+// when a Compact hook is wired and the per-loop token budget is being approached
+// (MaxTokens > 0 and the consumed tokens leave one headroom band or less). It is
+// a no-op — returning the input history unchanged — when no Compact is set or no
+// token budget bounds the loop, so a run that does not opt into both never
+// changes shape. A Compact error aborts the loop rather than silently proceeding
+// on an unshrunk history. Callers reach this only after the pre-turn budget check
+// has confirmed remaining budget is positive, so the headroom comparison never
+// sees a negative remainder.
+func maybeCompactHistory(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage) ([]message.Message, error) {
+	if input.Compact == nil || input.MaxTokens <= 0 {
+		return current, nil
+	}
+	remaining := input.MaxTokens - int64(usage.TotalTokens)
+	if remaining > input.MaxTokens/compactionBudgetHeadroomDivisor {
+		return current, nil
+	}
+	compacted, err := input.Compact(ctx, current)
+	if err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
+	return compacted, nil
 }
 
 // dispatchExceedsToolBudget reports whether executing this turn's tool batch
