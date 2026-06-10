@@ -28,6 +28,9 @@ type (
 	CapabilityStore           = ports.CapabilityStore
 	UsageStore                = ports.UsageStore
 	DeadLetterStore           = ports.DeadLetterStore
+	HandoffStore              = ports.HandoffStore
+	TeamStateStore            = ports.TeamStateStore
+	AgentInstanceStore        = ports.AgentInstanceStore
 	BlackboardStore           = ports.BlackboardReadWriter
 	UnitOfWork                = ports.UnitOfWork
 	StoreProvider             = ports.StoreProvider

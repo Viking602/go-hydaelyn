@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // RunSelector mirrors api.RunSelector. AND-combined fields.
 type RunSelector struct {
@@ -116,4 +119,52 @@ type Capability struct {
 	RequiresApproval bool
 	Tags             []string
 	Metadata         map[string]string
+}
+
+// HandoffRecord mirrors api.HandoffRecord — the durable twin of a
+// multiagent typed handoff. Append-only; (RunID, ID) is the unique key.
+type HandoffRecord struct {
+	ID                   string
+	RunID                string
+	From                 string
+	To                   string
+	Reason               string
+	Payload              json.RawMessage
+	EvidenceIDs          []string
+	RequiredOutputSchema json.RawMessage
+	CreatedAt            time.Time
+}
+
+// HandoffSelector mirrors api.HandoffSelector. AND-combined fields.
+type HandoffSelector struct {
+	RunID string
+	From  string
+	To    string
+	Since time.Time
+}
+
+// TeamStateRecord mirrors api.TeamStateRecord — the latest scheduler
+// snapshot per run; the audit trail stays in the event log.
+type TeamStateRecord struct {
+	RunID     string
+	Tick      int
+	State     json.RawMessage
+	UpdatedAt time.Time
+}
+
+// AgentInstanceRecord mirrors api.AgentInstanceRecord.
+type AgentInstanceRecord struct {
+	ID        string
+	ClassName string
+	RunID     string
+	TaskID    string
+	State     string
+	CreatedAt time.Time
+}
+
+// AgentInstanceSelector mirrors api.AgentInstanceSelector. AND-combined.
+type AgentInstanceSelector struct {
+	RunID     string
+	ClassName string
+	State     string
 }

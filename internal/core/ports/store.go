@@ -120,6 +120,26 @@ type DeadLetterStore interface {
 	Requeue(ctx context.Context, deadLetterID string) error
 }
 
+// HandoffStore mirrors api.HandoffStore on the internal side.
+type HandoffStore interface {
+	SaveHandoff(context.Context, model.HandoffRecord) error
+	LoadHandoff(ctx context.Context, runID, handoffID string) (model.HandoffRecord, error)
+	ListHandoffs(context.Context, model.HandoffSelector) ([]model.HandoffRecord, error)
+}
+
+// TeamStateStore mirrors api.TeamStateStore on the internal side.
+type TeamStateStore interface {
+	SaveTeamState(context.Context, model.TeamStateRecord) error
+	LoadTeamState(ctx context.Context, runID string) (model.TeamStateRecord, error)
+}
+
+// AgentInstanceStore mirrors api.AgentInstanceStore on the internal side.
+type AgentInstanceStore interface {
+	SaveAgentInstance(context.Context, model.AgentInstanceRecord) error
+	LoadAgentInstance(ctx context.Context, id string) (model.AgentInstanceRecord, error)
+	ListAgentInstances(context.Context, model.AgentInstanceSelector) ([]model.AgentInstanceRecord, error)
+}
+
 type UnitOfWork interface {
 	Runs() RunStore
 	Tasks() TaskStore
@@ -136,6 +156,10 @@ type UnitOfWork interface {
 	CapabilityCatalog() CapabilityStore
 	UsageRecords() UsageStore
 	DeadLetters() DeadLetterStore
+	// v0.8.0 multi-agent stores — required members (spec 07; ADR-016 §6).
+	Handoffs() HandoffStore
+	TeamStates() TeamStateStore
+	AgentInstances() AgentInstanceStore
 	Commit(context.Context) error
 	Rollback(context.Context) error
 }

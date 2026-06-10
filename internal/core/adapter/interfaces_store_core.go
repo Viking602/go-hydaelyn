@@ -118,6 +118,18 @@ func (a coreUnitOfWorkAdapter) DeadLetters() api.DeadLetterStore {
 	return coreDeadLetterStoreAdapter{inner: a.inner.DeadLetters()}
 }
 
+func (a coreUnitOfWorkAdapter) Handoffs() api.HandoffStore {
+	return coreHandoffStoreAdapter{inner: a.inner.Handoffs()}
+}
+
+func (a coreUnitOfWorkAdapter) TeamStates() api.TeamStateStore {
+	return coreTeamStateStoreAdapter{inner: a.inner.TeamStates()}
+}
+
+func (a coreUnitOfWorkAdapter) AgentInstances() api.AgentInstanceStore {
+	return coreAgentInstanceStoreAdapter{inner: a.inner.AgentInstances()}
+}
+
 func (a coreUnitOfWorkAdapter) Commit(ctx context.Context) error {
 	return ErrorToAPI(a.inner.Commit(ctx))
 }
@@ -490,4 +502,62 @@ func (a coreDeadLetterStoreAdapter) ListDeadLetters(ctx context.Context, sel api
 
 func (a coreDeadLetterStoreAdapter) Requeue(ctx context.Context, deadLetterID string) error {
 	return ErrorToAPI(a.inner.Requeue(ctx, deadLetterID))
+}
+
+type coreHandoffStoreAdapter struct{ inner core.HandoffStore }
+
+func (a coreHandoffStoreAdapter) SaveHandoff(ctx context.Context, record api.HandoffRecord) error {
+	return ErrorToAPI(a.inner.SaveHandoff(ctx, HandoffRecordToModel(record)))
+}
+
+func (a coreHandoffStoreAdapter) LoadHandoff(ctx context.Context, runID, handoffID string) (api.HandoffRecord, error) {
+	record, err := a.inner.LoadHandoff(ctx, runID, handoffID)
+	if err != nil {
+		return api.HandoffRecord{}, ErrorToAPI(err)
+	}
+	return HandoffRecordFromModel(record), nil
+}
+
+func (a coreHandoffStoreAdapter) ListHandoffs(ctx context.Context, sel api.HandoffSelector) ([]api.HandoffRecord, error) {
+	records, err := a.inner.ListHandoffs(ctx, HandoffSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return HandoffRecordsFromModel(records), nil
+}
+
+type coreTeamStateStoreAdapter struct{ inner core.TeamStateStore }
+
+func (a coreTeamStateStoreAdapter) SaveTeamState(ctx context.Context, record api.TeamStateRecord) error {
+	return ErrorToAPI(a.inner.SaveTeamState(ctx, TeamStateRecordToModel(record)))
+}
+
+func (a coreTeamStateStoreAdapter) LoadTeamState(ctx context.Context, runID string) (api.TeamStateRecord, error) {
+	record, err := a.inner.LoadTeamState(ctx, runID)
+	if err != nil {
+		return api.TeamStateRecord{}, ErrorToAPI(err)
+	}
+	return TeamStateRecordFromModel(record), nil
+}
+
+type coreAgentInstanceStoreAdapter struct{ inner core.AgentInstanceStore }
+
+func (a coreAgentInstanceStoreAdapter) SaveAgentInstance(ctx context.Context, record api.AgentInstanceRecord) error {
+	return ErrorToAPI(a.inner.SaveAgentInstance(ctx, AgentInstanceRecordToModel(record)))
+}
+
+func (a coreAgentInstanceStoreAdapter) LoadAgentInstance(ctx context.Context, id string) (api.AgentInstanceRecord, error) {
+	record, err := a.inner.LoadAgentInstance(ctx, id)
+	if err != nil {
+		return api.AgentInstanceRecord{}, ErrorToAPI(err)
+	}
+	return AgentInstanceRecordFromModel(record), nil
+}
+
+func (a coreAgentInstanceStoreAdapter) ListAgentInstances(ctx context.Context, sel api.AgentInstanceSelector) ([]api.AgentInstanceRecord, error) {
+	records, err := a.inner.ListAgentInstances(ctx, AgentInstanceSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return AgentInstanceRecordsFromModel(records), nil
 }

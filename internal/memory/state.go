@@ -26,6 +26,10 @@ type State struct {
 	Capabilities      map[string]model.Capability // key = name|agentID
 	UsageRecords      map[string]model.UsageRecord
 	DeadLetters       map[string]model.DeadLetterEntry
+	Handoffs          map[string]model.HandoffRecord // key = runID|handoffID
+	HandoffsByRun     map[string][]string
+	TeamStates        map[string]model.TeamStateRecord
+	AgentInstances    map[string]model.AgentInstanceRecord
 	Seq               map[string]int
 	NextID            int
 }
@@ -50,6 +54,10 @@ func NewState() *State {
 		Capabilities:      map[string]model.Capability{},
 		UsageRecords:      map[string]model.UsageRecord{},
 		DeadLetters:       map[string]model.DeadLetterEntry{},
+		Handoffs:          map[string]model.HandoffRecord{},
+		HandoffsByRun:     map[string][]string{},
+		TeamStates:        map[string]model.TeamStateRecord{},
+		AgentInstances:    map[string]model.AgentInstanceRecord{},
 		Seq:               map[string]int{},
 	}
 }
@@ -77,6 +85,10 @@ func (s *State) Clone() *State {
 	clone.Capabilities = maps.Clone(s.Capabilities)
 	clone.UsageRecords = maps.Clone(s.UsageRecords)
 	clone.DeadLetters = maps.Clone(s.DeadLetters)
+	clone.Handoffs = maps.Clone(s.Handoffs)
+	clone.HandoffsByRun = cloneSliceMap(s.HandoffsByRun)
+	clone.TeamStates = maps.Clone(s.TeamStates)
+	clone.AgentInstances = maps.Clone(s.AgentInstances)
 	clone.Seq = maps.Clone(s.Seq)
 	clone.NextID = s.NextID
 	return clone
