@@ -91,10 +91,12 @@ func testListHandoffsSelector(t *testing.T, factory ProviderFactory) {
 	base := time.Now().UTC().Truncate(time.Millisecond)
 
 	withUoW(t, p, func(uow api.UnitOfWork) error {
+		// Persisted deliberately out of ID order: List must sort by ID
+		// (spec 07 — ULID ascending), not echo persistence order.
 		for _, record := range []api.HandoffRecord{
-			sampleHandoff("run-sel", "h-1", "alpha", "beta", base.Add(-2*time.Hour)),
 			sampleHandoff("run-sel", "h-2", "alpha", "gamma", base),
 			sampleHandoff("run-sel", "h-3", "delta", "beta", base),
+			sampleHandoff("run-sel", "h-1", "alpha", "beta", base.Add(-2*time.Hour)),
 			sampleHandoff("run-other", "h-4", "alpha", "beta", base),
 		} {
 			if err := uow.Handoffs().SaveHandoff(ctx, record); err != nil {
@@ -111,6 +113,11 @@ func testListHandoffsSelector(t *testing.T, factory ProviderFactory) {
 		}
 		if len(byRun) != 3 {
 			t.Fatalf("RunID filter returned %d records, want 3", len(byRun))
+		}
+		for i, want := range []string{"h-1", "h-2", "h-3"} {
+			if byRun[i].ID != want {
+				t.Fatalf("ListHandoffs order = [%s %s %s], want ID-ascending [h-1 h-2 h-3]", byRun[0].ID, byRun[1].ID, byRun[2].ID)
+			}
 		}
 		fromAlpha, err := uow.Handoffs().ListHandoffs(ctx, api.HandoffSelector{RunID: "run-sel", From: "alpha"})
 		if err != nil {

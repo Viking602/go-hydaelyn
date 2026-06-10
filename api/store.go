@@ -170,7 +170,10 @@ type DeadLetterStore interface {
 
 // HandoffStore persists typed multi-agent handoff records. SaveHandoff is
 // append-only — a second save with an existing (RunID, ID) returns an
-// error; there is no update path.
+// error; there is no update path. ListHandoffs MUST return matches in
+// ID-ascending order: IDs are scheduler-derived ULIDs, so ascending ID is
+// wall-clock order per tick and replay observes handoffs
+// deterministically regardless of persistence order.
 //
 // Spec anchor: docs/product-spec/v0.8.0/07-storage.md §"HandoffStore".
 type HandoffStore interface {

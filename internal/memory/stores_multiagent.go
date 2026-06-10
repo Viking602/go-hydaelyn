@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -37,7 +36,6 @@ func (s *handoffStore) SaveHandoff(_ context.Context, record model.HandoffRecord
 		return fmt.Errorf("handoff %s already recorded for run %s (append-only store): %w", record.ID, record.RunID, model.ErrInvalidCommand)
 	}
 	u.staged.Handoffs[key] = record
-	u.staged.HandoffsByRun[record.RunID] = append(u.staged.HandoffsByRun[record.RunID], record.ID)
 	return nil
 }
 
@@ -74,27 +72,20 @@ func (s *handoffStore) ListHandoffs(_ context.Context, sel model.HandoffSelector
 		return true
 	}
 	out := make([]model.HandoffRecord, 0)
-	if sel.RunID != "" {
-		// Insertion order within the run.
-		for _, id := range u.staged.HandoffsByRun[sel.RunID] {
-			if record, ok := u.staged.Handoffs[handoffKey(sel.RunID, id)]; ok && matches(record) {
-				out = append(out, record)
-			}
-		}
-		return out, nil
-	}
-	runIDs := make([]string, 0, len(u.staged.HandoffsByRun))
-	for runID := range u.staged.HandoffsByRun {
-		runIDs = append(runIDs, runID)
-	}
-	slices.Sort(runIDs)
-	for _, runID := range runIDs {
-		for _, id := range u.staged.HandoffsByRun[runID] {
-			if record, ok := u.staged.Handoffs[handoffKey(runID, id)]; ok && matches(record) {
-				out = append(out, record)
-			}
+	for _, record := range u.staged.Handoffs {
+		if matches(record) {
+			out = append(out, record)
 		}
 	}
+	// Spec 07 §"HandoffStore": List MUST return handoffs in ID-ascending
+	// order (scheduler-derived ULIDs ⇒ wall-clock order), independent of
+	// persistence order. RunID breaks ties for cross-run listings.
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].RunID != out[b].RunID {
+			return out[a].RunID < out[b].RunID
+		}
+		return out[a].ID < out[b].ID
+	})
 	return out, nil
 }
 
