@@ -73,13 +73,13 @@ func TestStoreFirstPublicReadsUseConfiguredStoreProvider(t *testing.T) {
 	if events, err := rt.RunEvents(ctx, run.ID); err != nil || len(events) == 0 {
 		t.Fatalf("RunEvents() read from store events=%#v err=%v", events, err)
 	}
-	if ready := rt.ReadyTasks(run.ID); !containsTask(ready, task.ID) {
+	if ready := rt.ReadyTasks(context.Background(), run.ID); !containsTask(ready, task.ID) {
 		t.Fatalf("ReadyTasks() did not read store task: %#v", ready)
 	}
-	if outbox := rt.ResponseOutbox(run.ID); len(outbox) != 1 || outbox[0].ID != "msg-read" {
+	if outbox := rt.ResponseOutbox(context.Background(), run.ID); len(outbox) != 1 || outbox[0].ID != "msg-read" {
 		t.Fatalf("ResponseOutbox() read from store = %#v", outbox)
 	}
-	if spans := rt.TraceSpans(run.ID); !containsSpan(spans, "seed") {
+	if spans := rt.TraceSpans(context.Background(), run.ID); !containsSpan(spans, "seed") {
 		t.Fatalf("TraceSpans() read from store = %#v", spans)
 	}
 	if items, err := rt.SelectItems(ctx, run.ID, BlackboardSelector{Keys: []string{"seed"}}); err != nil || len(items) != 1 || items[0].ID != "bb-read" {
@@ -184,11 +184,11 @@ func TestPolicyAppliesToRuntimeBoundaries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(run.ID)[0]
+	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("response publish should be policy denied, got %v", err)
 	}
-	after := rt.ResponseOutbox(run.ID)[0]
+	after := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	if after.Status != UserMessageQueued {
 		t.Fatalf("denied publish must not mutate message status, got %#v", after)
 	}
@@ -205,7 +205,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 		t.Fatalf("dispatch require_approval should block command, got %v", err)
 	}
 	assertPolicyBlockedTask(ctx, t, dispatchRT, dispatchRun.ID, dispatchTask.ID, TaskStatusPaused, RunStatusWaitingApproval)
-	if collectEventTypes(dispatchRT.Events(dispatchRun.ID)).Contains(EventTaskDispatched) {
+	if collectEventTypes(dispatchRT.Events(context.Background(), dispatchRun.ID)).Contains(EventTaskDispatched) {
 		t.Fatalf("dispatch require_approval must not queue a task envelope")
 	}
 
@@ -232,7 +232,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 		t.Fatalf("tool_call pause should block command, got %v", err)
 	}
 	assertPolicyBlockedTask(ctx, t, toolRT, toolRun.ID, toolTask.ID, TaskStatusPaused, RunStatusBlocked)
-	if active := toolRT.ActiveLeaseCount(toolRun.ID, toolTask.ID); active != 0 {
+	if active := toolRT.ActiveLeaseCount(context.Background(), toolRun.ID, toolTask.ID); active != 0 {
 		t.Fatalf("policy pause must release active lease, got %d", active)
 	}
 
@@ -245,7 +245,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 		t.Fatalf("action pause should block command, got %v", err)
 	}
 	assertPolicyBlockedTask(ctx, t, actionRT, actionRun.ID, actionTask.ID, TaskStatusPaused, RunStatusBlocked)
-	if active := actionRT.ActiveLeaseCount(actionRun.ID, actionTask.ID); active != 0 {
+	if active := actionRT.ActiveLeaseCount(context.Background(), actionRun.ID, actionTask.ID); active != 0 {
 		t.Fatalf("policy pause must release action lease, got %d", active)
 	}
 
@@ -257,7 +257,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	if err := responseRT.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{RunID: responseRun.ID, TaskID: responseTask.ID, LeaseID: responseLease.ID, HolderType: HolderComponent, HolderID: "response_composer", TaskVersion: responseTask.Version, Payload: "safe"}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := responseRT.ResponseOutbox(responseRun.ID)[0]
+	message := responseRT.ResponseOutbox(context.Background(), responseRun.ID)[0]
 	if err := responseRT.PublishResponse(ctx, PublishResponseCommand{RunID: responseRun.ID, MessageID: message.ID}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("response_publish require_approval should block command, got %v", err)
 	}
@@ -265,10 +265,10 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	if err != nil {
 		t.Fatalf("Run(response after policy) error = %v", err)
 	}
-	if responseRunAfter.Status != RunStatusWaitingApproval || !collectEventTypes(responseRT.Events(responseRun.ID)).Contains(EventApprovalRequested) {
-		t.Fatalf("response_publish require_approval did not create approval blocker: run=%#v events=%#v", responseRunAfter, responseRT.Events(responseRun.ID))
+	if responseRunAfter.Status != RunStatusWaitingApproval || !collectEventTypes(responseRT.Events(context.Background(), responseRun.ID)).Contains(EventApprovalRequested) {
+		t.Fatalf("response_publish require_approval did not create approval blocker: run=%#v events=%#v", responseRunAfter, responseRT.Events(context.Background(), responseRun.ID))
 	}
-	if got := responseRT.ResponseOutbox(responseRun.ID)[0].Status; got != UserMessageQueued {
+	if got := responseRT.ResponseOutbox(context.Background(), responseRun.ID)[0].Status; got != UserMessageQueued {
 		t.Fatalf("blocked response publish mutated message status to %s", got)
 	}
 }
@@ -303,8 +303,8 @@ func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 		t.Fatalf("expected retry scheduling, got %#v", retryEnv)
 	}
 	retryTask := mustLoadTask(ctx, t, rt, run.ID, task.ID)
-	if retryTask.Status != TaskStatusDispatched || rt.ActiveLeaseCount(run.ID, task.ID) != 0 {
-		t.Fatalf("retry should release active lease and redispatch task: task=%#v active=%d", retryTask, rt.ActiveLeaseCount(run.ID, task.ID))
+	if retryTask.Status != TaskStatusDispatched || rt.ActiveLeaseCount(context.Background(), run.ID, task.ID) != 0 {
+		t.Fatalf("retry should release active lease and redispatch task: task=%#v active=%d", retryTask, rt.ActiveLeaseCount(context.Background(), run.ID, task.ID))
 	}
 	if _, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
 		RunID:      run.ID,
@@ -346,7 +346,7 @@ func TestApprovalResumeTokenRecovery(t *testing.T) {
 	if len(resumeTokens) != 1 {
 		t.Fatalf("expected resumable approval blocker, got %#v", resumeTokens)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, approvalTask.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, approvalTask.ID); active != 0 {
 		t.Fatalf("needs_approval must release active lease, got %d", active)
 	}
 	for tokenID := range resumeTokens {
@@ -417,9 +417,9 @@ func TestDecideApprovalApprovedResumesPausedTaskAndRun(t *testing.T) {
 	if running.Status != RunStatusRunning {
 		t.Fatalf("approved decision should resume run, got %#v", running)
 	}
-	eventTypes := collectEventTypes(rt.Events(run.ID))
+	eventTypes := collectEventTypes(rt.Events(context.Background(), run.ID))
 	if !eventTypes.Contains(EventApprovalDecided) || !eventTypes.Contains(EventRunStatusChanged) {
-		t.Fatalf("approval decision should emit decision and run-status events, got %#v", rt.Events(run.ID))
+		t.Fatalf("approval decision should emit decision and run-status events, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -450,11 +450,11 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 	if retryTask.Status != TaskStatusDispatched || retryTask.Error != "temporary" {
 		t.Fatalf("first failed report should redispatch task with error, got %#v", retryTask)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
 		t.Fatalf("retry should release active lease, got %d", active)
 	}
 
-	retryEnvelopeID := lastDispatchedEnvelopeID(t, rt.Events(run.ID), task.ID)
+	retryEnvelopeID := lastDispatchedEnvelopeID(t, rt.Events(context.Background(), run.ID), task.ID)
 	retryLease, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
 		RunID:      run.ID,
 		TaskID:     task.ID,
@@ -482,7 +482,7 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 	if failed.Status != TaskStatusFailed || failed.Error != "permanent" {
 		t.Fatalf("second failed report should fail task, got %#v", failed)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
 		t.Fatalf("final failure should release active lease, got %d", active)
 	}
 }
@@ -508,7 +508,7 @@ func TestBlockedReportReleasesLease(t *testing.T) {
 	if blocked.Status != TaskStatusBlocked {
 		t.Fatalf("blocked report should block task, got %#v", blocked)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
 		t.Fatalf("blocked report must release active lease, got %d", active)
 	}
 }
@@ -552,7 +552,7 @@ func TestActionAttemptReconcileAndSourceIdentitySelector(t *testing.T) {
 	if reconcile.Status != TaskStatusReconcileRequired {
 		t.Fatalf("unknown action attempt should require reconcile, got %#v", reconcile)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, actionTask.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, actionTask.ID); active != 0 {
 		t.Fatalf("reconcile-required action attempt must release active lease, got %d", active)
 	}
 
@@ -587,7 +587,7 @@ func TestPublishResponseDoesNotHoldRuntimeLockDuringGatewayCall(t *testing.T) {
 	}
 	rt.SetOutputGateway(reentrantGateway{rt: rt})
 	done := make(chan error, 1)
-	message := rt.ResponseOutbox(run.ID)[0]
+	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	go func() {
 		done <- rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID})
 	}()
@@ -616,8 +616,8 @@ func TestExecutionHeartbeatExtendsLease(t *testing.T) {
 	if !heartbeatLease.ExpiresAt.After(beforeHeartbeat) {
 		t.Fatalf("heartbeat did not extend lease: before=%s after=%s", beforeHeartbeat, heartbeatLease.ExpiresAt)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventTaskExecutionHeartbeat) {
-		t.Fatalf("heartbeat event missing, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventTaskExecutionHeartbeat) {
+		t.Fatalf("heartbeat event missing, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -637,8 +637,8 @@ func TestExecutionReleaseRejectsWrongHolderAndStopsHeartbeat(t *testing.T) {
 	if err := rt.HeartbeatTaskExecution(ctx, HeartbeatTaskExecutionCommand{LeaseID: lease.ID, TTL: time.Minute}); !errors.Is(err, ErrLeaseNotActive) {
 		t.Fatalf("heartbeat after release should fail with ErrLeaseNotActive, got %v", err)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventTaskExecutionReleased) {
-		t.Fatalf("release event missing, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventTaskExecutionReleased) {
+		t.Fatalf("release event missing, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -657,13 +657,13 @@ func TestTraceCommandsCloneMetadataAndRecordFailure(t *testing.T) {
 	if err := rt.EndTraceSpan(ctx, EndTraceSpanCommand{SpanID: span.ID, Error: "boom"}); err != nil {
 		t.Fatalf("EndTraceSpan() error = %v", err)
 	}
-	got := lastTraceSpan(t, rt.TraceSpans(run.ID))
+	got := lastTraceSpan(t, rt.TraceSpans(context.Background(), run.ID))
 	if got.Status != TraceSpanFailed || got.Error != "boom" || got.Metadata["phase"] != "start" {
 		t.Fatalf("trace span did not end with cloned metadata and failure: %#v", got)
 	}
-	eventTypes := collectEventTypes(rt.Events(run.ID))
+	eventTypes := collectEventTypes(rt.Events(context.Background(), run.ID))
 	if !eventTypes.Contains(EventTraceSpanStarted) || !eventTypes.Contains(EventTraceSpanEnded) {
-		t.Fatalf("trace events missing, got %#v", rt.Events(run.ID))
+		t.Fatalf("trace events missing, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -687,8 +687,8 @@ func TestRequestApprovalPreservesMetadataAndRejectDecision(t *testing.T) {
 	if decided.Status != "rejected" {
 		t.Fatalf("rejected decision was not persisted: %#v", decided)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventApprovalDecided) || !collectEventTypes(rt.Events(run.ID)).Contains(EventResumeTokenCreated) {
-		t.Fatalf("approval request/decision events missing, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventApprovalDecided) || !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventResumeTokenCreated) {
+		t.Fatalf("approval request/decision events missing, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -727,17 +727,17 @@ func TestPublishResponseFailureCommitsAuditWithoutPublishing(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(run.ID)[0]
+	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	rt.SetOutputGateway(failingGateway{})
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); !errors.Is(err, errPublishFailed) {
 		t.Fatalf("PublishResponse(failing gateway) error = %v, want %v", err, errPublishFailed)
 	}
-	after := rt.ResponseOutbox(run.ID)[0]
+	after := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	if after.Status != UserMessageQueued {
 		t.Fatalf("failed publish must leave message queued, got %#v", after)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventResponsePublishFailed) {
-		t.Fatalf("failed publish should commit audit event, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventResponsePublishFailed) {
+		t.Fatalf("failed publish should commit audit event, got %#v", rt.Events(context.Background(), run.ID))
 	}
 	rt.SetOutputGateway(nil)
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); err != nil {
@@ -994,7 +994,7 @@ type reentrantGateway struct {
 }
 
 func (g reentrantGateway) Publish(_ context.Context, message UserMessage) error {
-	_ = g.rt.ResponseOutbox(message.RunID)
+	_ = g.rt.ResponseOutbox(context.Background(), message.RunID)
 	return nil
 }
 
@@ -1073,7 +1073,7 @@ func assertPipelineOutcome(ctx context.Context, t *testing.T, rt *Runtime, polic
 	if !slices.Contains(policy.operations, PolicyOperationDispatch) {
 		t.Fatalf("dispatch did not go through PolicyEngine, ops=%#v", policy.operations)
 	}
-	spans := rt.TraceSpans(run.ID)
+	spans := rt.TraceSpans(context.Background(), run.ID)
 	if !containsSpan(spans, "runtime.pipeline") || !containsSpan(spans, "policy.authorize.dispatch") || !containsSpan(spans, "mailbox.dispatch") {
 		t.Fatalf("expected pipeline/policy/mailbox spans, got %#v", spans)
 	}
@@ -1092,8 +1092,8 @@ func assertPolicyBlockedTask(ctx context.Context, t *testing.T, rt *Runtime, run
 	if run.Status != runStatus {
 		t.Fatalf("policy effect set run status %s, want %s: %#v", run.Status, runStatus, run)
 	}
-	if !collectEventTypes(rt.Events(runID)).Contains(EventTaskPaused) {
-		t.Fatalf("policy effect did not emit TaskPaused, events=%#v", rt.Events(runID))
+	if !collectEventTypes(rt.Events(context.Background(), runID)).Contains(EventTaskPaused) {
+		t.Fatalf("policy effect did not emit TaskPaused, events=%#v", rt.Events(context.Background(), runID))
 	}
 }
 

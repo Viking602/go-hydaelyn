@@ -10,7 +10,7 @@ import (
 )
 
 func (r *Runner) ActiveLeaseCount(runID, taskID string) int {
-	return r.rt.ActiveLeaseCount(runID, taskID)
+	return r.rt.ActiveLeaseCount(context.Background(), runID, taskID)
 }
 
 func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd api.AcquireTaskExecutionCommand) (api.TaskExecutionLease, bool, error) {
@@ -101,7 +101,7 @@ func (r *Runner) EndTraceSpan(ctx context.Context, cmd api.EndTraceSpanCommand) 
 }
 
 func (r *Runner) TraceSpans(runID string) []api.TraceSpan {
-	return adapter.TraceSpansFromModel(r.rt.TraceSpans(runID))
+	return adapter.TraceSpansFromModel(r.rt.TraceSpans(context.Background(), runID))
 }
 
 func (r *Runner) SaveTraceSpan(ctx context.Context, span api.TraceSpan) error {

@@ -71,7 +71,7 @@ func TestLeaseReportAndMailboxContracts(t *testing.T) {
 	}); err != nil || duplicate {
 		t.Fatalf("duplicate AcquireTaskExecution() acquired=%v err=%v", duplicate, err)
 	}
-	if got := rt.ActiveLeaseCount(run.ID, task.ID); got != 1 {
+	if got := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); got != 1 {
 		t.Fatalf("expected one active lease, got %d", got)
 	}
 
@@ -126,7 +126,7 @@ func TestLeaseReportAndMailboxContracts(t *testing.T) {
 	if partial.Status != TaskStatusRunning {
 		t.Fatalf("partial_success must keep task running, got %#v", partial)
 	}
-	if ready := rt.ReadyTasks(run.ID); containsTask(ready, dependent.ID) {
+	if ready := rt.ReadyTasks(context.Background(), run.ID); containsTask(ready, dependent.ID) {
 		t.Fatalf("partial_success satisfied downstream dependency: %#v", ready)
 	}
 
@@ -327,10 +327,10 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if blocked.Status != TaskStatusWaitingUserInput || currentRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification did not block task/run: task=%#v run=%#v", blocked, currentRun)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventSystemResponseBypassAudited) {
-		t.Fatalf("system clarification response should emit bypass audit event, events=%#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventSystemResponseBypassAudited) {
+		t.Fatalf("system clarification response should emit bypass audit event, events=%#v", rt.Events(context.Background(), run.ID))
 	}
-	if active := rt.ActiveLeaseCount(run.ID, worker.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, worker.ID); active != 0 {
 		t.Fatalf("needs_clarification must release active lease, got %d", active)
 	}
 	if err := rt.SubmitUserInput(ctx, SubmitUserInputCommand{RunID: run.ID, TaskID: worker.ID, Input: "region=us-east-1"}); err != nil {
@@ -452,11 +452,11 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if reconcileTask.Status != TaskStatusReconcileRequired || reconcileTask.Attempts != 1 {
 		t.Fatalf("unknown action must block without auto retry, got %#v", reconcileTask)
 	}
-	if active := rt.ActiveLeaseCount(run.ID, unknownAction.ID); active != 0 {
+	if active := rt.ActiveLeaseCount(context.Background(), run.ID, unknownAction.ID); active != 0 {
 		t.Fatalf("reconcile_required must release active lease, got %d", active)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventActionReconcileRequired) {
-		t.Fatalf("expected ActionReconcileRequired event, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventActionReconcileRequired) {
+		t.Fatalf("expected ActionReconcileRequired event, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 
@@ -504,7 +504,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	if handedOff.OwnerAgentID != "agent-b" || handedOff.HandoffCount != 1 {
 		t.Fatalf("handoff did not transfer ownership: %#v", handedOff)
 	}
-	events := rt.Events(run.ID)
+	events := rt.Events(context.Background(), run.ID)
 	requestedIdx := indexEvent(events, EventHandoffRequested)
 	contextIdx := indexEvent(events, EventBlackboardItemWritten)
 	ownerIdx := indexEvent(events, EventTaskOwnerChanged)
@@ -555,7 +555,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	queued := rt.ResponseOutbox(run.ID)
+	queued := rt.ResponseOutbox(context.Background(), run.ID)
 	if len(queued) != 1 {
 		t.Fatalf("expected one queued response, got %#v", queued)
 	}
@@ -565,7 +565,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	if queued[0].Status != UserMessageQueued {
 		t.Fatalf("expected queued response, got %#v", queued[0])
 	}
-	for _, event := range rt.Events(run.ID) {
+	for _, event := range rt.Events(context.Background(), run.ID) {
 		if event.Type != EventUserMessageComposed {
 			continue
 		}
@@ -577,7 +577,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: queued[0].ID}); err != nil {
 		t.Fatalf("PublishResponse() error = %v", err)
 	}
-	published := rt.ResponseOutbox(run.ID)
+	published := rt.ResponseOutbox(context.Background(), run.ID)
 	if published[0].Status != UserMessagePublished {
 		t.Fatalf("OutputGateway did not mark response published: %#v", published[0])
 	}
@@ -612,14 +612,14 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	}); !errors.Is(err, ErrPolicyObligationFailed) {
 		t.Fatalf("expected policy obligation failure, got %v", err)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventPolicyObligationFailed) {
-		t.Fatalf("expected PolicyObligationFailed event, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventPolicyObligationFailed) {
+		t.Fatalf("expected PolicyObligationFailed event, got %#v", rt.Events(context.Background(), run.ID))
 	}
 
 	if err := rt.RegisterFlow(Flow{Name: "smoke", PlannerPreset: "default"}); err != nil {
 		t.Fatalf("expected flow registration to succeed, got %v", err)
 	}
-	projection, err := rt.Replay(run.ID, ReplayModeAudit)
+	projection, err := rt.Replay(context.Background(), run.ID, ReplayModeAudit)
 	if err != nil {
 		t.Fatalf("Replay() error = %v", err)
 	}
@@ -641,8 +641,8 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 	if deadTask.Status != TaskStatusBlocked {
 		t.Fatalf("dead-letter must trigger monitor decision and block task, got %#v", deadTask)
 	}
-	if !collectEventTypes(rt.Events(run.ID)).Contains(EventTaskMonitorDecision) {
-		t.Fatalf("expected TaskMonitorDecision after dead-letter, got %#v", rt.Events(run.ID))
+	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventTaskMonitorDecision) {
+		t.Fatalf("expected TaskMonitorDecision after dead-letter, got %#v", rt.Events(context.Background(), run.ID))
 	}
 }
 

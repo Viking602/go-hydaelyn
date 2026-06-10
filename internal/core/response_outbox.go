@@ -6,8 +6,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
-func (r *Runtime) ResponseOutbox(runID string) []model.UserMessage {
-	ctx := context.Background()
+func (r *Runtime) ResponseOutbox(ctx context.Context, runID string) []model.UserMessage {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil
