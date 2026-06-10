@@ -59,8 +59,25 @@ type BudgetUsage struct {
 	WallClock time.Duration `json:"wallClock,omitempty"`
 }
 
-// StepPolicy lets a caller override the model's default next-step
-// decision. v0.8.0 ships the contract; Phase 3 wires it into the loop.
+// StepPolicy lets a caller override the loop's natural next-step decision at a
+// continue boundary — the point after a non-terminal tool turn where the loop
+// would otherwise iterate again. RunMessages consults it there (when set) and
+// honors the returned decision:
+//
+//   - StepDecisionContinue (or "") keeps the loop's natural behavior.
+//   - StepDecisionFinish / StepDecisionHandoff stop the loop cleanly, recording
+//     the override on the final Step; the run completes with StopReasonComplete.
+//   - StepDecisionFail stops the loop with a typed failure (ErrStepAborted,
+//     classified FailureKindStepAborted).
+//
+// It is the substrate for goal-style control — iterate until a predicate over
+// the step trace holds, then stop. The policy cannot resurrect a loop that
+// already finished naturally (a final answer with no tool calls, or a terminal
+// tool): those boundaries are not continue boundaries, so the policy is not
+// consulted there. An output-guardrail retry turn loops again without
+// consulting the policy either — the retry is the guardrail's own decision,
+// bounded by its retry limit and MaxIterations — though its step still appears
+// in the snapshot at the next tool-turn boundary.
 type StepPolicy interface {
 	Next(state LoopSnapshot) (StepDecision, error)
 }

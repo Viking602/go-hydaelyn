@@ -15,6 +15,7 @@ const (
 	FailureKindInsufficientEvidence FailureKind = "insufficient_evidence"
 	FailureKindContextBuildFailed   FailureKind = "context_build_failed"
 	FailureKindEngineError          FailureKind = "engine_error"
+	FailureKindStepAborted          FailureKind = "step_aborted"
 )
 
 // AgentFailure is the only failure shape that crosses the agent →

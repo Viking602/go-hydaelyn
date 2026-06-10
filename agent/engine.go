@@ -68,6 +68,8 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		OutputGuardrails: e.OutputGuardrails,
 		OutputRecorder:   e.OutputRecorder,
 		Sink:             sink,
+		StepPolicy:       e.StepPolicy,
+		Compact:          e.compactor(),
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
@@ -295,6 +297,13 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 	case errors.As(err, &tripwire), errors.As(err, &retryLimit):
 		failure.Kind = FailureKindUnsafeAction
 		failure.Escalatable = true
+	case errors.Is(err, ErrStepAborted):
+		// A StepPolicy that stops the loop with a fail decision (or whose Next
+		// errors) is a deliberate control-flow choice, not a transient fault, so
+		// it is neither retryable nor escalatable: re-running would meet the same
+		// predicate. A Finish/Handoff override never reaches here — it ends the
+		// loop with no error.
+		failure.Kind = FailureKindStepAborted
 	default:
 		failure.Kind = FailureKindEngineError
 	}
@@ -306,6 +315,18 @@ func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Mess
 		return e.ContextBuilder.Build(ctx, task)
 	}
 	return defaultContextBuilder{}.Build(ctx, task)
+}
+
+// compactor returns the ContextManager.Compact bound as the loop's compaction
+// hook, or nil when no ContextManager is configured (the loop then never
+// compacts). The default context managers pass the history through unchanged, so
+// wiring this is a no-op until a caller supplies a ContextManager whose Compact
+// actually reshapes the history.
+func (e Engine) compactor() func(context.Context, []message.Message) ([]message.Message, error) {
+	if e.ContextBuilder == nil {
+		return nil
+	}
+	return e.ContextBuilder.Compact
 }
 
 type defaultContextBuilder struct{}

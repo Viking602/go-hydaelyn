@@ -9,9 +9,11 @@ import (
 
 // ContextManager builds the initial message slice for one api.Task and
 // compacts historical message lists when the loop's token budget is
-// tight. Engine.Run reads ContextManager.Build to seed the loop; the
-// Compact half is invoked once the LoopPolicy.MaxTokens / TaskBudget
-// boundary is approached (Phase 2 wiring).
+// tight. Engine.Run reads ContextManager.Build to seed the loop and wires
+// Compact into it: once the LoopPolicy.MaxTokens / TaskBudget boundary is
+// approached, the loop calls Compact before every remaining turn, so an
+// implementation must be idempotent on an already-compacted history. See
+// LoopInput.Compact for the trigger and determinism contract.
 type ContextManager interface {
 	Build(ctx context.Context, task api.Task) ([]message.Message, error)
 	Compact(ctx context.Context, history []message.Message) ([]message.Message, error)
