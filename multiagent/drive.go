@@ -3,6 +3,7 @@ package multiagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -71,6 +72,24 @@ type DriveResult struct {
 // dispatches past DriveOptions.MaxTicks.
 var ErrMaxTicksExceeded = errors.New("multiagent: scheduler exceeded max ticks")
 
+// SchedulerFailureError wraps an error returned by Scheduler.Next.
+// Drive returns it so integrations can detect scheduler-level failure
+// with errors.As, surface a typed terminal Run status, and emit an
+// EventSchedulerFailure event — per ADR-016 §6 a scheduler failure must
+// not cross the boundary as a bare error. Executor errors are not
+// scheduler failures; they surface as failed instances instead.
+type SchedulerFailureError struct {
+	RunID string
+	Tick  int
+	Err   error
+}
+
+func (e *SchedulerFailureError) Error() string {
+	return fmt.Sprintf("multiagent: scheduler failed on tick %d of run %s: %v", e.Tick, e.RunID, e.Err)
+}
+
+func (e *SchedulerFailureError) Unwrap() error { return e.Err }
+
 const defaultMaxTicks = 64
 
 // Drive runs scheduler to a terminal state (Next returns no dispatches),
@@ -94,7 +113,7 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		}
 		dispatches, err := scheduler.Next(ctx, state)
 		if err != nil {
-			return DriveResult{State: state, Ticks: tick - 1}, err
+			return DriveResult{State: state, Ticks: tick - 1}, &SchedulerFailureError{RunID: runID, Tick: tick, Err: err}
 		}
 		if len(dispatches) == 0 {
 			return DriveResult{State: state, Ticks: tick - 1}, nil
