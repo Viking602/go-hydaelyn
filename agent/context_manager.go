@@ -14,6 +14,13 @@ import (
 // approached, the loop calls Compact before every remaining turn, so an
 // implementation must be idempotent on an already-compacted history. See
 // LoopInput.Compact for the trigger and determinism contract.
+//
+// Compact receives only the history — not the remaining token budget —
+// so an implementation cannot size its output toward a target; it must
+// instead be deterministic and idempotent (compacting an
+// already-compacted history is cheap and stable), because the loop
+// invokes it before every remaining turn once the budget boundary is
+// approached and replay must reproduce the same compactions (ADR-007).
 type ContextManager interface {
 	Build(ctx context.Context, task api.Task) ([]message.Message, error)
 	Compact(ctx context.Context, history []message.Message) ([]message.Message, error)

@@ -106,3 +106,14 @@ const (
 	ActionAttemptUnknown   ActionAttemptStatus = "unknown"
 	ActionAttemptCancelled ActionAttemptStatus = "cancelled"
 )
+
+// TaskEnvelope.Status values the framework itself writes. The field stays
+// a plain string for compatibility (hosts may add their own states); these
+// constants document the built-in lifecycle: dispatch creates a pending
+// envelope, AckEnvelope marks it acked, and DeadLetter either re-queues it
+// as pending (retry decision) or parks it as dead.
+const (
+	EnvelopeStatusPending = "pending"
+	EnvelopeStatusAcked   = "acked"
+	EnvelopeStatusDead    = "dead"
+)

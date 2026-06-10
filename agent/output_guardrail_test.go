@@ -290,3 +290,40 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 		t.Fatalf("expected final assistant output, got %#v", result.Messages[len(result.Messages)-1])
 	}
 }
+
+func TestEngineOutputGuardrailReplacementIsSeenByNextGuardrail(t *testing.T) {
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "unsafe draft"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+	}
+	var secondSaw string
+	engine := Engine{Provider: driver}
+	result, err := engine.RunMessages(context.Background(), LoopInput{
+		Model: "test-model",
+		Messages: []message.Message{
+			message.NewText(message.RoleUser, "hi"),
+		},
+		MaxIterations: 1,
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("replacer", func(_ context.Context, input OutputGuardrailInput) (OutputGuardrailResult, error) {
+				return ReplaceOutput(message.NewText(message.RoleAssistant, "safe answer")), nil
+			}),
+			NewOutputGuardrail("observer", func(_ context.Context, input OutputGuardrailInput) (OutputGuardrailResult, error) {
+				secondSaw = input.Output.Text
+				return AllowOutput(), nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if secondSaw != "safe answer" {
+		t.Fatalf("second guardrail saw %q, want the replaced output", secondSaw)
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if last.Text != "safe answer" {
+		t.Fatalf("final output = %#v, want the replaced output", last)
+	}
+}

@@ -24,7 +24,7 @@ func (r *Runner) Task(ctx context.Context, runID, taskID string) (api.Task, erro
 }
 
 func (r *Runner) ReadyTasks(runID string) []api.Task {
-	return adapter.TasksFromModel(r.rt.ReadyTasks(runID))
+	return adapter.TasksFromModel(r.rt.ReadyTasks(context.Background(), runID))
 }
 
 func (r *Runner) TransitionTask(ctx context.Context, cmd api.TransitionTaskCommand) error {

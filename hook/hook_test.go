@@ -3,6 +3,7 @@ package hook
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/message"
@@ -124,6 +125,9 @@ func TestChainConvertsHandlerPanicToError(t *testing.T) {
 			}
 			if !errors.Is(err, ErrHandlerPanic) {
 				t.Fatalf("%s: errors.Is(err, ErrHandlerPanic) = false, err = %v", tc.stage, err)
+			}
+			if !strings.Contains(err.Error(), "panicHandler") {
+				t.Fatalf("%s: error %q does not identify the panicking handler", tc.stage, err)
 			}
 		})
 	}

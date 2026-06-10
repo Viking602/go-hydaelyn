@@ -54,11 +54,11 @@ func (r *Runner) RunEvents(ctx context.Context, runID string) ([]api.Event, erro
 }
 
 func (r *Runner) Events(runID string) []api.Event {
-	return adapter.EventsFromModel(r.rt.Events(runID))
+	return adapter.EventsFromModel(r.rt.Events(context.Background(), runID))
 }
 
 func (r *Runner) Replay(runID string, mode api.ReplayMode) (api.Projection, error) {
-	projection, err := r.rt.Replay(runID, model.ReplayMode(mode))
+	projection, err := r.rt.Replay(context.Background(), runID, model.ReplayMode(mode))
 	if err != nil {
 		return api.Projection{}, adapter.ErrorToAPI(err)
 	}
@@ -66,7 +66,7 @@ func (r *Runner) Replay(runID string, mode api.ReplayMode) (api.Projection, erro
 }
 
 func (r *Runner) ReplayRunState(runID string) (api.Projection, error) {
-	projection, err := r.rt.ReplayRunState(runID)
+	projection, err := r.rt.ReplayRunState(context.Background(), runID)
 	if err != nil {
 		return api.Projection{}, adapter.ErrorToAPI(err)
 	}

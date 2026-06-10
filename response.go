@@ -31,7 +31,7 @@ func (r *Runner) DrainResponseOutbox(ctx context.Context) (int, error) {
 }
 
 func (r *Runner) ResponseOutbox(runID string) []api.UserMessage {
-	return adapter.UserMessagesFromModel(r.rt.ResponseOutbox(runID))
+	return adapter.UserMessagesFromModel(r.rt.ResponseOutbox(context.Background(), runID))
 }
 
 func (r *Runner) QueueMessage(ctx context.Context, message api.UserMessage) error {

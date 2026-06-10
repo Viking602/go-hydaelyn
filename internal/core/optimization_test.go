@@ -184,7 +184,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if clarificationRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification should block run, got %#v", clarificationRun)
 	}
-	messages := rt.ResponseOutbox(run.ID)
+	messages := rt.ResponseOutbox(context.Background(), run.ID)
 	if len(messages) == 0 || messages[len(messages)-1].Type != UserMessageTypeClarificationRequest {
 		t.Fatalf("needs_clarification should queue clarification request, got %#v", messages)
 	}
@@ -220,7 +220,7 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(run.ID)[0]
+	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); err != nil {
 		t.Fatalf("PublishResponse() error = %v", err)
 	}
@@ -239,7 +239,7 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 		t.Fatalf("UpdateMessage(corrupt) error = %v", err)
 	}
 
-	projection, err := rt.ReplayRunState(run.ID)
+	projection, err := rt.ReplayRunState(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("ReplayRunState() error = %v", err)
 	}
@@ -252,7 +252,7 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	if len(projection.Messages) != 1 || projection.Messages[0].Status != UserMessagePublished {
 		t.Fatalf("expected replayed published user message, got %#v", projection.Messages)
 	}
-	audit, err := rt.Replay(run.ID, ReplayModeAudit)
+	audit, err := rt.Replay(context.Background(), run.ID, ReplayModeAudit)
 	if err != nil {
 		t.Fatalf("Replay(audit) error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestRetryDispatchEventCarriesAcquirableEnvelopeID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(failed retry) error = %v", err)
 	}
-	envID := lastDispatchedEnvelopeID(t, rt.Events(run.ID), task.ID)
+	envID := lastDispatchedEnvelopeID(t, rt.Events(context.Background(), run.ID), task.ID)
 	if envID == "" {
 		t.Fatalf("retry TaskDispatched event must carry a non-empty envelopeId")
 	}
@@ -336,10 +336,10 @@ func TestSubmitResponseOutputEventCarriesReplayableMessageID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	if id := lastQueuedMessageID(t, rt.Events(run.ID)); id == "" {
+	if id := lastQueuedMessageID(t, rt.Events(context.Background(), run.ID)); id == "" {
 		t.Fatalf("SubmitResponseOutput UserMessageQueued event must carry a non-empty messageId")
 	}
-	projection, err := rt.ReplayRunState(run.ID)
+	projection, err := rt.ReplayRunState(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("ReplayRunState(response) error = %v", err)
 	}
@@ -376,10 +376,10 @@ func TestSystemResponseEventCarriesReplayableMessageID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(needs clarification) error = %v", err)
 	}
-	if id := lastQueuedMessageID(t, rt.Events(run.ID)); id == "" {
+	if id := lastQueuedMessageID(t, rt.Events(context.Background(), run.ID)); id == "" {
 		t.Fatalf("system UserMessageQueued event must carry a non-empty messageId")
 	}
-	projection, err := rt.ReplayRunState(run.ID)
+	projection, err := rt.ReplayRunState(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("ReplayRunState(clarification) error = %v", err)
 	}

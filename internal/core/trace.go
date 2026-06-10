@@ -29,8 +29,7 @@ func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) err
 	return err
 }
 
-func (r *Runtime) TraceSpans(runID string) []model.TraceSpan {
-	ctx := context.Background()
+func (r *Runtime) TraceSpans(ctx context.Context, runID string) []model.TraceSpan {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil

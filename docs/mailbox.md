@@ -1,153 +1,106 @@
-# Mailbox — agent-to-agent signals
+# Mailbox — task envelopes between agents
 
-`go-hydaelyn` has two orthogonal data planes for agent collaboration:
+`go-hydaelyn` has two orthogonal planes for agent collaboration:
 
-| Plane       | Purpose                                                     | Where it lives                    |
-|-------------|-------------------------------------------------------------|-----------------------------------|
-| Blackboard  | **Data** — findings, artifacts, CAS-protected exchanges     | `internal/blackboard.Exchange`    |
-| **Mailbox** | **Signals** — ask / answer / delegate / cancel / handoff    | `mailbox.Mailbox`                 |
+| Plane       | Purpose                                                | Public surface                                                          |
+|-------------|--------------------------------------------------------|-------------------------------------------------------------------------|
+| Blackboard  | **Data** — findings, artifacts, shared evidence        | `api.BlackboardItem` + `Runner.WriteItem` / `SelectItems` / `Subscribe` |
+| **Mailbox** | **Dispatch** — hand a task to a specific agent, ack it | `api.TaskEnvelope` + the `Runner` envelope methods                      |
 
 Use the blackboard when one task's *output* feeds another's *input*. Use the
-mailbox when one agent wants to **talk to another agent directly**, out-of-band
-from the static plan.
+mailbox when a task must be **delivered to a particular agent** (or fanned out
+to a role/group) with explicit acknowledgement and dead-letter handling.
+
+There is no separate mailbox object: envelopes are created, acked, and
+dead-lettered through `Runner` commands, and every state change is persisted
+through the same durable stores as the rest of the run.
 
 ## Quick tour
 
 ```go
-driver := storage.NewMemoryDriver()
-runner := host.New(host.Config{Storage: driver})
+runner := hydaelyn.New()
+runner.RegisterAgent(api.AgentProfile{ID: "alice"})
+runner.RegisterAgent(api.AgentProfile{ID: "bob"})
 
-mbox := runner.Mailbox()
+run, _, _ := runner.StartRun(ctx, api.StartRunCommand{Request: "ping pong"})
 
-// Ask verifier-1 a question.
-ids, _ := mbox.Send(ctx, mailbox.SendInput{
-    TeamRunID: state.ID,
-    From: mailbox.Address{
-        Kind: mailbox.AddressKindAgent, TeamRunID: state.ID, AgentID: "researcher-1",
-    },
-    To: mailbox.Address{
-        Kind: mailbox.AddressKindAgent, TeamRunID: state.ID, AgentID: "verifier-1",
-    },
-    Letter: mailbox.Letter{
-        Subject:  "verify claim",
-        Body:     "is the p-value significant?",
-        Intent:   mailbox.IntentAsk,
-        Priority: mailbox.PriorityHigh,
-    },
-    CorrelationID: "thread-7",
+// Alice dispatches a question task to Bob.
+ask, _ := runner.CreateTask(ctx, api.CreateTaskCommand{
+    RunID: run.ID, TaskID: "ask", OwnerAgentID: "bob",
+    Goal: "verify alpha-cohort effect",
+})
+env, _ := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+    RunID: run.ID, TaskID: ask.ID, TargetAgentID: "bob",
+    Payload: map[string]any{"from": "alice", "subject": "verify claim"},
+})
+
+// Bob acquires the execution lease, acks the envelope, then reports.
+lease, _, _ := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+    RunID: run.ID, TaskID: ask.ID, EnvelopeID: env.ID,
+    HolderType: api.HolderAgent, HolderID: "bob", TTL: time.Minute,
+})
+_ = runner.AckEnvelope(ctx, api.AckEnvelopeCommand{EnvelopeID: env.ID, HolderID: "bob"})
+_ = runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
+    RunID: run.ID, TaskID: ask.ID, LeaseID: lease.ID,
+    HolderType: api.HolderAgent, HolderID: "bob",
+    TaskVersion: ask.Version,
+    Report:      api.TypedReport{Status: api.ReportStatusSuccess, Summary: "p=0.012"},
 })
 ```
 
-When verifier-1 is next scheduled, the runtime drains its inbox and injects
-the letter into its prompt as an `[Incoming messages]` block. On task success
-the envelope is acked; on retryable failure it's nacked. Best-effort events
-flow to `storage.EventStore` so patterns can observe the lifecycle.
+Run `go run ./_examples/mailbox_pingpong` for the full ask → ack → reply demo.
 
-Run `go run ./_examples/mailbox_pingpong` for a full ask → answer demo.
+## Addressing and fan-out
 
-## Addressing
-
-```go
-// Direct agent
-mailbox.Address{Kind: AddressKindAgent, AgentID: "worker-1"}
-
-// All agents with a role (fan-out is server-side, one envelope per recipient)
-mailbox.Address{Kind: AddressKindRole, Role: team.RoleVerifier}
-
-// All agents whose metadata["group"] matches
-mailbox.Address{Kind: AddressKindGroup, Group: "qa-squad"}
-```
-
-## Intents & priorities
-
-| Intent       | Typical use                                      |
-| ------------ | ------------------------------------------------ |
-| `ask`        | Default. Needs an answer.                        |
-| `answer`     | Reply to an `ask`; set `InReplyTo`.              |
-| `delegate`   | "You own this now."                              |
-| `cancel`     | Ask a peer to stop a sub-task.                   |
-| `broadcast`  | FYI, no answer expected.                         |
-| `handoff`    | Transfer ownership; typically paired with state. |
-
-Priorities `low | normal | high | urgent` govern inbox ordering. Within the
-same priority, per-recipient FIFO is guaranteed.
-
-## Delivery semantics
-
-- **At-least-once.** Every envelope requires an explicit `Ack`. Retryable
-  failures `Nack`, which increments the attempt counter and promotes to DLQ
-  after `MaxAttempts`.
-- **Lease-based.** `Fetch` claims a lease (default 60s). If the worker dies
-  before `Ack`, `RecoverExpiredLeases` returns the envelope to `pending`.
-- **Per-recipient FIFO + priority.** Higher priority first; ties broken by
-  sequence.
-- **TTL.** Expired envelopes are swept during `Fetch` and marked `expired`.
-
-## Guardrails (defaults)
-
-| Knob                 | Default   | Override via              |
-|----------------------|-----------|---------------------------|
-| `MaxBodySize`        | 64 KiB    | `mailbox.Limits`          |
-| `MaxInlineBodySize`  | 4 KiB     | `mailbox.Limits`          |
-| `MaxPerRecipient`    | 1024      | `mailbox.Limits`          |
-| `MaxAttempts`        | 3         | `mailbox.Limits`          |
-| `MaxHops`            | 8         | `mailbox.Limits`          |
-| `DefaultTTL`         | 24h       | `mailbox.Limits`          |
-| `SendRatePerMinute`  | 60        | `mailbox.Limits`          |
-
-Body and subject are automatically scrubbed for common PII (API keys, emails,
-phone numbers, card-like digits). Size/rate/hop overflow returns a typed
-error (`ErrOverSize`, `ErrRateLimited`, `ErrHopLimit`) which the
-`send_message` tool surfaces back to the LLM.
-
-Pass custom limits through `host.Config`:
+`DispatchTask` targets one agent (`TargetAgentID`) or one host component
+(`TargetComponent`). `DispatchTaskFanOut` expands an `api.Address` into one
+envelope per matching registered agent:
 
 ```go
-host.New(host.Config{
-    MailboxLimits: mailbox.Limits{
-        MaxBodySize:       8 * 1024,
-        SendRatePerMinute: 10,
-    },
+// One envelope per agent whose AgentProfile.Role == "verifier".
+envs, _ := runner.DispatchTaskFanOut(ctx, api.FanOutDispatchTaskCommand{
+    RunID: run.ID, TaskID: task.ID,
+    To: api.Address{Kind: api.AddressKindRole, Role: "verifier"},
 })
 ```
 
-## Using it from an agent
+`api.AddressKind` selects the matching rule: `agent` (exact `AgentID`),
+`role` (`AgentProfile.Role`), or `group` (membership in
+`AgentProfile.Groups`). Exactly one of `AgentID`/`Role`/`Group` must be set,
+matching `Kind`.
 
-Register the `send_message` tool so LLMs can post letters:
+## Envelope lifecycle
 
-```go
-runner.RegisterTool(kit.NewSendMessageTool(runner))
+```
+DispatchTask ──▶ pending ──AckEnvelope──▶ acked
+                   │
+                   └─DeadLetter──▶ TaskMonitor.DecideDeadLetter
+                            ├─ retry: status back to pending,
+                            │         Attempts+1, NextRetryAt set
+                            └─ dead:  status dead, task → blocked
 ```
 
-The tool auto-discovers the caller's `TeamRunID` and `AgentID` from the
-task context — the LLM only supplies recipient, body, and intent.
+The status strings are exported as `api.EnvelopeStatusPending` /
+`api.EnvelopeStatusAcked` / `api.EnvelopeStatusDead`; the `Status` field
+itself stays a plain string so hosts can add their own states.
 
-## Disabling the mailbox
+- **Dispatch** transitions the task to `dispatched` and persists a `pending`
+  envelope carrying the task's payload, read selectors, write targets, and
+  retry policy.
+- **Ack** (`api.AckEnvelopeCommand{EnvelopeID, HolderID}`) marks delivery;
+  the holder must own the active execution lease.
+- **DeadLetter** (`api.DeadLetterCommand{EnvelopeID, Reason}`) consults the
+  configured `api.TaskMonitor.DecideDeadLetter`. A *retry* decision re-queues
+  the envelope (`Attempts` incremented, `NextRetryAt` from the task's
+  `RetryPolicy`) and re-dispatches the task; a *dead* decision parks the
+  envelope and blocks the task.
 
-It's wired automatically when `storage.Driver.Mailboxes()` returns a store.
-To opt out (e.g. for a minimal embedded build):
-
-```go
-disabled := false
-host.New(host.Config{MailboxEnabled: &disabled})
-```
+Inspection helpers: `runner.LoadEnvelope(ctx, id)`,
+`runner.ListEnvelopes(ctx, runID)`, plus `QueueEnvelope`/`UpdateEnvelope` for
+host-managed queues.
 
 ## Observability
 
-Every state change is persisted as a `storage.Event`:
-
-- `MailboxSent`, `MailboxDelivered`, `MailboxAcked`, `MailboxNacked`,
-  `MailboxExpired`, `MailboxDead`.
-
-Pair with `observe.Observer` to ship these to your tracer of choice.
-
-## Phase 2 roadmap
-
-Things deliberately left out of the first cut:
-
-- `reply_message` tool wrapper.
-- `await_message` capability (blocking receive).
-- `Subscribe` push channel (Redis / NATS / long-poll).
-- `Task.Receives` pattern-level expectations.
-- Cross-team-run addressing.
-- DLQ browser + visualization.
+Envelope state changes append `api.Event`s to the run's event store —
+`EnvelopeAcked` and `EnvelopeDeadLettered` carry the envelope ID and reason —
+so replay and audit see the full dispatch history alongside task transitions.

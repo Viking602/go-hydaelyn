@@ -135,3 +135,29 @@ func TestEngineRunBlockingGuardrailFailsRun(t *testing.T) {
 		t.Fatalf("Failure cause = %v, want OutputGuardrailTripwireTriggeredError", result.Failure)
 	}
 }
+
+// failingContextManager always fails Build, pinning the engine's
+// failure-classification of context construction errors.
+type failingContextManager struct{}
+
+func (failingContextManager) Build(context.Context, api.Task) ([]message.Message, error) {
+	return nil, errors.New("boom: context source unavailable")
+}
+
+func (failingContextManager) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
+	return history, nil
+}
+
+func TestRun_ContextBuildErrorMapsToContextBuildFailed(t *testing.T) {
+	engine := Engine{Provider: &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "never reached"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}}}
+	engine.ContextBuilder = failingContextManager{}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "g"}, OutputPolicy{})
+
+	if result.Failure == nil || result.Failure.Kind != FailureKindContextBuildFailed {
+		t.Fatalf("Failure = %#v, want Kind=context_build_failed", result.Failure)
+	}
+}

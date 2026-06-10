@@ -56,8 +56,7 @@ func (r *Runtime) Task(ctx context.Context, runID, taskID string) (model.Task, e
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
 }
 
-func (r *Runtime) ReadyTasks(runID string) []model.Task {
-	ctx := context.Background()
+func (r *Runtime) ReadyTasks(ctx context.Context, runID string) []model.Task {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil
@@ -85,8 +84,8 @@ func (r *Runtime) ReadyTasks(runID string) []model.Task {
 	return out
 }
 
-func (r *Runtime) Events(runID string) []model.Event {
-	events, _ := r.RunEvents(context.Background(), runID)
+func (r *Runtime) Events(ctx context.Context, runID string) []model.Event {
+	events, _ := r.RunEvents(ctx, runID)
 	return events
 }
 
@@ -108,8 +107,7 @@ func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]model.Event, e
 	return slices.Clone(events), nil
 }
 
-func (r *Runtime) ActiveLeaseCount(runID, taskID string) int {
-	ctx := context.Background()
+func (r *Runtime) ActiveLeaseCount(ctx context.Context, runID, taskID string) int {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return 0

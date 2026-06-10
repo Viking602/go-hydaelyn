@@ -106,6 +106,50 @@ func TestDriveSurfacesExecutorErrorAsFailedInstance(t *testing.T) {
 	}
 }
 
+func TestDrive_WrapsSchedulerErrorAsSchedulerFailure(t *testing.T) {
+	boom := errors.New("no agent can handle current state")
+	scheduler := SchedulerFunc(func(context.Context, TeamState) ([]Dispatch, error) {
+		return nil, boom
+	})
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		return api.TypedReport{}, nil
+	})
+
+	_, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
+
+	var failure *SchedulerFailureError
+	if !errors.As(err, &failure) {
+		t.Fatalf("errors.As(err, *SchedulerFailureError) = false, err = %v", err)
+	}
+	if failure.RunID != "run-1" || failure.Tick != 1 {
+		t.Fatalf("unexpected failure fields: %+v", failure)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatal("wrapped error must still satisfy errors.Is on the cause")
+	}
+}
+
+func TestDrive_PassesContextCancellationThroughUnwrapped(t *testing.T) {
+	// A custom Scheduler surfacing cancellation from mid-Next work: Drive's
+	// loop-top ctx check cannot catch this, so the wrap branch must skip it.
+	scheduler := SchedulerFunc(func(context.Context, TeamState) ([]Dispatch, error) {
+		return nil, context.Canceled
+	})
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		return api.TypedReport{}, nil
+	})
+
+	_, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Drive error = %v, want context.Canceled", err)
+	}
+	var failure *SchedulerFailureError
+	if errors.As(err, &failure) {
+		t.Fatalf("cancellation must not be wrapped as SchedulerFailureError, got %v", err)
+	}
+}
+
 func TestDriveStopsAtMaxTicks(t *testing.T) {
 	// A scheduler that always dispatches a fresh class never terminates.
 	endless := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
