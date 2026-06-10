@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/provider/shared"
 )
 
 const defaultClientTimeout = 30 * time.Second
@@ -21,6 +22,10 @@ type Config struct {
 	// header on current models. Set e.g. "interleaved-thinking-2025-05-14"
 	// only when opting into a beta feature.
 	Betas []string
+	// Retry bounds stream-initiation retries for transient HTTP failures
+	// (429/5xx/transport errors). The zero value retries up to 3 total
+	// attempts with exponential backoff; MaxAttempts: -1 disables retrying.
+	Retry shared.RetryPolicy
 }
 
 type Driver struct {
