@@ -30,7 +30,12 @@ type AgentClass struct {
 	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 
-	LoopPolicy   agent.LoopPolicy `json:"loopPolicy,omitempty"`
+	LoopPolicy agent.LoopPolicy `json:"loopPolicy,omitempty"`
+
+	// Capabilities is Team-level ontology: it describes what the role
+	// offers to capability-based routing at the Packs layer. ToSpec
+	// deliberately drops it (it positions the role, it does not run the
+	// loop) and no framework component consumes it yet. See ADR-014.
 	Capabilities []api.Capability `json:"capabilities,omitempty"`
 }
 
