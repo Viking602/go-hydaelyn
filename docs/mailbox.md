@@ -80,6 +80,10 @@ DispatchTask ──▶ pending ──AckEnvelope──▶ acked
                             └─ dead:  status dead, task → blocked
 ```
 
+The status strings are exported as `api.EnvelopeStatusPending` /
+`api.EnvelopeStatusAcked` / `api.EnvelopeStatusDead`; the `Status` field
+itself stays a plain string so hosts can add their own states.
+
 - **Dispatch** transitions the task to `dispatched` and persists a `pending`
   envelope carrying the task's payload, read selectors, write targets, and
   retry policy.
