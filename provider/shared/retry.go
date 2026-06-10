@@ -90,8 +90,8 @@ func DoWithRetry(ctx context.Context, client *http.Client, policy RetryPolicy, b
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8*1024))
 			_ = resp.Body.Close()
 		}
-		if max := policy.maxDelay(); wait > max {
-			wait = max
+		if limit := policy.maxDelay(); wait > limit {
+			wait = limit
 		}
 		timer := time.NewTimer(wait)
 		select {
