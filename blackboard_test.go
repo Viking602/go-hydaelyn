@@ -105,6 +105,37 @@ func TestSubscribe_CancelStopsForwarderWithoutReader(t *testing.T) {
 	}
 }
 
+func TestSubscribe_CtxCancelReleasesSubscriptionWithoutCancelCall(t *testing.T) {
+	r := newTestRunner(t)
+	run, _, _ := r.StartRun(context.Background(), api.StartRunCommand{Request: "test"})
+
+	before := runtime.NumGoroutine()
+
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	_, cancel, err := r.Subscribe(ctx, run.ID, api.BlackboardFilter{})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Abandon the subscription via ctx only — the upstream registration
+	// must still be torn down without an explicit cancel() call.
+	cancelCtx()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines after ctx cancel = %d, want <= %d (subscription leaked)", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Calling cancel afterwards must be a harmless no-op, not a
+	// double-cancel error.
+	if err := cancel(); err != nil {
+		t.Fatalf("cancel after ctx cancellation = %v, want nil", err)
+	}
+}
+
 func TestWaitForBlackboard_PredicateSatisfied(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
