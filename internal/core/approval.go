@@ -55,3 +55,16 @@ func registerApprovalUoWCommandHandlers(runtime *Runtime) {
 func (r *Runtime) newApprovalForTask(task model.Task, reason, requester string) (model.ApprovalRequest, model.ResumeToken) {
 	return lifecycle.NewApprovalPair(r.newID, task, reason, requester)
 }
+
+// PendingResumeTokens lists unconsumed resume tokens matching sel — the
+// crash-recovery enumeration primitive: a restarting host lists pending
+// tokens and feeds each to RecoverResumeToken instead of hand-rolling
+// store access.
+func (r *Runtime) PendingResumeTokens(ctx context.Context, sel model.ResumeTokenSelector) ([]model.ResumeToken, error) {
+	uow, done, err := r.beginReadUoW(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return uow.ResumeTokens().ListPending(ctx, sel)
+}

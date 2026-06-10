@@ -59,3 +59,29 @@ func TestExecuteCommand_RequestApprovalReturnsTypedResult(t *testing.T) {
 		t.Fatalf("Approval.RunID %q != Run.ID %q", requested.Approval.RunID, run.ID)
 	}
 }
+
+func TestPendingResumeTokens_ListsUnconsumedToken(t *testing.T) {
+	r := New()
+	ctx := context.Background()
+	run, task, err := r.StartRun(ctx, api.StartRunCommand{Request: "bulk recovery"})
+	if err != nil {
+		t.Fatalf("StartRun error = %v", err)
+	}
+	_, token, err := r.RequestApproval(ctx, api.RequestApprovalCommand{
+		RunID:           run.ID,
+		TaskID:          task.ID,
+		RequestedAction: "deploy",
+		Reason:          "needs human sign-off",
+	})
+	if err != nil {
+		t.Fatalf("RequestApproval error = %v", err)
+	}
+
+	pending, err := r.PendingResumeTokens(ctx, api.ResumeTokenSelector{RunID: run.ID})
+	if err != nil {
+		t.Fatalf("PendingResumeTokens error = %v", err)
+	}
+	if len(pending) != 1 || pending[0].TokenID != token.TokenID {
+		t.Fatalf("PendingResumeTokens = %+v, want exactly the approval's token %s", pending, token.TokenID)
+	}
+}

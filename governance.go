@@ -140,3 +140,14 @@ func (r *Runner) SumUsageCredits(ctx context.Context, selector api.UsageSelector
 	}
 	return total, nil
 }
+
+// PendingResumeTokens lists unconsumed resume tokens matching selector.
+// After a crash, a host enumerates pending tokens with this and recovers
+// each via RecoverResumeToken — the bulk-recovery entry point.
+func (r *Runner) PendingResumeTokens(ctx context.Context, selector api.ResumeTokenSelector) ([]api.ResumeToken, error) {
+	tokens, err := r.rt.PendingResumeTokens(ctx, adapter.ResumeTokenSelectorToModel(selector))
+	if err != nil {
+		return nil, adapter.ErrorToAPI(err)
+	}
+	return adapter.ResumeTokensFromModel(tokens), nil
+}
