@@ -76,8 +76,13 @@ var ErrMaxTicksExceeded = errors.New("multiagent: scheduler exceeded max ticks")
 // Drive returns it so integrations can detect scheduler-level failure
 // with errors.As, surface a typed terminal Run status, and emit an
 // EventSchedulerFailure event — per ADR-016 §6 a scheduler failure must
-// not cross the boundary as a bare error. Executor errors are not
-// scheduler failures; they surface as failed instances instead.
+// not cross the boundary as a bare error.
+//
+// Three terminal errors are deliberately NOT scheduler failures:
+// executor errors (they surface as failed instances), context
+// cancellation/deadline (environmental, returned unwrapped), and
+// ErrMaxTicksExceeded (the host budget ran out; the scheduler made no
+// erroneous decision).
 type SchedulerFailureError struct {
 	RunID string
 	Tick  int
@@ -113,6 +118,12 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		}
 		dispatches, err := scheduler.Next(ctx, state)
 		if err != nil {
+			// Cancellation surfacing through a custom Scheduler is not a
+			// scheduler failure — pass it through unwrapped so integrations
+			// do not map it to a SchedulerFailure event.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return DriveResult{State: state, Ticks: tick - 1}, err
+			}
 			return DriveResult{State: state, Ticks: tick - 1}, &SchedulerFailureError{RunID: runID, Tick: tick, Err: err}
 		}
 		if len(dispatches) == 0 {

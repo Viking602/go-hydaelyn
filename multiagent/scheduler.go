@@ -25,7 +25,10 @@ type TeamState struct {
 }
 
 // SchedulerFunc adapts a plain function to the Scheduler interface — the
-// scheduling counterpart of ExecutorFunc.
+// scheduling counterpart of ExecutorFunc. The function must remain a pure
+// function of TeamState (no captured mutable state, no side effects):
+// ADR-016 relies on that purity to replay scheduler decisions from the
+// event store alone.
 type SchedulerFunc func(ctx context.Context, state TeamState) ([]Dispatch, error)
 
 // Next implements Scheduler.
