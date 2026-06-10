@@ -74,7 +74,10 @@ type BudgetUsage struct {
 // the step trace holds, then stop. The policy cannot resurrect a loop that
 // already finished naturally (a final answer with no tool calls, or a terminal
 // tool): those boundaries are not continue boundaries, so the policy is not
-// consulted there.
+// consulted there. An output-guardrail retry turn loops again without
+// consulting the policy either — the retry is the guardrail's own decision,
+// bounded by its retry limit and MaxIterations — though its step still appears
+// in the snapshot at the next tool-turn boundary.
 type StepPolicy interface {
 	Next(state LoopSnapshot) (StepDecision, error)
 }

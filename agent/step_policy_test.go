@@ -141,6 +141,9 @@ func TestRunMessagesStepPolicyNextErrorAborts(t *testing.T) {
 	if !errors.Is(err, ErrStepAborted) {
 		t.Fatalf("error = %v, want ErrStepAborted from a policy Next error", err)
 	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want it to keep wrapping the policy's own error", err)
+	}
 }
 
 func TestRunMessagesStepPolicyNotConsultedOnTerminalTool(t *testing.T) {

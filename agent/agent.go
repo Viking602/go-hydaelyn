@@ -103,6 +103,11 @@ type LoopInput struct {
 	// ContextManager.Compact; the default context managers pass the history
 	// through unchanged, so compaction is opt-in via a real compactor.
 	//
+	// Consumed tokens only grow, so once the loop enters the headroom band the
+	// trigger holds for every remaining turn and Compact runs before each one. A
+	// compactor must therefore be idempotent — cheap and stable on a history it
+	// already compacted — not a one-shot transform.
+	//
 	// Determinism: the loop triggers Compact deterministically (the same trigger
 	// fires on replay), so a deterministic compactor keeps the run
 	// replay-faithful (ADR-007) while an LLM-backed one does not. Compact is
@@ -452,8 +457,11 @@ func stepPolicyOverride(input LoopInput, current []message.Message, usage provid
 	}
 	decision, policyErr := input.StepPolicy.Next(LoopSnapshot{Steps: steps})
 	if policyErr != nil {
+		// Both errors stay wrapped: ErrStepAborted so the engine classifies the
+		// failure, and policyErr so a caller's errors.Is/As still reaches the
+		// policy's own sentinel — mirroring how a Compact error keeps its cause.
 		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
-			fmt.Errorf("%w: step policy: %v", ErrStepAborted, policyErr)
+			fmt.Errorf("%w: step policy: %w", ErrStepAborted, policyErr)
 	}
 	switch decision {
 	case StepDecisionFinish, StepDecisionHandoff:
