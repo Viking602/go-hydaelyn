@@ -26,14 +26,25 @@ func (r *Runner) Subscribe(ctx context.Context, runID string, filter api.Blackbo
 	if err != nil {
 		return nil, nil, adapter.ErrorToAPI(err)
 	}
+	// stop lets the returned cancel func (and ctx cancellation) unblock a
+	// forwarder parked on `out <-` after the consumer stopped reading;
+	// closing the upstream channel alone does not release a pending send.
+	fwd, stop := context.WithCancel(ctx)
 	out := make(chan api.BlackboardItem)
 	go func() {
 		defer close(out)
 		for item := range items {
-			out <- adapter.BlackboardItemFromModel(item)
+			select {
+			case out <- adapter.BlackboardItemFromModel(item):
+			case <-fwd.Done():
+				return
+			}
 		}
 	}()
-	return out, func() error { return adapter.ErrorToAPI(cancel()) }, nil
+	return out, func() error {
+		stop()
+		return adapter.ErrorToAPI(cancel())
+	}, nil
 }
 
 func (r *Runner) WaitForBlackboard(ctx context.Context, runID string, filter api.BlackboardFilter, predicate func([]api.BlackboardItem) bool, timeout time.Duration) ([]api.BlackboardItem, error) {

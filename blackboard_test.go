@@ -2,6 +2,7 @@ package hydaelyn
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -61,6 +62,46 @@ func TestSubscribe_ReceivesWrittenItem(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Error("timed out waiting for blackboard item")
+	}
+}
+
+func TestSubscribe_CancelStopsForwarderWithoutReader(t *testing.T) {
+	r := newTestRunner(t)
+	ctx := context.Background()
+	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
+
+	before := runtime.NumGoroutine()
+
+	_, cancel, err := r.Subscribe(ctx, run.ID, api.BlackboardFilter{})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Publish an item nobody ever reads, so the forwarder parks on its
+	// send into the consumer channel.
+	if err := r.WriteItem(ctx, api.BlackboardItem{
+		RunID:      run.ID,
+		Key:        "unread",
+		Visibility: api.BlackboardVisibilityInternal,
+		Source:     api.SourceIdentity{Type: api.SourceType("agent"), ID: "a1"},
+		Payload:    "ping",
+	}); err != nil {
+		t.Fatalf("WriteItem: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond) // let the forwarder pick up the item and park
+
+	if err := cancel(); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	// The forwarder (and the subscription it wraps) must wind down even
+	// though the consumer never read the channel.
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines after cancel = %d, want <= %d (forwarder leaked)", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
