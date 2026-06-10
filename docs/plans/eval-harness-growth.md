@@ -1,6 +1,6 @@
 # Plan — Grow `eval/` into the spec's Harness-based framework
 
-> Status: `active` (approved 2026-06-01)
+> Status: `done` — M0–M5 landed and verified in-tree 2026-06-10 (Harness, 18 assertions, matchers, 3 reporters, RunMatrix, docs rewritten)
 > Target spec: [`docs/product-spec/v0.8.0/10-evaluation.md`](../product-spec/v0.8.0/10-evaluation.md)
 > Supersedes the stale narrative in [`docs/evaluation.md`](../evaluation.md)
 
