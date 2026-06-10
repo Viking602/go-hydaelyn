@@ -23,3 +23,12 @@ type TeamState struct {
 	Instances  []AgentInstance      `json:"instances,omitempty"`
 	Blackboard []api.BlackboardItem `json:"blackboard,omitempty"`
 }
+
+// SchedulerFunc adapts a plain function to the Scheduler interface — the
+// scheduling counterpart of ExecutorFunc.
+type SchedulerFunc func(ctx context.Context, state TeamState) ([]Dispatch, error)
+
+// Next implements Scheduler.
+func (fn SchedulerFunc) Next(ctx context.Context, state TeamState) ([]Dispatch, error) {
+	return fn(ctx, state)
+}

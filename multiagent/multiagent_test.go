@@ -78,9 +78,3 @@ func TestSchedulerContractAcceptsTeamStateSnapshot(t *testing.T) {
 		t.Fatalf("dispatches = %#v", dispatches)
 	}
 }
-
-type SchedulerFunc func(context.Context, TeamState) ([]Dispatch, error)
-
-func (fn SchedulerFunc) Next(ctx context.Context, state TeamState) ([]Dispatch, error) {
-	return fn(ctx, state)
-}
