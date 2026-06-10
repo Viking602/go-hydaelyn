@@ -79,7 +79,9 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 	engine.ContextBuilder = workerContextBuilder{worker: w, run: run, extra: req.Messages}
 
+	started := time.Now()
 	result, runErr := w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl)
+	w.appendUsage(ctx, task, engine, result, time.Since(started))
 	if runErr != nil {
 		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, runErr)
 		return runErr
@@ -87,6 +89,36 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 
 	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
 	return err
+}
+
+// appendUsage best-effort persists the engine run's token consumption to
+// the metering ledger. Failed runs consumed tokens too, so it runs on
+// both outcome paths; metering must never fail the task, so append
+// errors are dropped.
+func (w AgentWorker) appendUsage(ctx context.Context, task api.Task, engine agent.Engine, result agent.Result, elapsed time.Duration) {
+	usage := result.Usage
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		return
+	}
+	providerName := ""
+	if engine.Provider != nil {
+		providerName = engine.Provider.Metadata().Name
+	}
+	toolCalls := 0
+	for _, step := range result.Steps {
+		toolCalls += len(step.ToolCalls)
+	}
+	_ = w.Runner.AppendUsage(context.WithoutCancel(ctx), api.UsageRecord{
+		RunID:        task.RunID,
+		TaskID:       task.ID,
+		AgentID:      w.AgentID,
+		Provider:     providerName,
+		Model:        engine.Model,
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		ToolCalls:    toolCalls,
+		DurationMS:   elapsed.Milliseconds(),
+	})
 }
 
 func (w AgentWorker) validateExecuteEnvelope() error {

@@ -115,3 +115,28 @@ func (r *Runner) ListTraceSpans(ctx context.Context, runID string) ([]api.TraceS
 	}
 	return adapter.TraceSpansFromModel(spans), nil
 }
+
+// AppendUsage persists one usage-metering record. The worker runtime
+// calls it after every engine run; hosts may also append their own
+// records (e.g. for non-engine model calls).
+func (r *Runner) AppendUsage(ctx context.Context, record api.UsageRecord) error {
+	return adapter.ErrorToAPI(r.rt.AppendUsage(ctx, adapter.UsageRecordToModel(record)))
+}
+
+// QueryUsage returns the usage records matching selector.
+func (r *Runner) QueryUsage(ctx context.Context, selector api.UsageSelector) ([]api.UsageRecord, error) {
+	records, err := r.rt.QueryUsage(ctx, adapter.UsageSelectorToModel(selector))
+	if err != nil {
+		return nil, adapter.ErrorToAPI(err)
+	}
+	return adapter.UsageRecordsFromModel(records), nil
+}
+
+// SumUsageCredits returns the credit sum over records matching selector.
+func (r *Runner) SumUsageCredits(ctx context.Context, selector api.UsageSelector) (int64, error) {
+	total, err := r.rt.SumUsageCredits(ctx, adapter.UsageSelectorToModel(selector))
+	if err != nil {
+		return 0, adapter.ErrorToAPI(err)
+	}
+	return total, nil
+}

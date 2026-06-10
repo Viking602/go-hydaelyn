@@ -311,3 +311,48 @@ func (p failingProvider) Metadata() provider.Metadata {
 func (p failingProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
 	return nil, p.err
 }
+
+func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-usage", RootTaskID: "root", Request: "meter me"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-usage",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 11, OutputTokens: 7}},
+	})}
+	if err := (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+
+	records, err := runner.QueryUsage(ctx, api.UsageSelector{RunID: run.ID})
+	if err != nil {
+		t.Fatalf("QueryUsage() error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("usage records = %d, want exactly 1 (worker must meter the run)", len(records))
+	}
+	record := records[0]
+	if record.TaskID != task.ID || record.AgentID != "agent-a" || record.Model != "scripted" {
+		t.Fatalf("usage record identity = %+v", record)
+	}
+	if record.InputTokens != 11 || record.OutputTokens != 7 {
+		t.Fatalf("usage tokens = %d/%d, want 11/7", record.InputTokens, record.OutputTokens)
+	}
+}
