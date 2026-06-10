@@ -78,13 +78,14 @@ func (s *handoffStore) ListHandoffs(_ context.Context, sel model.HandoffSelector
 		}
 	}
 	// Spec 07 §"HandoffStore": List MUST return handoffs in ID-ascending
-	// order (scheduler-derived ULIDs ⇒ wall-clock order), independent of
-	// persistence order. RunID breaks ties for cross-run listings.
+	// order (scheduler-derived ULIDs ⇒ wall-clock monotonic), independent
+	// of persistence order — globally, not per run, so cross-run listings
+	// stay in time order too. RunID only breaks exact-ID ties.
 	sort.Slice(out, func(a, b int) bool {
-		if out[a].RunID != out[b].RunID {
-			return out[a].RunID < out[b].RunID
+		if out[a].ID != out[b].ID {
+			return out[a].ID < out[b].ID
 		}
-		return out[a].ID < out[b].ID
+		return out[a].RunID < out[b].RunID
 	})
 	return out, nil
 }

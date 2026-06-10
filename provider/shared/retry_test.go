@@ -120,3 +120,41 @@ func TestDoWithRetry_ContextCancelledDuringBackoff(t *testing.T) {
 		t.Fatalf("DoWithRetry error = %v, want context.Canceled during backoff", err)
 	}
 }
+
+// flakyTransport fails the first n round trips with a transport error,
+// then delegates to the real transport.
+type flakyTransport struct {
+	failures int
+	calls    atomic.Int32
+	inner    http.RoundTripper
+}
+
+func (t *flakyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if int(t.calls.Add(1)) <= t.failures {
+		return nil, errors.New("transport: connection reset")
+	}
+	return t.inner.RoundTrip(req)
+}
+
+func TestDoWithRetry_RetriesTransportErrorThenSucceeds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	transport := &flakyTransport{failures: 2, inner: server.Client().Transport}
+	client := &http.Client{Transport: transport}
+	policy := RetryPolicy{BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond}
+
+	resp, err := DoWithRetry(context.Background(), client, policy, buildGet(t, server.URL))
+	if err != nil {
+		t.Fatalf("DoWithRetry error = %v, want success after two transport-error retries", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := transport.calls.Load(); got != 3 {
+		t.Fatalf("transport saw %d calls, want 3", got)
+	}
+}

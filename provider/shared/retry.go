@@ -100,7 +100,14 @@ func DoWithRetry(ctx context.Context, client *http.Client, policy RetryPolicy, b
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
-		delay *= 2
+		// Clamp at the cap instead of doubling forever: unbounded doubling
+		// overflows time.Duration after ~35 attempts, and a negative delay
+		// would fire the timer immediately (a zero-interval retry storm).
+		if delay < policy.maxDelay() {
+			delay *= 2
+		} else {
+			delay = policy.maxDelay()
+		}
 	}
 }
 
