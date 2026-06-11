@@ -965,8 +965,11 @@ func (u *recordingUnitOfWork) AgentProfiles() AgentProfileStore { return u.tx.Ag
 func (u *recordingUnitOfWork) CapabilityCatalog() CapabilityStore {
 	return u.tx.CapabilityCatalog()
 }
-func (u *recordingUnitOfWork) UsageRecords() UsageStore     { return u.tx.UsageRecords() }
-func (u *recordingUnitOfWork) DeadLetters() DeadLetterStore { return u.tx.DeadLetters() }
+func (u *recordingUnitOfWork) UsageRecords() UsageStore           { return u.tx.UsageRecords() }
+func (u *recordingUnitOfWork) DeadLetters() DeadLetterStore       { return u.tx.DeadLetters() }
+func (u *recordingUnitOfWork) Handoffs() HandoffStore             { return u.tx.Handoffs() }
+func (u *recordingUnitOfWork) TeamStates() TeamStateStore         { return u.tx.TeamStates() }
+func (u *recordingUnitOfWork) AgentInstances() AgentInstanceStore { return u.tx.AgentInstances() }
 
 func (u *recordingUnitOfWork) Commit(ctx context.Context) error {
 	u.committed = true

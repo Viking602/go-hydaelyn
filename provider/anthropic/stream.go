@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -123,21 +124,26 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		return nil, err
 	}
 	endpoint := strings.TrimRight(d.config.BaseURL, "/") + "/messages"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", d.config.Version)
-	req.Header.Set("Content-Type", "application/json")
-	if len(d.config.Betas) > 0 {
-		req.Header.Set("anthropic-beta", strings.Join(d.config.Betas, ","))
-	}
 	client := d.config.Client
 	if client == nil {
 		client = http.DefaultClient
 	}
-	resp, err := client.Do(req)
+	// Stream initiation is retried (never mid-stream): the request body is
+	// rebuilt per attempt and transient 429/5xx responses back off per
+	// Config.Retry.
+	resp, err := shared.DoWithRetry(ctx, client, d.config.Retry, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("x-api-key", apiKey)
+		req.Header.Set("anthropic-version", d.config.Version)
+		req.Header.Set("Content-Type", "application/json")
+		if len(d.config.Betas) > 0 {
+			req.Header.Set("anthropic-beta", strings.Join(d.config.Betas, ","))
+		}
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}

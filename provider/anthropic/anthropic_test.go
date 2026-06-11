@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/provider/shared"
 )
 
 func TestNewDefaultClientTimeout(t *testing.T) {
@@ -338,4 +340,43 @@ func collectAnthropicEvents(t *testing.T, stream provider.Stream) []provider.Eve
 		events = append(events, event)
 	}
 	return events
+}
+
+func TestStreamRetriesTransientStatusOnInitiation(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls++
+		if calls < 3 {
+			writer.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n"))
+		_, _ = writer.Write([]byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+		Retry:   shared.RetryPolicy{BaseDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond},
+	})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "claude-sonnet-4-6",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v, want success after two 429 retries", err)
+	}
+	defer func() { _ = stream.Close() }()
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Recv() error = %v", err)
+	}
+	if event.Text != "ok" {
+		t.Fatalf("event text = %q, want ok", event.Text)
+	}
+	if calls != 3 {
+		t.Fatalf("server saw %d calls, want 3", calls)
+	}
 }

@@ -22,12 +22,14 @@ type ProviderFactory func(t *testing.T) (provider api.StoreProvider, cleanup fun
 // their own _test.go to verify their provider satisfies the framework
 // contract.
 //
-// v0.8.0 Phase 2 scope: 35 named subtests across CRUD, transactions, lease
-// CAS, event ordering, resume tokens + outbox, replay determinism, and
-// capability self-consistency. See docs/product-spec/v0.8.0/05-storage.md
-// §"Contract test suite" for the authoritative list. See ADR-012 for the
-// Position C stance: this suite is the validation bar for every provider,
-// framework reference impls and external alike.
+// v0.8.0 scope: 42 named subtests across CRUD, transactions, lease CAS,
+// event ordering, resume tokens + outbox, replay determinism, capability
+// self-consistency, and the multi-agent stores (HandoffStore /
+// TeamStateStore / AgentInstanceStore — spec 07 §"New store contracts").
+// See docs/product-spec/v0.8.0/05-storage.md §"Contract test suite" for
+// the authoritative list. See ADR-012 for the Position C stance: this
+// suite is the validation bar for every provider, framework reference
+// impls and external alike.
 //
 // Tests gated on optional capabilities call t.Skip when the provider
 // self-declares the feature as unsupported via api.CapabilityReporter, so
@@ -45,6 +47,7 @@ func RunStoreProviderContractTests(t *testing.T, factory ProviderFactory) {
 	t.Run("ResumeAndOutbox", func(t *testing.T) { runResumeAndOutboxSuite(t, factory) })
 	t.Run("ReplayDeterminism", func(t *testing.T) { runReplayDeterminismSuite(t, factory) })
 	t.Run("CapabilitySelfConsistency", func(t *testing.T) { runCapabilitySelfConsistencySuite(t, factory) })
+	t.Run("MultiAgentStores", func(t *testing.T) { runMultiAgentStoreSuite(t, factory) })
 }
 
 // suiteCase pairs a contract test name (locked surface — never rename

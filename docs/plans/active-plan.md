@@ -1,5 +1,13 @@
 # Hydaelyn 长期迭代 Active Plan
 
+> **历史文档注记(2026-06-10)**:本文件的 v0.2–v1.0 里程碑描述的是
+> legacy v1 代码树(归档于 `legacy-v1` 分支)。其中若干标记为 done 的
+> 项目(`BudgetEnforcer`、`RateLimitPerWindow`、scheduler backpressure、
+> OTel observer 适配器、CLI `run --provider`)在 v2.0 框架净化中已被
+> 删除,当前树中不存在。现行规划以 `docs/product-spec/` 为准
+> (当前版本:v0.8.0 已发布,v0.9.0 见其 README 的 roadmap stub 与
+> "Debt carried from v0.8.0" 章节)。
+
 ## 状态说明
 
 - `active`: 正在执行

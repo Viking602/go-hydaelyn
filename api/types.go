@@ -830,3 +830,65 @@ func cloneStringMap(m map[string]string) map[string]string {
 	}
 	return out
 }
+
+// HandoffRecord is the durable persistence twin of multiagent.Handoff
+// (the in-memory scheduler-side value). Append-only; (RunID, ID) is the
+// unique key.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md §"HandoffStore".
+type HandoffRecord struct {
+	ID                   string          `json:"handoffId"`
+	RunID                string          `json:"runId"`
+	From                 string          `json:"from"`
+	To                   string          `json:"to"`
+	Reason               string          `json:"reason,omitempty"`
+	Payload              json.RawMessage `json:"payload,omitempty"`
+	EvidenceIDs          []string        `json:"evidenceIds,omitempty"`
+	RequiredOutputSchema json.RawMessage `json:"requiredOutputSchema,omitempty"`
+	CreatedAt            time.Time       `json:"createdAt"`
+}
+
+// HandoffSelector filters HandoffStore.ListHandoffs. All set fields
+// AND-combine.
+type HandoffSelector struct {
+	RunID string    `json:"runId,omitempty"`
+	From  string    `json:"from,omitempty"`
+	To    string    `json:"to,omitempty"`
+	Since time.Time `json:"since,omitempty"`
+}
+
+// TeamStateRecord is the latest scheduler snapshot for one run. State is
+// the host-serialized multiagent.TeamState (api stays multiagent-free).
+// It is NOT the audit trail — that is the EventStore's SchedulerTick
+// events; the snapshot only spares a resume from replaying every tick.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md §"TeamStateStore".
+type TeamStateRecord struct {
+	RunID     string          `json:"runId"`
+	Tick      int             `json:"tick"`
+	State     json.RawMessage `json:"state"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+// AgentInstanceRecord mirrors multiagent.AgentInstance for persistence.
+// SaveAgentInstance upserts on ID (deterministic per ComputeInstanceID);
+// the append-only status history lives in the event log.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md
+// §"AgentInstanceStore".
+type AgentInstanceRecord struct {
+	ID        string    `json:"id"`
+	ClassName string    `json:"className"`
+	RunID     string    `json:"runId"`
+	TaskID    string    `json:"taskId,omitempty"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// AgentInstanceSelector filters AgentInstanceStore.ListAgentInstances.
+// All set fields AND-combine.
+type AgentInstanceSelector struct {
+	RunID     string `json:"runId,omitempty"`
+	ClassName string `json:"className,omitempty"`
+	State     string `json:"state,omitempty"`
+}

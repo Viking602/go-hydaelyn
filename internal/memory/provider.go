@@ -124,6 +124,9 @@ func (u *UnitOfWork) AgentProfiles() ports.AgentProfileStore   { return (*agentP
 func (u *UnitOfWork) CapabilityCatalog() ports.CapabilityStore { return (*capabilityStore)(u) }
 func (u *UnitOfWork) UsageRecords() ports.UsageStore           { return (*usageStore)(u) }
 func (u *UnitOfWork) DeadLetters() ports.DeadLetterStore       { return (*deadLetterStore)(u) }
+func (u *UnitOfWork) Handoffs() ports.HandoffStore             { return (*handoffStore)(u) }
+func (u *UnitOfWork) TeamStates() ports.TeamStateStore         { return (*teamStateStore)(u) }
+func (u *UnitOfWork) AgentInstances() ports.AgentInstanceStore { return (*agentInstanceStore)(u) }
 func (u *UnitOfWork) ensureOpen() error {
 	if u.closed {
 		return fmt.Errorf("memory unit of work closed: %w", model.ErrInvalidCommand)

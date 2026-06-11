@@ -168,6 +168,43 @@ type DeadLetterStore interface {
 	Requeue(ctx context.Context, deadLetterID string) error
 }
 
+// HandoffStore persists typed multi-agent handoff records. SaveHandoff is
+// append-only — a second save with an existing (RunID, ID) returns an
+// error; there is no update path. ListHandoffs MUST return matches in
+// ID-ascending order: IDs are scheduler-derived ULIDs, so ascending ID is
+// wall-clock order per tick and replay observes handoffs
+// deterministically regardless of persistence order.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md §"HandoffStore".
+type HandoffStore interface {
+	SaveHandoff(context.Context, HandoffRecord) error
+	LoadHandoff(ctx context.Context, runID, handoffID string) (HandoffRecord, error)
+	ListHandoffs(context.Context, HandoffSelector) ([]HandoffRecord, error)
+}
+
+// TeamStateStore persists the latest TeamState snapshot per run.
+// SaveTeamState overwrites atomically; LoadTeamState returns ErrNotFound
+// when no snapshot exists. Snapshots arrive up to once per scheduler
+// tick, so implementations must not lock out readers on write.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md §"TeamStateStore".
+type TeamStateStore interface {
+	SaveTeamState(context.Context, TeamStateRecord) error
+	LoadTeamState(ctx context.Context, runID string) (TeamStateRecord, error)
+}
+
+// AgentInstanceStore persists AgentInstance lifecycle rows.
+// SaveAgentInstance upserts on ID; the append-only status history is the
+// event log.
+//
+// Spec anchor: docs/product-spec/v0.8.0/07-storage.md
+// §"AgentInstanceStore".
+type AgentInstanceStore interface {
+	SaveAgentInstance(context.Context, AgentInstanceRecord) error
+	LoadAgentInstance(ctx context.Context, id string) (AgentInstanceRecord, error)
+	ListAgentInstances(context.Context, AgentInstanceSelector) ([]AgentInstanceRecord, error)
+}
+
 type UnitOfWork interface {
 	Runs() RunStore
 	Tasks() TaskStore
@@ -184,6 +221,11 @@ type UnitOfWork interface {
 	CapabilityCatalog() CapabilityStore
 	UsageRecords() UsageStore
 	DeadLetters() DeadLetterStore
+	// v0.8.0 multi-agent stores — required members, not capability-gated
+	// (spec 07 §"New store contracts"; ADR-016 §6).
+	Handoffs() HandoffStore
+	TeamStates() TeamStateStore
+	AgentInstances() AgentInstanceStore
 	Commit(context.Context) error
 	Rollback(context.Context) error
 }

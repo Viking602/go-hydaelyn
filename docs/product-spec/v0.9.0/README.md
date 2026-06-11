@@ -38,9 +38,10 @@ land alongside the impls.
 
 ### Memory pipeline implementations (deferred from v0.8.0)
 
-Each item below corresponds to a `// reserved for v0.9.0+` marker
-or interface already present in v0.8.0. v0.9.0's job is to ship the
-implementations without breaking the v0.8.0 schema.
+Each item below was reserved at the spec level in v0.8.0 (docs only —
+no `// reserved` code markers or interfaces exist in the tree; verified
+2026-06-10). v0.9.0's job is to ship the implementations without
+breaking the v0.8.0 schema.
 
 | v0.8.0 reservation | v0.9.0 deliverable |
 |---|---|
@@ -52,9 +53,46 @@ implementations without breaking the v0.8.0 schema.
 
 ### Observability (deferred from v0.8.0)
 
-- `observe/otel/` exporter implementation (v0.8.0 ships skeleton + no-op)
+- `observe/otel/` exporter implementation (new package — contrary to
+  earlier drafts of this stub, v0.8.x ships no `observe/` skeleton;
+  verified 2026-06-10)
 - Multi-agent trace shape: scheduler tick span → dispatch span → agent loop span → step span → tool span, with parent links across the three-surface reconstruction
 - Pluggable trace exporters for Jaeger / Tempo / Honeycomb / DataDog
+
+## Debt carried from v0.8.0 (audited 2026-06-10)
+
+A whole-repo audit on 2026-06-10 found these v0.8.0 spec promises
+unimplemented with no documented deferral. Items marked **landed** were
+closed by the post-audit debt PRs; the rest belong to v0.9.0 scope
+regardless of theme:
+
+- **landed** — `HandoffStore` / `TeamStateStore` / `AgentInstanceStore`
+  in `api.UnitOfWork` + conformance suite (spec 07; ADR-016 §6).
+- **landed** — usage-metering write path (worker now appends
+  `UsageRecord`s; `Runner.AppendUsage/QueryUsage/SumUsageCredits`).
+- **landed** — provider stream-initiation retry/backoff and
+  `provider.Fallback` model failover.
+- **landed** — `Runner.PendingResumeTokens` bulk-recovery enumeration.
+- `Team.Start` / `Team.Resume` (spec 05): the spec's signature
+  `NewTeam(name, *hydaelyn.Runner)` contradicts ADR-016 §6
+  ("multiagent MUST NOT import runner"). v0.9.0 must resolve the
+  layering (likely a runner-side integration, per ADR-017) and amend
+  spec 05 before implementing.
+- `contract/integration` three-surface kill-resume tests (spec 07
+  §"Resume integration tests") — depend on the Team integration above.
+- Capability layer: `hydaelyn.self.*` reserved-name constants + 
+  registration guard, and exports 1/3/4 (MCP tools, CLI commands,
+  provider tool definitions) — spec 02. Export 2 (OpenAPI) was
+  deferred in release notes.
+- `packs/aiops/incident-triage/` worked demo (spec 16) — only the
+  skeleton pack exists.
+- `ContextSource` as a `Fetch()` interface + `api.Artifact`/store
+  (spec 09) — only a config struct shipped.
+- `agent.ToolSafety` enforcement design — the enum is declared but
+  consumed by nothing; non-idempotent calls have no idempotency-key
+  dedupe on the tool bus.
+- MCP server (expose agents/tools outward; only the client shipped)
+  and a streaming surface on the durable Runner.
 
 ## Out-of-scope for v0.9.0 (deferred further)
 
