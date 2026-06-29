@@ -25,7 +25,10 @@ cd "$ROOT"
 # public surfaces per spec 01-public-api §Change 6 / Change 7), and
 # root-package *.go. Test files are excluded — tests may legitimately need
 # []any helpers.
-mapfile -t files < <(
+files=()
+while IFS= read -r f; do
+  files+=("$f")
+done < <(
   {
     find api -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
     find agent -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
