@@ -86,6 +86,13 @@ type eventEnvelope struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
+	// Error carries a mid-stream API error (overload, content policy,
+	// invalid request that passed the initial 200). Anthropic's SSE error
+	// event shape is {"type":"error","error":{"type":"...","message":"..."}}.
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 type streamState struct {
@@ -249,7 +256,7 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 				StopReason: s.state.stopReason,
 			}, nil
 		case "error":
-			return provider.Event{}, fmt.Errorf("anthropic stream error")
+			return provider.Event{}, fmt.Errorf("anthropic stream error: %s: %s", parsed.Error.Type, parsed.Error.Message)
 		}
 	}
 }

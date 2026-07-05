@@ -1,9 +1,10 @@
 package agent
 
 // FailureKind enumerates the typed failure modes Engine.Run may surface.
-// Multi-agent schedulers branch on FailureKind to decide retry /
-// handoff / escalate / approval / terminate (spec 05 §Multi-agent
-// dispatch policy).
+// Multi-agent schedulers may branch on FailureKind to decide retry / handoff /
+// escalate / approval / terminate. v0.8.0 reference schedulers do not
+// automatically dispatch upstream evidence-gathering work for
+// FailureKindInsufficientEvidence; that table in the spec is advisory.
 type FailureKind string
 
 const (

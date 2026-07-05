@@ -2,6 +2,7 @@ package cron_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -124,5 +125,45 @@ func TestDriver_FiresAtCronCadence(t *testing.T) {
 	}
 	if atomic.LoadInt32(&hits) < 1 {
 		t.Fatalf("expected at least 1 firing within 3s, got %d", atomic.LoadInt32(&hits))
+	}
+}
+
+// TestDriver_RecoversPanickingHandler is the regression for the cron
+// panic-crash bug: robfig/cron v3 does not recover job panics, so a
+// panicking handler used to crash the cron worker goroutine and the
+// process. After the fix, the panic is caught by fire()'s recover and
+// routed to the logger; the driver keeps scheduling and Stop returns
+// cleanly.
+func TestDriver_RecoversPanickingHandler(t *testing.T) {
+	var logged atomic.Bool
+	var captured strings.Builder
+	d := cron.New(cron.Options{
+		Logger: func(format string, args ...any) {
+			// Simple capture: flag any panic-related log line.
+			out := fmt.Sprintf(format, args...)
+			captured.WriteString(out)
+			if strings.Contains(out, "panicked") {
+				logged.Store(true)
+			}
+		},
+	})
+	if _, err := d.Register(
+		api.Trigger{ID: "boom", Type: api.TriggerSchedule, Config: map[string]string{"cron": "* * * * * *"}},
+		"agent-1",
+		trigger.HandlerFunc(func(context.Context, trigger.TriggerContext) error {
+			panic("handler exploded")
+		}),
+	); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	d.Start()
+	defer func() { _ = d.Stop(context.Background()) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !logged.Load() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !logged.Load() {
+		t.Fatalf("expected panic to be recovered and logged within 3s; log captured: %q", captured.String())
 	}
 }

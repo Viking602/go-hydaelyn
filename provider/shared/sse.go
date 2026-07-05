@@ -72,13 +72,18 @@ func (r *Reader) Next() (Event, error) {
 			// retry: is intentionally ignored
 		}
 	}
+	// A frame in progress at EOF means the stream was truncated mid-event:
+	// surface it as an error rather than a valid final event, so the
+	// provider Recv path reports a transport fault instead of silently
+	// accepting a partial JSON payload (which could parse to a wrong
+	// result against a permissive struct).
 	if len(data) > 0 || name != "" || id != "" || comment != "" {
 		return Event{
 			Name:    name,
 			Data:    strings.Join(data, "\n"),
 			ID:      id,
 			Comment: comment,
-		}, nil
+		}, io.ErrUnexpectedEOF
 	}
 	return Event{}, io.EOF
 }

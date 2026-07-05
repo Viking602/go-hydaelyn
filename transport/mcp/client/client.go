@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -235,14 +236,18 @@ func (t *HTTPTransport) Close() error {
 }
 
 type StreamTransport struct {
-	reader    *bufio.Reader
-	writer    io.Writer
-	closers   []io.Closer
-	mu        sync.Mutex
-	closeOnce sync.Once
-	closeErr  error
-	closed    atomic.Bool
-	counter   uint64
+	reader     *bufio.Reader
+	writer     io.Writer
+	closers    []io.Closer
+	writeMu    sync.Mutex // serializes writes to the shared writer
+	callsMu    sync.Mutex // guards calls map
+	calls      map[uint64]chan streamResponse
+	readerOnce sync.Once     // starts the long-lived reader goroutine lazily
+	readerDone chan struct{} // closed when the reader goroutine exits
+	closeOnce  sync.Once
+	closeErr   error
+	closed     atomic.Bool
+	counter    uint64
 }
 
 func NewStreamTransport(reader io.Reader, writer io.Writer, closers ...io.Closer) *StreamTransport {
@@ -250,72 +255,207 @@ func NewStreamTransport(reader io.Reader, writer io.Writer, closers ...io.Closer
 		reader:  bufio.NewReader(reader),
 		writer:  writer,
 		closers: closers,
+		calls:   make(map[uint64]chan streamResponse),
 	}
+}
+
+// RPCError is the typed error returned by Call when the server replies with a
+// JSON-RPC error response. Callers can use [errors.As] to extract the code.
+type RPCError struct {
+	Code    int
+	Message string
+	Data    json.RawMessage
+}
+
+func (e *RPCError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if len(e.Data) > 0 {
+		return fmt.Sprintf("jsonrpc error %d: %s (%s)", e.Code, e.Message, e.Data)
+	}
+	return fmt.Sprintf("jsonrpc error %d: %s", e.Code, e.Message)
 }
 
 func (t *StreamTransport) Call(ctx context.Context, method string, params any, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.closed.Load() {
 		return errStreamTransportClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	t.startReader()
+
 	id := atomic.AddUint64(&t.counter, 1)
 	request, err := jsonrpc.NewRequest(id, method, params)
 	if err != nil {
 		return err
 	}
-	if err := jsonrpc.WriteFramed(t.writer, request); err != nil {
+
+	responseCh := make(chan streamResponse, 1)
+	t.callsMu.Lock()
+	if t.closed.Load() {
+		t.callsMu.Unlock()
+		return errStreamTransportClosed
+	}
+	t.calls[id] = responseCh
+	t.callsMu.Unlock()
+
+	t.writeMu.Lock()
+	err = jsonrpc.WriteFramed(t.writer, request)
+	t.writeMu.Unlock()
+	if err != nil {
+		t.unregisterCall(id)
 		return err
 	}
-	responses := make(chan streamResponse, 1)
-	go func() {
-		responses <- t.readResponse(id)
-	}()
+
 	select {
-	case response := <-responses:
+	case response := <-responseCh:
 		if response.err != nil {
 			return response.err
 		}
 		if response.response.Error != nil {
-			return fmt.Errorf("%s", response.response.Error.Message)
+			rpcErr := &RPCError{
+				Code:    response.response.Error.Code,
+				Message: response.response.Error.Message,
+			}
+			if response.response.Error.Data != nil {
+				if raw, mErr := json.Marshal(response.response.Error.Data); mErr == nil {
+					rpcErr.Data = raw
+				}
+			}
+			return rpcErr
 		}
 		if result == nil {
 			return nil
 		}
 		return json.Unmarshal(response.response.Result, result)
 	case <-ctx.Done():
-		t.closed.Store(true)
-		go func() { _ = t.Close() }()
+		t.unregisterCall(id)
 		return ctx.Err()
+	}
+}
+
+// unregisterCall removes a pending call from the registry. Safe to call when
+// the call was already dispatched or never registered.
+func (t *StreamTransport) unregisterCall(id uint64) {
+	t.callsMu.Lock()
+	delete(t.calls, id)
+	t.callsMu.Unlock()
+}
+
+// startReader launches the single long-lived reader goroutine the first time
+// Call is invoked. It is a no-op on subsequent calls.
+func (t *StreamTransport) startReader() {
+	t.readerOnce.Do(func() {
+		t.readerDone = make(chan struct{})
+		go t.readLoop()
+	})
+}
+
+// readLoop runs in its own goroutine, reads framed messages, and routes them
+// to the per-call channels registered in t.calls. Notifications (id == nil) and
+// responses for ids with no waiting caller are dropped. The loop exits when the
+// reader returns an error (e.g. EOF or the transport being closed).
+func (t *StreamTransport) readLoop() {
+	defer close(t.readerDone)
+	for {
+		payload, err := jsonrpc.ReadFramed(t.reader)
+		if err != nil {
+			t.closed.Store(true)
+			t.failPending(err)
+			return
+		}
+		response, err := jsonrpc.DecodeResponse(payload)
+		if err != nil {
+			t.closed.Store(true)
+			t.failPending(err)
+			return
+		}
+		// Notifications (no id) must never satisfy a waiting Call.
+		if response.ID == nil {
+			continue
+		}
+		id, ok := normalizeResponseID(response.ID)
+		if !ok {
+			continue
+		}
+		t.callsMu.Lock()
+		ch, ok := t.calls[id]
+		if ok {
+			delete(t.calls, id)
+		}
+		t.callsMu.Unlock()
+		if !ok {
+			// No caller is waiting for this id; drop it.
+			continue
+		}
+		select {
+		case ch <- streamResponse{response: response}:
+		default:
+			// Caller already abandoned (ctx canceled) and unregistered; drop.
+		}
+	}
+}
+
+// failPending delivers a terminal error to every waiting caller and clears the
+// registry. Used when the reader goroutine ends (EOF, read error, or Close).
+func (t *StreamTransport) failPending(err error) {
+	t.callsMu.Lock()
+	defer t.callsMu.Unlock()
+	for id, ch := range t.calls {
+		select {
+		case ch <- streamResponse{err: err}:
+		default:
+		}
+		delete(t.calls, id)
+	}
+}
+
+// normalizeResponseID converts a JSON-RPC response id (which may arrive as a
+// number or string depending on the server) to the uint64 key used by Call.
+// Returns ok=false for ids that cannot be matched to a waiting call.
+func normalizeResponseID(id any) (uint64, bool) {
+	switch v := id.(type) {
+	case float64:
+		if v != float64(uint64(v)) {
+			return 0, false
+		}
+		return uint64(v), true
+	case int:
+		if v < 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case int64:
+		if v < 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case uint64:
+		return v, true
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case string:
+		// String ids are server-issued and never match our uint64 counter;
+		// reject so they cannot be confused with a waiting call.
+		return 0, false
+	default:
+		return 0, false
 	}
 }
 
 type streamResponse struct {
 	response jsonrpc.Response
 	err      error
-}
-
-func (t *StreamTransport) readResponse(id uint64) streamResponse {
-	for {
-		payload, err := jsonrpc.ReadFramed(t.reader)
-		if err != nil {
-			return streamResponse{err: err}
-		}
-		response, err := jsonrpc.DecodeResponse(payload)
-		if err != nil {
-			return streamResponse{err: err}
-		}
-		if response.ID != nil && fmt.Sprint(response.ID) != fmt.Sprint(id) {
-			continue
-		}
-		return streamResponse{response: response}
-	}
 }
 
 func (t *StreamTransport) Close() error {
@@ -329,22 +469,44 @@ func (t *StreamTransport) Close() error {
 				t.closeErr = err
 			}
 		}
+		t.callsMu.Lock()
+		// Fail any caller still blocked in Call so it doesn't wait forever.
+		for id, ch := range t.calls {
+			select {
+			case ch <- streamResponse{err: errStreamTransportClosed}:
+			default:
+			}
+			delete(t.calls, id)
+		}
+		t.callsMu.Unlock()
 	})
 	return t.closeErr
 }
 
+// StdioConfig describes an MCP server process launched over stdin/stdout.
 type StdioConfig struct {
 	Command string
 	Args    []string
 	Dir     string
-	Env     []string
+	// Env is the complete child process environment. By default it replaces the
+	// parent environment even when empty, so untrusted stdio servers do not
+	// receive ambient API keys or credentials.
+	Env []string
+	// InheritEnv prepends os.Environ() before Env. Use this only for trusted
+	// subprocesses that need additive environment overrides.
+	InheritEnv bool
 }
 
 func DialStdio(ctx context.Context, cfg StdioConfig) (*Client, error) {
-	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
-	if len(cfg.Env) > 0 {
-		cmd.Env = append(cmd.Env, cfg.Env...)
+	if cfg.InheritEnv {
+		cmd.Env = append(os.Environ(), cfg.Env...)
+	} else {
+		cmd.Env = append([]string{}, cfg.Env...)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

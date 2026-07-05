@@ -48,6 +48,7 @@ func TestResolveWorkspacePath_Rejects(t *testing.T) {
 		{name: "empty", rel: "", wantErr: ErrEmptyPath},
 		{name: "dot only", rel: ".", wantErr: ErrEmptyPath},
 		{name: "absolute path", rel: "/etc/passwd", wantErr: ErrAbsolutePath},
+		{name: "rooted backslash path", rel: `\Windows\system32`, wantErr: ErrAbsolutePath},
 		{name: "dot-dot escape", rel: "../outside.go", wantErr: ErrPathEscape},
 		{name: "dot-dot only", rel: "..", wantErr: ErrPathEscape},
 		{name: "deep dot-dot escape", rel: "a/b/../../../outside.go", wantErr: ErrPathEscape},

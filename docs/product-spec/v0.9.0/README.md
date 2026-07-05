@@ -88,9 +88,17 @@ regardless of theme:
   skeleton pack exists.
 - `ContextSource` as a `Fetch()` interface + `api.Artifact`/store
   (spec 09) — only a config struct shipped.
-- `agent.ToolSafety` enforcement design — the enum is declared but
-  consumed by nothing; non-idempotent calls have no idempotency-key
-  dedupe on the tool bus.
+- `agent.ToolSafety` / `agent.ToolPolicy` engine integration —
+  v0.8.0 declares the policy vocabulary, while concrete side-effect
+  gating is enforced through `tool.Definition.RequiresActionTask` /
+  `worker.GovernedToolBus`. v0.9.0 owns retry/idempotency semantics
+  that directly consume `ToolSafety`.
+- `multiagent.Handoff` scheduler flow — the type and store contracts
+  exist, but reference schedulers do not yet emit, validate against
+  `AgentClass.InputSchema`, or persist Handoffs automatically.
+- `FailureKindInsufficientEvidence` automatic remediation — the
+  v0.8.0 dispatch table is advisory; no reference Scheduler currently
+  launches upstream evidence-gathering work from this failure kind.
 - MCP server (expose agents/tools outward; only the client shipped)
   and a streaming surface on the durable Runner.
 

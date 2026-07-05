@@ -127,11 +127,14 @@ Anchor: `05-multi-agent-layer.md`.
 - `SequentialScheduler` — fixed dispatch order
 - `RouterScheduler` — single-step routing based on first agent's TypedReport
 - `SupervisorScheduler` — central supervisor agent dispatches and consumes TypedReports
-- `Team.Start(ctx, api.RunInput) (api.Run, error)` — wires Team + Runner
-- `Team.Resume(ctx, runID) error` — three-surface reconstruction
+- `Team.Start` / `Team.Resume` layering is unresolved in v0.8.x because
+  `multiagent` must not import the durable runner; v0.9.0 owns the
+  integration shape.
 - Multi-agent Blackboard write/read helpers with required metadata enforcement
-- Typed Handoff validation against receiving class `InputSchema`
-- 7 multi-agent event kinds wired (EventInstanceSpawned, EventInstanceCompleted, EventInstanceFailed, EventHandoffPersisted, EventDispatchEmitted, EventSchedulerTick, EventSchedulerFailure)
+- v0.9.0 target: typed Handoff validation against receiving class
+  `InputSchema`
+- 6 multi-agent event kinds wired in v0.8.x; `EventHandoffPersisted` is
+  reserved for the v0.9.0 HandoffStore-backed scheduler flow.
 - `VotingResult`, `MajorityVote`, `QuorumVote` (types and helper functions; full Voting scheduler deferred to v0.9.0)
 
 **Exit gates**:

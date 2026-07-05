@@ -128,7 +128,7 @@ Package path changes:
 | 4 | `Scheduler` v0.8.0 implementations | Sequential / Router / Supervisor. Debate / MapReduce / DAG / Swarm deferred to v0.9.0. |
 | 5 | `AgentInstance.ID` generation | Deterministic from `(RunID, ClassName, SpawnSequence)`. Random ID rejected. |
 | 6 | `TaskBudget` enforcement boundary | Engine, not Runner. Runner records `UsageRecord` and persists `Task.Budget`. |
-| 7 | `Handoff` discipline | Typed only. `Handoff.Payload` MUST validate against receiving class's `InputSchema`. Free-form prose handoffs rejected at kernel level. |
+| 7 | `Handoff` discipline | Typed Handoff vocabulary and stores exist. Automatic Scheduler emission, `Handoff.Payload` validation against receiving `InputSchema`, and free-form handoff rejection are v0.9.0-reserved. |
 | 8 | `AgentFailure` boundary | The only failure shape that crosses the agent → multiagent boundary. Bare `error` rejected at code review. |
 
 ## Read order

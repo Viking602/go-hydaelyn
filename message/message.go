@@ -39,7 +39,7 @@ type JSONSchema struct {
 	Required             []string              `json:"required,omitempty"`
 	Items                *JSONSchema           `json:"items,omitempty"`
 	Enum                 []string              `json:"enum,omitempty"`
-	AdditionalProperties bool                  `json:"additionalProperties,omitempty"`
+	AdditionalProperties *bool                 `json:"additionalProperties,omitempty"`
 }
 
 type ToolSecurity struct {

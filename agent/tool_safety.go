@@ -2,15 +2,13 @@ package agent
 
 import "time"
 
-// ToolSafety classifies a tool's side-effect profile. ToolPolicy uses
-// this to decide whether the agent loop may auto-retry the tool on
-// transient failures.
+// ToolSafety classifies a tool's side-effect profile. In v0.8.0 it is a
+// declared policy vocabulary; concrete runtime side-effect gating is enforced
+// through tool.Definition metadata and the worker GovernedToolBus.
 //
-// Non-idempotent side-effect tools MUST NOT be auto-retried by the
-// loop — they MUST be routed through the runner's ActionAttempt
-// protocol (api.ActionAttempt, idempotency-key-keyed). The loop calling
-// such a tool without an ActionAttempt is a contract violation enforced
-// by the GovernedToolBus in worker/.
+// Engine-level retry decisions based on ToolSafety are reserved for v0.9.0.
+// Until that integration lands, non-idempotent side effects are guarded by
+// RequiresActionTask / Runner ActionAttempt metadata rather than this enum.
 type ToolSafety int
 
 const (
@@ -19,9 +17,8 @@ const (
 	ToolNonIdempotentSideEffect
 )
 
-// ToolPolicy is the per-tool execution policy the agent loop enforces.
-// Engine reads it from the bound tool.Bus; tool-specific overrides
-// layer on top of the engine-wide defaults.
+// ToolPolicy is the per-tool execution policy vocabulary reserved for
+// Engine integration in v0.9.0.
 type ToolPolicy struct {
 	Timeout        time.Duration `json:"timeout,omitempty"`
 	Safety         ToolSafety    `json:"safety,omitempty"`

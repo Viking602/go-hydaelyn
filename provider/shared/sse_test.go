@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -120,20 +121,33 @@ func TestReaderHandlesNoSpaceAfterColon(t *testing.T) {
 	}
 }
 
+// TestReaderHandlesTrailingFrameWithoutDoubleNewline asserts the
+// post-fix contract: a frame without a terminating blank line is
+// truncated, not a complete event. A network drop mid-frame must
+// surface as io.ErrUnexpectedEOF so the provider Recv path reports a
+// transport fault rather than silently accepting a partial payload.
 func TestReaderHandlesTrailingFrameWithoutDoubleNewline(t *testing.T) {
 	body := strings.NewReader("data: trailing")
 	reader := NewReader(body)
 
-	evt, err := reader.Next()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := reader.Next()
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected io.ErrUnexpectedEOF for truncated frame, got %v", err)
 	}
-	if evt.Data != "trailing" {
-		t.Errorf("expected data 'trailing', got %q", evt.Data)
-	}
+}
 
-	_, err = reader.Next()
-	if err != io.EOF {
-		t.Errorf("expected EOF, got %v", err)
+// TestReaderTruncatedMidJSONReturnsErrUnexpectedEOF is the regression for
+// the silent-truncation bug: a connection drop mid-frame used to return
+// the partial data as a valid Event, so a provider feeding it to
+// json.Unmarshal could parse a permissive struct to a wrong result. The
+// fix surfaces a mid-frame EOF as io.ErrUnexpectedEOF.
+func TestReaderTruncatedMidJSONReturnsErrUnexpectedEOF(t *testing.T) {
+	// A valid frame would end with a blank line; this one is cut mid-data.
+	body := strings.NewReader("event: message\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hel")
+	reader := NewReader(body)
+
+	_, err := reader.Next()
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected io.ErrUnexpectedEOF for mid-frame truncation, got %v", err)
 	}
 }

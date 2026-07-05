@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -198,18 +199,59 @@ func TestJSONSchemaStruct(t *testing.T) {
 				Enum: []string{"1", "2", "3"},
 			},
 		},
-		Required:             []string{"count"},
-		AdditionalProperties: true,
 	}
+	additional := true
+	schema.AdditionalProperties = &additional
 
 	if schema.Type != "object" {
 		t.Errorf("Type = %v, want object", schema.Type)
 	}
-	if schema.AdditionalProperties != true {
+	if schema.AdditionalProperties == nil || *schema.AdditionalProperties != true {
 		t.Errorf("AdditionalProperties = %v, want true", schema.AdditionalProperties)
 	}
 	if len(schema.Properties) != 1 {
 		t.Errorf("len(Properties) = %v, want 1", len(schema.Properties))
+	}
+}
+
+// TestJSONSchemaSerializesAdditionalPropertiesFalse is the regression for
+// the omitempty bug: a plain bool AdditionalProperties with omitempty
+// dropped false, so strict-mode schemas (OpenAI json_schema strict,
+// Anthropic tool input) could not forbid extra fields. The *bool fix
+// makes the literal false serialize.
+func TestJSONSchemaSerializesAdditionalPropertiesFalse(t *testing.T) {
+	additional := false
+	schema := JSONSchema{
+		Type:                 "object",
+		AdditionalProperties: &additional,
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("Marshal error = %v", err)
+	}
+	if !strings.Contains(string(raw), `"additionalProperties":false`) {
+		t.Fatalf("marshaled schema = %s, want it to contain additionalProperties:false", string(raw))
+	}
+
+	// And the true case still serializes.
+	additionalTrue := true
+	schemaTrue := JSONSchema{Type: "object", AdditionalProperties: &additionalTrue}
+	rawTrue, err := json.Marshal(schemaTrue)
+	if err != nil {
+		t.Fatalf("Marshal(true) error = %v", err)
+	}
+	if !strings.Contains(string(rawTrue), `"additionalProperties":true`) {
+		t.Fatalf("marshaled schema = %s, want it to contain additionalProperties:true", string(rawTrue))
+	}
+
+	// Nil (unset) is still omitted — backward compatible.
+	schemaNil := JSONSchema{Type: "object"}
+	rawNil, err := json.Marshal(schemaNil)
+	if err != nil {
+		t.Fatalf("Marshal(nil) error = %v", err)
+	}
+	if strings.Contains(string(rawNil), "additionalProperties") {
+		t.Fatalf("marshaled nil schema = %s, want additionalProperties omitted", string(rawNil))
 	}
 }
 

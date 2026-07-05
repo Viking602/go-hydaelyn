@@ -30,12 +30,20 @@ import (
 
 // Driver installs api.TriggerSchedule firings on top of a robfig/cron
 // scheduler. It is safe for concurrent Register/Deregister calls.
+//
+// Handler invocations run on a driver-level context cancelled by Stop,
+// wrapped in a recover so a panicking handler is logged rather than
+// crashing the cron worker goroutine (robfig/cron v3 does not recover
+// job panics). An optional per-firing HandlerTimeout bounds each call.
 type Driver struct {
-	mu     sync.Mutex
-	cron   *cron.Cron
-	jobs   map[string]cron.EntryID
-	regs   map[string]trigger.Registration
-	logger func(format string, args ...any)
+	mu             sync.Mutex
+	cron           *cron.Cron
+	jobs           map[string]cron.EntryID
+	regs           map[string]trigger.Registration
+	logger         func(format string, args ...any)
+	handlerTimeout time.Duration
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 // Options configures Driver construction.
@@ -48,6 +56,13 @@ type Options struct {
 	// DefaultLocation supplies the timezone used when a Trigger does not
 	// declare one. Nil falls back to time.Local.
 	DefaultLocation *time.Location
+
+	// HandlerTimeout bounds each firing's handler call. Zero means no
+	// per-firing timeout — the handler runs under the driver-level
+	// context, which is cancelled only by Stop. A positive value wraps
+	// each call in context.WithTimeout so a stuck handler cannot hold
+	// the cron worker indefinitely.
+	HandlerTimeout time.Duration
 }
 
 // New constructs a Driver with the given options. Call Start before
@@ -63,11 +78,15 @@ func New(opts Options) *Driver {
 	if logger == nil {
 		logger = func(format string, args ...any) {}
 	}
+	dctx, cancel := context.WithCancel(context.Background())
 	return &Driver{
-		cron:   cron.New(cron.WithSeconds(), cron.WithLocation(loc)),
-		jobs:   map[string]cron.EntryID{},
-		regs:   map[string]trigger.Registration{},
-		logger: logger,
+		cron:           cron.New(cron.WithSeconds(), cron.WithLocation(loc)),
+		jobs:           map[string]cron.EntryID{},
+		regs:           map[string]trigger.Registration{},
+		logger:         logger,
+		handlerTimeout: opts.HandlerTimeout,
+		ctx:            dctx,
+		cancel:         cancel,
 	}
 }
 
@@ -76,9 +95,14 @@ func New(opts Options) *Driver {
 func (d *Driver) Start() { d.cron.Start() }
 
 // Stop drains in-flight firings and stops the scheduler. Returns when
-// all currently-running handlers complete or ctx cancels, whichever
-// comes first.
+// Stop cancels the driver-level handler context, drains in-flight
+// firings, and stops the scheduler. Handlers observe ctx cancellation
+// (the driver-level context passed to each firing is cancelled here),
+// so a well-behaved handler returns promptly. Returns when all
+// currently-running handlers complete or ctx cancels, whichever comes
+// first.
 func (d *Driver) Stop(ctx context.Context) error {
+	d.cancel()
 	stopCtx := d.cron.Stop()
 	select {
 	case <-stopCtx.Done():
@@ -113,20 +137,9 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if err != nil {
 		return trigger.Registration{}, fmt.Errorf("scheduler: trigger %q %w", t.ID, err)
 	}
-
 	reg := trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}
 	id, err := d.cron.AddFunc(scheduledSpec, func() {
-		ctx := context.Background()
-		tc := trigger.TriggerContext{
-			Trigger:    t,
-			AgentID:    agentID,
-			FiredAt:    time.Now().UTC(),
-			Source:     spec,
-			Attributes: t.Config,
-		}
-		if err := h.Handle(ctx, tc); err != nil {
-			d.logger("scheduler: trigger %s firing failed: %v", t.ID, err)
-		}
+		d.fire(t, agentID, spec, h)
 	})
 	if err != nil {
 		return trigger.Registration{}, fmt.Errorf("scheduler: cron parse %q: %w", scheduledSpec, err)
@@ -146,6 +159,35 @@ func scheduleSpec(spec string, config map[string]string) (string, error) {
 		return "", fmt.Errorf("invalid timezone %q: %w", zone, err)
 	}
 	return "CRON_TZ=" + zone + " " + spec, nil
+}
+
+// fire runs one trigger firing under the driver-level context with
+// panic recovery and an optional per-firing timeout. robfig/cron v3
+// does not recover job panics, so without this wrapper a panicking
+// handler crashes the cron worker goroutine (and the process). The
+// recover logs the panic and lets the cron loop keep scheduling.
+func (d *Driver) fire(t api.Trigger, agentID, spec string, h trigger.Handler) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger("scheduler: trigger %s panicked: %v", t.ID, r)
+		}
+	}()
+	ctx := d.ctx
+	if d.handlerTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d.handlerTimeout)
+		defer cancel()
+	}
+	tc := trigger.TriggerContext{
+		Trigger:    t,
+		AgentID:    agentID,
+		FiredAt:    time.Now().UTC(),
+		Source:     spec,
+		Attributes: t.Config,
+	}
+	if err := h.Handle(ctx, tc); err != nil {
+		d.logger("scheduler: trigger %s firing failed: %v", t.ID, err)
+	}
 }
 
 // Deregister removes a previously-registered trigger by ID. Returns

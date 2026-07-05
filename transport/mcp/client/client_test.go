@@ -1,17 +1,22 @@
 package mcpclient
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/transport/mcp/jsonrpc"
 )
 
 func newTestServer(t *testing.T, handler func(method string, params map[string]any) any) *httptest.Server {
@@ -186,8 +191,56 @@ func TestStreamTransportCallCancelReturnsWhenNoResponseArrives(t *testing.T) {
 	}
 }
 
+func TestStreamTransportRejectsCallsAfterReaderExits(t *testing.T) {
+	transport := NewStreamTransport(strings.NewReader(""), io.Discard)
+
+	var result map[string]any
+	if err := transport.Call(context.Background(), "tools/list", nil, &result); !errors.Is(err, io.EOF) {
+		t.Fatalf("first Call error = %v, want EOF", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := transport.Call(ctx, "tools/list", nil, &result)
+	if !errors.Is(err, errStreamTransportClosed) {
+		t.Fatalf("second Call error = %v, want transport closed", err)
+	}
+}
+
+func TestStreamTransportInvalidResponseFailsPendingCall(t *testing.T) {
+	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
+		s.writeFramed(map[string]any{
+			"jsonrpc": "1.0",
+			"id":      req.ID,
+			"result":  map[string]any{"ok": true},
+		})
+	})
+	defer server.close()
+	transport := NewStreamTransport(server.reader, server.cliW, server.srvR, server.srvW)
+	defer transport.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	var result map[string]any
+	err := transport.Call(ctx, "tools/list", nil, &result)
+	if err == nil {
+		t.Fatal("Call error = nil, want invalid response error")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("Call timed out instead of surfacing invalid response error")
+	}
+
+	err = transport.Call(context.Background(), "tools/list", nil, &result)
+	if !errors.Is(err, errStreamTransportClosed) {
+		t.Fatalf("future Call error = %v, want transport closed", err)
+	}
+}
+
 func TestDialStdioCloseWaitsForProcessCancelLifecycle(t *testing.T) {
 	if os.Getenv("HYDAELYN_MCP_STDIO_CLOSE_HELPER") == "1" {
+		if path := os.Getenv("HYDAELYN_MCP_STDIO_ENV_FILE"); path != "" {
+			_ = os.WriteFile(path, []byte(os.Getenv("HYDAELYN_MCP_STDIO_PARENT_ENV")), 0o600)
+		}
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		time.Sleep(50 * time.Millisecond)
 		if path := os.Getenv("HYDAELYN_MCP_STDIO_CLOSE_FILE"); path != "" {
@@ -220,6 +273,191 @@ func TestDialStdioCloseWaitsForProcessCancelLifecycle(t *testing.T) {
 	}
 }
 
+func TestDialStdioEmptyEnvDoesNotLeakParentByDefault(t *testing.T) {
+	t.Setenv("HYDAELYN_MCP_STDIO_PARENT_ENV", "parent-secret")
+	envFile := filepath.Join(t.TempDir(), "env")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	client, err := DialStdio(context.Background(), StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioEmptyEnvLeakHelper$", "--", envFile},
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("child did not write env file: %v", err)
+	}
+	if string(raw) != "" {
+		t.Fatalf("child leaked parent env = %q, want empty", string(raw))
+	}
+}
+
+func TestDialStdioEmptyEnvLeakHelper(t *testing.T) {
+	envFile := argAfterDoubleDash()
+	if envFile == "" {
+		return
+	}
+	if err := os.WriteFile(envFile, []byte(os.Getenv("HYDAELYN_MCP_STDIO_PARENT_ENV")), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+func TestDialStdioHonorsDir(t *testing.T) {
+	temp := t.TempDir()
+	workDir := filepath.Join(temp, "work")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	wdFile := filepath.Join(temp, "wd")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	client, err := DialStdio(context.Background(), StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioDirHelper$", "--", wdFile},
+		Dir:     workDir,
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := os.ReadFile(wdFile)
+	if err != nil {
+		t.Fatalf("child did not write working directory file: %v", err)
+	}
+	if string(raw) != workDir {
+		t.Fatalf("child working directory = %q, want %q", string(raw), workDir)
+	}
+}
+
+func TestDialStdioDirHelper(t *testing.T) {
+	wdFile := argAfterDoubleDash()
+	if wdFile == "" {
+		return
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.WriteFile(wdFile, []byte(wd), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+func argAfterDoubleDash() string {
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return ""
+}
+
+func TestDialStdioInheritEnvIncludesParentWhenConfigEnvSet(t *testing.T) {
+	t.Setenv("HYDAELYN_MCP_STDIO_PARENT_ENV", "parent-ok")
+	temp := t.TempDir()
+	envFile := filepath.Join(temp, "env")
+	exitFile := filepath.Join(temp, "exited")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	client, err := DialStdio(context.Background(), StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioCloseWaitsForProcessCancelLifecycle$"},
+		Env: []string{
+			"HYDAELYN_MCP_STDIO_CLOSE_HELPER=1",
+			"HYDAELYN_MCP_STDIO_CLOSE_FILE=" + exitFile,
+			"HYDAELYN_MCP_STDIO_ENV_FILE=" + envFile,
+		},
+		InheritEnv: true,
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("child did not write inherited env file: %v", err)
+	}
+	if string(raw) != "parent-ok" {
+		t.Fatalf("child inherited env = %q, want parent-ok", string(raw))
+	}
+}
+
+func TestDialStdioConfigEnvDoesNotLeakParentByDefault(t *testing.T) {
+	t.Setenv("HYDAELYN_MCP_STDIO_PARENT_ENV", "parent-secret")
+	temp := t.TempDir()
+	envFile := filepath.Join(temp, "env")
+	exitFile := filepath.Join(temp, "exited")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	client, err := DialStdio(context.Background(), StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioCloseWaitsForProcessCancelLifecycle$"},
+		Env: []string{
+			"HYDAELYN_MCP_STDIO_CLOSE_HELPER=1",
+			"HYDAELYN_MCP_STDIO_CLOSE_FILE=" + exitFile,
+			"HYDAELYN_MCP_STDIO_ENV_FILE=" + envFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("child did not write env file: %v", err)
+	}
+	if string(raw) != "" {
+		t.Fatalf("child leaked parent env = %q, want empty", string(raw))
+	}
+}
+
+func TestDialStdioCancelAfterDialDoesNotKillProcess(t *testing.T) {
+	exitFile := filepath.Join(t.TempDir(), "exited")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	client, err := DialStdio(ctx, StdioConfig{
+		Command: executable,
+		Args:    []string{"-test.run=^TestDialStdioCloseWaitsForProcessCancelLifecycle$"},
+		Env: []string{
+			"HYDAELYN_MCP_STDIO_CLOSE_HELPER=1",
+			"HYDAELYN_MCP_STDIO_CLOSE_FILE=" + exitFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DialStdio() error = %v", err)
+	}
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Stat(exitFile); err != nil {
+		t.Fatalf("process was killed by dial context before Close could drain it: %v", err)
+	}
+}
+
 type blockingReadCloser struct {
 	once   sync.Once
 	closed chan struct{}
@@ -239,4 +477,223 @@ func (r *blockingReadCloser) Close() error {
 		close(r.closed)
 	})
 	return nil
+}
+
+// framedPipeServer simulates an MCP server speaking the LSP-style framed
+// protocol over a pair of pipes. The handler receives each decoded request and
+// may return framed responses (or notifications) via the returned writer.
+type framedPipeServer struct {
+	reader *bufio.Reader  // client reads responses from here
+	writer *bufio.Writer  // server writes responses here
+	srvR   *io.PipeReader // server reads requests from here
+	srvW   *io.PipeWriter
+	cliW   *io.PipeWriter // client writes requests here
+	done   chan struct{}
+}
+
+func newFramedPipeServer(t *testing.T, handle func(req jsonrpc.Request, server *framedPipeServer)) *framedPipeServer {
+	t.Helper()
+	cliR, cliW := io.Pipe()
+	srvR, srvW := io.Pipe()
+	s := &framedPipeServer{
+		reader: bufio.NewReader(srvR), // client reads responses from srvR
+		writer: bufio.NewWriter(srvW), // server writes responses to srvW
+		srvR:   srvR,
+		srvW:   srvW,
+		cliW:   cliW, // client writes requests to cliW
+		done:   make(chan struct{}),
+	}
+	go func() {
+		defer close(s.done)
+		server := bufio.NewReader(cliR) // server reads requests from cliR
+		for {
+			payload, err := jsonrpc.ReadFramed(server)
+			if err != nil {
+				return
+			}
+			req, err := jsonrpc.DecodeRequest(payload)
+			if err != nil {
+				return
+			}
+			handle(req, s)
+		}
+	}()
+	return s
+}
+
+func (s *framedPipeServer) writeFramed(v any) {
+	_ = jsonrpc.WriteFramed(s.writer, v)
+	_ = s.writer.Flush()
+}
+
+func (s *framedPipeServer) close() {
+	_ = s.cliW.Close()
+	_ = s.srvW.Close()
+	<-s.done
+}
+
+// TestStreamTransport_ConcurrentCallsDoNotSerialize verifies that two
+// concurrent Calls are not serialized by a transport-wide lock: both complete
+// even though the server responds to the second request first.
+func TestStreamTransport_ConcurrentCallsDoNotSerialize(t *testing.T) {
+	var order []string
+	var orderMu sync.Mutex
+	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
+		// Respond to the second request immediately, delay the first so that
+		// serialization would deadlock if Call held a transport-wide mutex.
+		switch req.Method {
+		case "first":
+			time.Sleep(80 * time.Millisecond)
+			resp, err := jsonrpc.Success(req.ID, map[string]any{"n": 1})
+			if err != nil {
+				t.Errorf("Success: %v", err)
+				return
+			}
+			s.writeFramed(resp)
+		case "second":
+			resp, err := jsonrpc.Success(req.ID, map[string]any{"n": 2})
+			if err != nil {
+				t.Errorf("Success: %v", err)
+				return
+			}
+			s.writeFramed(resp)
+		default:
+			t.Errorf("unexpected method %q", req.Method)
+		}
+		orderMu.Lock()
+		order = append(order, req.Method)
+		orderMu.Unlock()
+	})
+	defer server.close()
+
+	transport := NewStreamTransport(server.reader, server.cliW)
+	defer transport.Close()
+
+	type result struct {
+		n   int
+		err error
+	}
+	resCh := make(chan result, 2)
+	do := func(method string) {
+		var m map[string]any
+		err := transport.Call(context.Background(), method, nil, &m)
+		n, _ := m["n"].(float64)
+		resCh <- result{n: int(n), err: err}
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); do("first") }()
+	go func() { defer wg.Done(); do("second") }()
+	wg.Wait()
+	close(resCh)
+
+	got := make(map[string]int)
+	for r := range resCh {
+		if r.err != nil {
+			t.Fatalf("Call returned error: %v", r.err)
+		}
+		got[fmt.Sprintf("n=%d", r.n)]++
+	}
+	if got["n=1"] != 1 || got["n=2"] != 1 {
+		t.Fatalf("expected both calls to complete, got %#v", got)
+	}
+	// Sanity check the server actually saw both requests in the order we expect
+	// (second should arrive before first completes due to the artificial delay).
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	if len(order) != 2 {
+		t.Fatalf("expected 2 server requests, got %d", len(order))
+	}
+}
+
+func TestStreamTransport_RemovesCallAfterResponse(t *testing.T) {
+	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
+		resp, _ := jsonrpc.Success(req.ID, map[string]any{"ok": true})
+		s.writeFramed(resp)
+	})
+	defer server.close()
+	transport := NewStreamTransport(server.reader, server.cliW, server.srvR, server.srvW)
+	defer transport.Close()
+
+	var result map[string]any
+	if err := transport.Call(context.Background(), "tools/list", nil, &result); err != nil {
+		t.Fatalf("Call error = %v", err)
+	}
+	transport.callsMu.Lock()
+	defer transport.callsMu.Unlock()
+	if len(transport.calls) != 0 {
+		t.Fatalf("calls registry leaked %d completed call(s)", len(transport.calls))
+	}
+}
+
+// TestStreamTransport_RejectsNotificationAsResponse verifies that a server
+// sending a notification (no id) does NOT satisfy a waiting Call.
+func TestStreamTransport_RejectsNotificationAsResponse(t *testing.T) {
+	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
+		// First send a notification (no id) that must NOT match any caller...
+		notif, _ := jsonrpc.NewRequest(nil, "notifications/progress", nil)
+		s.writeFramed(notif)
+		// ...then send the actual response with the correct id.
+		time.Sleep(50 * time.Millisecond)
+		resp, err := jsonrpc.Success(req.ID, map[string]any{"ok": true})
+		if err != nil {
+			t.Errorf("Success: %v", err)
+			return
+		}
+		s.writeFramed(resp)
+	})
+	defer server.close()
+
+	transport := NewStreamTransport(server.reader, server.cliW)
+	defer transport.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var result map[string]any
+	if err := transport.Call(ctx, "tools/list", nil, &result); err != nil {
+		t.Fatalf("Call returned error: %v", err)
+	}
+	if ok, _ := result["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %#v", result)
+	}
+}
+
+// TestStreamTransport_RPCErrorCodeTyped asserts that a JSON-RPC error response
+// surfaces as a typed *RPCError whose Code can be extracted via errors.As.
+func TestStreamTransport_RPCErrorCodeTyped(t *testing.T) {
+	const code = -32001
+	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
+		resp := jsonrpc.Failure(req.ID, code, "tool failed", map[string]any{"detail": "boom"})
+		s.writeFramed(resp)
+	})
+	defer server.close()
+
+	transport := NewStreamTransport(server.reader, server.cliW)
+	defer transport.Close()
+
+	var result map[string]any
+	err := transport.Call(context.Background(), "tools/call", nil, &result)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
+		t.Fatalf("expected *RPCError, got %T: %v", err, err)
+	}
+	if rpcErr.Code != code {
+		t.Fatalf("expected code %d, got %d", code, rpcErr.Code)
+	}
+	if rpcErr.Message != "tool failed" {
+		t.Fatalf("expected message %q, got %q", "tool failed", rpcErr.Message)
+	}
+	if len(rpcErr.Data) == 0 {
+		t.Fatal("expected non-empty Data")
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(rpcErr.Data, &detail); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if detail["detail"] != "boom" {
+		t.Fatalf("expected detail=boom, got %#v", detail)
+	}
 }

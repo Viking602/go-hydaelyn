@@ -56,9 +56,19 @@ func (s TeamState) finishedClasses() map[string]bool {
 // reportForClass returns the TypedReport produced by the finished instance
 // of className, resolved through that instance's TaskID, or nil when no
 // finished instance or report exists.
+//
+// When multiple finished instances share a ClassName (e.g. a Supervisor
+// re-dispatched via SupervisorActionRetry), the LATEST finished instance
+// wins: Drive appends instances in dispatch order, so the last match is the
+// most recent run. Reading the earliest match would freeze the scheduler on
+// the original decision and make Retry loop until MaxTicks — see
+// TestSupervisorRetryObservesLatestDecision. Iterating in reverse keeps
+// Next a pure function of the snapshot (the snapshot order is fixed by the
+// append order, not by completion timing), so replay determinism is preserved.
 func (s TeamState) reportForClass(className string) *api.TypedReport {
 	var taskID string
-	for _, instance := range s.Instances {
+	for i := len(s.Instances) - 1; i >= 0; i-- {
+		instance := s.Instances[i]
 		if instance.ClassName == className && instance.State == InstanceStateFinished {
 			taskID = instance.TaskID
 			break
@@ -67,7 +77,8 @@ func (s TeamState) reportForClass(className string) *api.TypedReport {
 	if taskID == "" {
 		return nil
 	}
-	for _, task := range s.Tasks {
+	for i := len(s.Tasks) - 1; i >= 0; i-- {
+		task := s.Tasks[i]
 		if task.ID == taskID {
 			return task.Result
 		}
