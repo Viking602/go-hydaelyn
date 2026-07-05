@@ -483,12 +483,13 @@ func (r *blockingReadCloser) Close() error {
 // protocol over a pair of pipes. The handler receives each decoded request and
 // may return framed responses (or notifications) via the returned writer.
 type framedPipeServer struct {
-	reader *bufio.Reader  // client reads responses from here
-	writer *bufio.Writer  // server writes responses here
-	srvR   *io.PipeReader // server reads requests from here
-	srvW   *io.PipeWriter
-	cliW   *io.PipeWriter // client writes requests here
-	done   chan struct{}
+	reader  *bufio.Reader // client reads responses from here
+	writer  *bufio.Writer // server writes responses here
+	writeMu sync.Mutex
+	srvR    *io.PipeReader // server reads requests from here
+	srvW    *io.PipeWriter
+	cliW    *io.PipeWriter // client writes requests here
+	done    chan struct{}
 }
 
 func newFramedPipeServer(t *testing.T, handle func(req jsonrpc.Request, server *framedPipeServer)) *framedPipeServer {
@@ -522,6 +523,8 @@ func newFramedPipeServer(t *testing.T, handle func(req jsonrpc.Request, server *
 }
 
 func (s *framedPipeServer) writeFramed(v any) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_ = jsonrpc.WriteFramed(s.writer, v)
 	_ = s.writer.Flush()
 }
