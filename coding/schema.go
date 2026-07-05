@@ -22,10 +22,11 @@ func objectSchema(required []string, props ...property) message.JSONSchema {
 	for _, p := range props {
 		properties[p.name] = p.schema
 	}
+	additional := false
 	return message.JSONSchema{
 		Type:                 "object",
 		Properties:           properties,
 		Required:             required,
-		AdditionalProperties: false,
+		AdditionalProperties: &additional,
 	}
 }

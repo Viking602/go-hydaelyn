@@ -157,10 +157,11 @@ type OutputExpectation struct {
 ```go
 package multiagent
 
-// Handoff is a structured transfer of context between agents. Persisted
-// via HandoffStore (07-storage.md). The framework rejects free-form
-// prose handoffs at the kernel level; Reason may contain prose but
-// Payload MUST conform to the receiving AgentClass.InputSchema.
+// Handoff is the structured transfer vocabulary between agents. v0.8.0
+// ships the type and storage contract, but the reference schedulers do not
+// yet emit, validate, or persist Handoffs automatically. Full HandoffStore-
+// backed routing is v0.9.0-reserved. Reason may contain prose, but once the
+// flow is wired, Payload MUST conform to the receiving AgentClass.InputSchema.
 type Handoff struct {
     From                 api.AgentID
     To                   api.AgentID
@@ -172,10 +173,11 @@ type Handoff struct {
 }
 ```
 
-Validation happens at Dispatch construction time: if `Handoff.Payload`
-does not validate against the receiving class's `InputSchema`, the
-Scheduler MUST return an error from `Next` rather than emitting the
-Dispatch.
+v0.9.0 wiring target: at Dispatch construction time, if
+`Handoff.Payload` does not validate against the receiving class's
+`InputSchema`, the Scheduler returns an error from `Next` rather than
+emitting the Dispatch. v0.8.0 reference schedulers do not perform this
+Handoff-specific validation.
 
 ## Multi-agent Blackboard
 
@@ -242,6 +244,7 @@ package multiagent
 
 const (
     EventDispatchEmitted   api.EventType = "multiagent.dispatch_emitted"
+    // v0.9.0-reserved: emitted once reference schedulers persist typed Handoffs.
     EventHandoffPersisted  api.EventType = "multiagent.handoff_persisted"
     EventInstanceSpawned   api.EventType = "multiagent.instance_spawned"
     EventInstanceCompleted api.EventType = "multiagent.instance_completed"
@@ -251,9 +254,10 @@ const (
 )
 ```
 
-These join the existing `api.EventType` constants. The
-`EventSchedulerTick` event lets external Schedulers subscribe rather
-than poll.
+These join the existing `api.EventType` constants. In v0.8.0, reference
+schedulers emit dispatch/instance/tick/failure events; `EventHandoffPersisted`
+is reserved for the v0.9 HandoffStore-backed flow. The `EventSchedulerTick`
+event lets external Schedulers subscribe rather than poll.
 
 ## Scheduler ↔ Runner sequence
 
@@ -262,7 +266,7 @@ than poll.
 2.  Scheduler.Next(state) → []Dispatch
 3.  For each Dispatch:
       - Runner persists Dispatch.Task via TaskStore
-      - HandoffStore appends (if Dispatch came from a Handoff)
+      - v0.9 target: HandoffStore appends before Dispatch.Task if Dispatch came from a Handoff
       - Worker Runtime acquires Lease (LeaseStore.AcquireWithExpectedVersion)
       - agent.Engine.Run(Task, OutputPolicy{Schema: Task.OutputSchema})
       - Returns agent.Result
@@ -280,8 +284,9 @@ than poll.
 1. `multiagent/**` imports `api/`, `agent/`, stdlib only.
 2. Schedulers never side-effect external systems directly; all side
    effects route through agent tools.
-3. Dispatches whose `Handoff.Payload` violates the receiving class's
-   InputSchema MUST NOT be emitted.
+3. v0.9 target: Dispatches whose `Handoff.Payload` violates the receiving
+   class's InputSchema MUST NOT be emitted. v0.8.0 reference schedulers do
+   not yet emit Handoff-backed dispatches.
 4. Schedulers MUST be stateless across ticks; all state lives in
    TeamStateStore.
 5. AgentInstance.ID is deterministic via `ComputeInstanceID`.

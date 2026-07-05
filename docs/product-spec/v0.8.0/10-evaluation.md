@@ -101,9 +101,10 @@ Multi-agent (NEW, 6 assertions):
   one Handoff from a `fromClass` instance to a `toClass` instance.
 - `TeamTerminatedSuccessfully()` — asserts the Team's terminal
   status is success (vs scheduler failure, vs budget exhausted).
-- `NoNonIdempotentToolAutoRetried()` — asserts that no
-  `ToolNonIdempotentSideEffect` tool was retried by `agent.Engine`
-  without going through Approval. Enforces ADR-015 §ToolSafety.
+- `NoNonIdempotentToolAutoRetried()` — v0.9.0-reserved assertion that
+  guarded non-idempotent tool actions do not create multiple distinct
+  action attempts without Approval. It does not imply `agent.Engine`
+  consumes `ToolSafety` in v0.8.0.
 - `BPBLikeMetric(scorer eval.BPBScorer, threshold float64)` —
   autoresearch-borrowed quality metric template. Scorer is
   application-supplied; framework provides the harness and the

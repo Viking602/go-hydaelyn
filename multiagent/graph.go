@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/api"
@@ -264,7 +265,11 @@ func (c *CompiledGraph) Next(_ context.Context, state TeamState) ([]Dispatch, er
 	out := make([]Dispatch, 0, len(ready))
 	for _, id := range ready {
 		node := c.nodes[id]
-		out = append(out, buildGraphDispatch(state.RunID, id, node.class, inputFor(activeParents[id], state)))
+		input, err := inputFor(activeParents[id], state)
+		if err != nil {
+			return nil, fmt.Errorf("graph: node %q input resolution failed: %w", id, err)
+		}
+		out = append(out, buildGraphDispatch(state.RunID, id, node.class, input))
 	}
 	return out, nil
 }
@@ -283,18 +288,9 @@ func edgeActive(e graphEdge, state TeamState) bool {
 	return e.pred(*report)
 }
 
-// inputFor threads the already-classified active incoming edges (Next
-// evaluates edge activation once, in the status pass, so predicates are not
-// re-evaluated here) into a node's Input. There are three shapes:
-//
-//   - field-mapped edges (Compile guarantees all-or-none per target):
-//     mapped Structured fields are projected into one flat input object.
-//   - a single unmapped parent: its report is forwarded directly (matching
-//     RouterScheduler).
-//   - several unmapped parents: marshaled as a {nodeID: report} object.
-func inputFor(active []graphEdge, state TeamState) json.RawMessage {
+func inputFor(active []graphEdge, state TeamState) (json.RawMessage, error) {
 	if len(active) == 0 {
-		return nil
+		return nil, nil
 	}
 	// Compile enforces all-or-none mapping per target, so the first active
 	// edge's mapping presence classifies the whole fan-in.
@@ -302,7 +298,7 @@ func inputFor(active []graphEdge, state TeamState) json.RawMessage {
 		return mappedInput(active, state)
 	}
 	if len(active) == 1 {
-		return state.reportInput(active[0].from)
+		return state.reportInput(active[0].from), nil
 	}
 	froms := make([]string, 0, len(active))
 	for _, e := range active {
@@ -315,9 +311,9 @@ func inputFor(active []graphEdge, state TeamState) json.RawMessage {
 	}
 	raw, err := json.Marshal(merged)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return raw
+	return raw, nil
 }
 
 // mappedInput builds the flat input object for field-mapped fan-in: each
@@ -325,7 +321,7 @@ func inputFor(active []graphEdge, state TeamState) json.RawMessage {
 // downstream input under their To names. Edges are processed in from order so
 // the marshaled bytes are deterministic; Compile rejects duplicate To targets,
 // so distinct edges never contend for the same key.
-func mappedInput(active []graphEdge, state TeamState) json.RawMessage {
+func mappedInput(active []graphEdge, state TeamState) (json.RawMessage, error) {
 	sorted := append([]graphEdge(nil), active...)
 	sort.Slice(sorted, func(a, b int) bool { return sorted[a].from < sorted[b].from })
 	out := make(map[string]any)
@@ -341,19 +337,46 @@ func mappedInput(active []graphEdge, state TeamState) json.RawMessage {
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		// Every active parent finished without any of the mapped fields
+		// in its Structured payload — a runtime schema drift. Returning
+		// nil here would dispatch the downstream node with empty input
+		// and no signal, likely producing a confusing failure inside the
+		// agent. Surface a scheduler-level error instead so the cause is
+		// attributable.
+		froms := make([]string, 0, len(sorted))
+		for _, e := range sorted {
+			froms = append(froms, e.from)
+		}
+		return nil, fmt.Errorf("graph: node input is empty — mapped fields %q not present in any active parent report %s", mappedFieldNames(sorted), strings.Join(froms, ", "))
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return raw
+	return raw, nil
+}
+
+// mappedFieldNames returns the distinct To-names a set of mapped edges
+// project, sorted for deterministic error messages.
+func mappedFieldNames(edges []graphEdge) []string {
+	seen := make(map[string]struct{})
+	for _, e := range edges {
+		for _, m := range e.mappings {
+			seen[m.To] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildGraphDispatch assembles a Dispatch keyed on nodeID rather than class
 // name, so the same AgentClass can back multiple nodes. Drive recovers the
 // nodeID into AgentInstance.ClassName via classNameFromTaskID, which is what
-// finishedClasses (and therefore Next) keys on.
+// graph schedulers need to correlate reports back to nodes.
 func buildGraphDispatch(runID, nodeID string, class AgentClass, input json.RawMessage) Dispatch {
 	taskID := taskIDForClass(runID, nodeID)
 	goal := class.Instructions

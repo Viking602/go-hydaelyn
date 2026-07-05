@@ -319,11 +319,12 @@ func schemaFor(current reflect.Type) (message.JSONSchema, error) {
 				required = append(required, name)
 			}
 		}
+		additional := false
 		return message.JSONSchema{
 			Type:                 "object",
 			Properties:           properties,
 			Required:             required,
-			AdditionalProperties: false,
+			AdditionalProperties: &additional,
 		}, nil
 	case reflect.Slice, reflect.Array:
 		items, err := schemaFor(current.Elem())
@@ -343,7 +344,8 @@ func schemaFor(current reflect.Type) (message.JSONSchema, error) {
 	case reflect.Float32, reflect.Float64:
 		return message.JSONSchema{Type: "number"}, nil
 	case reflect.Map:
-		return message.JSONSchema{Type: "object", AdditionalProperties: true}, nil
+		additional := true
+		return message.JSONSchema{Type: "object", AdditionalProperties: &additional}, nil
 	case reflect.String:
 		return message.JSONSchema{Type: "string"}, nil
 	default:

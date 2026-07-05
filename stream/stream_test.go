@@ -164,3 +164,64 @@ func TestMergeFansInAndStampsSource(t *testing.T) {
 		t.Fatalf("agent-b frames = %#v", bySrc["agent-b"])
 	}
 }
+
+// TestThinkingSignatureRoundTripsThroughFrame is the regression for the
+// streaming-path signature loss: Anthropic emits signature_delta and
+// redacted_thinking as provider.EventThinkingDelta carrying Signature /
+// RedactedThinking. Before the fix, Frame dropped those fields, so the
+// accumulator's normalized response (and the message built from it) had
+// empty signature — and the next assistant turn was rejected by the API.
+// The round-trip FrameFromEvent → ToEvent → NormalizeEvents must preserve
+// both payloads, and Accumulator.Message must carry them onto the message.
+func TestThinkingSignatureRoundTripsThroughFrame(t *testing.T) {
+	events := []provider.Event{
+		{Kind: provider.EventThinkingDelta, Thinking: "reasoning"},
+		{Kind: provider.EventThinkingDelta, Signature: "sig-abc"},
+		{Kind: provider.EventThinkingDelta, RedactedThinking: "enc-123"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}
+
+	// Frame path: each event converts to a Frame and back without loss.
+	var acc []provider.Event
+	for _, event := range events {
+		frame, ok := FrameFromEvent(event)
+		if !ok {
+			t.Fatalf("FrameFromEvent(%s) ok = false", event.Kind)
+		}
+		round, ok := frame.ToEvent()
+		if !ok {
+			t.Fatalf("ToEvent(%s) ok = false", frame.Kind)
+		}
+		acc = append(acc, round)
+	}
+	normalized, err := provider.NormalizeEvents(acc)
+	if err != nil {
+		t.Fatalf("NormalizeEvents error = %v", err)
+	}
+	if normalized.Signature != "sig-abc" {
+		t.Fatalf("normalized.Signature = %q, want sig-abc", normalized.Signature)
+	}
+	if normalized.RedactedThinking != "enc-123" {
+		t.Fatalf("normalized.RedactedThinking = %q, want enc-123", normalized.RedactedThinking)
+	}
+
+	// Accumulator path: Emit frames and read the message — signature and
+	// redacted thinking must land on message.Message for the next turn.
+	sink := NewAccumulator()
+	for _, event := range events {
+		frame, _ := FrameFromEvent(event)
+		if err := sink.Emit(context.Background(), frame); err != nil {
+			t.Fatalf("Accumulator.Emit error = %v", err)
+		}
+	}
+	msg, err := sink.Message()
+	if err != nil {
+		t.Fatalf("Accumulator.Message error = %v", err)
+	}
+	if msg.ThinkingSignature != "sig-abc" {
+		t.Fatalf("message.ThinkingSignature = %q, want sig-abc", msg.ThinkingSignature)
+	}
+	if msg.RedactedThinking != "enc-123" {
+		t.Fatalf("message.RedactedThinking = %q, want enc-123", msg.RedactedThinking)
+	}
+}

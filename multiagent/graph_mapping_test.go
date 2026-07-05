@@ -3,6 +3,7 @@ package multiagent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -75,6 +76,31 @@ func TestGraphSingleMappedEdgeProjectsOnlyMappedFields(t *testing.T) {
 	// (which would carry a top-level "status").
 	if _, forwarded := flat["status"]; forwarded {
 		t.Fatalf("single mapped edge must project fields, not forward the whole report: %s", captured)
+	}
+}
+
+func TestGraphMappedInputErrorsWhenNoMappedFieldsExist(t *testing.T) {
+	var captured json.RawMessage
+	exec := mappingExecutor("run-1", "b", &captured, map[string]map[string]any{
+		"a": {"other": "1"},
+	})
+	g := NewGraph().
+		AddNode("a", AgentClass{Name: "a"}).
+		AddNode("b", AgentClass{Name: "b"}).
+		AddEdgeWith("a", "b", WithFieldMapping(FieldMapping{From: "missing", To: "key"}))
+
+	_, err := Drive(context.Background(), "run-1", mustCompile(t, g), exec, DriveOptions{})
+	if err == nil {
+		t.Fatal("Drive() expected mapped-input error, got nil")
+	}
+	if !strings.Contains(err.Error(), "input resolution failed") {
+		t.Fatalf("Drive() error = %q, want scheduler input-resolution context", err.Error())
+	}
+	if !strings.Contains(err.Error(), "mapped fields") {
+		t.Fatalf("Drive() error = %q, want missing mapped-field detail", err.Error())
+	}
+	if captured != nil {
+		t.Fatalf("downstream node should not run with empty mapped input, got %s", captured)
 	}
 }
 

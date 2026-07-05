@@ -3,6 +3,8 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +311,36 @@ func TestScrubEnv_NoSecretPassthrough(t *testing.T) {
 	}
 }
 
+func TestScrubEnv_PassesTempLocators(t *testing.T) {
+	t.Setenv("TMP", `C:\Users\agent\AppData\Local\Temp`)
+	t.Setenv("TEMP", `C:\Users\agent\AppData\Local\Temp`)
+	env := scrubEnv(nil)
+	if !containsKV(env, `TMP=C:\Users\agent\AppData\Local\Temp`) {
+		t.Errorf("TMP should pass through for Windows go work dirs; env=%v", env)
+	}
+	if !containsKV(env, `TEMP=C:\Users\agent\AppData\Local\Temp`) {
+		t.Errorf("TEMP should pass through for Windows go work dirs; env=%v", env)
+	}
+}
+
+func TestScrubEnv_DefaultsGOCACHEWhenMissing(t *testing.T) {
+	old, had := os.LookupEnv("GOCACHE")
+	if err := os.Unsetenv("GOCACHE"); err != nil {
+		t.Fatalf("Unsetenv: %v", err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("GOCACHE", old)
+		} else {
+			_ = os.Unsetenv("GOCACHE")
+		}
+	})
+	want := "GOCACHE=" + filepath.Join(os.TempDir(), "hydaelyn-go-build-cache")
+	if !containsKV(scrubEnv(nil), want) {
+		t.Errorf("scrubEnv() should set fallback %q; env=%v", want, scrubEnv(nil))
+	}
+}
+
 func containsKV(env []string, kv string) bool {
 	for _, e := range env {
 		if e == kv {
@@ -389,7 +421,7 @@ func TestScrubEnv_PinsGOENVOff(t *testing.T) {
 // TestIsAllowedEnvKey checks the passthrough allowlist directly: locator
 // variables the toolchain needs are allowed, execution-shaping ones are not.
 func TestIsAllowedEnvKey(t *testing.T) {
-	for _, k := range []string{"HOME", "PATH", "GOPROXY", "GOCACHE"} {
+	for _, k := range []string{"HOME", "PATH", "GOPROXY", "GOCACHE", "TMPDIR", "TMP", "TEMP"} {
 		if !isAllowedEnvKey(k) {
 			t.Errorf("isAllowedEnvKey(%q) = false, want true", k)
 		}

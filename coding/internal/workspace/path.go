@@ -45,7 +45,7 @@ func ResolveWorkspacePath(root, rel string) (abs string, canonicalRel string, er
 	}
 
 	clean := filepath.Clean(rel)
-	if filepath.IsAbs(clean) {
+	if isAbsoluteLike(clean) {
 		return "", "", ErrAbsolutePath
 	}
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -104,6 +104,13 @@ func ResolveWorkspacePath(root, rel string) (abs string, canonicalRel string, er
 	}
 
 	return abs, clean, nil
+}
+
+func isAbsoluteLike(path string) bool {
+	return filepath.IsAbs(path) ||
+		filepath.VolumeName(path) != "" ||
+		strings.HasPrefix(path, "/") ||
+		strings.HasPrefix(path, `\`)
 }
 
 // resolvesIntoDeniedTree reports whether the canonical target lands inside the

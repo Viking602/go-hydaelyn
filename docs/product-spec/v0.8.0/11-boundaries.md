@@ -100,10 +100,10 @@ externally-visible output MUST produce:
 - A `TraceSpan` if a trace is active
 - A `UsageRecord` for resource accounting
 
-**New for v0.8.0**: Multi-agent Handoffs, Scheduler Dispatches, and
-Instance lifecycle changes ALSO produce events (`EventHandoffPersisted`,
-`EventDispatchEmitted`, `EventInstanceSpawned`, `EventInstanceCompleted`,
-`EventSchedulerTick`). They are part of the audit envelope.
+**New for v0.8.0**: Scheduler Dispatches and instance lifecycle changes
+produce audit events (`EventDispatchEmitted`, `EventInstanceSpawned`,
+`EventInstanceCompleted`, `EventSchedulerTick`). `EventHandoffPersisted`
+is reserved for the v0.9.0 HandoffStore-backed scheduler flow.
 
 ## Principle 5 — All long-running work must be resumable
 

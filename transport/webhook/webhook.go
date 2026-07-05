@@ -19,6 +19,9 @@ package webhook
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,9 +34,6 @@ import (
 )
 
 const defaultMaxBodyBytes = 1 << 20 // 1 MiB
-
-// Driver routes inbound HTTP requests to registered webhook triggers.
-// The zero value is unusable; construct via New.
 type Driver struct {
 	mu     sync.RWMutex
 	routes map[routeKey]trigger.Registration
@@ -42,7 +42,17 @@ type Driver struct {
 	// verifyToken, when non-nil, runs against every incoming request
 	// before the trigger handler. Returning false short-circuits with a
 	// 401. Use it to validate webhook signatures or shared secrets.
+	//
+	// verifyToken runs BEFORE the request body is read, so it cannot
+	// inspect the body. For body-aware verification (e.g. HMAC over the
+	// raw payload) use VerifyRequest instead.
 	verifyToken func(r *http.Request, expected string) bool
+	// verifyRequest, when non-nil, runs against every incoming request
+	// AFTER the body has been read and capped at MaxBodyBytes. Returning
+	// false short-circuits with a 401. It receives the raw body bytes so
+	// it can compute a MAC over the payload. When both VerifyRequest and
+	// VerifyToken are set, VerifyRequest wins.
+	verifyRequest func(r *http.Request, body []byte, expected string) bool
 }
 
 // Options configures Driver construction.
@@ -54,7 +64,19 @@ type Options struct {
 	// causes the driver to respond with 401 and skip the handler. A nil
 	// VerifyToken disables verification entirely — fine for in-cluster
 	// triggers behind a service mesh, dangerous on the open internet.
+	//
+	// VerifyToken runs BEFORE the request body is read, so it cannot
+	// inspect the raw body. For HMAC-style verification over the body,
+	// use VerifyRequest (or VerifyHMAC) instead.
 	VerifyToken func(r *http.Request, expected string) bool
+	// VerifyRequest is the body-aware verifier. It is invoked AFTER the
+	// request body has been read (and capped at MaxBodyBytes) and
+	// receives the raw body bytes. Returning false causes the driver to
+	// respond with 401 and skip the handler. When both VerifyRequest and
+	// VerifyToken are set, VerifyRequest wins and VerifyToken is not
+	// invoked. Use this when the signature covers the raw payload (e.g.
+	// HMAC). The expected argument is Trigger.Config["secret"].
+	VerifyRequest func(r *http.Request, body []byte, expected string) bool
 }
 
 // New constructs a Driver. Mount Driver.Handler into your http.ServeMux
@@ -69,10 +91,11 @@ func New(opts Options) *Driver {
 		maxBytes = defaultMaxBodyBytes
 	}
 	return &Driver{
-		routes:      map[routeKey]trigger.Registration{},
-		logger:      logger,
-		max:         maxBytes,
-		verifyToken: opts.VerifyToken,
+		routes:        map[routeKey]trigger.Registration{},
+		logger:        logger,
+		max:           maxBytes,
+		verifyToken:   opts.VerifyToken,
+		verifyRequest: opts.VerifyRequest,
 	}
 }
 
@@ -87,7 +110,7 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if path == "" {
 		return trigger.Registration{}, fmt.Errorf("webhook: trigger %q missing config[\"path\"]", t.ID)
 	}
-	if t.Config["secret"] != "" && d.verifyToken == nil {
+	if t.Config["secret"] != "" && d.verifyToken == nil && d.verifyRequest == nil {
 		return trigger.Registration{}, fmt.Errorf("webhook: trigger %q configures secret without verifier", t.ID)
 	}
 	method := strings.ToUpper(strings.TrimSpace(t.Config["method"]))
@@ -147,7 +170,14 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if secret := reg.Trigger.Config["secret"]; secret != "" {
+	secret := reg.Trigger.Config["secret"]
+	hasSecret := secret != ""
+
+	// Legacy path: VerifyToken runs BEFORE the body is read. Existing
+	// verifiers only inspect headers/query strings, so the body is left
+	// untouched for the handler. VerifyRequest takes precedence and is
+	// applied after the body read below.
+	if hasSecret && d.verifyRequest == nil {
 		if d.verifyToken == nil {
 			http.Error(w, "webhook verifier not configured", http.StatusInternalServerError)
 			return
@@ -157,6 +187,7 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, d.max+1))
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
@@ -166,6 +197,16 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	if int64(len(body)) > d.max {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
+	}
+
+	// Body-aware path: VerifyRequest runs AFTER the body has been read
+	// (and capped) so it can compute a MAC over the raw payload. When
+	// both VerifyRequest and VerifyToken are set, VerifyRequest wins.
+	if hasSecret && d.verifyRequest != nil {
+		if !d.verifyRequest(r, body, secret) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	attrs := make(map[string]string, len(r.Header))
@@ -190,6 +231,39 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// VerifyHMAC returns a VerifyRequest-style verifier that checks an
+// hmac-SHA256 MAC of the request body keyed by secret, compared in
+// constant time against the hex-encoded signature in the header named
+// headerName. Typical header names are "X-Hub-Signature-256"
+// (GitHub-style) or "X-Signature".
+//
+// If secret is empty, the returned verifier uses the expected argument
+// (Trigger.Config["secret"]) passed by the Driver. If secret is non-empty,
+// the closure value wins for backward compatibility with callers that bind
+// one verifier to one secret.
+//
+// WARNING: this protects against tampering and forged signatures, NOT
+// against replay. A captured (body, signature) pair can be resent
+// indefinitely. Add a timestamp/nonce in the body or a header and check
+// it inside the verifier, or front the webhook with replay-defeating
+// middleware, if replay attacks are in your threat model.
+func VerifyHMAC(secret string, headerName string) func(r *http.Request, body []byte, expected string) bool {
+	return func(r *http.Request, body []byte, expected string) bool {
+		key := secret
+		if key == "" {
+			key = expected
+		}
+		got := strings.TrimPrefix(r.Header.Get(headerName), "sha256=")
+		if got == "" || key == "" {
+			return false
+		}
+		mac := hmac.New(sha256.New, []byte(key))
+		mac.Write(body)
+		want := hex.EncodeToString(mac.Sum(nil))
+		return hmac.Equal([]byte(got), []byte(want))
+	}
 }
 
 type routeKey struct {

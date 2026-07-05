@@ -380,3 +380,37 @@ func TestStreamRetriesTransientStatusOnInitiation(t *testing.T) {
 		t.Fatalf("server saw %d calls, want 3", calls)
 	}
 }
+
+// TestDriverStreamSurfacesErrorTypeAndMessage is the regression for the
+// opaque-error bug: the error case used to return fmt.Errorf("anthropic
+// stream error") with no detail, so a mid-stream overload or content-policy
+// error was unclassifiable. The fix surfaces the upstream error type and
+// message so callers can branch on the cause.
+func TestDriverStreamSurfacesErrorTypeAndMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	stream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "claude-test",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	_, err = stream.Recv()
+	if err == nil {
+		t.Fatal("Recv() expected error for mid-stream error event, got nil")
+	}
+	if !strings.Contains(err.Error(), "overloaded_error") {
+		t.Fatalf("error = %q, want it to contain the upstream type %q", err.Error(), "overloaded_error")
+	}
+	if !strings.Contains(err.Error(), "Overloaded") {
+		t.Fatalf("error = %q, want it to contain the upstream message %q", err.Error(), "Overloaded")
+	}
+}

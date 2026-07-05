@@ -207,12 +207,12 @@ Downstream `containment` reads via `BlackboardSelector{ItemTypes:
 []BlackboardItemType{"evidence"}}` and includes the EvidenceBundle's
 indicators in its containment plan.
 
-## Typed Handoff
+## Typed Handoff (v0.9.0 target)
 
-When `forensics` decides its evidence is insufficient (e.g. the SIEM
-returned ambiguous results), it produces `Result.Failure =
-&AgentFailure{Kind: FailureInsufficientEvidence}`. The
-SupervisorScheduler reads the typed failure and dispatches a second
+The intended v0.9.0 behavior: when `forensics` decides its evidence is
+insufficient (e.g. the SIEM returned ambiguous results), it produces
+`Result.Failure = &AgentFailure{Kind: FailureInsufficientEvidence}`. A
+future Scheduler can read the typed failure and dispatch a second
 `forensics` instance with a Handoff:
 
 ```go
@@ -220,15 +220,15 @@ multiagent.Handoff{
     From: forensicsInstanceA.ID,
     To:   forensicsInstanceB.ID,
     Reason: "Initial evidence ambiguous around lateral movement; widen scope.",
-    Payload: scopedInputJSON,            // validated against ForensicsInputSchema
+    Payload: scopedInputJSON,            // v0.9: validate against ForensicsInputSchema
     EvidenceIDs: []string{"ev-abc123"},  // partial evidence to carry forward
     RequiredOutputSchema: schemas.EvidenceBundleSchema,
 }
 ```
 
-This exercises:
+This v0.9 target exercises:
 
-- Typed Handoff with `Payload` validating against
+- Typed Handoff with `Payload` validation against
   `ForensicsClass.InputSchema`
 - `EvidenceIDs` reference to prior Blackboard entries
 - Multiple `AgentInstance`s of the same `AgentClass` in one Run

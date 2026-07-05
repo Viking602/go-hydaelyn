@@ -159,9 +159,10 @@ entry points is rejected at code review (ADR-015 §3).
 ```go
 package agent
 
-// ToolSafety classifies the side-effect profile of a Tool. Engine uses
-// this to decide retry behavior and to route non-idempotent invocations
-// through Runner's Approval + ActionAttempt path.
+// ToolSafety classifies the side-effect profile of a Tool. In v0.8.0 it is
+// a declared policy vocabulary only: runtime side-effect gating is enforced
+// through tool.Definition metadata and the worker GovernedToolBus. Engine
+// consumption of ToolSafety/ToolPolicy is reserved for v0.9.0.
 type ToolSafety int
 
 const (
@@ -176,12 +177,14 @@ const (
     // ToolNonIdempotentSideEffect: the tool mutates state and repeating
     // an invocation with the same input produces a different effect
     // (e.g. money transfer, ticket creation, kubectl apply without
-    // server-side apply). Engine MUST NOT auto-retry. Invocation routes
-    // through Runner's ApprovalStore + ActionAttemptStore.
+    // server-side apply). Engine-level retry blocking for this enum is a
+    // v0.9.0-reserved behavior; v0.8.0 gates concrete side effects through
+    // RequiresActionTask / Runner ActionAttempt metadata.
     ToolNonIdempotentSideEffect
 )
 
-// ToolPolicy is the per-tool execution policy Engine consults.
+// ToolPolicy is the per-tool execution policy vocabulary reserved for
+// Engine integration in v0.9.0.
 type ToolPolicy struct {
     Timeout        time.Duration
     Retry          RetryPolicy
@@ -191,7 +194,8 @@ type ToolPolicy struct {
 }
 ```
 
-Retry rules per safety (enforced by Engine):
+Intended retry rules per safety (v0.9.0-reserved; not enforced by
+`agent.Engine` in v0.8.0):
 
 | Safety | Engine auto-retry | Runner path required |
 |--------|-------------------|----------------------|
@@ -275,7 +279,7 @@ Scheduler decisions per FailureKind (informative, not enforced):
 | `FailureSchemaInvalid` | Retry same agent with stricter prompt; max 1-2 |
 | `FailureRepairFailed` | Switch agent class or request human approval |
 | `FailureUnsafeAction` | Request human approval; do not retry automatically |
-| `FailureInsufficientEvidence` | Dispatch upstream agent to gather more evidence |
+| `FailureInsufficientEvidence` | v0.9.0 target: dispatch upstream agent to gather more evidence |
 
 ## Engine entry point
 

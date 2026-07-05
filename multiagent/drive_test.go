@@ -161,3 +161,44 @@ func TestDriveStopsAtMaxTicks(t *testing.T) {
 		t.Fatalf("Drive error = %v, want ErrMaxTicksExceeded", err)
 	}
 }
+
+// TestSupervisorRetryObservesLatestDecision is the regression for the
+// stale-decision bug: when SupervisorActionRetry re-dispatches the
+// supervisor, the retried run produces a new report, but reportForClass
+// used to return the FIRST finished instance (the original Retry
+// decision), freezing the loop until MaxTicks. With the fix it returns
+// the LATEST finished instance, so a retry that says Accept terminates.
+func TestSupervisorRetryObservesLatestDecision(t *testing.T) {
+	scheduler := SupervisorScheduler{
+		Supervisor: AgentClass{Name: "boss"},
+		Workers:    map[string]AgentClass{"writer": {Name: "writer"}},
+	}
+	// boss returns Retry on its first run, Accept on its second. Pre-fix
+	// reportForClass kept reading the first run's Retry → ErrMaxTicksExceeded.
+	calls := 0
+	executor := ExecutorFunc(func(_ context.Context, dispatch Dispatch) (api.TypedReport, error) {
+		if classNameFromTaskID("run-1", dispatch.Task.ID) != "boss" {
+			return api.TypedReport{}, errors.New("unexpected non-boss dispatch")
+		}
+		calls++
+		action := SupervisorActionRetry
+		if calls >= 2 {
+			action = SupervisorActionAccept
+		}
+		return api.TypedReport{
+			Status:     api.ReportStatusSuccess,
+			Structured: map[string]any{"action": string(action)},
+		}, nil
+	})
+
+	result, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{MaxTicks: 8})
+	if err != nil {
+		t.Fatalf("Drive error = %v, want nil (retry then accept should terminate)", err)
+	}
+	if calls != 2 {
+		t.Fatalf("boss dispatches = %d, want 2 (retry + accept)", calls)
+	}
+	if len(result.State.Instances) != 2 {
+		t.Fatalf("instances = %d, want 2 (two boss runs)", len(result.State.Instances))
+	}
+}
