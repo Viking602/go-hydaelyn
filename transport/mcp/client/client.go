@@ -288,8 +288,6 @@ func (t *StreamTransport) Call(ctx context.Context, method string, params any, r
 		return err
 	}
 
-	t.startReader()
-
 	id := atomic.AddUint64(&t.counter, 1)
 	request, err := jsonrpc.NewRequest(id, method, params)
 	if err != nil {
@@ -304,6 +302,14 @@ func (t *StreamTransport) Call(ctx context.Context, method string, params any, r
 	}
 	t.calls[id] = responseCh
 	t.callsMu.Unlock()
+
+	// Start the reader after the call channel is registered so that an
+	// immediately-terminating reader (e.g. an empty stream) cannot set
+	// closed=true and deliver EOF to an empty calls map before this Call
+	// registers — which would make the first Call see errStreamTransportClosed
+	// instead of the real reader error. startReader is idempotent (sync.Once),
+	// so calls after the first are unaffected.
+	t.startReader()
 
 	t.writeMu.Lock()
 	err = jsonrpc.WriteFramed(t.writer, request)
@@ -366,13 +372,11 @@ func (t *StreamTransport) readLoop() {
 	for {
 		payload, err := jsonrpc.ReadFramed(t.reader)
 		if err != nil {
-			t.closed.Store(true)
 			t.failPending(err)
 			return
 		}
 		response, err := jsonrpc.DecodeResponse(payload)
 		if err != nil {
-			t.closed.Store(true)
 			t.failPending(err)
 			return
 		}
@@ -402,11 +406,18 @@ func (t *StreamTransport) readLoop() {
 	}
 }
 
-// failPending delivers a terminal error to every waiting caller and clears the
-// registry. Used when the reader goroutine ends (EOF, read error, or Close).
+// failPending delivers a terminal error to every waiting caller, marks the
+// transport closed, and clears the registry. The closed flag is set under
+// callsMu so that a concurrent Call registering in the same critical section
+// observes closed=false, registers its channel, and receives the real error
+// (e.g. io.EOF) rather than racing ahead of the delivery and seeing only
+// errStreamTransportClosed. Used when the reader goroutine ends (EOF, read
+// error); Close sets closed separately because errStreamTransportClosed is the
+// intended terminal error there.
 func (t *StreamTransport) failPending(err error) {
 	t.callsMu.Lock()
 	defer t.callsMu.Unlock()
+	t.closed.Store(true)
 	for id, ch := range t.calls {
 		select {
 		case ch <- streamResponse{err: err}:
