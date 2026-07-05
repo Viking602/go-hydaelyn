@@ -19,6 +19,7 @@ func TestAgentClass_ToSpec_CarriesExecutableFields(t *testing.T) {
 		Description:  "looks things up",
 		Instructions: "You research.",
 		Model:        "opus",
+		Skills:       []string{"code-review"},
 		Tools:        []string{"lookup", "search"},
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"string"}`),
@@ -33,6 +34,9 @@ func TestAgentClass_ToSpec_CarriesExecutableFields(t *testing.T) {
 	}
 	if spec.Model != class.Model {
 		t.Errorf("Model = %q, want %q", spec.Model, class.Model)
+	}
+	if !reflect.DeepEqual(spec.Skills, class.Skills) {
+		t.Errorf("Skills = %v, want %v", spec.Skills, class.Skills)
 	}
 	if !reflect.DeepEqual(spec.Tools, class.Tools) {
 		t.Errorf("Tools = %v, want %v", spec.Tools, class.Tools)
@@ -53,7 +57,7 @@ func TestAgentClass_ToSpec_CarriesExecutableFields(t *testing.T) {
 // their Team-facing ontology (Name, Description, Capabilities) must project to
 // an identical, byte-for-byte equal Spec.
 func TestAgentClass_ToSpec_IgnoresRolePositioningFields(t *testing.T) {
-	base := AgentClass{Instructions: "i", Model: "m", Tools: []string{"t"}}
+	base := AgentClass{Instructions: "i", Skills: []string{"code-review"}, Model: "m", Tools: []string{"t"}}
 
 	first := base
 	first.Name = "Alpha"

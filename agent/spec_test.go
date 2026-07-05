@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/kit"
 )
@@ -164,6 +166,119 @@ func TestBuild_DefaultContextSeedsInstructionsAndGoal(t *testing.T) {
 	}
 }
 
+func TestBuild_ResolvesSkillsIntoContext(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "ok"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}}
+	registry := skill.NewRegistry()
+	if err := skill.Register(registry, skill.Skill{
+		Name:        "code-review",
+		Description: "Review code",
+		Body:        "Review diffs before editing.",
+		SourceDir:   "skills/code-review",
+	}); err != nil {
+		t.Fatalf("register skill: %v", err)
+	}
+	engine, err := Build(
+		Spec{Model: "m", Instructions: "base", Skills: []string{"code-review"}},
+		BuildDeps{Providers: provider.Single(driver), Skills: registry},
+	)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "review this change"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Run failed: %v", result.Failure)
+	}
+	if len(driver.requests) == 0 {
+		t.Fatal("provider received no request")
+	}
+	got := driver.requests[0].Messages
+	if len(got) != 3 {
+		t.Fatalf("seeded %d messages, want 3 (system + skills + user): %+v", len(got), got)
+	}
+	if got[0].Role != message.RoleSystem || got[0].Text != "base" {
+		t.Fatalf("first message = %+v, want base system instructions", got[0])
+	}
+	if got[1].Role != message.RoleSystem ||
+		!strings.Contains(got[1].Text, "--- skill: code-review ---") ||
+		!strings.Contains(got[1].Text, "Review diffs before editing.") {
+		t.Fatalf("second message = %+v, want rendered code-review skill", got[1])
+	}
+	if got[2].Role != message.RoleUser || got[2].Text != "review this change" {
+		t.Fatalf("third message = %+v, want task goal", got[2])
+	}
+}
+
+func TestBuild_SkillsRequireRegistry(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	_, err := Build(
+		Spec{Model: "m", Skills: []string{"code-review"}},
+		BuildDeps{Providers: provider.Single(driver)},
+	)
+	if !errors.Is(err, ErrSkillRegistryMissing) {
+		t.Fatalf("Build with skills but no registry err = %v, want ErrSkillRegistryMissing", err)
+	}
+}
+
+func TestBuild_MissingSkillFailsConstruction(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	_, err := Build(
+		Spec{Model: "m", Skills: []string{"missing"}},
+		BuildDeps{Providers: provider.Single(driver), Skills: skill.NewRegistry()},
+	)
+	var missing *skill.NotFoundError
+	if !errors.As(err, &missing) {
+		t.Fatalf("Build with unknown skill err = %v, want *skill.NotFoundError", err)
+	}
+	if missing.Name != "missing" {
+		t.Fatalf("missing skill name = %q, want missing", missing.Name)
+	}
+}
+
+func TestBuild_ContextManagerOverrideStillGetsSkills(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "ok"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}}
+	registry := skill.NewRegistry()
+	if err := skill.Register(registry, skill.Skill{
+		Name:        "code-review",
+		Description: "Review code",
+		Body:        "Use the checklist.",
+	}); err != nil {
+		t.Fatalf("register skill: %v", err)
+	}
+	engine, err := Build(
+		Spec{Model: "m", Instructions: "ignored when overridden", Skills: []string{"code-review"}},
+		BuildDeps{Providers: provider.Single(driver), Skills: registry, ContextManager: markerPairContext{}},
+	)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	if result := engine.Run(context.Background(), api.Task{Goal: "ignored by marker pair"}, OutputPolicy{}); result.Failure != nil {
+		t.Fatalf("Run failed: %v", result.Failure)
+	}
+	got := driver.requests[0].Messages
+	if len(got) != 3 {
+		t.Fatalf("seeded %d messages, want marker system + skills + marker user: %+v", len(got), got)
+	}
+	if got[0].Role != message.RoleSystem || got[0].Text != "marker-system" {
+		t.Fatalf("first message = %+v, want marker system", got[0])
+	}
+	if got[1].Role != message.RoleSystem ||
+		!strings.Contains(got[1].Text, "--- skill: code-review ---") ||
+		!strings.Contains(got[1].Text, "Use the checklist.") {
+		t.Fatalf("second message = %+v, want active skill after marker system", got[1])
+	}
+	if got[2].Role != message.RoleUser || got[2].Text != "marker-user" {
+		t.Fatalf("third message = %+v, want marker user", got[2])
+	}
+}
+
 func TestBuild_ContextManagerOverrideWins(t *testing.T) {
 	driver := &scriptedProvider{turns: [][]provider.Event{{
 		{Kind: provider.EventTextDelta, Text: "ok"},
@@ -219,6 +334,19 @@ func (markerContext) Build(context.Context, api.Task) ([]message.Message, error)
 }
 
 func (markerContext) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
+	return history, nil
+}
+
+type markerPairContext struct{}
+
+func (markerPairContext) Build(context.Context, api.Task) ([]message.Message, error) {
+	return []message.Message{
+		message.NewText(message.RoleSystem, "marker-system"),
+		message.NewText(message.RoleUser, "marker-user"),
+	}, nil
+}
+
+func (markerPairContext) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
 	return history, nil
 }
 

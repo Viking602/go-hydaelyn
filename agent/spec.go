@@ -11,12 +11,17 @@ import (
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
 // ErrProviderResolverMissing is returned by Build when BuildDeps carries no
 // provider.Resolver — the Engine cannot issue a model call without one.
 var ErrProviderResolverMissing = errors.New("agent: build deps missing provider resolver")
+
+// ErrSkillRegistryMissing is returned by Build when Spec.Skills names active
+// skills but BuildDeps carries no skill registry to resolve them.
+var ErrSkillRegistryMissing = errors.New("agent: build deps missing skill registry")
 
 // Spec is the neutral, executable declaration of a single agent: how to run one
 // bounded loop. It says nothing about how the agent is used — the same Spec can
@@ -34,6 +39,10 @@ type Spec struct {
 	// ContextManager, Build wires a default one that seeds the loop with
 	// Instructions as the system message and the task goal as the user message.
 	Instructions string
+
+	// Skills names reusable instruction bundles resolved against BuildDeps.Skills
+	// and injected into Engine.Run task context.
+	Skills []string
 
 	// Model is the model name passed to the provider on every turn and the key
 	// BuildDeps.Providers resolves to a concrete driver. Two Specs with
@@ -79,6 +88,10 @@ type BuildDeps struct {
 	// May be nil only when every Spec being built declares no tools.
 	Tools *tool.Bus
 
+	// Skills is the registry Build uses to resolve Spec.Skills. It is required
+	// only when a Spec declares one or more skill names.
+	Skills *skill.Registry
+
 	// Hooks is the hook chain installed on the materialized Engine. The zero
 	// value is a valid empty chain.
 	Hooks hook.Chain
@@ -119,6 +132,21 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		bus = deps.Tools.Subset(spec.Tools)
 	}
 
+	var activeSkills []skill.Skill
+	if len(spec.Skills) > 0 {
+		if deps.Skills == nil {
+			return Engine{}, fmt.Errorf("%w: spec lists %d skill(s)", ErrSkillRegistryMissing, len(spec.Skills))
+		}
+		activeSkills, err = deps.Skills.Resolve(spec.Skills...)
+		if err != nil {
+			var missing *skill.NotFoundError
+			if errors.As(err, &missing) {
+				return Engine{}, fmt.Errorf("agent: resolve skill %q: %w", missing.Name, err)
+			}
+			return Engine{}, fmt.Errorf("agent: resolve skills: %w", err)
+		}
+	}
+
 	contextManager := deps.ContextManager
 	if contextManager == nil {
 		contextManager = instructionsContext{instructions: spec.Instructions}
@@ -131,6 +159,7 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		Model:          spec.Model,
 		LoopPolicy:     spec.LoopPolicy,
 		ContextBuilder: contextManager,
+		Skills:         activeSkills,
 		ThinkingBudget: spec.ThinkingBudget,
 		StopSequences:  spec.StopSequences,
 		ExtraBody:      spec.ExtraBody,

@@ -10,6 +10,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/flow"
 	"github.com/Viking602/go-hydaelyn/policy"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/transport/mcp"
 )
@@ -32,6 +33,14 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ provider.Driver
 	var _ mcp.Gateway
 	var _ tool.Mode
+	var _ = skill.Skill{Name: "code-review", Description: "Review code"}
+	skills := skill.NewRegistry()
+	if err := skill.Register(skills, skill.Skill{Name: "code-review", Description: "Review code"}); err != nil {
+		t.Fatalf("skill.Register() error = %v", err)
+	}
+	if got := len(skills.List()); got != 1 {
+		t.Fatalf("skill registry List() length = %d, want 1", got)
+	}
 	_ = api.Tool{Name: "write", EffectType: api.ToolEffectWrite, RequiresActionTask: true}
 
 	runner := New()

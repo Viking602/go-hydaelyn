@@ -77,6 +77,10 @@ through `api/`.
 | **Runtime** | How is the doing executed and recovered? | Runner, Worker Runtime, Storage |
 | **Scheduling** | Who runs next, in what team configuration? | `multiagent.Scheduler`, `multiagent.Team` |
 
+Procedure includes Agent Skills: reusable procedure/instruction bundles may
+reference tools but do not authorize tools, make policy decisions, schedule
+agents, or persist runtime state.
+
 Five concepts (extended from four). Conflating any two is the
 single most common framework anti-pattern.
 

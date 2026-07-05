@@ -32,6 +32,9 @@ github.com/Viking602/go-hydaelyn/
 │   ├── loop_policy.go            # LoopPolicy
 │   └── registry.go               # AgentProfile registry surface (04-agent-class.md)
 │
+├── skill/                        # Agent Skills parser/registry; no runtime
+│   └── skill.go                  # SKILL.md parsing, registry, system rendering
+│
 ├── multiagent/                   # NEW — Multi-Agent Layer (05-multi-agent-layer.md)
 │   ├── class.go                  # AgentClass
 │   ├── instance.go               # AgentInstance + ComputeInstanceID
@@ -182,7 +185,8 @@ github.com/Viking602/go-hydaelyn/
 ```
 packs/         → multiagent/, agent/, api/, memory/, artifact/, eval/, recipe/
 multiagent/    → agent/, api/                                             (one-way)
-agent/         → api/, memory/, artifact/                                 (never multiagent/)
+agent/         → api/, skill/, memory/, artifact/                         (never multiagent/)
+skill/         → stdlib + YAML parser only                                (no Hydaelyn deps)
 eval/          → api/, agent/, multiagent/                                (test consumer)
 recipe/        → api/                                                     (compiles to commands)
 contract/      → api/                                                     (no impl deps)
@@ -211,6 +215,7 @@ Enforced by `.sentrux.toml`. The critical rules:
 |---------|-----------|
 | `api/` | Only types, errors, command definitions, selectors. No logic, no imports of this module. |
 | `agent/` | Strong bounded loop. Owns Step trace, OutputPolicy, ToolSafety, ContextManager, AgentFailure, LoopPolicy. NEVER imports `multiagent/`. |
+| `skill/` | Parses and renders reusable instruction bundles. No filesystem auto-discovery inside runner; no tool authorization. |
 | `multiagent/` | Multi-agent primitives. Imports `agent/` + `api/` only. NEVER imports any `internal/`. |
 | `memory/` | Verbs only. No backend. |
 | `artifact/` | Interface + filesystem ref impl. Production storage in app code. |

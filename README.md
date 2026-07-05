@@ -41,6 +41,8 @@ Hydaelyn takes the opposite stance:
 - **Strong bounded agent loop** (`agent/`) — one agent does one task well: step
   trace, schema repair, tool safety, context management, typed failure, and
   budget enforcement.
+  Reusable `skill/` instruction bundles can be explicitly activated there; they
+  do not grant tools or create a runtime.
 - **Explicit multi-agent scheduler** (`multiagent/`) — first-class
   `AgentClass`, `Team`, `Scheduler`, `Dispatch`, typed `Handoff`, `Blackboard`,
   `Voting`, and `Supervisor`, instead of ad-hoc helpers.
@@ -205,6 +207,7 @@ Two constraints worth knowing:
 | `hydaelyn` (root) | `Runner` façade — construction, run/task commands, approvals, leases, action attempts, event reads |
 | `api/` | Public contracts: `Config`, commands, `Run`, `Task`, store and policy interfaces |
 | `agent/` | Strong bounded agent loop: `Engine`, `Step`, `OutputPolicy`, `ToolSafety`, `ContextManager`, `AgentFailure`, `LoopPolicy` |
+| `skill/` | Agent Skills standard parser/registry for reusable instruction bundles; explicit host activation; does not grant tools or create a runtime |
 | `multiagent/` | Multi-agent primitives: `AgentClass`, `Team`, `Scheduler`, `Dispatch`, `Handoff`, `BlackboardEntry`, `Voting`, `Supervisor`, `CompiledGraph` |
 | `workflow/` | Declarative `Definition` / `Builder` that compiles to a `multiagent` graph; in-process `Engine`; no second durable runtime |
 | `transport/` | Integration transports: `cron` and `webhook` triggers, MCP, SSE, events |
