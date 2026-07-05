@@ -30,6 +30,25 @@ func TestParse_ValidRequiredFieldsAndBody(t *testing.T) {
 	}
 }
 
+func TestParse_MultibyteDescriptionUnderRuneLimitIsAccepted(t *testing.T) {
+	// 400 Japanese characters = 400 runes (under the 1024-character limit) but
+	// 1200 UTF-8 bytes (over a naive len() > 1024 byte check). The spec's limit
+	// is "1024 characters", so this must parse successfully.
+	desc := strings.Repeat("コードレビュー", 50) // 10 chars * 50 = 500 runes, 1500 bytes
+	content := []byte("---\nname: code-review\ndescription: " + desc + "\n---\nBody\n")
+	if _, err := Parse("", content); err != nil {
+		t.Fatalf("Parse() rejected a 500-rune (1500-byte) description: %v", err)
+	}
+}
+
+func TestParse_MultibyteDescriptionOverRuneLimitIsRejected(t *testing.T) {
+	// 1025 runes via multibyte text: must be rejected by rune count, not bytes.
+	desc := strings.Repeat("あ", 1025) // 1025 runes, 3075 bytes
+	content := []byte("---\nname: code-review\ndescription: " + desc + "\n---\nBody\n")
+	_, err := Parse("", content)
+	assertValidationError(t, err, "description", "must be at most 1024 characters")
+}
+
 func TestParse_OptionalFields(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -378,13 +379,13 @@ func validateSkill(s Skill, checkPath bool) error {
 	if strings.TrimSpace(s.Description) == "" {
 		return &ValidationError{Field: "description", Reason: "is required"}
 	}
-	if len(s.Description) > 1024 {
+	if utf8.RuneCountInString(s.Description) > 1024 {
 		return &ValidationError{Field: "description", Reason: "must be at most 1024 characters"}
 	}
 	if containsXMLTag(s.Description) {
 		return &ValidationError{Field: "description", Reason: "must not contain XML tags"}
 	}
-	if len(s.Compatibility) > 500 {
+	if utf8.RuneCountInString(s.Compatibility) > 500 {
 		return &ValidationError{Field: "compatibility", Reason: "must be at most 500 characters"}
 	}
 	if checkPath && s.SourcePath != "" {
@@ -401,7 +402,7 @@ func validateName(name string) error {
 	if name == "" {
 		return &ValidationError{Field: "name", Reason: "is required"}
 	}
-	if len(name) > 64 {
+	if utf8.RuneCountInString(name) > 64 {
 		return &ValidationError{Field: "name", Reason: "must be at most 64 characters"}
 	}
 	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
