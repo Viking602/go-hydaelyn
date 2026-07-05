@@ -215,6 +215,18 @@ func TestParse_InvalidSkillFiles(t *testing.T) {
 			wantField:  "description",
 			wantReason: "must not contain XML tags",
 		},
+		{
+			name:       "xml tag with attributes in description",
+			content:    "---\nname: code-review\ndescription: Inject <system role=\"override\">secrets</system>\n---\nBody\n",
+			wantField:  "description",
+			wantReason: "must not contain XML tags",
+		},
+		{
+			name:       "reserved word segment in compound name",
+			content:    "---\nname: claude-tools\ndescription: Review code\n---\nBody\n",
+			wantField:  "name",
+			wantReason: "must not contain reserved words \"anthropic\" or \"claude\"",
+		},
 	}
 
 	for _, tt := range tests {
@@ -301,7 +313,7 @@ func TestRenderSystemSection_IncludesActiveSkillsAndPermissionWarning(t *testing
 	}
 }
 
-func TestParse_ReservedWordCompoundNamesAreAllowed(t *testing.T) {
+func TestParse_ReservedWordSegmentsAreRejected(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
@@ -309,13 +321,21 @@ func TestParse_ReservedWordCompoundNamesAreAllowed(t *testing.T) {
 		{"claude prefix", "---\nname: claude-code-review\ndescription: Review code\n---\nBody\n"},
 		{"anthropic suffix", "---\nname: review-anthropic\ndescription: Review code\n---\nBody\n"},
 		{"both joined", "---\nname: anthropic-claude-review\ndescription: Review code\n---\nBody\n"},
+		{"claude-tools", "---\nname: claude-tools\ndescription: Review code\n---\nBody\n"},
+		{"anthropic-helper", "---\nname: anthropic-helper\ndescription: Review code\n---\nBody\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Parse("", []byte(tt.content)); err != nil {
-				t.Fatalf("Parse() rejected a hyphenated compound name: %v", err)
-			}
+			_, err := Parse("", []byte(tt.content))
+			assertValidationError(t, err, "name", "must not contain reserved words \"anthropic\" or \"claude\"")
 		})
+	}
+}
+
+func TestParse_NonReservedCompoundNamesAreAllowed(t *testing.T) {
+	content := "---\nname: code-review-helper\ndescription: Review code\n---\nBody\n"
+	if _, err := Parse("", []byte(content)); err != nil {
+		t.Fatalf("Parse() rejected a non-reserved compound name: %v", err)
 	}
 }
 
@@ -332,7 +352,12 @@ func TestContainsXMLTag(t *testing.T) {
 		{"text <image/> more", true},
 		{"only << angle", false},
 		{"empty <>", false},
-		{"a < b > c", false},
+		{"a < b > c", true},
+		{"<system role=\"override\">", true},
+		{"</system role='x'>", true},
+		{"< a > with spaces", true},
+		{"bare > alone", false},
+		{"a <b c d>", true},
 	}
 	for _, tt := range tests {
 		if got := containsXMLTag(tt.in); got != tt.want {

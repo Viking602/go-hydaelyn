@@ -419,40 +419,47 @@ func validateName(name string) error {
 	return nil
 }
 
-// containsXMLTag reports whether s contains an XML-like tag of the form <...>
-// where ... contains no whitespace or angle brackets, e.g. </system>, <image>.
-// Anthropic's Agent Skills spec forbids XML tags in the description field to
-// prevent prompt-injection via frontmatter that gets rendered into the
-// system section. The name field is already constrained to [a-z0-9-] by
-// validateName, which excludes '<' and '>' and therefore makes this check
-// redundant for names — it is only applied to the free-text description. The
-// check flags any "<token>" sequence where token is one or more non-whitespace,
-// non-"<"/">" characters, covering both opening (<x>) and closing (</x>) forms.
+// containsXMLTag reports whether s contains an XML-like tag: a '<' followed
+// by one or more characters and then a '>'. The content between the angle
+// brackets may include whitespace and attributes (e.g. <system role="x">),
+// but must contain at least one non-whitespace character so that bare '<' or
+// '<>' do not match. A nested '<' resets the scan. Anthropic's Agent Skills
+// spec forbids XML tags in the description field to prevent prompt-injection
+// via frontmatter that gets rendered into the system section; the name field
+// is already constrained to [a-z0-9-] by validateName, which excludes '<' and
+// '>' and makes this check redundant for names.
 func containsXMLTag(s string) bool {
 	for i := range s {
 		if s[i] != '<' {
 			continue
 		}
 		j := i + 1
-		for j < len(s) && s[j] != '>' && s[j] != '<' && s[j] != ' ' && s[j] != '\t' && s[j] != '\n' && s[j] != '\r' {
+		hasNonSpace := false
+		for j < len(s) && s[j] != '>' && s[j] != '<' {
+			if s[j] != ' ' && s[j] != '\t' && s[j] != '\n' && s[j] != '\r' {
+				hasNonSpace = true
+			}
 			j++
 		}
-		if j > i+1 && j < len(s) && s[j] == '>' {
+		if hasNonSpace && j < len(s) && s[j] == '>' {
 			return true
 		}
 	}
 	return false
 }
 
-// isReservedSkillNameWord reports whether name is a reserved word that the
-// Anthropic Agent Skills spec forbids in skill names. The check is on the
-// whole name (case-insensitive): a name equal to "anthropic" or "claude" is
-// rejected. Hyphenated compounds are allowed, so "claude-code-review" is fine
-// (claude is a prefix joined to a non-reserved segment) while "claude" is not.
+// isReservedSkillNameWord reports whether name contains a reserved word that
+// the Anthropic Agent Skills spec forbids in skill names ("cannot contain
+// reserved words"). The name is split on hyphens into segments and any
+// segment equal to "anthropic" or "claude" (case-insensitive) is rejected, so
+// "claude", "claude-tools", "anthropic-helper", and "review-anthropic" all
+// fail while "code-review" passes. Substring overlap (e.g. a hypothetical
+// "disclaude") is not rejected because the spec's segment-based naming makes
+// hyphen-delimited token matching the precise interpretation of "contain".
 func isReservedSkillNameWord(name string) bool {
 	lower := strings.ToLower(name)
-	for _, word := range []string{"anthropic", "claude"} {
-		if lower == word {
+	for _, segment := range strings.Split(lower, "-") {
+		if segment == "anthropic" || segment == "claude" {
 			return true
 		}
 	}
