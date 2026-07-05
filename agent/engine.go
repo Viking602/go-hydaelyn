@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/stream"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -311,10 +312,39 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 }
 
 func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {
+	var (
+		messages []message.Message
+		err      error
+	)
 	if e.ContextBuilder != nil {
-		return e.ContextBuilder.Build(ctx, task)
+		messages, err = e.ContextBuilder.Build(ctx, task)
+	} else {
+		messages, err = defaultContextBuilder{}.Build(ctx, task)
 	}
-	return defaultContextBuilder{}.Build(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	return injectSkillMessages(messages, e.Skills), nil
+}
+
+func injectSkillMessages(messages []message.Message, skills []skill.Skill) []message.Message {
+	if len(skills) == 0 {
+		return messages
+	}
+	section := skill.RenderSystemSection(skills)
+	if section == "" {
+		return messages
+	}
+	insertAt := 0
+	for insertAt < len(messages) && messages[insertAt].Role == message.RoleSystem {
+		insertAt++
+	}
+	skillMessage := message.NewText(message.RoleSystem, section)
+	out := make([]message.Message, 0, len(messages)+1)
+	out = append(out, messages[:insertAt]...)
+	out = append(out, skillMessage)
+	out = append(out, messages[insertAt:]...)
+	return out
 }
 
 // compactor returns the ContextManager.Compact bound as the loop's compaction

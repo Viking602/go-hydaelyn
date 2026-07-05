@@ -155,6 +155,7 @@ type AgentDefinition struct {
 	Description string `json:"description,omitempty"`
 
 	Instructions string      `json:"instructions,omitempty"`
+	Skills       []string    `json:"skills,omitempty"`
 	Model        ModelPolicy `json:"model,omitempty"`
 
 	Capabilities []string         `json:"capabilities,omitempty"`

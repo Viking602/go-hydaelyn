@@ -41,7 +41,7 @@ func TestPublicAnyContract(t *testing.T) {
 
 func publicSurfaceFiles() ([]string, error) {
 	var files []string
-	for _, pattern := range []string{"*.go", "api/*.go", "agent/*.go", "multiagent/*.go"} {
+	for _, pattern := range []string{"*.go", "api/*.go", "agent/*.go", "multiagent/*.go", "skill/*.go"} {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			return nil, err

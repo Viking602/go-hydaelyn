@@ -10,6 +10,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/hook"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/stream"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
@@ -151,6 +152,11 @@ type Engine struct {
 	ToolMode       tool.Mode
 	LoopPolicy     LoopPolicy
 	ContextBuilder ContextManager
+
+	// Skills are active reusable instructions Engine.Run injects into task-level
+	// context. RunMessages is the low-level message API and does not read this
+	// Engine default.
+	Skills []skill.Skill
 
 	// The fields below are the engine-level defaults Engine.Run threads into
 	// every LoopInput it builds, so the task-level entry can configure the

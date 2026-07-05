@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/agent"
 	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/provider/scripted"
+	"github.com/Viking602/go-hydaelyn/skill"
 	"github.com/Viking602/go-hydaelyn/tool"
 )
 
@@ -69,6 +72,64 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Payload != "summary done" {
 		t.Fatalf("missing worker output item: %#v", items)
+	}
+}
+
+func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.New()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-skills", RootTaskID: "root", Request: "do work"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-worker-skills",
+		Goal:         "summarize skills",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	recorder := &recordingProvider{events: []provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}
+	engine := agent.Engine{
+		Provider: recorder,
+		Skills: []skill.Skill{{
+			Name:        "worker-skill",
+			Description: "worker context",
+			Body:        "worker body",
+		}},
+	}
+
+	if err := (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	if len(recorder.requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(recorder.requests))
+	}
+	got := recorder.requests[0].Messages
+	if len(got) != 3 {
+		t.Fatalf("provider messages = %d, want worker system + skills + user: %+v", len(got), got)
+	}
+	if got[0].Role != message.RoleSystem || got[0].Text != "You are Hydaelyn agent agent-a. Complete the assigned task and return a concise result." {
+		t.Fatalf("first message = %+v, want worker system identity", got[0])
+	}
+	if got[1].Role != message.RoleSystem ||
+		!strings.Contains(got[1].Text, "--- skill: worker-skill ---") ||
+		!strings.Contains(got[1].Text, "worker body") {
+		t.Fatalf("second message = %+v, want worker skill system section", got[1])
+	}
+	if got[2].Role != message.RoleUser || got[2].Text != "summarize skills" {
+		t.Fatalf("third message = %+v, want task goal prompt", got[2])
 	}
 }
 
@@ -310,6 +371,24 @@ func (p failingProvider) Metadata() provider.Metadata {
 
 func (p failingProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
 	return nil, p.err
+}
+
+type recordingProvider struct {
+	events   []provider.Event
+	requests []provider.Request
+}
+
+func (p *recordingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "recording"}
+}
+
+func (p *recordingProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+	p.requests = append(p.requests, request)
+	events := p.events
+	if len(events) == 0 {
+		events = []provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}}
+	}
+	return provider.NewSliceStream(events), nil
 }
 
 func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
