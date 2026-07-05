@@ -63,12 +63,12 @@ func TestParse_OptionalFields(t *testing.T) {
 				"description: Exercise optional string fields",
 				"license: MIT",
 				"compatibility: Hydaelyn 0.8",
-				"allowed-tools: read, write bash",
+				"allowed-tools: read, Bash(git diff:*)",
 				"metadata:",
 				"  owner: platform",
 				"  priority: high",
 			}, "\n"),
-			wantTools: []string{"read", "write", "bash"},
+			wantTools: []string{"read", "Bash(git diff:*)"},
 			wantMetadata: map[string]string{
 				"owner":    "platform",
 				"priority": "high",
@@ -355,6 +355,27 @@ func TestParse_NonReservedCompoundNamesAreAllowed(t *testing.T) {
 	content := "---\nname: code-review-helper\ndescription: Review code\n---\nBody\n"
 	if _, err := Parse("", []byte(content)); err != nil {
 		t.Fatalf("Parse() rejected a non-reserved compound name: %v", err)
+	}
+}
+
+func TestSplitAllowedTools(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"read, write, bash", []string{"read", "write", "bash"}},
+		{"read,write,bash", []string{"read", "write", "bash"}},
+		{"read, Bash(git diff:*), grep", []string{"read", "Bash(git diff:*)", "grep"}},
+		{"  read  ,  write  ", []string{"read", "write"}},
+		{"read,,write", []string{"read", "write"}},
+		{"", []string{}},
+		{"only", []string{"only"}},
+		{"Edit(file:*.go), Bash(npm test:*)", []string{"Edit(file:*.go)", "Bash(npm test:*)"}},
+	}
+	for _, tt := range tests {
+		if got := splitAllowedTools(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("splitAllowedTools(%q) = %#v, want %#v", tt.in, got, tt.want)
+		}
 	}
 }
 

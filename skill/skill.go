@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -358,10 +357,13 @@ func yamlAllowedTools(node *yaml.Node) ([]string, error) {
 	}
 }
 
+// splitAllowedTools splits a scalar allowed-tools string on commas only.
+// Spaces inside an entry are preserved because tool specs may contain them
+// (e.g. "Bash(git diff:*)"); only leading/trailing whitespace around each
+// comma-separated entry is trimmed. The YAML sequence form is handled by
+// yamlAllowedTools and never reaches this function.
 func splitAllowedTools(value string) []string {
-	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || unicode.IsSpace(r)
-	})
+	parts := strings.Split(value, ",")
 	tools := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
