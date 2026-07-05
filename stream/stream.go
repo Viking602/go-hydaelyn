@@ -51,25 +51,25 @@ const (
 type Frame struct {
 	// Source is an optional origin label (e.g. an AgentInstance ID). It is
 	// empty for single-agent streams and set by Merge for fan-in.
-	Source        string                  `json:"source,omitempty"`
-	Kind          FrameKind               `json:"kind"`
-	Text          string                  `json:"text,omitempty"`
-	Thinking      string                  `json:"thinking,omitempty"`
+	Source   string    `json:"source,omitempty"`
+	Kind     FrameKind `json:"kind"`
+	Text     string    `json:"text,omitempty"`
+	Thinking string    `json:"thinking,omitempty"`
 	// Signature carries the opaque thinking-block signature (Anthropic
 	// signature_delta) associated with the Thinking delta. Threaded through
 	// FrameFromEvent/ToEvent so the streaming path preserves it; without it
 	// the next assistant turn's thinking block is rejected by the API.
-	Signature     string                  `json:"signature,omitempty"`
+	Signature string `json:"signature,omitempty"`
 	// RedactedThinking carries the opaque payload of a redacted_thinking
 	// block delivered whole by the provider. Like Signature, it must
 	// round-trip verbatim on the next request when extended thinking is
 	// combined with tool use.
-	RedactedThinking string              `json:"redactedThinking,omitempty"`
-	ToolCall      *message.ToolCall       `json:"toolCall,omitempty"`
-	ToolCallDelta *provider.ToolCallDelta `json:"toolCallDelta,omitempty"`
-	ToolResult    *message.ToolResult     `json:"toolResult,omitempty"`
-	Usage         provider.Usage          `json:"usage,omitempty"`
-	StopReason    provider.StopReason     `json:"stopReason,omitempty"`
+	RedactedThinking string                  `json:"redactedThinking,omitempty"`
+	ToolCall         *message.ToolCall       `json:"toolCall,omitempty"`
+	ToolCallDelta    *provider.ToolCallDelta `json:"toolCallDelta,omitempty"`
+	ToolResult       *message.ToolResult     `json:"toolResult,omitempty"`
+	Usage            provider.Usage          `json:"usage,omitempty"`
+	StopReason       provider.StopReason     `json:"stopReason,omitempty"`
 	// Err is set only on FrameError frames. It is not serialized.
 	Err error `json:"-"`
 }

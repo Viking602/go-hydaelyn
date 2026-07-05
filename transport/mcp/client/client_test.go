@@ -539,17 +539,21 @@ func TestStreamTransport_ConcurrentCallsDoNotSerialize(t *testing.T) {
 	var order []string
 	var orderMu sync.Mutex
 	server := newFramedPipeServer(t, func(req jsonrpc.Request, s *framedPipeServer) {
-		// Respond to the second request immediately, delay the first so that
-		// serialization would deadlock if Call held a transport-wide mutex.
+		// Delay the first response asynchronously so the server loop can read the
+		// second request before the first Call completes. If Call held a
+		// transport-wide lock, the second request would not arrive until the first
+		// response was delivered.
 		switch req.Method {
 		case "first":
-			time.Sleep(80 * time.Millisecond)
-			resp, err := jsonrpc.Success(req.ID, map[string]any{"n": 1})
-			if err != nil {
-				t.Errorf("Success: %v", err)
-				return
-			}
-			s.writeFramed(resp)
+			go func(id any) {
+				time.Sleep(80 * time.Millisecond)
+				resp, err := jsonrpc.Success(id, map[string]any{"n": 1})
+				if err != nil {
+					t.Errorf("Success: %v", err)
+					return
+				}
+				s.writeFramed(resp)
+			}(req.ID)
 		case "second":
 			resp, err := jsonrpc.Success(req.ID, map[string]any{"n": 2})
 			if err != nil {

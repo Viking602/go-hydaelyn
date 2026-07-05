@@ -61,13 +61,13 @@ func (a *Accumulator) Message() (message.Message, error) {
 		return message.Message{}, err
 	}
 	return message.Message{
-		Role:             message.RoleAssistant,
-		Kind:             message.KindStandard,
-		Text:             response.Text,
-		Thinking:         response.Thinking,
+		Role:              message.RoleAssistant,
+		Kind:              message.KindStandard,
+		Text:              response.Text,
+		Thinking:          response.Thinking,
 		ThinkingSignature: response.Signature,
-		RedactedThinking: response.RedactedThinking,
-		ToolCalls:        response.ToolCalls,
+		RedactedThinking:  response.RedactedThinking,
+		ToolCalls:         response.ToolCalls,
 	}, nil
 }
 

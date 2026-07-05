@@ -139,18 +139,25 @@ func TestWriter_HeartbeatEmitsComments(t *testing.T) {
 	// Give the goroutine a moment to observe cancellation.
 	time.Sleep(20 * time.Millisecond)
 
+	writer.mu.Lock()
 	body := rec.Body.String()
 	count := strings.Count(body, ":\n\n")
+	writer.mu.Unlock()
 	if count < 2 {
 		t.Fatalf("expected at least 2 heartbeat comments, got %d in body:\n%s", count, body)
 	}
 
 	// After cancel, no further comments should be written. Snapshot
 	// the count, wait, and confirm it doesn't grow.
+	writer.mu.Lock()
 	before := rec.Body.Len()
+	writer.mu.Unlock()
 	time.Sleep(40 * time.Millisecond)
-	if rec.Body.Len() != before {
-		t.Fatalf("heartbeat kept writing after ctx cancel: before=%d after=%d", before, rec.Body.Len())
+	writer.mu.Lock()
+	after := rec.Body.Len()
+	writer.mu.Unlock()
+	if after != before {
+		t.Fatalf("heartbeat kept writing after ctx cancel: before=%d after=%d", before, after)
 	}
 }
 

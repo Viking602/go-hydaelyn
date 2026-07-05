@@ -162,7 +162,6 @@ func TestDriveStopsAtMaxTicks(t *testing.T) {
 	}
 }
 
-
 // TestSupervisorRetryObservesLatestDecision is the regression for the
 // stale-decision bug: when SupervisorActionRetry re-dispatches the
 // supervisor, the retried run produces a new report, but reportForClass
@@ -187,7 +186,7 @@ func TestSupervisorRetryObservesLatestDecision(t *testing.T) {
 			action = SupervisorActionAccept
 		}
 		return api.TypedReport{
-			Status:    api.ReportStatusSuccess,
+			Status:     api.ReportStatusSuccess,
 			Structured: map[string]any{"action": string(action)},
 		}, nil
 	})
