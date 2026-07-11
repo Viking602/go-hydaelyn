@@ -398,7 +398,7 @@ func newCodingHarnessWithPolicy(t *testing.T, runID string, engine api.PolicyEng
 		}
 	}
 
-	runner := hydaelyn.New(api.Config{PolicyEngine: engine})
+	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: engine})
 	runner.RegisterAgent(api.AgentProfile{ID: codingHarnessAgentID})
 
 	ctx := context.Background()

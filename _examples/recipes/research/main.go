@@ -27,7 +27,7 @@ const (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	researchers := []string{"alpha", "beta", "gamma"}
 	for _, id := range researchers {

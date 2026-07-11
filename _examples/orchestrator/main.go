@@ -12,7 +12,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	run, err := runner.QueueRun(ctx, api.StartRunCommand{
 		Request: "prepare a launch checklist",
@@ -60,7 +60,7 @@ func main() {
 		panic(err)
 	}
 
-	projection, err := runner.ReplayRunState(run.ID)
+	projection, err := runner.ReplayRunStateContext(ctx, run.ID)
 	if err != nil {
 		panic(err)
 	}

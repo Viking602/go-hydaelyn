@@ -2,6 +2,7 @@ package hydaelyn
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/agent"
@@ -61,14 +62,41 @@ func TestPublicAPISmoke(t *testing.T) {
 	}
 }
 
-func TestNewAcceptsOptionalConfig(t *testing.T) {
-	legacy := New(api.Config{})
-	if legacy == nil {
-		t.Fatalf("New(api.Config{}) returned nil")
+func TestRunnerConstructionModes(t *testing.T) {
+	development := NewDevelopment()
+	if development.Mode() != api.RuntimeModeDevelopment {
+		t.Fatalf("NewDevelopment mode = %q", development.Mode())
 	}
-	custom := New(api.Config{PolicyEngine: allowAPIEngine{}})
-	if custom == nil {
-		t.Fatalf("New(api.Config{...}) returned nil")
+
+	if _, err := NewProduction(api.Config{}); !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("NewProduction(empty) error = %v", err)
+	}
+	if _, err := NewProduction(api.Config{StoreProvider: stubStoreProvider{}}); !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("NewProduction(without policy) error = %v", err)
+	}
+	var nilProvider *stubStoreProvider
+	if _, err := NewProduction(api.Config{StoreProvider: nilProvider, PolicyEngine: allowAPIEngine{}}); !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("NewProduction(typed-nil provider) error = %v", err)
+	}
+	var nilPolicy *allowAPIEngine
+	if _, err := NewProduction(api.Config{StoreProvider: stubStoreProvider{}, PolicyEngine: nilPolicy}); !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("NewProduction(typed-nil policy) error = %v", err)
+	}
+	production, err := NewProduction(api.Config{StoreProvider: stubStoreProvider{}, PolicyEngine: allowAPIEngine{}})
+	if err != nil {
+		t.Fatalf("NewProduction() error = %v", err)
+	}
+	if production.Mode() != api.RuntimeModeProduction {
+		t.Fatalf("NewProduction mode = %q", production.Mode())
+	}
+
+	// Legacy construction remains source-compatible during the pre-v1 migration.
+	if legacy := New(api.Config{PolicyEngine: allowAPIEngine{}}); legacy.Mode() != api.RuntimeModeDevelopment {
+		t.Fatalf("legacy New mode = %q", legacy.Mode())
 	}
 	_ = DefaultConfig()
 }
+
+type stubStoreProvider struct{}
+
+func (stubStoreProvider) Begin(context.Context) (api.UnitOfWork, error) { return nil, nil }

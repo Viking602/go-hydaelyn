@@ -17,7 +17,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "summarize a task"})

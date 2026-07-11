@@ -12,8 +12,13 @@ import (
 // Runner is the public façade over the internal runtime. All public contract
 // values crossing this boundary use api package types, not internal/core types.
 type Runner struct {
-	rt *core.Runtime
+	rt   *core.Runtime
+	mode api.RuntimeMode
 }
+
+// Mode reports whether the runner was created with development defaults or
+// validated production dependencies.
+func (r *Runner) Mode() api.RuntimeMode { return r.mode }
 
 // ExecuteCommand dispatches a Command through the internal command bus and
 // returns the typed result. For most use cases prefer the typed methods
@@ -27,6 +32,9 @@ type Runner struct {
 // RequestApprovalCommand -> api.RequestApprovalResult,
 // AcquireTaskExecutionCommand -> api.AcquireTaskExecutionResult). Commands
 // that produce a single domain value return that value directly.
+//
+// Deprecated: use the typed Runner methods so result shapes are checked at
+// compile time.
 func (r *Runner) ExecuteCommand(ctx context.Context, command api.Command) (any, error) {
 	coreCommand, ok := adapter.CommandToCore(command)
 	if !ok {
