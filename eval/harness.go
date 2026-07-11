@@ -99,7 +99,7 @@ func WithEmbeddingProvider(p EmbeddingProvider) HarnessOption {
 // needed; M1 keeps the default in-memory config.
 func NewHarness(opts ...HarnessOption) *DefaultHarness {
 	h := &DefaultHarness{
-		runner:  hydaelyn.New(),
+		runner:  hydaelyn.NewDevelopment(),
 		agentID: "agent",
 		model:   "scripted",
 		script: []provider.Event{

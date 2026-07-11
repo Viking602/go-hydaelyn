@@ -46,7 +46,7 @@ func (approvalGate) Authorize(_ context.Context, req api.PolicyRequest) (api.Pol
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New(api.Config{PolicyEngine: approvalGate{}})
+	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
 
 	// --- topology ----------------------------------------------------------
 	specialists := []string{"monitor", "logreader", "changelog"}

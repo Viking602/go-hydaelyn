@@ -1,20 +1,29 @@
 # Public API
 
-## Root Package Default
+## Runner Construction
 
-`hydaelyn.New()` is the default startup path. It returns a `*hydaelyn.Runner`
-using the default in-memory configuration.
+Use `hydaelyn.NewDevelopment()` for local work and tests. It returns a Runner
+with in-memory storage and development policy defaults.
 
 Import `github.com/Viking602/go-hydaelyn/api` for all public contracts:
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
 
-The zero-config form remains the preferred startup path when you do not need
-to override storage, policy, output, or pipeline dependencies.
+Production startup is fail-closed at construction:
+
+```go
+runner, err := hydaelyn.NewProduction(api.Config{
+	StoreProvider: durableStore,
+	PolicyEngine:  policy.DenySideEffectsByDefault(),
+})
+```
+
+The legacy `hydaelyn.New` development constructor remains available during the
+pre-v1 migration and is deprecated.
 
 ## Stable Packages
 
@@ -39,7 +48,7 @@ These packages follow the compatibility rules in [SemVer And Compatibility](semv
 
 The primary contract is split across the root facade and the api package:
 
-- `hydaelyn.New`, `hydaelyn.Runner`
+- `hydaelyn.NewDevelopment`, `hydaelyn.NewProduction`, `hydaelyn.Runner`
 - `api.Config`
 - `api.StartRunCommand`, `api.CreateTaskCommand`, other `api.*Command` values
 - `api.Run`, `api.Task`, `api.TaskEnvelope`, `api.TaskExecutionLease`, `api.TypedReport`
@@ -67,8 +76,9 @@ Durable storage contracts are exposed through `api`:
 Example:
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner, err := hydaelyn.NewProduction(api.Config{
 	StoreProvider: myStoreProvider,
+	PolicyEngine:  myPolicy,
 })
 ```
 
@@ -96,7 +106,8 @@ These packages remain implementation details:
 
 Archived v1 package names such as `host`, `team`, `planner`, `scheduler`,
 `capability`, and `orchestrator` are not part of the current public import
-surface. Use `hydaelyn.New()` plus `api` contracts for new code.
+surface. Use the explicit development or production constructor plus `api`
+contracts for new code.
 
 Hydaelyn does not ship endpoint catalogs, a standard-library router, or a
 canonical `net/http` route tree as part of the primary runner API.

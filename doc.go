@@ -1,7 +1,7 @@
 // Package hydaelyn is the root facade for the go-hydaelyn runner. It owns
 // construction and the Runner wrapper:
 //
-//	runner := hydaelyn.New()
+//	runner := hydaelyn.NewDevelopment()
 //
 // Import [api] for public contracts such as Config, commands, store
 // interfaces, policy requests, and Run/Task value types.

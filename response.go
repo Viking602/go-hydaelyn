@@ -30,8 +30,13 @@ func (r *Runner) DrainResponseOutbox(ctx context.Context) (int, error) {
 	return published, adapter.ErrorToAPI(err)
 }
 
+// Deprecated: use ResponseOutboxContext.
 func (r *Runner) ResponseOutbox(runID string) []api.UserMessage {
-	return adapter.UserMessagesFromModel(r.rt.ResponseOutbox(context.Background(), runID))
+	return r.ResponseOutboxContext(context.Background(), runID)
+}
+
+func (r *Runner) ResponseOutboxContext(ctx context.Context, runID string) []api.UserMessage {
+	return adapter.UserMessagesFromModel(r.rt.ResponseOutbox(ctx, runID))
 }
 
 func (r *Runner) QueueMessage(ctx context.Context, message api.UserMessage) error {

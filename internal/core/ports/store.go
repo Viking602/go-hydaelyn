@@ -183,7 +183,7 @@ type StoreCapabilities struct {
 // providers that do not implement CapabilityReporter.
 func DefaultStoreCapabilities() StoreCapabilities {
 	return StoreCapabilities{
-		SupportsTransactions:        true,
+		SupportsTransactions:        false,
 		SupportsBlackboardSubscribe: false,
 		SupportsListPending:         false,
 		SupportsConcurrentWriters:   false,

@@ -114,7 +114,7 @@ import (
 )
 
 func main() {
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 		Request: "compare options for a Go research assistant",
@@ -134,7 +134,7 @@ func main() {
 Override defaults via `api.Config`:
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	PolicyEngine: policy.DenySideEffectsByDefault(),
 })
 ```

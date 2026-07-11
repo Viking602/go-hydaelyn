@@ -21,7 +21,7 @@ import (
 
 func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 
 func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-skills", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 
 func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-schema", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
 
 func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-structured", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -232,7 +232,7 @@ func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 
 func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-tool", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -267,7 +267,7 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 
 func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-failure", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -309,7 +309,7 @@ func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.
 	if failed.Result == nil || failed.Result.Kind != string(agent.FailureKindEngineError) {
 		t.Fatalf("failed report should carry the agent failure kind, got %#v", failed.Result)
 	}
-	if active := runner.ActiveLeaseCount(run.ID, task.ID); active != 0 {
+	if active := runner.ActiveLeaseCountContext(ctx, run.ID, task.ID); active != 0 {
 		t.Fatalf("engine failure should release active lease, got %d", active)
 	}
 }
@@ -393,7 +393,7 @@ func (p *recordingProvider) Stream(_ context.Context, request provider.Request) 
 
 func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-usage", RootTaskID: "root", Request: "meter me"})
 	if err != nil {

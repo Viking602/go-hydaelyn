@@ -12,13 +12,17 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider"
 )
 
-func TestNewDefaultClientTimeout(t *testing.T) {
+func TestNewDefaultClientHasNoStreamLifetimeTimeout(t *testing.T) {
 	driver := New(Config{})
 	if driver.config.Client == nil {
 		t.Fatal("expected default client")
 	}
-	if driver.config.Client.Timeout <= 0 {
-		t.Fatalf("expected default client timeout, got %s", driver.config.Client.Timeout)
+	if driver.config.Client.Timeout != 0 {
+		t.Fatalf("default client timeout = %s, want 0", driver.config.Client.Timeout)
+	}
+	transport, ok := driver.config.Client.Transport.(*http.Transport)
+	if !ok || transport.ResponseHeaderTimeout <= 0 {
+		t.Fatalf("default response header timeout is not configured")
 	}
 
 	supplied := &http.Client{}

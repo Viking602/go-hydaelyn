@@ -28,7 +28,7 @@ const roleExpert = "panel.expert"
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {

@@ -61,7 +61,8 @@ See `docs/release-notes/v0.8.0.md` for the full deferral list.
 
 当前模型：
 
-- `hydaelyn.New()` 创建默认 `Runner`。
+- `hydaelyn.NewDevelopment()` 创建本地/测试 `Runner`；生产环境使用
+  `hydaelyn.NewProduction(api.Config)`。
 - `Runner.StartRun` 创建 `Run + RootTask`。
 - `Runner.ExecuteCommand` 作为命令层入口，状态变更走 `api.StoreProvider + api.UnitOfWork`。
 - planner/router adapter 创建一等 `api.Task`。
@@ -78,13 +79,13 @@ See `docs/release-notes/v0.8.0.md` for the full deferral list.
 默认：
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 ```
 
 自定义配置：
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
@@ -94,7 +95,7 @@ runner := hydaelyn.New(api.Config{
 
 ## API 映射
 
-- old team start -> `hydaelyn.New()` + `Runner.StartRun` / `Runner.QueueRun`
+- old team start -> explicit constructor + `Runner.StartRun` / `Runner.QueueRun`
 - team events -> `Runner.RunEvents`
 - team timeline -> `Runner.RunTimeline`
 - replay team state -> `Runner.ReplayRunState`

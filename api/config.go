@@ -1,5 +1,12 @@
 package api
 
+type RuntimeMode string
+
+const (
+	RuntimeModeDevelopment RuntimeMode = "development"
+	RuntimeModeProduction  RuntimeMode = "production"
+)
+
 type Config struct {
 	StoreProvider StoreProvider
 	PolicyEngine  PolicyEngine

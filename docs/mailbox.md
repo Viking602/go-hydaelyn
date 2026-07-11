@@ -18,7 +18,7 @@ through the same durable stores as the rest of the run.
 ## Quick tour
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 runner.RegisterAgent(api.AgentProfile{ID: "alice"})
 runner.RegisterAgent(api.AgentProfile{ID: "bob"})
 

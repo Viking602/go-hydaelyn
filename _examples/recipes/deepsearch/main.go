@@ -23,7 +23,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	researchers := []string{"r1", "r2"}
 	for _, id := range researchers {

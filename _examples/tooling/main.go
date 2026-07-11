@@ -16,7 +16,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "researcher"})
 	runner.RegisterTool(api.Tool{
 		Name:       "web.search",

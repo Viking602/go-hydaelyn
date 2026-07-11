@@ -15,7 +15,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "producer"})
 	runner.RegisterAgent(api.AgentProfile{ID: "consumer"})
 

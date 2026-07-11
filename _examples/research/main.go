@@ -17,7 +17,7 @@ const groupResearchers = "researchers"
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	pool := []string{"r1", "r2", "r3"}
 	for _, id := range pool {

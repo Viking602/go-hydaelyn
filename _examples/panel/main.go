@@ -17,7 +17,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {
 		runner.RegisterAgent(api.AgentProfile{ID: id, Role: "panel.expert"})

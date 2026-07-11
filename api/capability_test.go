@@ -2,6 +2,12 @@ package api
 
 import "testing"
 
+func TestDefaultStoreCapabilitiesFailClosed(t *testing.T) {
+	if got := DefaultStoreCapabilities(); got != (StoreCapabilities{}) {
+		t.Fatalf("DefaultStoreCapabilities() = %+v, want all capabilities disabled", got)
+	}
+}
+
 func TestToolCapabilityProjectionCopiesMutableMetadata(t *testing.T) {
 	tool := Tool{
 		Name:               "write_report",

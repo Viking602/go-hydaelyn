@@ -25,7 +25,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 
 	branches := []string{"api", "ui", "data"}
 	for _, b := range branches {

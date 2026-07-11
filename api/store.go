@@ -256,7 +256,7 @@ type StoreCapabilities struct {
 // polling and serializes worker access.
 func DefaultStoreCapabilities() StoreCapabilities {
 	return StoreCapabilities{
-		SupportsTransactions:        true, // every provider commits or rolls back
+		SupportsTransactions:        false,
 		SupportsBlackboardSubscribe: false,
 		SupportsListPending:         false,
 		SupportsConcurrentWriters:   false,

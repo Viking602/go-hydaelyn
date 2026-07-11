@@ -1,4 +1,5 @@
 .claude/
+.omo/
 .omc/
 .sisyphus/
 .sentrux/*
@@ -8,4 +9,5 @@ benchmarks/_external/
 benchmarks/results/
 .idea/
 .goland/
+.DS_Store
 docs/superpowers/

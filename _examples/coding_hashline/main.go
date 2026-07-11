@@ -75,7 +75,7 @@ func main() {
 	//    action task by composing an allow rule for the two coding write tools
 	//    the run uses. That composition is exactly the "explicit allowance"
 	//    spec section 7.1 says must clear the default deny.
-	runner := hydaelyn.New(api.Config{PolicyEngine: hostPolicy()})
+	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: hostPolicy()})
 	runner.RegisterAgent(api.AgentProfile{ID: agentID})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "fix the Add bug"})

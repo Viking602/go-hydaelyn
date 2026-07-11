@@ -17,7 +17,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.New()
+	runner := hydaelyn.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "worker"})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "recoverable run"})
@@ -43,7 +43,7 @@ func main() {
 	}))
 
 	// Replay reconstructs the entire run state from events on disk/memory.
-	projection, err := runner.ReplayRunState(run.ID)
+	projection, err := runner.ReplayRunStateContext(ctx, run.ID)
 	must(err)
 	out, _ := json.MarshalIndent(projection, "", "  ")
 	fmt.Println(string(out))

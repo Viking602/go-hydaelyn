@@ -18,14 +18,15 @@ The primary path exposes durability through:
 Default startup uses the in-memory store:
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 ```
 
 Custom durable storage is injected only when needed:
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner, err := hydaelyn.NewProduction(api.Config{
 	StoreProvider: myStoreProvider,
+	PolicyEngine:  myPolicy,
 })
 ```
 

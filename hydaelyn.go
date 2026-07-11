@@ -6,16 +6,57 @@
 package hydaelyn
 
 import (
+	"fmt"
+	"reflect"
+
 	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/internal/core"
 	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
 )
 
-// New constructs the primary Run/Task runner. With no arguments it uses the
-// default in-memory configuration; pass api.Config values to override defaults.
+// New constructs an in-memory development runner.
+//
+// Deprecated: use NewDevelopment for local/test use or NewProduction for a
+// runner that rejects missing durable storage and policy dependencies.
 func New(configs ...api.Config) *Runner {
+	return NewDevelopment(configs...)
+}
+
+// NewDevelopment constructs a runner with in-memory storage and allow-all
+// policy defaults. It is intended for tests, examples, and local development.
+func NewDevelopment(configs ...api.Config) *Runner {
 	cfg := resolveConfig(configs...)
-	return &Runner{rt: core.NewRuntime(adapter.ConfigToCore(cfg))}
+	return newRunner(cfg, api.RuntimeModeDevelopment)
+}
+
+// NewProduction constructs a runner only when the host supplies both durable
+// storage and an explicit policy. The framework cannot verify whether a
+// StoreProvider is durable, so production ownership remains with the host.
+func NewProduction(cfg api.Config) (*Runner, error) {
+	if isNilDependency(cfg.StoreProvider) {
+		return nil, fmt.Errorf("%w: store provider is required", api.ErrInvalidConfiguration)
+	}
+	if isNilDependency(cfg.PolicyEngine) {
+		return nil, fmt.Errorf("%w: policy engine is required", api.ErrInvalidConfiguration)
+	}
+	return newRunner(cfg, api.RuntimeModeProduction), nil
+}
+
+func isNilDependency(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
+func newRunner(cfg api.Config, mode api.RuntimeMode) *Runner {
+	return &Runner{rt: core.NewRuntime(adapter.ConfigToCore(cfg)), mode: mode}
 }
 
 // DefaultConfig returns an empty api.Config; useful as a baseline before
