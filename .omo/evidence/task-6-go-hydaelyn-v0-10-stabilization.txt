@@ -1,0 +1,158 @@
+Task 6: strengthen the tag release gate
+Date: 2026-07-10
+
+Changed files
+- .github/workflows/release.yml
+- .github/workflows/ci.yml
+- RELEASING.md
+
+Implemented checks
+- Checkout keeps fetch-depth: 0, then explicitly fetches origin/main.
+- The peeled GITHUB_SHA commit must be an ancestor of origin/main before the
+  release gate can pass.
+- staticcheck is pinned to v0.7.0 and govulncheck to v1.3.0; no @latest
+  analysis tool remains in the release workflow.
+- Sentrux is pinned and installed exactly like CI at v0.5.7, including the Go
+  grammar plugin, and make architecture-check is part of release-gate.
+- The tagged CLI is installed into a temporary GOBIN with GOPROXY=direct. Its
+  version must equal GITHUB_REF_NAME; --help must succeed; an unknown command
+  must exit 1 with empty stdout and non-empty stderr.
+- A temporary consumer writes its skill import first, pins the same tag, then
+  runs go mod tidy before go test ./... and go build ./.... This ensures lazy
+  module loading records skill's gopkg.in/yaml.v3 dependency in go.sum.
+- The GitHub Release job still has needs: release-gate, so no release creation
+  can bypass these checks.
+
+Verification evidence
+1. YAML and embedded bash syntax
+   ruby YAML.load_file plus bash -n over every run block: PASS
+   actionlint v1.7.7: PASS
+   git diff --check for release.yml and RELEASING.md: PASS
+
+2. Tag ancestry fixture (temporary bare origin; real repository untouched)
+   main-contained annotated tag: accepted by merge-base --is-ancestor
+   side-branch annotated tag: rejected by merge-base --is-ancestor
+
+3. Historical failing release readback
+   GOBIN=<temp> GOPROXY=direct go install
+   github.com/Viking602/go-hydaelyn/cmd/hydaelyn@v0.9.0: PASS
+   installed version: v2.0.0-dev
+   strict expected version v0.9.0: correctly rejected
+
+4. Full tagged install with an empty module cache
+   A temporary bare git remote was created from the current worktree and tagged
+   v0.10.0-test.1; git URL rewriting kept the real repository untouched.
+   GOMODCACHE and GOCACHE started empty; GOPROXY was direct.
+   origin/main ancestry: PASS
+   installed CLI version: v0.10.0-test.1
+   --help: exit 0
+   unknown command: exit 1, stdout empty, stderr non-empty
+   consumer source imported skill before dependency resolution.
+   go mod tidy downloaded gopkg.in/yaml.v3 and recorded it in go.sum: PASS
+   go test ./...: PASS
+   go build ./...: PASS
+
+5. Static release contract scan
+   Required fetch, ancestry, tool pins, Sentrux pin, architecture check,
+   GOPROXY=direct tagged install, version assertion, CLI behavior assertions,
+   same-tag consumer, and release dependency were all found: PASS
+   staticcheck@latest or govulncheck@latest in release workflow: absent
+
+6. Architecture gate
+   make architecture-check: PASS after the concurrent MCP implementation unit
+   removed its transient client/gateway cycle.
+   Sentrux quality: 6165; all rules pass.
+   Business-word, public-any, and package-import boundary checks: PASS.
+
+Tool versions
+- go version go1.25.12 darwin/arm64
+- git version 2.50.1 (Apple Git-155)
+- ruby 2.6.10p210
+- sentrux 0.5.7
+- staticcheck 2026.1 (v0.7.0)
+- govulncheck v1.3.0, DB updated 2026-07-08 17:05:00 +0000 UTC
+- actionlint v1.7.7 (run through go run)
+
+Not locally verifiable
+- A new tag cannot be pushed or a GitHub Release created under this task's
+  explicit no-publish constraint. The workflow's actual GitHub tag event and
+  release API call therefore remain CI-only checks.
+
+Residual risk
+- GOPROXY=direct depends on GitHub availability and a pushed tag being visible
+  from the runner. That dependency is intentional: the gate validates the same
+  public source path consumers use instead of the checked-out working tree.
+
+Security hardening follow-up
+
+Permissions and action pins
+- Workflow default permissions: contents read.
+- release-gate permissions: contents read; checkout persist-credentials false.
+- release permissions: contents write. This is the only write-capable job.
+- The release job has no checkout and executes no repository code. It uses the
+  GitHub-hosted runner's gh CLI with --verify-tag.
+- actions/checkout v5.0.1:
+  93cb6efe18208431cddfb8368fd83d5badbf9bfd
+  Source: official refs/tags/v5.0.1 plus the GitHub commit API.
+  The action.yml at this commit declares runs.using node24.
+- actions/setup-go v6.5.0:
+  924ae3a1cded613372ab5595356fb5720e22ba16
+  Source: official refs/tags/v6.5.0 plus the GitHub commit API.
+  The action.yml at this commit declares runs.using node24.
+- actions/upload-artifact v7.0.1:
+  043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+  Source: official refs/tags/v7.0.1 plus the GitHub commit API.
+  The action.yml at this commit declares runs.using node24 and retains the
+  name, path, if-no-files-found, and retention-days inputs used by CI.
+- golangci/golangci-lint-action v9.3.0:
+  ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
+  Source: the peeled official refs/tags/v9 and refs/tags/v9.3.0 plus the
+  GitHub commit API. The action.yml at this commit declares runs.using node24.
+- Every release workflow action uses a full 40-character commit SHA. CI uses
+  the same pinned checkout and setup-go revisions, and every CI action is also
+  pinned to a full commit SHA.
+
+Verified Sentrux v0.5.7 supply chain
+- Sentrux release/tag commit:
+  f36da08a53e7f06c5b6aec33eb05816b371000ea
+- sentrux-linux-x86_64 SHA-256:
+  3237f80fe20d54aad4deefa8a143f0d60543bb5d2d6ad891eb42432f155725a6
+- grammars-linux-x86_64.tar.gz SHA-256:
+  8849f1eb07df3f6d4ea1ed422d8dee4b9b79a250682fa5646675dae466554454
+- extracted go/grammars/linux-x86_64.so SHA-256:
+  4ad143e1da83af843d15e7efb9209b867c25f31f65a96ebdeb281ab958789072
+- plugins/go/plugin.toml SHA-256:
+  78ffd1982051035d70f26d1bbb8ab7c5f65f1ee63f756e7ce244b9eafe712753
+  The pinned manifest declares Go plugin version 0.1.0.
+- plugins/go/queries/tags.scm SHA-256:
+  3f2a406d19c7db7be6529f28fc0b38637a419c9f7a7b4be5ba50d0c0ece1d94c
+- Binary and archive digests came from the official v0.5.7 GitHub Release API
+  asset digest fields and were confirmed against downloaded bytes.
+- Plugin metadata and query came from raw.githubusercontent.com at the immutable
+  v0.5.7 commit above and were confirmed against downloaded bytes.
+- sentrux plugin add --help accepts only a plugin name and has no version flag.
+  CI and release therefore install the pinned metadata/query plus the verified
+  release grammar directly; no dynamic plugin registry lookup remains.
+- Positive download/checksum/extraction/plugin validation: PASS.
+- One-byte-corrupted Sentrux binary checksum: correctly rejected.
+- CI and release Sentrux environment and install blocks: byte-for-byte equal.
+
+Tag revalidation and TOCTOU fixtures
+- release-gate resolves the remote tag to a commit, compares it with the event
+  commit, checks origin/main ancestry, and exposes the commit as a job output.
+- The release job fetches origin/main and the exact tag into a new empty git
+  repository, then compares the final remote commit with the gate output and
+  checks ancestry again before invoking gh release create.
+- Lightweight tag on main: accepted.
+- Annotated tag on main: accepted.
+- Tag on side branch: rejected.
+- Tag force-moved after the gate: rejected by final remote readback.
+
+Final security verification
+- Ruby YAML parsing and bash -n for every run block in CI and release: PASS.
+- actionlint v1.7.7 for CI and release: PASS.
+- git diff --check: PASS.
+- make architecture-check: PASS; Sentrux quality 6165 and all boundary checks
+  passed.
+- No real tag, push, GitHub Release, commit, or repository credential mutation
+  was performed.

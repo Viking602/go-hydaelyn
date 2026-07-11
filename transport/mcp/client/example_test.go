@@ -2,10 +2,11 @@ package mcpclient_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
 )
@@ -19,25 +20,24 @@ import (
 //
 // or use [mcpclient.DialStdio] for stdio-based MCP servers.
 func Example() {
-	// Spin up a minimal MCP server that responds to tools/list.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"jsonrpc": "2.0",
-			"id":      req["id"],
-			"result": map[string]any{
-				"tools": []map[string]any{
-					{"name": "search", "description": "Search the web"},
-				},
-			},
-		})
-	}))
+	serverImplementation := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "example-server", Version: "v1.0.0"}, nil)
+	serverImplementation.AddTool(&sdkmcp.Tool{
+		Name:        "search",
+		Description: "Search the web",
+		InputSchema: map[string]any{"type": "object"},
+	}, nil)
+	server := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return serverImplementation
+	}, nil))
 	defer server.Close()
 
 	c := mcpclient.New(mcpclient.NewHTTPTransport(server.URL, nil))
 	defer func() { _ = c.Close() }()
 
+	if _, err := c.Initialize(context.Background(), "example-client", "v1.0.0"); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 	tools, err := c.ListTools(context.Background())
 	if err != nil {
 		fmt.Println("error:", err)

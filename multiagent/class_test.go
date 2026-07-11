@@ -15,16 +15,17 @@ import (
 
 func TestAgentClass_ToSpec_CarriesExecutableFields(t *testing.T) {
 	class := AgentClass{
-		Name:         "Researcher",
-		Description:  "looks things up",
-		Instructions: "You research.",
-		Model:        "opus",
-		Skills:       []string{"code-review"},
-		Tools:        []string{"lookup", "search"},
-		InputSchema:  json.RawMessage(`{"type":"object"}`),
-		OutputSchema: json.RawMessage(`{"type":"string"}`),
-		LoopPolicy:   agent.LoopPolicy{MaxIterations: 7},
-		Capabilities: []api.Capability{{Name: "research"}},
+		Name:            "Researcher",
+		Description:     "looks things up",
+		Instructions:    "You research.",
+		Model:           "opus",
+		Skills:          []string{"code-review"},
+		AvailableSkills: []string{"pdf-processing"},
+		Tools:           []string{"lookup", "search"},
+		InputSchema:     json.RawMessage(`{"type":"object"}`),
+		OutputSchema:    json.RawMessage(`{"type":"string"}`),
+		LoopPolicy:      agent.LoopPolicy{MaxIterations: 7},
+		Capabilities:    []api.Capability{{Name: "research"}},
 	}
 
 	spec := class.ToSpec()
@@ -37,6 +38,9 @@ func TestAgentClass_ToSpec_CarriesExecutableFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(spec.Skills, class.Skills) {
 		t.Errorf("Skills = %v, want %v", spec.Skills, class.Skills)
+	}
+	if !reflect.DeepEqual(spec.AvailableSkills, class.AvailableSkills) {
+		t.Errorf("AvailableSkills = %v, want %v", spec.AvailableSkills, class.AvailableSkills)
 	}
 	if !reflect.DeepEqual(spec.Tools, class.Tools) {
 		t.Errorf("Tools = %v, want %v", spec.Tools, class.Tools)

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — enforced from v0.8.0 onward. Supersedes the previous ADR-013 *Memory Kernel vs Pipeline* draft, which proposed `memory/inmem/` as a v0.8.0 reference implementation with a kernel-locked `MemoryEntry` schema (Content / Embedding / Refs / Layer / RetrievalStrategy). Anchor document: `docs/product-spec/v0.8.0/13-memory-optional-plugin.md`. Supports `docs/product-spec/v0.8.0/09-boundaries.md` Principle 3.
+Accepted; enforced from v0.8.0 onward and aligned with ADR-012 Position D. Supersedes the previous ADR-013 *Memory Kernel vs Pipeline* draft, which proposed `memory/inmem/` as a v0.8.0 reference implementation with a kernel-locked `MemoryEntry` schema (Content / Embedding / Refs / Layer / RetrievalStrategy). Anchor document: `docs/product-spec/v0.8.0/13-memory-optional-plugin.md`. Supports `docs/product-spec/v0.8.0/09-boundaries.md` Principle 3.
 
 ## Context
 
@@ -11,7 +11,7 @@ The earlier draft of this ADR addressed a real problem (procedures should not be
 1. **Memory schemas are domain-specific.** Unlike framework-owned control-plane entities (Run, Task, Lease, Event), memory entities are application content: chat turns, user preferences, learned facts, vector chunks, knowledge-graph nodes, audit traces. The shape varies per application. A reference `MemoryEntry` shaped around "text + embedding + layer" actively misleads applications whose memory looks nothing like that, and the framework cannot enumerate the shapes in advance.
 2. **Storage choice is the application's.** Real applications already have a database, an ORM, a migration tool. Asking them to adopt the framework's in-process memory store (or even a "starter SQLite" variant) is friction that buys no value — they will discard it within an iteration.
 
-The same logic does **not** apply to `StoreProvider` (Run / Task / Lease / Event storage). Those entities have framework-decided schemas because they encode framework-owned control flow; reference implementations under `storage/{memory,sqlite,postgres,mysql}` legitimately accelerate adoption without misleading downstream. The asymmetry between Memory (no reference impl) and StoreProvider (reference impls retained) is intentional and tracks who owns the schema.
+Position D applies the same ownership rule to `StoreProvider` (Run / Task / Lease / Event storage). The framework defines the control-plane contract verbs and conformance tests. Applications own the schema and storage implementation. The framework ships no `storage/{memory,sqlite,postgres,mysql}` reference implementations.
 
 ## Decision
 

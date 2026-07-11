@@ -8,8 +8,17 @@
 # - The legacy/* tree was deleted in M6 (v2.0); historical legacy code is
 #   preserved on the archive/legacy-v1 branch, not in main.
 #
-# Sub-package boundary intent (enforced manually via grep gates until sentrux
-# supports path-scoped import rules natively):
+# Sentrux 0.5.7 enforces the graph-wide constraints below, but cannot express
+# these path-scoped import rules precisely. They are enforced from the compiled
+# package graph by scripts/check-import-boundaries.sh instead:
+#
+#   api                    — no Hydaelyn imports
+#   agent                  — no multiagent imports
+#   multiagent             — no root, worker, or internal imports
+#   root package facade    — no multiagent imports
+#
+# multiagent → stream is intentionally allowed: stream is a runtime-neutral
+# collaboration primitive, not an upward dependency on the durable Runner.
 #
 #   internal/core/model      — stdlib only; no internal/core/* imports
 #   internal/core/ports      — model only
@@ -28,6 +37,7 @@
 # Script-based gates run in CI and `make architecture-check`:
 #   scripts/check-business-words.sh  — framework/business vocabulary boundary
 #   scripts/check-public-any.sh      — public []any return and any-field contract
+#   scripts/check-import-boundaries.sh — four path-scoped import seams via go list
 
 [constraints]
 # Acyclic always.

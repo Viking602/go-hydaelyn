@@ -2,42 +2,58 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/go-hydaelyn/tool/kit"
 	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
 )
 
 func TestNewGateway(t *testing.T) {
 	// Create a nil client for testing (we can't create a real one without transport)
-	var client *mcpclient.Client
-	gateway := NewGateway(client)
+	gateway := NewGateway(nil)
 
 	// The gateway should be created even with nil client
 	// The actual ImportTools will fail when called
-	if gateway.Client != client {
+	if gateway.Client != nil {
 		t.Error("NewGateway() should set the client")
 	}
 }
 
-func TestClientGatewayImportToolsNilClient(t *testing.T) {
-	gateway := ClientGateway{}
+func TestErrInvalidClientAliasesKitSentinel(t *testing.T) {
+	if ErrInvalidClient != kit.ErrInvalidMCPClient {
+		t.Fatal("ErrInvalidClient should alias kit.ErrInvalidMCPClient")
+	}
+}
 
-	ctx := context.Background()
+func TestClientGatewayImportToolsReturnsInvalidClientForUntypedNil(t *testing.T) {
+	// Given
+	gateway := NewGateway(nil)
 
-	// This will panic with nil client - use defer/recover to test this
-	defer func() {
-		if r := recover(); r != nil {
-			// Expected panic with nil client
-			t.Logf("Expected panic occurred: %v", r)
-		}
-	}()
+	// When
+	_, err := gateway.ImportTools(context.Background())
 
-	_, err := gateway.ImportTools(ctx)
+	// Then
+	if !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("ImportTools() error = %v, want ErrInvalidClient", err)
+	}
+}
 
-	// Should error with nil client (but actually panics)
-	if err == nil {
-		t.Error("ImportTools() should return error with nil client")
+func TestClientGatewayImportToolsReturnsInvalidClientForTypedNil(t *testing.T) {
+	// Given
+	var client *mcpclient.Client
+	gateway := NewGateway(client)
+	if gateway.Client != nil {
+		t.Fatal("NewGateway() should normalize a typed-nil client")
+	}
+
+	// When
+	_, err := gateway.ImportTools(context.Background())
+
+	// Then
+	if !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("ImportTools() error = %v, want ErrInvalidClient", err)
 	}
 }
 
@@ -47,11 +63,10 @@ func TestGatewayInterface(t *testing.T) {
 }
 
 func TestNewGatewayReturnsClientGateway(t *testing.T) {
-	var client *mcpclient.Client
-	gateway := NewGateway(client)
+	gateway := NewGateway(nil)
 
 	// Test that we can access it as ClientGateway
-	if gateway.Client != client {
+	if gateway.Client != nil {
 		t.Error("Client should be set correctly")
 	}
 }

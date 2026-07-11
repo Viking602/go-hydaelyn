@@ -69,6 +69,7 @@ architecture-check: ## Run Sentrux and framework boundary checks
 	$(SENTRUX) check .
 	./scripts/check-business-words.sh
 	./scripts/check-public-any.sh
+	./scripts/check-import-boundaries.sh
 
 .PHONY: tidy
 tidy: ## Run go mod tidy

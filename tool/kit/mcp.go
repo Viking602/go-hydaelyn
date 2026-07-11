@@ -3,13 +3,26 @@ package kit
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 
 	"github.com/Viking602/go-hydaelyn/tool"
-	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
+	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
 )
 
-func ImportMCPTools(ctx context.Context, client *mcpclient.Client) ([]tool.Driver, error) {
+// ErrInvalidMCPClient is returned when an MCP client is nil or otherwise unusable.
+var ErrInvalidMCPClient = errors.New("mcp client is invalid")
+
+type MCPClient interface {
+	ListTools(ctx context.Context) ([]tool.Definition, error)
+	CallTool(ctx context.Context, name string, arguments map[string]any) (mcpcontract.CallToolResult, error)
+}
+
+func ImportMCPTools(ctx context.Context, client MCPClient) ([]tool.Driver, error) {
+	if isNilMCPClient(client) {
+		return nil, ErrInvalidMCPClient
+	}
 	tools, err := client.ListTools(ctx)
 	if err != nil {
 		return nil, err
@@ -24,8 +37,21 @@ func ImportMCPTools(ctx context.Context, client *mcpclient.Client) ([]tool.Drive
 	return drivers, nil
 }
 
+func isNilMCPClient(client MCPClient) bool {
+	if client == nil {
+		return true
+	}
+	value := reflect.ValueOf(client)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
 type remoteTool struct {
-	client     *mcpclient.Client
+	client     MCPClient
 	definition tool.Definition
 }
 

@@ -34,6 +34,11 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ mcp.Gateway
 	var _ tool.Mode
 	var _ = skill.Skill{Name: "code-review", Description: "Review code"}
+	var _ = skill.DiscoveryOptions{TrustProject: true}
+	var _ = agent.Spec{AvailableSkills: []string{"code-review"}}
+	if agent.SkillActivationToolName == "" || agent.SkillResourceToolName == "" {
+		t.Fatal("skill runtime tool names must be exported")
+	}
 	skills := skill.NewRegistry()
 	if err := skill.Register(skills, skill.Skill{Name: "code-review", Description: "Review code"}); err != nil {
 		t.Fatalf("skill.Register() error = %v", err)

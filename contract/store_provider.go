@@ -26,10 +26,10 @@ type ProviderFactory func(t *testing.T) (provider api.StoreProvider, cleanup fun
 // event ordering, resume tokens + outbox, replay determinism, capability
 // self-consistency, and the multi-agent stores (HandoffStore /
 // TeamStateStore / AgentInstanceStore — spec 07 §"New store contracts").
-// See docs/product-spec/v0.8.0/05-storage.md §"Contract test suite" for
-// the authoritative list. See ADR-012 for the Position C stance: this
-// suite is the validation bar for every provider, framework reference
-// impls and external alike.
+// See docs/product-spec/v0.8.0/07-storage.md §"Contract test suite" for
+// the authoritative list. See ADR-012 for the Position D stance.
+// Application-owned StoreProvider implementations should run this suite. The
+// framework ships no reference StoreProvider implementations.
 //
 // Tests gated on optional capabilities call t.Skip when the provider
 // self-declares the feature as unsupported via api.CapabilityReporter, so

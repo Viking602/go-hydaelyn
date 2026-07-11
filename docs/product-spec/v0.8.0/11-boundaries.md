@@ -14,6 +14,17 @@ This document is the source for `docs/architecture-boundaries.md` (a
 copy with the same content, located outside `product-spec/`, linked
 from CONTRIBUTING.md and README).
 
+> **Post-release clarification (current `main` / v0.10):** The planned
+> `docs/architecture-boundaries.md` copy was never created. This versioned file
+> remains the maintained v0.8.0 design record; use tag `v0.8.0` for the exact
+> released code. Current `multiagent/` may import the runtime-neutral `stream/`
+> package. `scripts/check-import-boundaries.sh` now enforces four path rules:
+> `api/` imports no Hydaelyn package; `agent/` never imports `multiagent/`;
+> `multiagent/` never imports the root Runner, `worker/`, or `internal/`; and the
+> root facade never imports `multiagent/`. Sentrux handles the complementary
+> global cycle, coupling, and God File checks. These updates describe current
+> `main`, not the v0.8.0 tag.
+
 ## Principle 1 — Core has no domain vocabulary
 
 **Rule**: Code under `api/`, `internal/core/**`, `internal/run/`,
@@ -175,6 +186,11 @@ The full text of these six principles is published in:
 - Referenced from `CONTRIBUTING.md`
 - Linked from top of `README.md`
 - Referenced by every ADR listed in §Mapping
+
+The first item above records the v0.8.0 plan. The copy does not exist in the
+current repository; use this versioned record for the historical design and
+[ADR-016](../../adr/ADR-016-explicit-multi-agent-scheduler.md) for the current
+multi-agent boundary.
 
 ## Verification
 

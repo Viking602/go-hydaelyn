@@ -5,14 +5,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
+
+const maxSkillBytes = 1 << 20
 
 // Skill is a parsed Agent Skills-compatible reusable instruction bundle.
 type Skill struct {
@@ -26,10 +30,12 @@ type Skill struct {
 	// availability and policy come from the agent configuration (spec
 	// 11-boundaries.md). The field is parsed and preserved for host tooling
 	// (e.g. linters, UIs) but has no runtime gate effect.
-	AllowedTools []string `json:"allowedTools,omitempty"`
-	Body         string   `json:"body,omitempty"`
-	SourcePath   string   `json:"sourcePath,omitempty"`
-	SourceDir    string   `json:"sourceDir,omitempty"`
+	AllowedTools []string   `json:"allowedTools,omitempty"`
+	Body         string     `json:"body,omitempty"`
+	SourcePath   string     `json:"sourcePath,omitempty"`
+	SourceDir    string     `json:"sourceDir,omitempty"`
+	Resources    []Resource `json:"resources,omitempty"`
+	sourceInfo   os.FileInfo
 }
 
 // ErrRegistryNil is returned when a registry operation requires a Registry.
@@ -69,6 +75,9 @@ type Registry struct {
 
 // Parse parses one SKILL.md file body.
 func Parse(path string, content []byte) (Skill, error) {
+	if len(content) > maxSkillBytes {
+		return Skill{}, &ValidationError{Field: "file", Reason: "must be at most 1 MiB"}
+	}
 	frontmatter, body, err := splitFrontmatter(content)
 	if err != nil {
 		return Skill{}, err
@@ -98,12 +107,95 @@ func Parse(path string, content []byte) (Skill, error) {
 
 // LoadDir reads SKILL.md directly under dir and parses it.
 func LoadDir(dir string) (Skill, error) {
-	path := filepath.Join(dir, "SKILL.md")
-	content, err := os.ReadFile(path)
+	canonicalDir, root, sourceInfo, err := openSkillRoot(dir)
 	if err != nil {
 		return Skill{}, err
 	}
-	return Parse(path, content)
+	defer root.Close()
+	content, err := readSkillDefinition(root)
+	if err != nil {
+		return Skill{}, err
+	}
+	path := filepath.Join(canonicalDir, "SKILL.md")
+	s, err := Parse(path, content)
+	if err != nil {
+		return Skill{}, err
+	}
+	s.sourceInfo = sourceInfo
+	if err := loadResourceManifest(&s, root); err != nil {
+		return Skill{}, err
+	}
+	return s, nil
+}
+
+func openSkillRoot(dir string) (string, *os.Root, os.FileInfo, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	dirInfo, err := os.Lstat(absDir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if dirInfo.Mode()&os.ModeSymlink != 0 || !dirInfo.IsDir() {
+		return "", nil, nil, fmt.Errorf("skill: directory %q must be a real directory", dir)
+	}
+	canonicalDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	root, err := os.OpenRoot(canonicalDir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	sourceInfo, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return "", nil, nil, err
+	}
+	if err := validateSourceIdentity(dir, dirInfo, sourceInfo); err != nil {
+		root.Close()
+		return "", nil, nil, err
+	}
+	return canonicalDir, root, sourceInfo, nil
+}
+
+func readSkillDefinition(root *os.Root) ([]byte, error) {
+	info, err := root.Lstat("SKILL.md")
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("skill: SKILL.md must be a regular file")
+	}
+	file, err := root.Open("SKILL.md")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err = file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("skill: SKILL.md must be a regular file")
+	}
+	return readBounded(file, maxSkillBytes)
+}
+
+func validateSourceIdentity(path string, before, after os.FileInfo) error {
+	if !os.SameFile(before, after) {
+		return fmt.Errorf("skill: directory %q changed while loading", path)
+	}
+	return nil
+}
+
+func readBounded(reader io.Reader, limit int64) ([]byte, error) {
+	content, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > limit {
+		return nil, &ValidationError{Field: "file", Reason: fmt.Sprintf("must be at most %d bytes", limit)}
+	}
+	return content, nil
 }
 
 // NewRegistry returns an empty skill registry.
@@ -205,7 +297,21 @@ func RenderSystemSection(skills []Skill) string {
 		b.WriteString("\n")
 		b.WriteString("Source directory: ")
 		b.WriteString(s.SourceDir)
-		b.WriteString("\n\n")
+		b.WriteString("\n")
+		if s.Compatibility != "" {
+			b.WriteString("Compatibility: ")
+			b.WriteString(s.Compatibility)
+			b.WriteString("\n")
+		}
+		if len(s.Resources) > 0 {
+			b.WriteString("Resources (load only when needed):\n")
+			for _, resource := range s.Resources {
+				b.WriteString("- ")
+				b.WriteString(resource.Name)
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
 		b.WriteString(s.Body)
 		if s.Body != "" && !strings.HasSuffix(s.Body, "\n") {
 			b.WriteString("\n")
@@ -218,12 +324,13 @@ func RenderSystemSection(skills []Skill) string {
 }
 
 type frontmatterFields struct {
-	Name          string
-	Description   string
-	License       string
-	Compatibility string
-	Metadata      map[string]string
-	AllowedTools  []string
+	Name             string
+	Description      string
+	License          string
+	Compatibility    string
+	Metadata         map[string]string
+	AllowedTools     []string
+	compatibilitySet bool
 }
 
 func splitFrontmatter(content []byte) (string, string, error) {
@@ -248,63 +355,101 @@ func splitFrontmatter(content []byte) (string, string, error) {
 
 func parseFrontmatter(content string) (frontmatterFields, error) {
 	var fields frontmatterFields
-	if strings.TrimSpace(content) == "" {
+	node, err := decodeFrontmatterNode(content)
+	if err != nil {
+		return frontmatterFields{}, err
+	}
+	if node == nil {
 		return fields, nil
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if err := applyFrontmatterField(&fields, node.Content[i].Value, node.Content[i+1]); err != nil {
+			return frontmatterFields{}, err
+		}
+	}
+	if fields.compatibilitySet && strings.TrimSpace(fields.Compatibility) == "" {
+		return frontmatterFields{}, &ValidationError{Field: "compatibility", Reason: "must not be empty when provided"}
+	}
+	return fields, nil
+}
+
+func decodeFrontmatterNode(content string) (*yaml.Node, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil
 	}
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
-		return frontmatterFields{}, &ValidationError{Field: "frontmatter", Reason: "invalid YAML: " + err.Error()}
+		return nil, &ValidationError{Field: "frontmatter", Reason: "invalid YAML: " + err.Error()}
 	}
 	if len(root.Content) == 0 || root.Content[0].Kind == 0 {
-		return fields, nil
+		return nil, nil
 	}
 	node := root.Content[0]
 	if node.Kind != yaml.MappingNode {
-		return frontmatterFields{}, &ValidationError{Field: "frontmatter", Reason: "must be a mapping"}
+		return nil, &ValidationError{Field: "frontmatter", Reason: "must be a mapping"}
 	}
-	for i := 0; i < len(node.Content); i += 2 {
-		key := node.Content[i]
-		value := node.Content[i+1]
-		switch key.Value {
-		case "name":
-			text, err := yamlString("name", value)
-			if err != nil {
-				return frontmatterFields{}, err
+	if err := rejectDuplicateKeys(node); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func applyFrontmatterField(fields *frontmatterFields, key string, value *yaml.Node) error {
+	switch key {
+	case "name":
+		text, err := yamlString("name", value)
+		fields.Name = text
+		return err
+	case "description":
+		text, err := yamlString("description", value)
+		fields.Description = text
+		return err
+	case "license":
+		text, err := yamlString("license", value)
+		fields.License = text
+		return err
+	case "compatibility":
+		text, err := yamlString("compatibility", value)
+		fields.Compatibility = text
+		fields.compatibilitySet = err == nil
+		return err
+	case "metadata":
+		metadata, err := yamlStringMap(value)
+		fields.Metadata = metadata
+		return err
+	case "allowed-tools":
+		tools, err := yamlAllowedTools(value)
+		fields.AllowedTools = tools
+		return err
+	}
+	return nil
+}
+
+func rejectDuplicateKeys(root *yaml.Node) error {
+	pending := []*yaml.Node{root}
+	for len(pending) > 0 {
+		node := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if node.Kind == yaml.MappingNode {
+			if err := rejectMappingDuplicates(node); err != nil {
+				return err
 			}
-			fields.Name = text
-		case "description":
-			text, err := yamlString("description", value)
-			if err != nil {
-				return frontmatterFields{}, err
-			}
-			fields.Description = text
-		case "license":
-			text, err := yamlString("license", value)
-			if err != nil {
-				return frontmatterFields{}, err
-			}
-			fields.License = text
-		case "compatibility":
-			text, err := yamlString("compatibility", value)
-			if err != nil {
-				return frontmatterFields{}, err
-			}
-			fields.Compatibility = text
-		case "metadata":
-			metadata, err := yamlStringMap(value)
-			if err != nil {
-				return frontmatterFields{}, err
-			}
-			fields.Metadata = metadata
-		case "allowed-tools":
-			tools, err := yamlAllowedTools(value)
-			if err != nil {
-				return frontmatterFields{}, err
-			}
-			fields.AllowedTools = tools
 		}
+		pending = append(pending, node.Content...)
 	}
-	return fields, nil
+	return nil
+}
+
+func rejectMappingDuplicates(node *yaml.Node) error {
+	seen := make(map[string]struct{}, len(node.Content)/2)
+	for i := 0; i < len(node.Content); i += 2 {
+		key := node.Content[i].Value
+		if _, ok := seen[key]; ok {
+			return &ValidationError{Field: "frontmatter", Reason: fmt.Sprintf("duplicate key %q", key)}
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func yamlString(field string, node *yaml.Node) (string, error) {
@@ -357,21 +502,38 @@ func yamlAllowedTools(node *yaml.Node) ([]string, error) {
 	}
 }
 
-// splitAllowedTools splits a scalar allowed-tools string on commas only.
-// Spaces inside an entry are preserved because tool specs may contain them
-// (e.g. "Bash(git diff:*)"); only leading/trailing whitespace around each
-// comma-separated entry is trimmed. The YAML sequence form is handled by
-// yamlAllowedTools and never reaches this function.
+// splitAllowedTools splits the standard space-separated form while preserving
+// whitespace inside parenthesized tool patterns such as "Bash(git diff:*)".
 func splitAllowedTools(value string) []string {
-	parts := strings.Split(value, ",")
-	tools := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			tools = append(tools, part)
+	tools := make([]string, 0)
+	start, depth := -1, 0
+	for i, r := range value {
+		if unicode.IsSpace(r) && depth == 0 {
+			if start >= 0 {
+				tools = append(tools, value[start:i])
+				start = -1
+			}
+			continue
 		}
+		if start < 0 {
+			start = i
+		}
+		depth = nextToolDepth(depth, r)
+	}
+	if start >= 0 {
+		tools = append(tools, value[start:])
 	}
 	return tools
+}
+
+func nextToolDepth(depth int, r rune) int {
+	if r == '(' {
+		return depth + 1
+	}
+	if r == ')' && depth > 0 {
+		return depth - 1
+	}
+	return depth
 }
 
 func validateSkill(s Skill, checkPath bool) error {
@@ -383,9 +545,6 @@ func validateSkill(s Skill, checkPath bool) error {
 	}
 	if utf8.RuneCountInString(s.Description) > 1024 {
 		return &ValidationError{Field: "description", Reason: "must be at most 1024 characters"}
-	}
-	if containsXMLTag(s.Description) {
-		return &ValidationError{Field: "description", Reason: "must not contain XML tags"}
 	}
 	if utf8.RuneCountInString(s.Compatibility) > 500 {
 		return &ValidationError{Field: "compatibility", Reason: "must be at most 500 characters"}
@@ -416,62 +575,13 @@ func validateName(name string) error {
 		}
 		return &ValidationError{Field: "name", Reason: "must contain only lowercase ASCII letters, digits, and hyphens"}
 	}
-	if isReservedSkillNameWord(name) {
-		return &ValidationError{Field: "name", Reason: "must not contain reserved words \"anthropic\" or \"claude\""}
-	}
 	return nil
-}
-
-// containsXMLTag reports whether s contains an XML-like tag: a '<' followed
-// by one or more characters and then a '>'. The content between the angle
-// brackets may include whitespace and attributes (e.g. <system role="x">),
-// but must contain at least one non-whitespace character so that bare '<' or
-// '<>' do not match. A nested '<' resets the scan. Anthropic's Agent Skills
-// spec forbids XML tags in the description field to prevent prompt-injection
-// via frontmatter that gets rendered into the system section; the name field
-// is already constrained to [a-z0-9-] by validateName, which excludes '<' and
-// '>' and makes this check redundant for names.
-func containsXMLTag(s string) bool {
-	for i := range s {
-		if s[i] != '<' {
-			continue
-		}
-		j := i + 1
-		hasNonSpace := false
-		for j < len(s) && s[j] != '>' && s[j] != '<' {
-			if s[j] != ' ' && s[j] != '\t' && s[j] != '\n' && s[j] != '\r' {
-				hasNonSpace = true
-			}
-			j++
-		}
-		if hasNonSpace && j < len(s) && s[j] == '>' {
-			return true
-		}
-	}
-	return false
-}
-
-// isReservedSkillNameWord reports whether name contains a reserved word that
-// the Anthropic Agent Skills spec forbids in skill names ("cannot contain
-// reserved words"). The name is split on hyphens into segments and any
-// segment equal to "anthropic" or "claude" (case-insensitive) is rejected, so
-// "claude", "claude-tools", "anthropic-helper", and "review-anthropic" all
-// fail while "code-review" passes. Substring overlap (e.g. a hypothetical
-// "disclaude") is not rejected because the spec's segment-based naming makes
-// hyphen-delimited token matching the precise interpretation of "contain".
-func isReservedSkillNameWord(name string) bool {
-	lower := strings.ToLower(name)
-	for _, segment := range strings.Split(lower, "-") {
-		if segment == "anthropic" || segment == "claude" {
-			return true
-		}
-	}
-	return false
 }
 
 func cloneSkill(s Skill) Skill {
 	s.Metadata = cloneStringMap(s.Metadata)
 	s.AllowedTools = cloneStrings(s.AllowedTools)
+	s.Resources = cloneResources(s.Resources)
 	return s
 }
 

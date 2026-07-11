@@ -45,9 +45,11 @@ func TestBuilderRecordsFieldMappings(t *testing.T) {
 func TestBuilderDefinitionCopiesMutableClassFields(t *testing.T) {
 	inputSchema := json.RawMessage(`{"type":"object"}`)
 	class := multiagent.AgentClass{
-		Name:        "extract",
-		Tools:       []string{"lookup"},
-		InputSchema: inputSchema,
+		Name:            "extract",
+		Skills:          []string{"eager"},
+		AvailableSkills: []string{"on-demand"},
+		Tools:           []string{"lookup"},
+		InputSchema:     inputSchema,
 		Capabilities: []api.Capability{{
 			Name:        "cap",
 			Tags:        []string{"tag"},
@@ -59,12 +61,17 @@ func TestBuilderDefinitionCopiesMutableClassFields(t *testing.T) {
 	def := workflow.New("snapshot").Step("extract", class).Definition()
 
 	class.Tools[0] = "mutated"
+	class.Skills[0] = "mutated"
+	class.AvailableSkills[0] = "mutated"
 	inputSchema[0] = '['
 	class.Capabilities[0].Tags[0] = "mutated"
 	class.Capabilities[0].Metadata["owner"] = "mutated"
 	class.Capabilities[0].InputSchema["type"] = "mutated"
 
 	got := def.Steps[0].Class
+	if got.Skills[0] != "eager" || got.AvailableSkills[0] != "on-demand" {
+		t.Fatalf("skills were aliased: eager=%#v available=%#v", got.Skills, got.AvailableSkills)
+	}
 	if got.Tools[0] != "lookup" {
 		t.Fatalf("tools were aliased: %#v", got.Tools)
 	}

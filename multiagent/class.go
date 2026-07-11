@@ -20,10 +20,11 @@ import (
 //
 // Spec anchor: docs/product-spec/v0.8.0/04-agent-class.md.
 type AgentClass struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description,omitempty"`
-	Instructions string   `json:"instructions,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	Instructions    string   `json:"instructions,omitempty"`
+	Skills          []string `json:"skills,omitempty"`
+	AvailableSkills []string `json:"availableSkills,omitempty"`
 
 	Model string   `json:"model,omitempty"`
 	Tools []string `json:"tools,omitempty"`
@@ -55,12 +56,13 @@ type AgentClass struct {
 // between single-agent and multi-agent deployments without re-describing it.
 func (c AgentClass) ToSpec() agent.Spec {
 	return agent.Spec{
-		Instructions: c.Instructions,
-		Skills:       c.Skills,
-		Model:        c.Model,
-		Tools:        c.Tools,
-		LoopPolicy:   c.LoopPolicy,
-		InputSchema:  c.InputSchema,
-		OutputSchema: c.OutputSchema,
+		Instructions:    c.Instructions,
+		Skills:          c.Skills,
+		AvailableSkills: c.AvailableSkills,
+		Model:           c.Model,
+		Tools:           c.Tools,
+		LoopPolicy:      c.LoopPolicy,
+		InputSchema:     c.InputSchema,
+		OutputSchema:    c.OutputSchema,
 	}
 }

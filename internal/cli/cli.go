@@ -1,5 +1,5 @@
-// Package cli implements the hydaelyn binary. v2.0 ships a deliberately
-// minimal CLI: the framework is library-first, so the CLI only exposes
+// Package cli implements the deliberately minimal hydaelyn binary. The
+// framework is library-first, so the CLI only exposes
 // utilities for inspecting event logs emitted by a hydaelyn Runner.
 //
 // The richer recipe / eval / pattern-driven CLI from v1 lives on the
@@ -11,20 +11,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 )
-
-// Version is overridden at link time via -ldflags "-X .../cli.Version=v2.0.0".
-var Version = "v2.0.0-dev"
 
 func Execute(ctx context.Context, args []string, stdout io.Writer, _ io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("missing command — try `hydaelyn help`")
 	}
+	buildInfo, _ := debug.ReadBuildInfo()
+	version := resolveBuildVersion(buildInfo)
 	switch args[0] {
 	case "help", "-h", "--help":
-		return runHelp(stdout)
+		return runHelp(stdout, version)
 	case "version", "-v", "--version":
-		_, err := fmt.Fprintln(stdout, Version)
+		_, err := fmt.Fprintln(stdout, version)
 		return err
 	case "inspect-events":
 		return runInspectEvents(ctx, args[1:], stdout)
@@ -33,13 +33,22 @@ func Execute(ctx context.Context, args []string, stdout io.Writer, _ io.Writer) 
 	}
 }
 
-func runHelp(stdout io.Writer) error {
-	_, err := fmt.Fprint(stdout, `hydaelyn — multi-agent orchestrator runtime (v2.0)
+func resolveBuildVersion(info *debug.BuildInfo) string {
+	// Local builds have no module checksum, even when Go synthesizes a
+	// pseudo-version from VCS metadata.
+	if info == nil || info.Main.Sum == "" {
+		return "devel"
+	}
+	return info.Main.Version
+}
+
+func runHelp(stdout io.Writer, version string) error {
+	_, err := fmt.Fprintf(stdout, `hydaelyn — multi-agent orchestrator runtime (%s)
 
 Usage:
   hydaelyn version
   hydaelyn inspect-events --events PATH [--task TASKID]
   hydaelyn help
-`)
+`, version)
 	return err
 }

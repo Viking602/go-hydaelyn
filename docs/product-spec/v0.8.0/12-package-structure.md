@@ -242,3 +242,14 @@ Enforced by `.sentrux.toml`. The critical rules:
 - `go build ./...` succeeds with the new top-level packages
 - `go vet ./...` clean
 - `go doc ./...` returns sensible package-level docs for every new top-level package
+
+## Post-release clarification (current `main` / v0.10)
+
+The dependency table and `.sentrux.toml` references above are the v0.8.0 design
+record, not the current package graph. Current `multiagent/` may also import the
+runtime-neutral `stream/` package. `scripts/check-import-boundaries.sh` enforces
+four path rules: `api/` imports no Hydaelyn package; `agent/` never imports
+`multiagent/`; `multiagent/` never imports the root Runner, `worker/`, or
+`internal/`; and the root facade never imports `multiagent/`. Sentrux owns the
+complementary global cycle, coupling, and God File checks. These statements
+describe current `main` and the v0.10 candidate, not tag `v0.8.0`.

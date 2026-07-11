@@ -136,9 +136,10 @@ replayable from EventStore alone.
 
 ### 6. Hard constraints (immediately effective)
 
-- `multiagent/**` MUST import only `api/`, `agent/`, and standard
-  library. It MUST NOT import `runner/`, `worker/`, or any
-  `internal/` package.
+- `multiagent/**` MAY import `api/`, `agent/`, `stream/`, and the standard
+  library. It MUST NOT import the root Runner package, `worker/`, or any
+  `internal/` package. `stream/` is the intentional exception because it is a
+  runtime-neutral collaboration primitive and does not expose Runner state.
 - `agent/**` MUST NOT import `multiagent/**` (one-way dependency).
 - Schedulers MUST NOT side-effect external systems directly.
   All side effects route through agent tools, which route through
@@ -150,6 +151,11 @@ replayable from EventStore alone.
   MUST emit a `multiagent.SchedulerFailure` event and surface to
   Runner as a typed terminal Run status — not as a panic or bare
   error.
+
+These import constraints are checked from `go list` output by
+`scripts/check-import-boundaries.sh`. Sentrux 0.5.7 still enforces global cycle,
+coupling, and god-file limits, but cannot precisely encode path-scoped import
+rules; it is therefore complementary to, not a replacement for, the script.
 
 ### 7. Multi-agent primitive vocabulary
 

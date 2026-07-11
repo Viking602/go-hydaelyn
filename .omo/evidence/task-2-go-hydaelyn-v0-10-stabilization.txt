@@ -1,0 +1,107 @@
+Task 2 evidence: official MCP SDK session and stdio migration
+Date: 2026-07-10
+
+RED
+- Added SDK-session tests before production migration.
+- `go test ./transport/mcp/client -run 'TestClient(ListToolsReturnsNotInitializedBeforeInitialize|InitializeConnectsOfficialSession)$' -count=1` failed because the old Transport required Call instead of Connect and ErrNotInitialized did not exist.
+
+GREEN
+- Pinned `github.com/modelcontextprotocol/go-sdk v1.6.1`.
+- `go test -race ./transport/mcp/client -count=20` passed.
+- `go test ./transport/mcp/client ./tool/kit -count=1` passed.
+- `go test ./... -count=1` passed for the full repository after the migration and test split.
+- `go vet ./transport/mcp/client ./tool/kit` passed.
+- `golangci-lint run ./transport/mcp/client ./tool/kit` passed with 0 issues.
+- `git diff --check` passed.
+- `go list -deps ./transport/mcp/client` includes the official SDK mcp/jsonrpc packages.
+- Production `transport/mcp` contains no Content-Length, ReadFramed, or WriteFramed implementation.
+
+PROTOCOL OBSERVATIONS
+- A real subprocess running the official SDK StdioTransport completed initialize and tool list/call.
+- The raw negotiation test observed initialize as the first line-delimited JSON request, non-empty client capabilities, and no Content-Length prefix.
+- The official server accepted tool calls only after notifications/initialized was handled.
+- An unsupported protocol response made Initialize fail and the subprocess observed stdin closure before Initialize returned.
+- Stdio tests cover isolated environment by default, explicit parent-environment inheritance, configured working directory via os.SameFile, and idempotent close.
+- NewStreamTransport completed a real official IOTransport session over pipes.
+
+PUBLIC COMPATIBILITY
+- Preserved New, Initialize, Close, ListTools, CallTool, ListResources, ReadResource, ListPrompts, GetPrompt, NewHTTPTransport, NewStreamTransport, DialStdio, StdioConfig, and Hydaelyn DTO names.
+- The low-level Transport contract intentionally changes from custom Call/Close to the official MCP Transport.Connect contract.
+- Operations before Initialize now return an error matching ErrNotInitialized.
+- RPCError keeps Code/Message/Data and unwraps to the official SDK jsonrpc.Error.
+- DialStdio now starts its subprocess during Initialize, matching the official session lifecycle.
+- Updated the tool/kit integration test to initialize against an official MCP HTTP test server; production tool/kit code is unchanged.
+
+SIZE AND SELF-REVIEW
+- At the initial SDK migration checkpoint, all touched Go files were at or below 189 pure LOC; the final current production sizes are recorded in the final-review section below.
+- Responsibilities are split into session lifecycle, DTOs, JSON boundary mapping, errors, transports, stdio configuration, and focused tests.
+- SDK types remain behind Hydaelyn result DTOs; only the explicitly migrated low-level Transport alias exposes the SDK transport contract.
+- No second JSON-RPC lifecycle or framing implementation remains.
+
+P2 REVIEW FIXES
+- RED: untyped nil and typed-nil transports both produced a runtime nil-pointer panic during Initialize before the boundary fix.
+- GREEN: New caches a stable ErrInvalidTransport boundary result using a reflect-safe nil-like check; Initialize and Close return the sentinel without invoking an invalid transport.
+- RED: shared reader/writer, duplicate explicit closers, and an uncomparable slice-backed closer each reported CloseCount=2.
+- GREEN: closer collection now deduplicates comparable identities directly and map/slice identities by reflection without comparing uncomparable interface values; all three cases report CloseCount=1 and nil error.
+- Stdio integration now passes Args=["configured-argument"] and asserts the child observes exactly that argument.
+- `go test -race ./transport/mcp/client -count=20` passed after the P2 fixes.
+- `go test ./tool/kit -count=1` passed in 0.531s.
+- `go test ./... -count=1` passed for the full repository after the P2 fixes.
+- `go vet ./transport/mcp/client ./tool/kit`, targeted golangci-lint (0 issues), and `git diff --check` passed.
+
+ARCHITECTURE CYCLE FIX
+- Two consecutive `sentrux check .` runs reproduced one cycle between tracked production files transport/mcp/client/client.go and transport/mcp/gateway.go.
+- Go's real import graph had no client-to-parent import: client imported the external official SDK `/mcp`; gateway imported concrete client directly and through tool/kit.
+- A temporary one-line SDK import suffix toggle `/mcp` to `/notmcp` changed Sentrux from the deterministic cycle to All rules pass; the toggle was immediately reverted. This proves Sentrux suffix resolution supplied the outward edge.
+- Added neutral transport/mcpcontract result DTOs. Existing mcpclient ContentBlock and CallToolResult remain aliases with identical type identity and JSON fields.
+- tool/kit now depends on a narrow MCPClient interface; Gateway uses that interface and no longer imports concrete client. Normal NewGateway(*mcpclient.Client) calls remain source compatible.
+- `sentrux check .` and `make architecture-check` pass without rule changes or suppressions.
+- Official stdio and HTTP JSON/SSE QA, MCP race count20, full repository tests, and full go vet pass after the dependency inversion.
+
+GATEWAY PUBLIC COMPATIBILITY FOLLOW-UP
+- RED: an external consumer of `NewGateway(client).Client` no longer compiled calls to Initialize, ListResources, ReadResource, ListPrompts, GetPrompt, and Close because the exported field had been narrowed to tool/kit.MCPClient.
+- GREEN: transport/mcpcontract.Client now describes the complete exported high-level client surface; transport/mcp/client aliases every signature DTO back to that neutral contract, so all legacy field calls compile without restoring the concrete dependency.
+- RED: `NewGateway((*mcpclient.Client)(nil)).ImportTools` panicked in Client.initializedSession, and the existing recover-based test incorrectly passed after the panic.
+- GREEN: the Gateway path validates both untyped and typed nil clients and returns ErrInvalidClient through the shared tool/kit boundary; regression tests assert errors.Is for both forms.
+- External consumer QA compiled every legacy gateway field call and typed-nil runtime QA exited normally with the shared invalid-client sentinel.
+- Two consecutive `sentrux check .` runs, `make architecture-check`, `go test ./... -count=1`, `go vet ./...`, MCP race count20, targeted golangci-lint, official stdio/HTTP lifecycle QA, and `git diff --check` passed.
+- Final `make verify` passed: full go vet, go mod tidy, repository-wide golangci-lint with 0 issues, and all package tests.
+
+SECOND REVIEW: SHARED KIT NIL BOUNDARY
+- RED: direct public `tool/kit.ImportMCPTools` calls with untyped nil or `(*mcpclient.Client)(nil)` had no shared sentinel contract and entered ListTools, where the typed nil path panicked. The new regression tests initially failed because ErrInvalidMCPClient did not exist.
+- GREEN: `tool/kit.ImportMCPTools` now performs the nil-like validation before ListTools and returns the exported ErrInvalidMCPClient for both forms; direct tests assert errors.Is and complete without panic.
+- `transport/mcp.ErrInvalidClient` reuses the exact `kit.ErrInvalidMCPClient` value. Gateway has no errors/reflect imports and delegates to the shared kit boundary, eliminating duplicate validation and semantics.
+- `go test ./tool/kit ./transport/mcp -count=1` passed.
+- Two consecutive `sentrux check .` runs passed at Quality 6165; `make architecture-check` passed Sentrux, business-word, public-any, and import-boundary gates.
+- `go test ./... -count=1`, targeted golangci-lint with 0 issues, `go test -race ./transport/mcp/client -count=20` (83.882s), targeted go vet, and `git diff --check` passed.
+
+FINAL REVIEW: STDIO, LIFECYCLE, HTTP SECURITY
+- F1 RED: exact `go test ./transport/mcp/client -run '^TestDialStdioHonorsDir$' -count=1 -v` exited successfully but printed `testing: warning: no tests to run` and `[no tests to run]`.
+- F1 GREEN: the exact top-level test now launches the official stdio child with cfg.Dir, proves the observed child cwd is the configured directory with os.SameFile=true, and proves a second real directory is different with os.SameFile=false.
+- Lifecycle RED: a blocking Transport.Connect caused Close to exceed the 250ms bound because Initialize held Client.mu across SDK Connect; the transport never observed context cancellation.
+- Lifecycle GREEN: Initialize records cancel/done state under the mutex and performs Connect outside it. Close marks closed, cancels, and returns immediately. The blocking transport observes context.Canceled, Initialize ends with ErrConnectionClosed, concurrent Initialize shares one Transport.Connect, and concurrent/repeated Initialize/Close is race-safe.
+- HTTP RED: the runtime client had total Timeout=30s, which covers long-lived SSE bodies. GREEN: total Timeout=0; a clone of http.DefaultTransport has ResponseHeaderTimeout=30s. A live 50ms header timeout rejects a server that withholds headers, while flushed SSE headers allow a 100ms idle body and subsequent event delivery.
+- Redirect RED: a second httptest origin and HTTPS downgrade both observed `Authorization: Bearer secret`. GREEN: all configured custom headers inject only when scheme, canonical hostname, and effective port match the endpoint. Cross-origin redirect receives no Authorization, Cookie, X-API-Key, or ordinary custom header; same-origin redirect retains them.
+- RPC error RED: Error rendered marker Data. GREEN: Error renders only code/message; Data and SDK Unwrap remain intact.
+- Official stdio and Streamable HTTP JSON/SSE lifecycle QA passed. MCP client race count20 passed in 86.656s. Full repository tests, full vet, targeted lint 0 issues, two consecutive Sentrux checks, and architecture-check passed.
+- Because standard Sentrux uses `git ls-files`, an additional temporary Git index staged the complete shared worktree only in `/tmp`; Sentrux scanned 622 tracked-plus-untracked files at Quality 6181 with all rules passing. The temporary index was removed without touching the real index.
+- Every production Go file under transport/mcp/client is below 250 pure LOC; the largest are client.go at 210 and transport.go at 191.
+- Upstream risk intentionally not changed: official go-sdk v1.6.1 does not provide a native message-size ceiling at this wrapper boundary; adding one would require replacing or rewriting SDK transport/framing, which is out of scope and prohibited.
+
+TERMINAL STATE AND 4 MIB INBOUND BOUND FOLLOW-UP
+- Initialize is now terminal and single-use across success, failure, and cancellation. RED counting transports observed 2 sequential and 3 concurrent Connect calls; GREEN observes exactly 1 and reuses the cached result/error. A waiting caller may cancel its own wait without starting another Connect.
+- Close now has one owner and one closeDone publication point. RED concurrent callers returned nil before cleanup or returned before a blocked resource close; GREEN all callers wait for initialization cancellation and resource cleanup, then return the same joined error. Close wins over concurrent Initialize and later public operations.
+- RED real 307/308 cross-origin redirects leaked Mcp-Session-Id. GREEN strips configured credentials plus Mcp-Session-Id, Mcp-Protocol-Version, and Last-Event-Id; same-origin redirects retain the headers and request cloning leaves the original unchanged.
+- NewHTTPTransport no longer asserts that http.DefaultTransport is *http.Transport. A replacement RoundTripper no longer panics; fallback transport values mirror the standard library and retain the 30-second response-header-only timeout.
+- InboundLimitError is the typed, sticky public boundary for messages over 4 MiB. NDJSON counts each physical line, SSE resets only at a blank event delimiter, and HTTP JSON counts the complete response body. Exactly 4 MiB passes; the next byte fails.
+- Explicit StreamTransport wraps its reader before official IOTransport. HTTP wraps JSON/SSE response bodies before the official StreamableClientTransport parser. HTTP operations fail fast after overflow but DELETE remains available for session cleanup.
+- Official CommandTransport exposes no reader hook, so DialStdio uses a minimal commandIOTransport for pipes/process lifecycle and delegates NDJSON decoding and MCP protocol ownership to official IOTransport. A real official stdio server returning a message over 4 MiB is rejected, and Close waits until the subprocess has exited.
+- No handwritten JSON-RPC, JSON decoder, SSE field parser, reconnect/session state, or Content-Length framing was introduced.
+
+FINAL VERIFICATION
+- `go test -race ./transport/mcp/client -count=20` passed in 169.266s.
+- `make verify` passed full vet, tidy, repository-wide lint with 0 issues, and all tests.
+- `make ci-local` passed staticcheck, govulncheck with zero called vulnerabilities, lint, full tests, full race, and architecture checks.
+- Standard architecture-check passed. A temporary Git index including all tracked and untracked worktree files scanned 630 files and passed at Quality 6190.
+- Production LOC after responsibility split: client.go 145, client_lifecycle.go 136, transport.go 157, http_transport.go 126, inbound_limit.go 217, command_transport.go 145, stdio.go 38.
+- This follow-up resolves the prior recorded upstream size-limit risk without replacing official protocol parsing.

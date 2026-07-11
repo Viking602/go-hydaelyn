@@ -1,0 +1,25 @@
+Task 1: Go toolchain and macOS stdio working-directory assertion
+
+Red:
+  GOTOOLCHAIN=go1.25.12 go test ./transport/mcp/client -run '^TestDialStdioHonorsDir$' -count=1 -v
+  FAIL: child reported /private/var/.../work while the configured path was /var/.../work.
+  This proved the assertion compared path spellings instead of directory identity.
+
+Green:
+  GOTOOLCHAIN=go1.25.12 go test ./transport/mcp/client -run '^TestDialStdioHonorsDir$' -count=10
+  ok
+
+Security:
+  GOTOOLCHAIN=go1.25.12 govulncheck ./...
+  No vulnerabilities found.
+
+Hygiene:
+  gofmt -d transport/mcp/client/client_test.go
+  no output
+  git diff --check
+  no output
+
+Implementation:
+  go.mod pins toolchain go1.25.12.
+  TestDialStdioHonorsDir uses os.SameFile for the configured and child-reported
+  directories and proves the comparison rejects a distinct sibling directory.

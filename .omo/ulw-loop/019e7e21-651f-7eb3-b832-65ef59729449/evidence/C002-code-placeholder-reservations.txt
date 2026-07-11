@@ -1,0 +1,97 @@
+./contract/store_provider.go:32:// Tests gated on optional capabilities call t.Skip when the provider
+./contract/store_provider.go:33:// self-declares the feature as unsupported via api.CapabilityReporter, so
+./contract/store_provider.go:904:		t.Skip("provider does not support list-pending")
+./contract/store_provider.go:926:		t.Skip("provider does not support list-pending")
+./contract/store_provider.go:953:		t.Skip("provider does not support list-pending")
+./contract/store_provider.go:975:		t.Skip("provider does not support list-pending")
+./contract/store_provider.go:1014:		t.Skip("provider does not support list-pending")
+./worker/runtime.go:158:// bugs surface loudly rather than as silent no-ops.
+./transport/cron/cron.go:75:// subsequent calls are no-ops.
+./transport/cron/cron.go:97:		return trigger.Registration{}, fmt.Errorf("scheduler: unsupported trigger type %q", t.Type)
+./hook/hook_test.go:63:// no-ops, so a test can drive each Chain method into a recovered panic.
+./agent/output_policy.go:41:	if err := rejectUnsupportedOutputPolicySchemaKeywords(schemaRaw, "$"); err != nil {
+./agent/output_policy.go:50:func rejectUnsupportedOutputPolicySchemaKeywords(schemaRaw json.RawMessage, path string) error {
+./agent/output_policy.go:60:			return fmt.Errorf("%s: unsupported schema keyword %q", path, keyword)
+./agent/output_policy.go:69:			if err := rejectUnsupportedOutputPolicySchemaKeywords(propertyRaw, propertyPath(path, name)); err != nil {
+./agent/output_policy.go:75:		if err := rejectUnsupportedOutputPolicySchemaKeywords(itemsRaw, path+".items"); err != nil {
+./agent/output_policy.go:93:		return fmt.Errorf("%s: unsupported schema type %q", path, schema.Type)
+./agent/output_policy.go:186:		return fmt.Errorf("%s: unsupported schema type %q", path, schemaType)
+./worker/worker.go:271:// reads at task start. Compact is a no-op pass-through; tightening it
+./api/pipeline.go:10:	CreatePlan(context.Context, Intent) (TodoPlan, error)
+./api/pipeline.go:14:	ValidatePlan(context.Context, TodoPlan) error
+./api/pipeline.go:18:	RouteTasks(context.Context, TodoPlan) (RoutingPlan, error)
+./tool/kit/toolkit.go:208:			return nil, fmt.Errorf("tool %s received unsupported second argument", name)
+./tool/kit/toolkit.go:350:		return message.JSONSchema{}, fmt.Errorf("unsupported schema type: %s", current.Kind())
+./transport/event/event.go:67:		return trigger.Registration{}, fmt.Errorf("event: unsupported trigger type %q", t.Type)
+./agent/output_policy_test.go:114:		{name: "unsupported type", schema: json.RawMessage(`{"type":"decimal"}`)},
+./agent/output_policy_test.go:142:func TestEngineOutputPolicyUnsupportedSchemaKeywordsFailBeforeRepair(t *testing.T) {
+./api/types.go:339:type TodoPlan struct {
+./api/types.go:573:	TodoID          string `json:"todoId,omitempty"`
+./provider/anthropic/anthropic_test.go:219:		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "x", Name: "noop"}}},
+./agent/subagent_test.go:278:		Tools:    tool.NewBus(staticTool{def: tool.Definition{Name: "noop", InputSchema: tool.Schema{Type: "object"}}}),
+./agent/subagent_test.go:533:// staticTool is a tool.Driver with a fixed Definition and a no-op Execute, used
+./agent/context_manager.go:21:// interface; the Compact half is a no-op pass-through.
+./provider/provider.go:106:var ErrNotImplemented = errors.New("provider driver not implemented")
+./multiagent/dispatch.go:12:// lets a Scheduler emit a placeholder dispatch (e.g. for DAGScheduler's
+./packs/packs.go:52:	// field exists so future versions can wire them into a "preset"
+./transport/webhook/webhook.go:84:		return trigger.Registration{}, fmt.Errorf("webhook: unsupported trigger type %q", t.Type)
+./internal/run/advance_handler.go:86:func (h advanceRunHandler) createPipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *AdvanceResult, pipeline ports.PipelineComponents, run model.Run) (model.Run, model.TodoPlan, error) {
+./internal/run/advance_handler.go:89:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:93:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:96:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:100:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:108:			return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:113:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:116:		return model.Run{}, model.TodoPlan{}, err
+./internal/run/advance_handler.go:121:func (h advanceRunHandler) preparePlanTasks(ctx context.Context, uow ports.UnitOfWork, m *AdvanceResult, run model.Run, plan model.TodoPlan) error {
+./internal/run/advance_handler.go:142:func (h advanceRunHandler) validatePipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *AdvanceResult, pipeline ports.PipelineComponents, run model.Run, plan model.TodoPlan) (model.Run, error) {
+./internal/run/advance_handler.go:174:func (h advanceRunHandler) routePipelinePlan(ctx context.Context, uow ports.UnitOfWork, m *AdvanceResult, pipeline ports.PipelineComponents, run model.Run, plan model.TodoPlan) (model.Run, model.RoutingPlan, error) {
+./provider/scripted/scripted_test.go:59:func TestLoadScriptRejectsUnsupportedKind(t *testing.T) {
+./internal/blackboard/blackboard_test.go:277:		{"this is unsupported", VerificationStatusContradicted},
+./internal/compact/compact.go:20:// SimpleCompactor drops middle messages and replaces them with a placeholder
+./internal/memory/stores.go:367:// specified. Recipient is currently a no-op until UserMessage gains a
+./provider/scripted/scripted.go:87:		return provider.Event{}, fmt.Errorf("unsupported scripted event kind %q", s.Kind)
+./contract/internal/inmemfake/provider.go:85:// goes out of scope, so this is effectively a no-op.
+./internal/compact/compact_test.go:11:func TestSimpleCompactorNoOpWhenUnderThreshold(t *testing.T) {
+./internal/compact/compact_test.go:56:func TestLLMCompactorFallsBackToPlaceholderOnStreamError(t *testing.T) {
+./internal/blackboard/blackboard.go:402:	case strings.Contains(current, "contradict"), strings.Contains(current, "unsupported"), strings.Contains(current, "false"):
+./internal/response/redact.go:15:// RedactEmail replaces email addresses in payload with a redacted placeholder.
+./internal/compact/llm.go:44:		// Fall back to the simple placeholder on LLM failure so the
+./internal/compact/llm.go:46:		placeholder := fmt.Sprintf("[Compaction summary: %d earlier messages omitted]", len(dropped))
+./internal/compact/llm.go:47:		summary = placeholder
+./internal/pipeline/defaults.go:41:func (defaultPlanner) CreatePlan(_ context.Context, intent model.Intent) (model.TodoPlan, error) {
+./internal/pipeline/defaults.go:42:	return model.TodoPlan{RunID: intent.RunID}, nil
+./internal/pipeline/defaults.go:47:func (defaultPlanValidator) ValidatePlan(_ context.Context, _ model.TodoPlan) error {
+./internal/pipeline/defaults.go:53:func (defaultTaskRouter) RouteTasks(_ context.Context, plan model.TodoPlan) (model.RoutingPlan, error) {
+./internal/core/model/task.go:53:	TodoID          string               `json:"todoId,omitempty"`
+./internal/blackboard/selectors_test.go:18:func TestSelectExchangesRequireVerifiedFiltersUnsupportedClaims(t *testing.T) {
+./provider/errorprovider/error.go:65:		return nil, fmt.Errorf("unsupported error provider kind %q", p.Failure)
+./internal/core/ports/pipeline.go:14:	CreatePlan(context.Context, model.Intent) (model.TodoPlan, error)
+./internal/core/ports/pipeline.go:18:	ValidatePlan(context.Context, model.TodoPlan) error
+./internal/core/ports/pipeline.go:22:	RouteTasks(context.Context, model.TodoPlan) (model.RoutingPlan, error)
+./internal/core/model_test_aliases_test.go:50:	TodoPlan             = model.TodoPlan
+./internal/core/runtime_test.go:590:				{Kind: "unsupported_obligation", Target: "payload"},
+./internal/memory/provider.go:99:// process memory, so Close is a no-op. Satisfies ports.ProviderCloser so the
+./internal/core/blackboard_subscribe.go:22:// Subscribe streams future blackboard writes for runID that match filter. The
+./internal/core/refactor_test.go:1009:func (staticPlanner) CreatePlan(_ context.Context, intent Intent) (TodoPlan, error) {
+./internal/core/refactor_test.go:1010:	return TodoPlan{RunID: intent.RunID, Tasks: []Task{{
+./internal/core/refactor_test.go:1025:func (staticValidator) ValidatePlan(context.Context, TodoPlan) error { return nil }
+./internal/core/refactor_test.go:1029:func (staticRouter) RouteTasks(_ context.Context, plan TodoPlan) (RoutingPlan, error) {
+./internal/response/service_test.go:41:func TestApplyObligationsRecordsUnsupportedObligation(t *testing.T) {
+./internal/response/service_test.go:53:			Kind:   model.ObligationKind("unsupported"),
+./internal/response/service_test.go:65:		t.Fatalf("unsupported obligation events = %#v", events)
+./internal/core/adapter/types.go:174:		TodoID:          in.TodoID,
+./internal/core/adapter/types.go:199:		TodoID:          in.TodoID,
+./internal/core/adapter/types.go:666:func TodoPlanToModel(in api.TodoPlan) model.TodoPlan {
+./internal/core/adapter/types.go:667:	return model.TodoPlan{RunID: in.RunID, Tasks: TasksToModel(in.Tasks)}
+./internal/core/adapter/types.go:670:func TodoPlanFromModel(in model.TodoPlan) api.TodoPlan {
+./internal/core/adapter/types.go:671:	return api.TodoPlan{RunID: in.RunID, Tasks: TasksFromModel(in.Tasks)}
+./internal/response/service.go:24:			if err := uow.Events().AppendEvent(ctx, model.Event{RunID: message.RunID, TaskID: message.TaskID, Type: model.EventPolicyObligationFailed, Payload: map[string]any{"decisionId": decision.DecisionID, "obligation": string(obligation.Kind), "target": obligation.Target, "reason": "unsupported obligation", "effectiveEffect": string(model.PolicyEffectDeny)}, RecordedAt: time.Now().UTC()}); err != nil {
+./internal/core/adapter/interfaces.go:90:func (a apiPlannerAdapter) CreatePlan(ctx context.Context, intent model.Intent) (model.TodoPlan, error) {
+./internal/core/adapter/interfaces.go:93:		return model.TodoPlan{}, ErrorToCore(err)
+./internal/core/adapter/interfaces.go:95:	return TodoPlanToModel(plan), nil
+./internal/core/adapter/interfaces.go:107:func (a apiPlanValidatorAdapter) ValidatePlan(ctx context.Context, plan model.TodoPlan) error {
+./internal/core/adapter/interfaces.go:108:	return ErrorToCore(a.inner.ValidatePlan(ctx, TodoPlanFromModel(plan)))
+./internal/core/adapter/interfaces.go:120:func (a apiTaskRouterAdapter) RouteTasks(ctx context.Context, plan model.TodoPlan) (model.RoutingPlan, error) {
+./internal/core/adapter/interfaces.go:121:	routing, err := a.inner.RouteTasks(ctx, TodoPlanFromModel(plan))
+./internal/core/model/pipeline.go:10:type TodoPlan struct {

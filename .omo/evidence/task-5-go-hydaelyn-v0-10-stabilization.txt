@@ -1,0 +1,54 @@
+Task 5: enforce the four path-scoped import boundaries
+
+Real repository graph:
+  ./scripts/check-import-boundaries.sh
+  OK: import boundaries preserved.
+
+Isolated fixture matrix:
+  A temporary minimal Go module copied the checker and imported stream from
+  multiagent; the checker passed, proving multiagent -> stream is allowed.
+
+  Seven isolated copies then injected one forbidden import each:
+  api -> skill
+    rejected by api-no-project-imports
+  agent -> multiagent/fixture
+    rejected by agent-no-multiagent
+  agent -> multiagent, creating a direct import cycle
+    rejected first by agent-no-multiagent with both package paths named
+  multiagent -> root
+    rejected by multiagent-no-runner-worker-internal
+  multiagent -> worker
+    rejected by multiagent-no-runner-worker-internal
+  multiagent -> internal/core
+    rejected by multiagent-no-runner-worker-internal
+  root -> multiagent
+    rejected by root-facade-no-multiagent
+
+  A separate fixture imported an unavailable external package. It was not
+  mislabeled as an architecture violation; the final ordinary go list check
+  preserved the original package-resolution failure.
+
+Integrated architecture gate and structure refresh:
+  make architecture-check
+  sentrux check: Quality 6164, all rules pass
+  check-business-words.sh: pass
+  check-public-any.sh: pass
+  check-import-boundaries.sh: pass
+
+Hygiene:
+  bash -n scripts/check-import-boundaries.sh
+  pass
+  scripts/check-import-boundaries.sh is executable
+  git diff --check
+  no output
+  shellcheck was not installed, so that optional check was skipped
+
+Implementation:
+  scripts/check-import-boundaries.sh first reads direct imports from go list -e
+  so a forbidden edge is still named when it creates an import cycle, then runs
+  ordinary go list validation after all four boundary rules pass. Make and the
+  CI architecture job invoke it.
+  The CI job now installs the repository's Go toolchain before running the
+  checker. Architecture docs and Sentrux comments state the division of
+  responsibility honestly: Sentrux owns global graph constraints, while the
+  script owns path-scoped import seams.
