@@ -23,8 +23,13 @@ func (r *Runner) Task(ctx context.Context, runID, taskID string) (api.Task, erro
 	return adapter.TaskFromModel(task), nil
 }
 
+// Deprecated: use ReadyTasksContext.
 func (r *Runner) ReadyTasks(runID string) []api.Task {
-	return adapter.TasksFromModel(r.rt.ReadyTasks(context.Background(), runID))
+	return r.ReadyTasksContext(context.Background(), runID)
+}
+
+func (r *Runner) ReadyTasksContext(ctx context.Context, runID string) []api.Task {
+	return adapter.TasksFromModel(r.rt.ReadyTasks(ctx, runID))
 }
 
 func (r *Runner) TransitionTask(ctx context.Context, cmd api.TransitionTaskCommand) error {

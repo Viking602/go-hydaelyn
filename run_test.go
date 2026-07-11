@@ -63,27 +63,33 @@ func TestRun_NotFound(t *testing.T) {
 	}
 }
 
-func TestEvents_ReturnsEventsForRun(t *testing.T) {
+func TestRunEvents_ReturnsEventsForRun(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
 	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
-	events := r.Events(run.ID)
+	events, err := r.RunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("RunEvents: %v", err)
+	}
 	if len(events) == 0 {
 		t.Error("expected at least one event after StartRun")
 	}
 }
 
-func TestRunEvents_SameAsEvents(t *testing.T) {
+func TestRunEvents_IsStableAcrossReads(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
 	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
-	events1 := r.Events(run.ID)
+	events1, err := r.RunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("first RunEvents: %v", err)
+	}
 	events2, err := r.RunEvents(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("RunEvents: %v", err)
 	}
 	if len(events1) != len(events2) {
-		t.Errorf("Events and RunEvents returned different counts: %d vs %d", len(events1), len(events2))
+		t.Errorf("RunEvents reads returned different counts: %d vs %d", len(events1), len(events2))
 	}
 }
 
@@ -91,7 +97,7 @@ func TestReplayRunState_ReturnsSomeProjection(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
 	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
-	projection, err := r.ReplayRunState(run.ID)
+	projection, err := r.ReplayRunStateContext(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("ReplayRunState: %v", err)
 	}

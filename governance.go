@@ -9,8 +9,13 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
+// Deprecated: use ActiveLeaseCountContext.
 func (r *Runner) ActiveLeaseCount(runID, taskID string) int {
-	return r.rt.ActiveLeaseCount(context.Background(), runID, taskID)
+	return r.ActiveLeaseCountContext(context.Background(), runID, taskID)
+}
+
+func (r *Runner) ActiveLeaseCountContext(ctx context.Context, runID, taskID string) int {
+	return r.rt.ActiveLeaseCount(ctx, runID, taskID)
 }
 
 func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd api.AcquireTaskExecutionCommand) (api.TaskExecutionLease, bool, error) {
@@ -100,6 +105,7 @@ func (r *Runner) EndTraceSpan(ctx context.Context, cmd api.EndTraceSpanCommand) 
 	return adapter.ErrorToAPI(r.rt.EndTraceSpan(ctx, core.EndTraceSpanCommand{SpanID: cmd.SpanID, Error: cmd.Error}))
 }
 
+// Deprecated: use ListTraceSpans so cancellation and storage errors are observable.
 func (r *Runner) TraceSpans(runID string) []api.TraceSpan {
 	return adapter.TraceSpansFromModel(r.rt.TraceSpans(context.Background(), runID))
 }

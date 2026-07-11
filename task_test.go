@@ -76,7 +76,7 @@ func TestReadyTasks_ReturnsCreatedRootTask(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
 	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
-	tasks := r.ReadyTasks(run.ID)
+	tasks := r.ReadyTasksContext(ctx, run.ID)
 	if len(tasks) == 0 {
 		t.Error("expected at least one ready task after StartRun")
 	}
