@@ -21,7 +21,7 @@ Hydaelyn currently exposes extension points at two levels:
 ## Runtime Configuration
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	StoreProvider: durableStore,
 	PolicyEngine:  policyEngine,
 	OutputGateway: outputGateway,

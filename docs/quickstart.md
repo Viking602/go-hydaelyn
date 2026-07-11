@@ -3,7 +3,7 @@
 ## 1. Minimal Runner
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 
 run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 	Request: "compare options for a Go research assistant",
@@ -15,9 +15,9 @@ if err != nil {
 timeline, err := runner.RunTimeline(context.Background(), run.ID)
 ```
 
-`hydaelyn.New()` starts the default in-memory runner. Pass `api.Config` only
-when overriding defaults, for example a custom policy engine or output
-gateway.
+`hydaelyn.NewDevelopment()` starts an in-memory runner with development policy
+defaults. Production hosts use `hydaelyn.NewProduction` and must provide both
+a `StoreProvider` and `PolicyEngine`.
 
 `QueueRun` uses the primary runner path:
 
@@ -72,13 +72,19 @@ envelope to `agent.Engine`, use the optional `worker.AgentWorker` package.
 ## 3. Optional Config
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
 
-The zero config is equivalent to the default config, so prefer `hydaelyn.New()`
-for ordinary startup.
+For production startup:
+
+```go
+runner, err := hydaelyn.NewProduction(api.Config{
+	StoreProvider: durableStore,
+	PolicyEngine:  policy.DenySideEffectsByDefault(),
+})
+```
 
 ## 4. Flow Presets
 

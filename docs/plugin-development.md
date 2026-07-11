@@ -22,7 +22,7 @@ Supported plugin types:
 Most application code should integrate through the public runner surface:
 
 ```go
-runner := hydaelyn.New(api.Config{
+runner := hydaelyn.NewDevelopment(api.Config{
 	PolicyEngine:  customPolicy,
 	StoreProvider: customStore,
 })

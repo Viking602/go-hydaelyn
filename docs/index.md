@@ -55,6 +55,7 @@
 - [ADR Index](adr/README.md)
 - [GoLand Go Format Standard](architecture/goland-format-standard.md)
 - [Active Plan](plans/active-plan.md)
+- [Architecture Safety Hardening](plans/architecture-safety-hardening.md)
 - [Future Backlog](plans/future-backlog.md)
 
 Plans use a dual-track layout: `docs/plans/` contains the current execution

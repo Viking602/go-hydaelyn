@@ -87,7 +87,7 @@ fields. Fold a slice of records into one with `eval.SummarizeUsage(records)`.
 ### Harness
 
 `eval.NewHarness(opts ...HarnessOption)` returns the reference `*DefaultHarness`,
-backed by a fresh in-memory `hydaelyn.New()` runner and a deterministic scripted
+backed by a fresh in-memory `hydaelyn.NewDevelopment()` runner and a deterministic scripted
 provider. It registers a single agent (default id `"agent"`) that owns the
 case's task. Options:
 

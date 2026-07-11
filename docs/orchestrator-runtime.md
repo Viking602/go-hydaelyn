@@ -86,7 +86,7 @@ The in-memory implementation covers the contract-level primitives:
 New code should use:
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 ```
 
 Use `api.Config{...}` only for overrides. The internal runtime remains an

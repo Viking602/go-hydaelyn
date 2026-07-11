@@ -8,7 +8,7 @@ dependencies, blackboard selectors, and flows directly through
 For direct orchestration, prefer:
 
 ```go
-runner := hydaelyn.New()
+runner := hydaelyn.NewDevelopment()
 run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "..."})
 ```
 

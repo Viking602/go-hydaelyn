@@ -54,3 +54,7 @@ and the full gate passes.
 Advanced schedulers, memory pipelines, artifact storage, OpenTelemetry
 integration, and production pack content are not part of this stabilization
 release. They remain in the [unversioned future backlog](./future-backlog.md).
+
+The separately assessed [architecture safety hardening plan](./architecture-safety-hardening.md)
+tracks compatibility-safe fixes extracted from the broader A-K proposal. It
+does not replace the accepted scheduler or durable Runner ADRs.
