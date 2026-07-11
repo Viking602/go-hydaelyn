@@ -8,7 +8,7 @@ import (
 	"github.com/Viking602/go-hydaelyn/provider/shared"
 )
 
-const defaultClientTimeout = 30 * time.Second
+const defaultResponseHeaderTimeout = 30 * time.Second
 
 type Config struct {
 	APIKey    string
@@ -50,7 +50,9 @@ func New(config Config) Driver {
 		config.MaxTokens = 1024
 	}
 	if config.Client == nil {
-		config.Client = &http.Client{Timeout: defaultClientTimeout}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.ResponseHeaderTimeout = defaultResponseHeaderTimeout
+		config.Client = &http.Client{Transport: transport}
 	}
 	return Driver{config: config}
 }
