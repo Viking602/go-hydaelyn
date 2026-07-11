@@ -1,0 +1,32 @@
+## sentrux check_rules: pass=true violation_count=0
+## sentrux test_gaps: source_files=359 test_files=117 tested=58 untested=301 coverage_score=0.1615598885793872
+## go test ./contract
+ok  	github.com/Viking602/go-hydaelyn/contract	0.506s
+## go test ./api ./agent ./multiagent ./memory ./eval ./packs/...
+ok  	github.com/Viking602/go-hydaelyn/api	0.640s
+ok  	github.com/Viking602/go-hydaelyn/agent	0.677s
+ok  	github.com/Viking602/go-hydaelyn/multiagent	0.913s
+?   	github.com/Viking602/go-hydaelyn/memory	[no test files]
+ok  	github.com/Viking602/go-hydaelyn/eval	1.788s
+ok  	github.com/Viking602/go-hydaelyn/packs	1.374s
+?   	github.com/Viking602/go-hydaelyn/packs/aiops	[no test files]
+?   	github.com/Viking602/go-hydaelyn/packs/customersupport	[no test files]
+?   	github.com/Viking602/go-hydaelyn/packs/devops	[no test files]
+?   	github.com/Viking602/go-hydaelyn/packs/research	[no test files]
+## make architecture-check
+sentrux check .
+Scanning ....
+[build_project_map] 476 files, 121 unique dirs, 112 cache misses, 5.3ms
+[resolve] 776 resolved, 779 unresolved (of 1555 total specs)
+[resolve_imports] project_map 5.4ms, suffix_idx 1.4ms, suffix_resolve 5.6ms, total 12.4ms
+[build_graphs] 476 files | maps 0.5ms, imports 12.6ms, calls+inherit 2.3ms, total 15.3ms | 776 import, 866 call, 0 inherit edges
+sentrux check — 2 rules checked
+
+Quality: 6096
+
+✓ All rules pass
+./scripts/check-business-words.sh
+framework business-word count: 0 (baseline: 0)
+OK: framework boundary preserved.
+./scripts/check-public-any.sh
+OK: public any contract preserved.

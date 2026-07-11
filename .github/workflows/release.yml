@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -16,22 +16,91 @@ jobs:
   release-gate:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
+    outputs:
+      resolved-commit: ${{ steps.resolve-tag.outputs.commit }}
+
+    env:
+      SENTRUX_VERSION: v0.5.7
+      SENTRUX_SHA256: 3237f80fe20d54aad4deefa8a143f0d60543bb5d2d6ad891eb42432f155725a6
+      SENTRUX_GRAMMARS_SHA256: 8849f1eb07df3f6d4ea1ed422d8dee4b9b79a250682fa5646675dae466554454
+      SENTRUX_GO_GRAMMAR_SHA256: 4ad143e1da83af843d15e7efb9209b867c25f31f65a96ebdeb281ab958789072
+      SENTRUX_PLUGIN_COMMIT: f36da08a53e7f06c5b6aec33eb05816b371000ea
+      SENTRUX_GO_MANIFEST_SHA256: 78ffd1982051035d70f26d1bbb8ab7c5f65f1ee63f756e7ce244b9eafe712753
+      SENTRUX_GO_QUERY_SHA256: 3f2a406d19c7db7be6529f28fc0b38637a419c9f7a7b4be5ba50d0c0ece1d94c
+
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and verify tag commit
+        id: resolve-tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            "+refs/tags/${TAG}:refs/tags/${TAG}"
+          EVENT_COMMIT="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          TAG_COMMIT="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [ "$TAG_COMMIT" != "$EVENT_COMMIT" ]; then
+            echo "::error::Release tag ${TAG} moved from ${EVENT_COMMIT} to ${TAG_COMMIT}"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "::error::Release tag ${TAG} points to ${TAG_COMMIT}, which is not on origin/main"
+            exit 1
+          fi
+          echo "commit=${TAG_COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
       - name: Install analysis tools
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install verified sentrux and Go plugin
+        run: |
+          set -euo pipefail
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          curl -fsSL -o "$TMP_DIR/sentrux" \
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/sentrux-linux-x86_64"
+          echo "${SENTRUX_SHA256}  $TMP_DIR/sentrux" | sha256sum -c -
+          install -m 0755 "$TMP_DIR/sentrux" /usr/local/bin/sentrux
+
+          curl -fsSL -o "$TMP_DIR/grammars.tar.gz" \
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/grammars-linux-x86_64.tar.gz"
+          echo "${SENTRUX_GRAMMARS_SHA256}  $TMP_DIR/grammars.tar.gz" | sha256sum -c -
+          tar -xzf "$TMP_DIR/grammars.tar.gz" -C "$TMP_DIR" go/grammars/linux-x86_64.so
+          echo "${SENTRUX_GO_GRAMMAR_SHA256}  $TMP_DIR/go/grammars/linux-x86_64.so" | sha256sum -c -
+
+          mkdir -p "$HOME/.sentrux/plugins/go/queries" "$HOME/.sentrux/plugins/go/grammars"
+          curl -fsSL -o "$HOME/.sentrux/plugins/go/plugin.toml" \
+            "https://raw.githubusercontent.com/sentrux/sentrux/${SENTRUX_PLUGIN_COMMIT}/plugins/go/plugin.toml"
+          curl -fsSL -o "$HOME/.sentrux/plugins/go/queries/tags.scm" \
+            "https://raw.githubusercontent.com/sentrux/sentrux/${SENTRUX_PLUGIN_COMMIT}/plugins/go/queries/tags.scm"
+          echo "${SENTRUX_GO_MANIFEST_SHA256}  $HOME/.sentrux/plugins/go/plugin.toml" | sha256sum -c -
+          echo "${SENTRUX_GO_QUERY_SHA256}  $HOME/.sentrux/plugins/go/queries/tags.scm" | sha256sum -c -
+          install -m 0644 "$TMP_DIR/go/grammars/linux-x86_64.so" \
+            "$HOME/.sentrux/plugins/go/grammars/linux-x86_64.so"
+
+          test "$(sentrux --version)" = "sentrux ${SENTRUX_VERSION#v}"
+          sentrux plugin validate "$HOME/.sentrux/plugins/go"
 
       - name: Validate release tag and module major version
         shell: bash
@@ -54,20 +123,29 @@ jobs:
             fi
           fi
 
-      - name: Run go vet
-        run: go vet ./...
+      - name: Validate release documentation
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          BASE_TAG="${TAG%%[-+]*}"
+          TAG_WITHOUT_BUILD="${TAG%%+*}"
+          NOTES_PATH="docs/release-notes/${BASE_TAG}.md"
+          test -f "$NOTES_PATH"
+          if [[ "$TAG_WITHOUT_BUILD" == *-* ]]; then
+            grep -Fxq 'Status: **Prerelease**' "$NOTES_PATH"
+          else
+            grep -Fxq 'Status: **Released**' "$NOTES_PATH"
+            grep -Fq "releases/tag/${TAG}" README.md
+            if grep -Fqi "unreleased ${BASE_TAG}" README.md; then
+              echo "::error::README still marks ${BASE_TAG} as unreleased"
+              exit 1
+            fi
+          fi
 
-      - name: Run tests
-        run: go test ./...
-
-      - name: Run tests with race detector
-        run: go test -race -timeout=10m ./...
-
-      - name: Run staticcheck
-        run: staticcheck ./...
-
-      - name: Run govulncheck
-        run: govulncheck ./...
+      - name: Run full CI parity gate
+        run: make ci-local
 
       - name: Collect coverage
         run: go test -coverprofile=coverage.out ./...
@@ -78,37 +156,134 @@ jobs:
       - name: Run race soak
         run: go test -race -timeout=10m ./... -count=5
 
+      - name: Verify tagged install and consumer build
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          export GOBIN="$TMP_DIR/bin"
+          export GOPROXY=direct
+          mkdir -p "$GOBIN"
+
+          go install "github.com/Viking602/go-hydaelyn/cmd/hydaelyn@${GITHUB_REF_NAME}"
+          HYDAELYN="$GOBIN/hydaelyn"
+          INSTALLED_VERSION="$("$HYDAELYN" version)"
+          if [ "$INSTALLED_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Installed version ${INSTALLED_VERSION} does not match tag ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          "$HYDAELYN" --help >/dev/null
+
+          set +e
+          "$HYDAELYN" unknown-command >"$TMP_DIR/unknown.stdout" 2>"$TMP_DIR/unknown.stderr"
+          UNKNOWN_STATUS=$?
+          set -e
+          test "$UNKNOWN_STATUS" -eq 1
+          test ! -s "$TMP_DIR/unknown.stdout"
+          test -s "$TMP_DIR/unknown.stderr"
+
+          mkdir -p "$TMP_DIR/consumer"
+          cd "$TMP_DIR/consumer"
+          go mod init example.com/hydaelyn-release-consumer
+          cat > consumer.go <<'EOF'
+          package consumer
+
+          import (
+              "github.com/Viking602/go-hydaelyn/agent"
+              "github.com/Viking602/go-hydaelyn/provider"
+              "github.com/Viking602/go-hydaelyn/provider/scripted"
+              "github.com/Viking602/go-hydaelyn/skill"
+          )
+
+          func NewEngine() (agent.Engine, error) {
+              registry := skill.NewRegistry()
+              for _, current := range []skill.Skill{
+                  {Name: "always-on", Description: "Always active", Body: "Always check."},
+                  {Name: "on-demand", Description: "Activate when needed", Body: "Check on demand."},
+              } {
+                  if err := skill.Register(registry, current); err != nil {
+                      return agent.Engine{}, err
+                  }
+              }
+              return agent.Build(agent.Spec{
+                  Model: "scripted",
+                  Skills: []string{"always-on"},
+                  AvailableSkills: []string{"on-demand"},
+              }, agent.BuildDeps{
+                  Providers: provider.Single(scripted.New(nil)),
+                  Skills: registry,
+              })
+          }
+          EOF
+          cat > consumer_test.go <<'EOF'
+          package consumer
+
+          import "testing"
+
+          func TestNewEngine(t *testing.T) {
+              engine, err := NewEngine()
+              if err != nil {
+                  t.Fatal(err)
+              }
+              if len(engine.Skills) != 1 || len(engine.AvailableSkills) != 1 {
+                  t.Fatalf("skills = %d available = %d", len(engine.Skills), len(engine.AvailableSkills))
+              }
+          }
+          EOF
+          go mod edit -require="github.com/Viking602/go-hydaelyn@${GITHUB_REF_NAME}"
+          go mod tidy
+          go test ./...
+          go build ./...
+
   release:
     needs:
       - release-gate
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
+    permissions:
+      contents: write
 
-      - name: Create GitHub release
+    steps:
+      - name: Revalidate tag and create GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_COMMIT: ${{ needs.release-gate.outputs.resolved-commit }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          cat > release.json <<EOF
-          {
-            "tag_name": "${TAG}",
-            "name": "${TAG}",
-            "generate_release_notes": true
-          }
-          EOF
-
-          curl --fail-with-body \
-            -L \
-            -X POST \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" \
-            -d @release.json
+          test -n "$EXPECTED_COMMIT"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          git -C "$TMP_DIR" init --quiet
+          git -C "$TMP_DIR" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$TMP_DIR" fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            "+refs/tags/${TAG}:refs/tags/${TAG}"
+          REMOTE_COMMIT="$(git -C "$TMP_DIR" rev-parse "refs/tags/${TAG}^{commit}")"
+          if [ "$REMOTE_COMMIT" != "$EXPECTED_COMMIT" ]; then
+            echo "::error::Release tag ${TAG} moved from ${EXPECTED_COMMIT} to ${REMOTE_COMMIT}"
+            exit 1
+          fi
+          if ! git -C "$TMP_DIR" merge-base --is-ancestor "$REMOTE_COMMIT" origin/main; then
+            echo "::error::Release tag ${TAG} is no longer contained in origin/main"
+            exit 1
+          fi
+          BASE_TAG="${TAG%%[-+]*}"
+          TAG_WITHOUT_BUILD="${TAG%%+*}"
+          NOTES_PATH="docs/release-notes/${BASE_TAG}.md"
+          git -C "$TMP_DIR" show "${REMOTE_COMMIT}:${NOTES_PATH}" > "$TMP_DIR/release-notes.md"
+          NOTES="$(cat "$TMP_DIR/release-notes.md")"
+          RELEASE_FLAGS=(
+            --repo "$GITHUB_REPOSITORY"
+            --verify-tag
+            --generate-notes
+            --notes "$NOTES"
+            --title "$TAG"
+          )
+          if [[ "$TAG_WITHOUT_BUILD" == *-* ]]; then
+            RELEASE_FLAGS+=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG" \
+            "${RELEASE_FLAGS[@]}"

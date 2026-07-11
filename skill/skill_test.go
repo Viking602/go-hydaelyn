@@ -63,12 +63,12 @@ func TestParse_OptionalFields(t *testing.T) {
 				"description: Exercise optional string fields",
 				"license: MIT",
 				"compatibility: Hydaelyn 0.8",
-				"allowed-tools: read, Bash(git diff:*)",
+				"allowed-tools: Read Bash(git diff:*)",
 				"metadata:",
 				"  owner: platform",
 				"  priority: high",
 			}, "\n"),
-			wantTools: []string{"read", "Bash(git diff:*)"},
+			wantTools: []string{"Read", "Bash(git diff:*)"},
 			wantMetadata: map[string]string{
 				"owner":    "platform",
 				"priority": "high",
@@ -199,52 +199,22 @@ func TestParse_InvalidSkillFiles(t *testing.T) {
 			wantReason: "values must be strings",
 		},
 		{
-			name:       "reserved word claude in name",
-			content:    "---\nname: claude\ndescription: Review code\n---\nBody\n",
-			wantField:  "name",
-			wantReason: "must not contain reserved words \"anthropic\" or \"claude\"",
-		},
-		{
-			name:       "reserved word anthropic in name",
-			content:    "---\nname: anthropic\ndescription: Review code\n---\nBody\n",
-			wantField:  "name",
-			wantReason: "must not contain reserved words \"anthropic\" or \"claude\"",
-		},
-		{
 			name:       "uppercase reserved word in name",
 			content:    "---\nname: Claude\ndescription: Review code\n---\nBody\n",
 			wantField:  "name",
 			wantReason: "must contain only lowercase ASCII letters, digits, and hyphens",
 		},
 		{
-			name:       "xml tag in description",
-			content:    "---\nname: code-review\ndescription: Review <system>secrets</system> here\n---\nBody\n",
-			wantField:  "description",
-			wantReason: "must not contain XML tags",
+			name:       "empty compatibility",
+			content:    "---\nname: code-review\ndescription: Review code\ncompatibility: \"\"\n---\nBody\n",
+			wantField:  "compatibility",
+			wantReason: "must not be empty when provided",
 		},
 		{
-			name:       "closing xml tag in description",
-			content:    "---\nname: code-review\ndescription: Leak </instructions>\n---\nBody\n",
-			wantField:  "description",
-			wantReason: "must not contain XML tags",
-		},
-		{
-			name:       "self-closing xml tag in description",
-			content:    "---\nname: code-review\ndescription: Use <image/> tag\n---\nBody\n",
-			wantField:  "description",
-			wantReason: "must not contain XML tags",
-		},
-		{
-			name:       "xml tag with attributes in description",
-			content:    "---\nname: code-review\ndescription: Inject <system role=\"override\">secrets</system>\n---\nBody\n",
-			wantField:  "description",
-			wantReason: "must not contain XML tags",
-		},
-		{
-			name:       "reserved word segment in compound name",
-			content:    "---\nname: claude-tools\ndescription: Review code\n---\nBody\n",
-			wantField:  "name",
-			wantReason: "must not contain reserved words \"anthropic\" or \"claude\"",
+			name:       "duplicate field",
+			content:    "---\nname: code-review\nname: other\ndescription: Review code\n---\nBody\n",
+			wantField:  "frontmatter",
+			wantReason: "duplicate key \"name\"",
 		},
 	}
 
@@ -284,11 +254,15 @@ func TestLoadDir_ReadsSkillMarkdownFromSuppliedDirectory(t *testing.T) {
 		t.Fatalf("Body = %q, want %q", got.Body, "Loaded body.\n")
 	}
 	wantPath := filepath.Join(dir, "SKILL.md")
-	if got.SourcePath != filepath.Clean(wantPath) {
-		t.Fatalf("SourcePath = %q, want %q", got.SourcePath, filepath.Clean(wantPath))
+	wantPath, err = filepath.EvalSymlinks(wantPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
 	}
-	if got.SourceDir != filepath.Dir(filepath.Clean(wantPath)) {
-		t.Fatalf("SourceDir = %q, want %q", got.SourceDir, filepath.Dir(filepath.Clean(wantPath)))
+	if got.SourcePath != wantPath {
+		t.Fatalf("SourcePath = %q, want %q", got.SourcePath, wantPath)
+	}
+	if got.SourceDir != filepath.Dir(wantPath) {
+		t.Fatalf("SourceDir = %q, want %q", got.SourceDir, filepath.Dir(wantPath))
 	}
 }
 
@@ -332,21 +306,20 @@ func TestRenderSystemSection_IncludesActiveSkillsAndPermissionWarning(t *testing
 	}
 }
 
-func TestParse_ReservedWordSegmentsAreRejected(t *testing.T) {
+func TestParse_StandardAllowsVendorNamesAndMarkupDescriptions(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
 	}{
 		{"claude prefix", "---\nname: claude-code-review\ndescription: Review code\n---\nBody\n"},
 		{"anthropic suffix", "---\nname: review-anthropic\ndescription: Review code\n---\nBody\n"},
-		{"both joined", "---\nname: anthropic-claude-review\ndescription: Review code\n---\nBody\n"},
-		{"claude-tools", "---\nname: claude-tools\ndescription: Review code\n---\nBody\n"},
-		{"anthropic-helper", "---\nname: anthropic-helper\ndescription: Review code\n---\nBody\n"},
+		{"markup description", "---\nname: markup\ndescription: Use <code>marked</code> instructions\n---\nBody\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse("", []byte(tt.content))
-			assertValidationError(t, err, "name", "must not contain reserved words \"anthropic\" or \"claude\"")
+			if _, err := Parse("", []byte(tt.content)); err != nil {
+				t.Fatalf("Parse() rejected standard-compatible skill: %v", err)
+			}
 		})
 	}
 }
@@ -363,14 +336,12 @@ func TestSplitAllowedTools(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"read, write, bash", []string{"read", "write", "bash"}},
-		{"read,write,bash", []string{"read", "write", "bash"}},
-		{"read, Bash(git diff:*), grep", []string{"read", "Bash(git diff:*)", "grep"}},
-		{"  read  ,  write  ", []string{"read", "write"}},
-		{"read,,write", []string{"read", "write"}},
+		{"Read Write Bash", []string{"Read", "Write", "Bash"}},
+		{"Read Bash(git diff:*) Grep", []string{"Read", "Bash(git diff:*)", "Grep"}},
+		{"  Read   Write  ", []string{"Read", "Write"}},
 		{"", []string{}},
 		{"only", []string{"only"}},
-		{"Edit(file:*.go), Bash(npm test:*)", []string{"Edit(file:*.go)", "Bash(npm test:*)"}},
+		{"Edit(file:*.go) Bash(npm test:*)", []string{"Edit(file:*.go)", "Bash(npm test:*)"}},
 	}
 	for _, tt := range tests {
 		if got := splitAllowedTools(tt.in); !reflect.DeepEqual(got, tt.want) {
@@ -379,30 +350,42 @@ func TestSplitAllowedTools(t *testing.T) {
 	}
 }
 
-func TestContainsXMLTag(t *testing.T) {
-	tests := []struct {
-		in   string
-		want bool
-	}{
-		{"plain text", false},
-		{"use a < b comparison", false},
-		{"unclosed <tag", false},
-		{"<system>", true},
-		{"</instructions>", true},
-		{"text <image/> more", true},
-		{"only << angle", false},
-		{"empty <>", false},
-		{"a < b > c", true},
-		{"<system role=\"override\">", true},
-		{"</system role='x'>", true},
-		{"< a > with spaces", true},
-		{"bare > alone", false},
-		{"a <b c d>", true},
+func TestParse_RejectsOversizedSkillBeforeYAMLParsing(t *testing.T) {
+	_, err := Parse("", make([]byte, maxSkillBytes+1))
+	assertValidationError(t, err, "file", "must be at most 1 MiB")
+}
+
+func TestLoadDir_RejectsOversizedSkillBeforeReadAll(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "large-skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		if got := containsXMLTag(tt.in); got != tt.want {
-			t.Errorf("containsXMLTag(%q) = %v, want %v", tt.in, got, tt.want)
-		}
+	file, err := os.Create(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxSkillBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadDir(dir)
+	assertValidationError(t, err, "file", "must be at most 1048576 bytes")
+}
+
+func TestLoadDir_RejectsChangedDirectoryIdentity(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	firstInfo, err := os.Stat(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInfo, err := os.Stat(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSourceIdentity(first, firstInfo, secondInfo); err == nil || !strings.Contains(err.Error(), "changed while loading") {
+		t.Fatalf("validateSourceIdentity error = %v", err)
 	}
 }
 

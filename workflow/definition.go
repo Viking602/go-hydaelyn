@@ -72,6 +72,8 @@ func (b *Builder) Definition() Definition {
 
 func cloneAgentClass(in multiagent.AgentClass) multiagent.AgentClass {
 	out := in
+	out.Skills = append([]string(nil), in.Skills...)
+	out.AvailableSkills = append([]string(nil), in.AvailableSkills...)
 	out.Tools = append([]string(nil), in.Tools...)
 	out.InputSchema = append([]byte(nil), in.InputSchema...)
 	out.OutputSchema = append([]byte(nil), in.OutputSchema...)

@@ -2,21 +2,34 @@ package mcp
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/Viking602/go-hydaelyn/tool"
 	"github.com/Viking602/go-hydaelyn/tool/kit"
-	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
+	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
 )
+
+// ErrInvalidClient is returned when a gateway has no usable MCP client.
+var ErrInvalidClient = kit.ErrInvalidMCPClient
 
 type Gateway interface {
 	ImportTools(ctx context.Context) ([]tool.Driver, error)
 }
 
 type ClientGateway struct {
-	Client *mcpclient.Client
+	Client mcpcontract.Client
 }
 
-func NewGateway(client *mcpclient.Client) ClientGateway {
+func NewGateway(client mcpcontract.Client) ClientGateway {
+	if client != nil {
+		value := reflect.ValueOf(client)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				client = nil
+			}
+		}
+	}
 	return ClientGateway{Client: client}
 }
 

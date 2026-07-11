@@ -39,6 +39,13 @@ func (e Engine) RunStream(ctx context.Context, task api.Task, policy OutputPolic
 func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sink stream.Sink) Result {
 	runCtx, cancelRun, budgetDriven := e.runContext(ctx, task)
 	defer cancelRun()
+	runtime := newSkillRuntime(e.Skills, e.AvailableSkills)
+	e.AvailableSkills = runtime.availableSkills()
+	var err error
+	e.Tools, err = runtime.attachTools(e.Tools)
+	if err != nil {
+		return Result{Failure: (&AgentFailure{Kind: FailureKindEngineError, Reason: err.Error()}).WithCause(err)}
+	}
 
 	messages, err := e.buildContext(runCtx, task)
 	if err != nil {
@@ -70,7 +77,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		OutputRecorder:   e.OutputRecorder,
 		Sink:             sink,
 		StepPolicy:       e.StepPolicy,
-		Compact:          e.compactor(),
+		Compact:          e.compactor(runtime),
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
@@ -324,26 +331,44 @@ func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Mess
 	if err != nil {
 		return nil, err
 	}
-	return injectSkillMessages(messages, e.Skills), nil
+	return injectSkillMessages(messages, e.Skills, e.AvailableSkills), nil
 }
 
-func injectSkillMessages(messages []message.Message, skills []skill.Skill) []message.Message {
-	if len(skills) == 0 {
+func injectSkillMessages(messages []message.Message, active, available []skill.Skill) []message.Message {
+	if len(active) == 0 && len(available) == 0 {
 		return messages
 	}
-	section := skill.RenderSystemSection(skills)
-	if section == "" {
-		return messages
-	}
+	messages = removeSkillContextMessages(messages)
 	insertAt := 0
 	for insertAt < len(messages) && messages[insertAt].Role == message.RoleSystem {
 		insertAt++
 	}
-	skillMessage := message.NewText(message.RoleSystem, section)
-	out := make([]message.Message, 0, len(messages)+1)
+	skillMessages := make([]message.Message, 0, 2)
+	if section := skill.RenderSystemSection(active); section != "" {
+		current := message.NewText(message.RoleSystem, section)
+		current.Metadata = map[string]string{skillContextMetadataKey: "active"}
+		skillMessages = append(skillMessages, current)
+	}
+	if catalog := renderSkillCatalog(available); catalog != "" {
+		current := message.NewText(message.RoleSystem, catalog)
+		current.Metadata = map[string]string{skillContextMetadataKey: "catalog"}
+		skillMessages = append(skillMessages, current)
+	}
+	out := make([]message.Message, 0, len(messages)+len(skillMessages))
 	out = append(out, messages[:insertAt]...)
-	out = append(out, skillMessage)
+	out = append(out, skillMessages...)
 	out = append(out, messages[insertAt:]...)
+	return out
+}
+
+func removeSkillContextMessages(messages []message.Message) []message.Message {
+	out := make([]message.Message, 0, len(messages))
+	for _, current := range messages {
+		if current.Metadata != nil && current.Metadata[skillContextMetadataKey] != "" {
+			continue
+		}
+		out = append(out, current)
+	}
 	return out
 }
 
@@ -352,11 +377,17 @@ func injectSkillMessages(messages []message.Message, skills []skill.Skill) []mes
 // compacts). The default context managers pass the history through unchanged, so
 // wiring this is a no-op until a caller supplies a ContextManager whose Compact
 // actually reshapes the history.
-func (e Engine) compactor() func(context.Context, []message.Message) ([]message.Message, error) {
+func (e Engine) compactor(runtime *skillRuntime) func(context.Context, []message.Message) ([]message.Message, error) {
 	if e.ContextBuilder == nil {
 		return nil
 	}
-	return e.ContextBuilder.Compact
+	return func(ctx context.Context, history []message.Message) ([]message.Message, error) {
+		compacted, err := e.ContextBuilder.Compact(ctx, history)
+		if err != nil {
+			return nil, err
+		}
+		return injectSkillMessages(compacted, runtime.skillsForCompaction(compacted), runtime.availableSkills()), nil
+	}
 }
 
 type defaultContextBuilder struct{}

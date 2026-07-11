@@ -44,6 +44,11 @@ type Spec struct {
 	// and injected into Engine.Run task context.
 	Skills []string
 
+	// AvailableSkills names reusable instruction bundles disclosed to the model
+	// as a compact catalog and activated on demand. Unlike Skills, their bodies
+	// are not injected before activation.
+	AvailableSkills []string
+
 	// Model is the model name passed to the provider on every turn and the key
 	// BuildDeps.Providers resolves to a concrete driver. Two Specs with
 	// different Model values can therefore run on different models — and, when
@@ -132,19 +137,34 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		bus = deps.Tools.Subset(spec.Tools)
 	}
 
-	var activeSkills []skill.Skill
-	if len(spec.Skills) > 0 {
+	var activeSkills, availableSkills []skill.Skill
+	if len(spec.Skills) > 0 || len(spec.AvailableSkills) > 0 {
 		if deps.Skills == nil {
-			return Engine{}, fmt.Errorf("%w: spec lists %d skill(s)", ErrSkillRegistryMissing, len(spec.Skills))
+			return Engine{}, fmt.Errorf("%w: spec lists %d skill(s)", ErrSkillRegistryMissing, len(spec.Skills)+len(spec.AvailableSkills))
 		}
+	}
+	if len(spec.Skills) > 0 {
 		activeSkills, err = deps.Skills.Resolve(spec.Skills...)
 		if err != nil {
-			var missing *skill.NotFoundError
-			if errors.As(err, &missing) {
-				return Engine{}, fmt.Errorf("agent: resolve skill %q: %w", missing.Name, err)
-			}
-			return Engine{}, fmt.Errorf("agent: resolve skills: %w", err)
+			return Engine{}, wrapSkillResolveError(err)
 		}
+	}
+	if len(spec.AvailableSkills) > 0 {
+		availableSkills, err = deps.Skills.Resolve(spec.AvailableSkills...)
+		if err != nil {
+			return Engine{}, wrapSkillResolveError(err)
+		}
+		active := make(map[string]struct{}, len(activeSkills))
+		for _, current := range activeSkills {
+			active[current.Name] = struct{}{}
+		}
+		filtered := availableSkills[:0]
+		for _, current := range availableSkills {
+			if _, alreadyActive := active[current.Name]; !alreadyActive {
+				filtered = append(filtered, current)
+			}
+		}
+		availableSkills = filtered
 	}
 
 	contextManager := deps.ContextManager
@@ -153,17 +173,26 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 	}
 
 	return Engine{
-		Provider:       driver,
-		Tools:          bus,
-		Hooks:          deps.Hooks,
-		Model:          spec.Model,
-		LoopPolicy:     spec.LoopPolicy,
-		ContextBuilder: contextManager,
-		Skills:         activeSkills,
-		ThinkingBudget: spec.ThinkingBudget,
-		StopSequences:  spec.StopSequences,
-		ExtraBody:      spec.ExtraBody,
+		Provider:        driver,
+		Tools:           bus,
+		Hooks:           deps.Hooks,
+		Model:           spec.Model,
+		LoopPolicy:      spec.LoopPolicy,
+		ContextBuilder:  contextManager,
+		Skills:          activeSkills,
+		AvailableSkills: availableSkills,
+		ThinkingBudget:  spec.ThinkingBudget,
+		StopSequences:   spec.StopSequences,
+		ExtraBody:       spec.ExtraBody,
 	}, nil
+}
+
+func wrapSkillResolveError(err error) error {
+	var missing *skill.NotFoundError
+	if errors.As(err, &missing) {
+		return fmt.Errorf("agent: resolve skill %q: %w", missing.Name, err)
+	}
+	return fmt.Errorf("agent: resolve skills: %w", err)
 }
 
 // instructionsContext is the default ContextManager Build installs when none is

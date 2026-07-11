@@ -20,7 +20,7 @@ ADR-001 through ADR-008 were originally authored in Chinese (before the English-
 - [ADR-009 Capability Public API](ADR-009-capability-public-api.md) — declaration vs execution vs enforcement; the four exports (MCP / OpenAPI / CLI / LLM tool def); reserved `hydaelyn.self.*` namespace
 - [ADR-010 Usage, Budget, and Policy composition](ADR-010-usage-budget-policy-composition.md) — measurement (`UsageRecord`) feeds enforcement (`BudgetPolicy` ⊆ `PolicyEngine`); conditional authorization via `PolicyEnforcer` obligations
 - [ADR-011 Context four-layer model](ADR-011-context-four-layer-model.md) — Blackboard / Memory / Artifact / ContextSource; `ContextScope` axis
-- [ADR-012 Storage contract and Position C](ADR-012-storage-contract-position-c.md) — framework owns contract + test suite; reference impls are starting points; production = BYO provider
+- [ADR-012 Storage contract and Position D](ADR-012-storage-contract-position-c.md): framework owns contract verbs and conformance tests; applications own schema and implementation; no reference backend ships
 - [ADR-013 Memory kernel vs pipeline](ADR-013-memory-kernel-vs-pipeline.md) — `api.Memory` is storage interface only; extraction pipelines live in `recipe/`
 - [ADR-014 Agent ontology stance](ADR-014-agent-ontology-stance.md) — accept structural identity (`Status`, `PreviousVersionID`, `RunSelector`, `hydaelyn.self.*` reserved); reject metaphysical identity (no `Agent.Self`, no `UpdateOwnProfile`, no auto-derived personality)
 

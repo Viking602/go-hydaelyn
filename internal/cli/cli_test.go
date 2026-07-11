@@ -6,29 +6,67 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
-func TestVersionPrintsBuildString(t *testing.T) {
+func TestVersionPrintsSourceBuildVersion(t *testing.T) {
+	// Given
 	var stdout, stderr bytes.Buffer
+
+	// When
 	if err := Execute(context.Background(), []string{"version"}, &stdout, &stderr); err != nil {
 		t.Fatalf("version error = %v", err)
 	}
-	if strings.TrimSpace(stdout.String()) == "" {
-		t.Fatal("version produced no output")
+
+	// Then
+	if got := strings.TrimSpace(stdout.String()); got != "devel" {
+		t.Fatalf("version = %q, want devel", got)
 	}
 }
 
-func TestHelpListsTopLevelCommands(t *testing.T) {
+func TestHelpListsTopLevelCommandsAndSourceBuildVersion(t *testing.T) {
+	// Given
 	var stdout, stderr bytes.Buffer
+
+	// When
 	if err := Execute(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("help error = %v", err)
 	}
+
+	// Then
 	if !strings.Contains(stdout.String(), "inspect-events") {
 		t.Fatalf("help should advertise inspect-events, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "(devel)") {
+		t.Fatalf("help should display source build version, got %s", stdout.String())
+	}
+}
+
+func TestResolveBuildVersionUsesModuleVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		info *debug.BuildInfo
+		want string
+	}{
+		{name: "missing build info", info: nil, want: "devel"},
+		{name: "source build", info: &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, want: "devel"},
+		{name: "source build pseudo-version", info: &debug.BuildInfo{Main: debug.Module{Version: "v0.9.1-0.20260705053004-95e511035235+dirty"}}, want: "devel"},
+		{name: "installed module version", info: &debug.BuildInfo{Main: debug.Module{Version: "v0.10.0", Sum: "h1:module-checksum"}}, want: "v0.10.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// When
+			got := resolveBuildVersion(tt.info)
+
+			// Then
+			if got != tt.want {
+				t.Fatalf("resolveBuildVersion() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "createdAt": "2026-05-31T13:04:20.166Z",
+  "updatedAt": "2026-05-31T13:15:01.472Z",
+  "briefPath": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/brief.md",
+  "goalsPath": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/goals.json",
+  "ledgerPath": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-go-hydaelyn-api-todo",
+      "title": "分析当前 go-hydaelyn 项目是否存在已经在文档、API、类型、TODO、测试或架构上预留但尚未完成的地方；只做只读审计，不修改生...",
+      "objective": "分析当前 go-hydaelyn 项目是否存在已经在文档、API、类型、TODO、测试或架构上预留但尚未完成的地方；只做只读审计，不修改生产代码；输出按风险和版本阶段分层的证据化结论。",
+      "status": "complete",
+      "successCriteria": [
+        {
+          "id": "C001",
+          "scenario": "CLI evidence: run rg over docs, specs, README and ADRs for reservation language (TODO/TBD/Future/v0.9/v1.0/not implemented/no reference implementation) and save exact matches to .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C001-doc-roadmap-reservations.txt; PASS when matches are classified into actual unfinished work vs intentional future scope.",
+          "userModel": "happy",
+          "expectedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C001-doc-roadmap-reservations.txt",
+          "capturedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C001-doc-roadmap-reservations.txt | cleanup: no runtime/tmux/browser/ports spawned; explorer agents closed",
+          "status": "pass",
+          "capturedAt": "2026-05-31T13:14:06.465Z",
+          "notes": "Doc/roadmap reservation scan captured v0.9 roadmap, v0.8 release deferrals, migration deferrals, ADR reservations."
+        },
+        {
+          "id": "C002",
+          "scenario": "CLI evidence: inspect production code and tests for unfinished implementation markers (TODO/FIXME/TBD/not implemented/panic stub/no-op placeholder/unsupported placeholder) excluding vendor and .omo; save exact matches to .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C002-code-placeholder-reservations.txt; PASS when boundary cases include zero-match packages and generated/tooling directories are excluded.",
+          "userModel": "edge",
+          "expectedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C002-code-placeholder-reservations.txt",
+          "capturedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C002-code-placeholder-reservations.txt | cleanup: no runtime/tmux/browser/ports spawned; explorer agents closed",
+          "status": "pass",
+          "capturedAt": "2026-05-31T13:14:11.625Z",
+          "notes": "Code placeholder scan captured ErrNotImplemented, Recipient no-op, provider capability skips, pack recipe future hook, and false-positive unsupported/no-op cases."
+        },
+        {
+          "id": "C003",
+          "scenario": "CLI evidence: run architecture/test/public-contract checks relevant to reserved surfaces (sentrux check_rules/test_gaps, make architecture-check, targeted go test ./api ./agent ./multiagent ./contract/...) and save outputs to .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C003-architecture-contract-gates.txt; PASS when gates identify whether any reserved surface is an untested or architecture-breaking incomplete area.",
+          "userModel": "regression",
+          "expectedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C003-architecture-contract-gates.txt",
+          "capturedEvidence": ".omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence/C003-architecture-contract-gates.txt | cleanup: no runtime/tmux/browser/ports spawned; command session exited 0; explorer agents closed; planner agent closed after timeout",
+          "status": "pass",
+          "capturedAt": "2026-05-31T13:14:18.017Z",
+          "notes": "Architecture gate passed; targeted tests passed; test_gaps remains low and is evidence of coverage risk, not a failing architecture rule."
+        }
+      ],
+      "attempt": 0,
+      "createdAt": "2026-05-31T13:04:20.166Z",
+      "updatedAt": "2026-05-31T13:15:01.472Z",
+      "completedAt": "2026-05-31T13:15:01.472Z",
+      "evidence": "C001/C002/C003 all pass; artifacts under .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence; no production code changed"
+    }
+  ],
+  "codexObjective": "Complete the durable ulw-loop plan in .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/goals.json, including later accepted/appended stories, under the original brief constraints; use .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/ledger.jsonl as the audit trail.",
+  "aggregateCompletion": {
+    "status": "complete",
+    "completedAt": "2026-05-31T13:15:01.472Z",
+    "evidence": "C001/C002/C003 all pass; artifacts under .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/evidence; no production code changed",
+    "codexGoal": {
+      "goal": {
+        "threadId": "019e7e21-651f-7eb3-b832-65ef59729449",
+        "objective": "Complete the durable ulw-loop plan in .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/goals.json, including later accepted/appended stories, under the original brief constraints; use .omo/ulw-loop/019e7e21-651f-7eb3-b832-65ef59729449/ledger.jsonl as the audit trail.",
+        "status": "complete",
+        "tokensUsed": 110822,
+        "timeUsedSeconds": 621
+      }
+    }
+  }
+}

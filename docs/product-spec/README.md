@@ -1,59 +1,62 @@
 # Hydaelyn Product Specification
 
-Source-of-truth design documents for Hydaelyn, organized by release.
+These documents organize maintained historical design records by release. The
+corresponding Git tag is the source for exact shipped code. Unreleased work and
+future ideas are labeled separately so that a version directory never doubles
+as a promise.
 
 ## Versions
 
-| Version | Status | Theme |
-|---------|--------|-------|
-| [v0.8.0](./v0.8.0/) | **Active** — implementation in progress | Durable Typed Multi-Agent Framework: strong bounded agent loop, explicit multi-agent scheduler layer (`multiagent/`), narrowed durable Runner, Capability layer, Position D storage contract, four-layer context, eval framework with multi-agent assertions |
-| [v0.9.0](./v0.9.0/) | Roadmap stub | Advanced scheduler strategies (Debate / MapReduce / DAG / Swarm), Memory pipeline (L0→L3), symbolic short-term context (Mermaid canvas), knowledge-graph context source, hosted observability surfaces |
+| Version | Status | Shipped scope |
+|---------|--------|---------------|
+| [v0.8.0](./v0.8.0/) | Released 2026-05-25 | Durable typed multi-agent foundation, bounded agent loop, explicit scheduler layer, Position D storage contract, context contracts, and evaluation primitives |
+| [v0.9.0](./v0.9.0/) | Released 2026-06-29 at `78036a6` | Streaming and scheduler implementations, bounded agent execution, workflow modeling, evaluation and coding-agent surfaces, plus storage and runtime reliability fixes |
+| [v0.10.0](../release-notes/v0.10.0.md) | Unreleased | Agent Skills, MCP protocol conformance, security and CLI fixes, executable architecture boundaries, and release-gate hardening |
+| [Future backlog](../plans/future-backlog.md) | Unversioned | Scheduler expansion, memory and artifact work, OpenTelemetry integration, and production pack content |
 
-## Positioning (v0.8.0+)
+The latest published release remains v0.9.0. The v0.10.0 row describes the
+current release candidate and does not imply that a tag or GitHub Release
+exists.
 
-> Hydaelyn is a durable typed multi-agent framework for Go.
-> It ships a strong but bounded single-agent loop, an explicit
-> role/class based multi-agent scheduler, and durable execution
-> primitives for approvals, audit, resume, and idempotent side effects.
+## Architecture
 
-Four load-bearing layers:
+Hydaelyn has four load-bearing layers:
 
-```
+```text
 Packs / Examples
         ↓
 Multi-Agent Layer  (multiagent/)
         ↓
 Agent Loop Layer   (agent/)
         ↓
-Durable Runner     (runner + internal/run/task/event/...)
+Durable Runner     (root + internal/)
 ```
+
+The executable import-boundary rules live in
+[`scripts/check-import-boundaries.sh`](../../scripts/check-import-boundaries.sh).
+The historical v0.8.0 architecture record is
+[`11-boundaries.md`](./v0.8.0/11-boundaries.md).
+
+## Reading order
+
+1. Read the [latest released record](./v0.9.0/README.md).
+2. Read the [v0.8.0 architecture boundaries](./v0.8.0/11-boundaries.md) and
+   [package structure](./v0.8.0/12-package-structure.md).
+3. Review the [unreleased v0.10.0 notes](../release-notes/v0.10.0.md) when
+   building from `main`.
+4. Treat the [future backlog](../plans/future-backlog.md) as uncommitted scope.
 
 ## Conventions
 
-- Each version directory is self-contained: every doc inside `v0.8.0/` describes what v0.8.0 ships, not what is planned next.
-- Cross-version references use the form `[doc 09 in v0.9.0](./v0.9.0/09-context.md)` so links remain unambiguous.
-- Decisions land via ADRs in `../adr/`. The version directory's `11-boundaries.md` and `13-rollout-plan.md` enumerate which ADRs that version introduces.
+- A released version directory is a maintained historical design record. Use
+  the corresponding Git tag when exact code is required.
+- The Agent Skills procedure clarification now present in the v0.8.0 boundary
+  document is a post-release interpretation. It does not claim that Agent
+  Skills shipped in the v0.8.0 tag.
+- Unreleased notes state their status at the top and do not claim availability.
+- Deferred work belongs in the unversioned backlog unless a release plan has
+  accepted it.
+- Architecture decisions live in [`docs/adr`](../adr/README.md).
 
-## Read order for new contributors
-
-1. Start at the active version's [README](./v0.8.0/README.md).
-2. Read `11-boundaries.md` first — every other doc operates under the six principles.
-3. Read the four-layer chain: `03-agent-loop` → `04-agent-class` → `05-multi-agent-layer` → `06-durable-runner`.
-4. Then follow the dependency order listed in `00-overview.md`.
-
-## Master spec
-
-The architectural anchor for v0.8.0 lives at
-`../superpowers/specs/2026-05-24-agent-layer-business-stance.md`. All
-v0.8.0 docs in `v0.8.0/` defer to it.
-
-## ADR index (v0.8.0 era)
-
-- ADR-007 — EventStore replay
-- ADR-008 (revised) — Framework vs business + multi-agent primitive exception list
-- ADR-012 (revised) — Storage Position D
-- ADR-013 — Memory as optional plugin
-- ADR-014 (revised) — Agent ontology (AgentInstance accepted)
-- ADR-015 — Strong Bounded Agent Loop
-- ADR-016 — Explicit Multi-Agent Scheduler
-- ADR-017 — Durable Runner Boundary
+The current multi-agent architecture boundary is maintained in
+[ADR-016](../adr/ADR-016-explicit-multi-agent-scheduler.md).

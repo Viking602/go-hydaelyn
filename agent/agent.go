@@ -158,6 +158,11 @@ type Engine struct {
 	// Engine default.
 	Skills []skill.Skill
 
+	// AvailableSkills are disclosed as metadata and activated on demand. Build
+	// resolves them from Spec.AvailableSkills; direct Engine construction may
+	// also supply validated skills here.
+	AvailableSkills []skill.Skill
+
 	// The fields below are the engine-level defaults Engine.Run threads into
 	// every LoopInput it builds, so the task-level entry can configure the
 	// provider request and output handling that previously only RunMessages
@@ -847,6 +852,11 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 // failure takes precedence over a batch error because it is the earlier hook in the
 // pipeline; the loop surfaces whichever non-nil error this returns.
 func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
+	if containsSkillRuntimeTool(prepared) {
+		// Skill activation changes which resources may be read. Preserve the
+		// provider's stable call order so activate+read in one batch cannot race.
+		mode = tool.ModeSequential
+	}
 	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	items := make([]message.ToolResult, 0, len(results))
 	for _, current := range results {
@@ -857,6 +867,15 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 		items = append(items, item)
 	}
 	return items, batchErr
+}
+
+func containsSkillRuntimeTool(calls []tool.Call) bool {
+	for _, call := range calls {
+		if call.Name == activateSkillToolName || call.Name == readSkillResourceToolName {
+			return true
+		}
+	}
+	return false
 }
 
 // appendToolResults appends each tool result to the running history through the

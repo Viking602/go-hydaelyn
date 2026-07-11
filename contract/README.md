@@ -1,8 +1,8 @@
-# `contract/` — Ecosystem Adapter Contract Test Suites
+# `contract/`: Ecosystem Adapter Contract Test Suite
 
 This package is the **public** validation gate for any Hydaelyn ecosystem adapter
 that implements a kernel interface. Spec anchor:
-[`docs/product-spec/v0.8.0/05-storage.md`](../docs/product-spec/v0.8.0/05-storage.md)
+[`docs/product-spec/v0.8.0/07-storage.md`](../docs/product-spec/v0.8.0/07-storage.md)
 §"Contract test suite" + [ADR-012](../docs/adr/ADR-012-storage-contract-position-c.md).
 
 ## Position D in one sentence
@@ -13,7 +13,7 @@ that implements a kernel interface. Spec anchor:
 
 If your provider passes `contract.RunStoreProviderContractTests`, it is correct
 as far as Hydaelyn is concerned. The framework runs the same suite on every PR
-via a non-exported in-memory adapter at `contract/internal/inmemfake/` — see
+via a non-exported in-memory adapter at `contract/internal/inmemfake/`; see
 [ADR-012 (revised, Position D)](../docs/adr/ADR-012-storage-contract-position-c.md).
 
 ## Usage from an external adapter
@@ -40,31 +40,35 @@ func TestMyProvider_ContractCompliance(t *testing.T) {
 }
 ```
 
-## What this package contains (v0.8.0 scope)
+## What this package contains
 
-| Suite | Status | Notes |
-| ----- | ------ | ----- |
-| `RunStoreProviderContractTests` | **Skeleton (Phase 2 of v0.8.0)** — ~35 named `t.Run` subtests, bodies `t.Skip("TODO: contract test, Phase 2")` | Test names ARE the contract surface. Per ADR-012 (revised, Position D) the framework ships no reference implementations; the framework's own CI exercises the suite via the non-exported `contract/internal/inmemfake` adapter. |
-| `RunProviderContractTests` (model provider) | Stub for v0.8.x | Doc 01 / `provider/` adapter validation |
-| `RunToolDriverContractTests` | Stub for v0.8.x | `tool/` driver validation |
-| `RunPolicyEngineContractTests` | Stub for v0.8.x | `api.PolicyEngine` adapter validation |
-| `RunOutputGatewayContractTests` | Stub for v0.8.x | `api.OutputGateway` adapter validation |
+`RunStoreProviderContractTests` is the package's only exported contract suite.
+It runs eight top-level groups with executable assertions:
 
-## Authoring rule (v0.8.0 Phase 2)
+| Group | Coverage |
+| ----- | -------- |
+| `CRUD` | Required store reads, writes, and selectors |
+| `Transactions` | Commit, rollback, read-own-writes, and isolation |
+| `LeaseCAS` | Version checks, ownership, transfer, and concurrent acquisition |
+| `EventOrdering` | Append order, run filtering, and monotonic sequence |
+| `ResumeAndOutbox` | Pending resume tokens, pagination, queue state, and FIFO order |
+| `ReplayDeterminism` | Stable full and partial replay |
+| `CapabilitySelfConsistency` | Declared optional capabilities match runtime behavior |
+| `MultiAgentStores` | Handoff, team-state, and agent-instance persistence |
 
-The order of operations for any new contract test is:
+These are real tests, not placeholder stubs. `t.Skip` is used only for the
+optional list-pending scenarios when a provider reports that capability as
+unsupported. Required store behavior cannot be skipped. The framework verifies
+the suite against `contract/internal/inmemfake` on every PR.
 
-1. **Add the test name** to the appropriate suite as a `t.Run(name, ...)` with
-   `t.Skip("TODO: contract test, Phase 2")` body.
-2. **Update the table** in `05-storage.md` §"Contract test suite" if the count
-   changes.
-3. **Land at least one passing implementation** before flipping the body from
-   skip to assertion. In the framework's own CI the implementation that closes
-   this loop is `contract/internal/inmemfake` — the non-exported adapter the
-   framework self-tests against. This guarantees the test specifies behavior
-   that ≥1 working provider exhibits.
-4. **Flip the body** to real assertions and verify the self-test still passes.
+## Extending the suite
 
-This sequence is what makes Position D credible: the contract is written
-*independent of any specific implementation*, and the only implementation the
-framework owns is the one it uses to self-test the contract.
+1. Add the smallest executable assertion to the relevant group. Create a new
+   top-level group only for a distinct contract area.
+2. Obtain a fresh provider through `ProviderFactory` and register cleanup with
+   the test.
+3. Gate a test with `t.Skip` only when the public capability contract declares
+   the behavior optional.
+4. Update [`07-storage.md`](../docs/product-spec/v0.8.0/07-storage.md) when the
+   storage contract changes.
+5. Run `go test ./contract` against the internal self-check adapter.

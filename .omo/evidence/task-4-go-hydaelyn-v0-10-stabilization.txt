@@ -1,0 +1,35 @@
+Task 4: CLI runtime build version
+
+Red:
+  go test ./internal/cli -run 'TestVersionPrintsSourceBuildVersion|TestHelpListsTopLevelCommandsAndSourceBuildVersion|TestResolveBuildVersionUsesModuleVersion' -count=1
+  FAIL: resolveBuildVersion was undefined before production code was added.
+
+  go test ./internal/cli -run 'TestResolveBuildVersionUsesModuleVersion/source_build_pseudo-version' -count=1
+  FAIL: a local Go 1.25 install resolved to v0.9.1-0.20260705053004-95e511035235+dirty instead of devel.
+
+Green:
+  go test ./internal/cli ./cmd/hydaelyn -count=10
+  ok
+
+  go test -race -shuffle=on -count=1 ./internal/cli ./cmd/hydaelyn
+  ok
+
+  go vet ./internal/cli ./cmd/hydaelyn
+  ok
+
+Installed binary smoke test:
+  GOBIN=<temporary directory> go install ./cmd/hydaelyn
+  hydaelyn version: stdout "devel", empty stderr, exit 0
+  hydaelyn --help: header includes "(devel)", empty stderr, exit 0
+  hydaelyn unknown-command: empty stdout, stderr "unknown command: unknown-command", exit 1
+
+Hygiene:
+  git diff --check
+  no output
+
+Implementation:
+  runtime/debug.ReadBuildInfo is the single version source for version and help.
+  Local builds resolve to devel using the absent main-module checksum.
+  module@version installs preserve the exact Main.Version from build metadata.
+  The package description states the current CLI responsibility without a stale
+  historical version number.

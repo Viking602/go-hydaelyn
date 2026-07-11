@@ -1,0 +1,145 @@
+Task 7: reconcile release history and v0.10.0 candidate documentation
+Date: 2026-07-10
+
+Changed files
+- README.md
+- docs/product-spec/README.md
+- docs/product-spec/v0.9.0/README.md
+- docs/plans/active-plan.md
+- docs/plans/future-backlog.md
+- docs/release-notes/v0.10.0.md
+- docs/product-spec/v0.8.0/11-boundaries.md (post-release clarification only)
+- docs/product-spec/v0.8.0/12-package-structure.md (post-release clarification only)
+- docs/adr/README.md
+- docs/adr/ADR-013-memory-kernel-vs-pipeline.md
+- contract/README.md
+- contract/doc.go (package Godoc only)
+- contract/store_provider.go (Godoc only)
+
+Release facts checked
+- gh release view reports v0.9.0 published on 2026-06-29.
+- Tag v0.9.0 points to commit 78036a68ca9fd1902ce60fb7d0f3f99bd053d953.
+- git log v0.8.0..v0.9.0 and the published release body were used to
+  replace the old roadmap stub with a historical shipped-scope record.
+- git log v0.9.0..HEAD and the current worktree diff were used for the
+  unreleased v0.10.0 notes.
+- No v0.10.0 tag or GitHub Release was claimed or created.
+
+Documentation result
+- Product status now separates released v0.8.0, released v0.9.0, unreleased
+  v0.10.0 candidate work, and an unversioned future backlog.
+- Advanced schedulers, memory pipelines, artifact storage, OpenTelemetry, and
+  production packs have no v0.10.0 commitment.
+- README identifies v0.9.0 as the latest published release and points readers
+  to the unreleased notes before they adopt main-branch surfaces.
+- Current import enforcement is documented in README, tracked ADR-016, the
+  v0.10.0 notes, and the executable script. The v0.8.0 boundary and package
+  documents retain their historical text and add labeled post-release
+  clarification blocks for current main and the v0.10 candidate.
+- Version directories are maintained historical design records; the
+  corresponding Git tag remains the exact code source. The product index
+  identifies the Agent Skills note in the v0.8.0 boundary document as a
+  post-release interpretation, not v0.8.0 tag content.
+- The product index no longer links into ignored docs/superpowers material; its
+  current architecture pointer targets tracked ADR-016.
+- contract/README.md now describes the only exported contract suite and its
+  eight executable top-level groups. It removes the obsolete skeleton, Phase 2,
+  TODO, and nonexistent stub-suite claims.
+- contract package and RunStoreProviderContractTests Godoc now state Position D:
+  Hydaelyn owns contract verbs and tests; applications own schema and
+  implementation; no reference StoreProvider implementation ships.
+- The ADR index and ADR-013 context now use the same Position D ownership.
+
+Breaking-change coverage
+- The low-level MCP Transport contract migration from Call/Close to Connect is
+  explicit.
+- DialStdio child startup moving to Initialize is explicit.
+- ClientGateway.Client and NewGateway generalization to mcpcontract.Client is
+  explicit. The eight normal high-level method calls are listed as compatible.
+- The concrete gateway.Client assignment and exact NewGateway function-value
+  shape are listed with migrations.
+- The exact `tool/kit.ImportMCPTools` parameter change from
+  `*mcpclient.Client` to `kit.MCPClient` is disclosed. Direct calls remain
+  compatible; exact function values require the interface signature or a
+  wrapper.
+- Hydaelyn DTO source names, assignments, and JSON fields remain compatible via
+  aliases, while the defined types and reflection package path now belong to
+  `mcpcontract`. SDK result types do not enter those DTOs.
+- Nil and typed-nil gateway clients are documented as returning an error rather
+  than panicking.
+- README and RELEASING contain no claim that DialStdio uses the official
+  CommandTransport or that HTTP has a 30-second total request lifetime. The
+  only stale CommandTransport recommendation was removed from the v0.10 notes.
+- DialStdio is documented as a bounded command-process adapter feeding the
+  official IOTransport. Hydaelyn owns pipes and the 4 MiB physical NDJSON line
+  limit; the SDK owns MCP parsing.
+- HTTP is documented with a 30-second response-header timeout and no total SSE
+  body lifetime. Physical NDJSON lines, HTTP JSON bodies, and individual SSE
+  events have a 4 MiB limit that surfaces as InboundLimitError.
+- Cross-origin redirects strip MCP session, protocol, Last-Event-ID, configured
+  custom headers, and authorization, cookie, and proxy credentials. Initialize
+  and Close each publish one terminal result and share one cleanup path.
+
+Verification
+- Unfiltered stale scan has one intentional match in the restored historical
+  v0.8.0 multi-agent specification. The live-surface command is:
+  rg 'Not started|active product line is v0\.8|v2\.0\.0-dev|multiagent.*api/.*agent/.*stdlib only' README.md docs internal/cli -g '!docs/product-spec/v0.8.0/**'
+  It has no matches. The exclusion preserves versioned history instead of
+  rewriting it as current behavior.
+- Local relative Markdown targets across all tracked Markdown plus candidate
+  future-backlog.md, v0.10.0.md, and check-import-boundaries.sh:
+  PASS, 70 Markdown files checked. Every target is tracked or an explicit PR
+  candidate; filesystem existence alone is not accepted.
+- Write punctuation gate with --lang en on the seven current release documents,
+  plus all added lines in the versioned/ADR/Godoc diffs:
+  PASS.
+- `rg 't.Run' contract/store_provider.go` reports 10 call sites: eight direct
+  top-level groups in RunStoreProviderContractTests, one generic runSuite helper,
+  and one nested capability assertion. The documented top-level count is eight.
+- `go test ./contract`:
+  PASS.
+- `go test ./contract -count=1` and `go vet ./contract` after the Godoc-only
+  correction:
+  PASS.
+- `gofmt -d contract/doc.go contract/store_provider.go`:
+  no output.
+- v0.8.0 post-release scope check:
+  11-boundaries.md is 16 additions and 0 deletions; 12-package-structure.md is
+  11 additions and 0 deletions. The historical body is preserved.
+- `go doc ./contract`:
+  PASS.
+- MCP transport wording scan across README.md, RELEASING.md, and the v0.10.0
+  notes found no CommandTransport claim and no 30-second total-request timeout
+  claim. The release notes punctuation gate passed after the final sync.
+- git diff --check:
+  PASS.
+
+Ignored historical files
+- A scan that also included local ignored docs/superpowers plans found three
+  pre-existing broken links. Those files are not tracked by Git and were left
+  unchanged so the PR does not force-add user-local historical material.
+- The tracked release documentation and the two new release documents have no
+  missing local target.
+
+Tracked link correction
+- Every contract/README.md storage reference now targets the existing v0.8.0
+  07-storage.md instead of the missing 05-storage.md.
+- Optional list-pending capability tests are the only documented t.Skip path;
+  required store behavior remains mandatory.
+- Existing RunStoreProviderContractTests Godoc now points to 07-storage.md and
+  Position D. The public signature and runtime body are unchanged.
+- contract/doc.go links ADR-012, ADR-013, and the tracked v0.8.0 07-storage
+  record from package Godoc.
+
+Go post-write review
+- contract/doc.go measures 1 pure LOC. contract/store_provider.go measures 1049
+  pure LOC, an inherited oversized file. This task changes only package/public
+  Godoc and adds no pure code.
+- The edit does not change types, control flow, errors, concurrency, logging,
+  or test behavior. Refactoring the inherited file would exceed the authorized
+  comment-only scope.
+
+Residual release risk
+- The final repository-wide CI and manual QA wave still determines whether the
+  candidate can be tagged. These notes remain Unreleased until that gate passes
+  and a release operator pushes a tag.

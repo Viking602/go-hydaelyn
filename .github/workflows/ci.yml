@@ -15,10 +15,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -36,7 +36,7 @@ jobs:
         run: go test ./... -coverprofile=coverage.out
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: coverage.out
@@ -48,10 +48,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -89,10 +89,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -100,7 +100,7 @@ jobs:
         # v9 ships on Node.js 24 (v8 still ran Node.js 20 which GitHub
         # deprecates 2026-06-02). v9 still defaults to a v2 binary, so
         # only the major-version pin needs bumping.
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           # v2.12.0 is the latest official upstream golangci-lint release
           # (homebrew may ship a patched 2.12.1 that doesn't exist on GitHub).
@@ -119,25 +119,51 @@ jobs:
 
     env:
       SENTRUX_VERSION: v0.5.7
+      SENTRUX_SHA256: 3237f80fe20d54aad4deefa8a143f0d60543bb5d2d6ad891eb42432f155725a6
+      SENTRUX_GRAMMARS_SHA256: 8849f1eb07df3f6d4ea1ed422d8dee4b9b79a250682fa5646675dae466554454
+      SENTRUX_GO_GRAMMAR_SHA256: 4ad143e1da83af843d15e7efb9209b867c25f31f65a96ebdeb281ab958789072
+      SENTRUX_PLUGIN_COMMIT: f36da08a53e7f06c5b6aec33eb05816b371000ea
+      SENTRUX_GO_MANIFEST_SHA256: 78ffd1982051035d70f26d1bbb8ab7c5f65f1ee63f756e7ce244b9eafe712753
+      SENTRUX_GO_QUERY_SHA256: 3f2a406d19c7db7be6529f28fc0b38637a419c9f7a7b4be5ba50d0c0ece1d94c
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
-      - name: Install sentrux binary
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install verified sentrux and Go plugin
         run: |
-          curl -fsSL -o /usr/local/bin/sentrux \
+          set -euo pipefail
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          curl -fsSL -o "$TMP_DIR/sentrux" \
             "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/sentrux-linux-x86_64"
-          chmod +x /usr/local/bin/sentrux
-          sentrux --version
+          echo "${SENTRUX_SHA256}  $TMP_DIR/sentrux" | sha256sum -c -
+          install -m 0755 "$TMP_DIR/sentrux" /usr/local/bin/sentrux
 
-      - name: Install Go grammar plugin
-        run: |
-          if [ -d "$HOME/.sentrux/plugins/go" ]; then
-            echo "go plugin already installed at $HOME/.sentrux/plugins/go"
-          else
-            sentrux plugin add go
-          fi
+          curl -fsSL -o "$TMP_DIR/grammars.tar.gz" \
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/grammars-linux-x86_64.tar.gz"
+          echo "${SENTRUX_GRAMMARS_SHA256}  $TMP_DIR/grammars.tar.gz" | sha256sum -c -
+          tar -xzf "$TMP_DIR/grammars.tar.gz" -C "$TMP_DIR" go/grammars/linux-x86_64.so
+          echo "${SENTRUX_GO_GRAMMAR_SHA256}  $TMP_DIR/go/grammars/linux-x86_64.so" | sha256sum -c -
+
+          mkdir -p "$HOME/.sentrux/plugins/go/queries" "$HOME/.sentrux/plugins/go/grammars"
+          curl -fsSL -o "$HOME/.sentrux/plugins/go/plugin.toml" \
+            "https://raw.githubusercontent.com/sentrux/sentrux/${SENTRUX_PLUGIN_COMMIT}/plugins/go/plugin.toml"
+          curl -fsSL -o "$HOME/.sentrux/plugins/go/queries/tags.scm" \
+            "https://raw.githubusercontent.com/sentrux/sentrux/${SENTRUX_PLUGIN_COMMIT}/plugins/go/queries/tags.scm"
+          echo "${SENTRUX_GO_MANIFEST_SHA256}  $HOME/.sentrux/plugins/go/plugin.toml" | sha256sum -c -
+          echo "${SENTRUX_GO_QUERY_SHA256}  $HOME/.sentrux/plugins/go/queries/tags.scm" | sha256sum -c -
+          install -m 0644 "$TMP_DIR/go/grammars/linux-x86_64.so" \
+            "$HOME/.sentrux/plugins/go/grammars/linux-x86_64.so"
+
+          test "$(sentrux --version)" = "sentrux ${SENTRUX_VERSION#v}"
+          sentrux plugin validate "$HOME/.sentrux/plugins/go"
 
       - name: Architectural rules (.sentrux/rules.toml)
         run: sentrux check .
@@ -148,16 +174,19 @@ jobs:
       - name: Public API any-return boundary (spec v0.8.0 §01 Change 5)
         run: ./scripts/check-public-any.sh
 
+      - name: Package import boundaries (ADR-016)
+        run: ./scripts/check-import-boundaries.sh
+
   release-soak:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 

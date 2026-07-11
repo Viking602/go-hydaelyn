@@ -223,6 +223,29 @@ func TestBuild_SkillsRequireRegistry(t *testing.T) {
 	}
 }
 
+func TestBuild_AvailableSkillsRequireRegistry(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	_, err := Build(
+		Spec{Model: "m", AvailableSkills: []string{"code-review"}},
+		BuildDeps{Providers: provider.Single(driver)},
+	)
+	if !errors.Is(err, ErrSkillRegistryMissing) {
+		t.Fatalf("Build with available skills but no registry err = %v, want ErrSkillRegistryMissing", err)
+	}
+}
+
+func TestBuild_MissingAvailableSkillFailsConstruction(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	_, err := Build(
+		Spec{Model: "m", AvailableSkills: []string{"missing"}},
+		BuildDeps{Providers: provider.Single(driver), Skills: skill.NewRegistry()},
+	)
+	var missing *skill.NotFoundError
+	if !errors.As(err, &missing) || missing.Name != "missing" {
+		t.Fatalf("Build with unknown available skill err = %v, want missing NotFoundError", err)
+	}
+}
+
 func TestBuild_MissingSkillFailsConstruction(t *testing.T) {
 	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
 	_, err := Build(
