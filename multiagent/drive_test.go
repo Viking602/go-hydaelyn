@@ -3,6 +3,8 @@ package multiagent
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -160,6 +162,56 @@ func TestDriveStopsAtMaxTicks(t *testing.T) {
 	if !errors.Is(err, ErrMaxTicksExceeded) {
 		t.Fatalf("Drive error = %v, want ErrMaxTicksExceeded", err)
 	}
+}
+
+func TestDriveZeroValueConcurrencyIsBounded(t *testing.T) {
+	peak := drivePeakConcurrency(t, DriveOptions{}, 4)
+	if peak != defaultMaxConcurrency {
+		t.Fatalf("zero-value peak concurrency = %d, want %d", peak, defaultMaxConcurrency)
+	}
+
+	peak = drivePeakConcurrency(t, DriveOptions{UnlimitedConcurrency: true}, 6)
+	if peak != 6 {
+		t.Fatalf("unlimited peak concurrency = %d, want 6", peak)
+	}
+}
+
+func drivePeakConcurrency(t *testing.T, opts DriveOptions, releaseAt int32) int32 {
+	t.Helper()
+	const dispatchCount = 6
+	scheduler := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		dispatches := make([]Dispatch, dispatchCount)
+		for i := range dispatches {
+			dispatches[i] = buildDispatch(state.RunID, AgentClass{Name: string(rune('a' + i))}, i, nil)
+		}
+		return dispatches, nil
+	})
+
+	var active, peak atomic.Int32
+	release := make(chan struct{})
+	var once sync.Once
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for previous := peak.Load(); current > previous; previous = peak.Load() {
+			if peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		if current == releaseAt {
+			once.Do(func() { close(release) })
+		}
+		<-release
+		return api.TypedReport{Status: api.ReportStatusSuccess}, nil
+	})
+
+	if _, err := Drive(context.Background(), "run-bounded", scheduler, executor, opts); err != nil {
+		t.Fatalf("Drive() error = %v", err)
+	}
+	return peak.Load()
 }
 
 // TestSupervisorRetryObservesLatestDecision is the regression for the

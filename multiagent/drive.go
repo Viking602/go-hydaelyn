@@ -48,10 +48,13 @@ type DriveOptions struct {
 	// never reaches a terminal state. Defaults to 64.
 	MaxTicks int
 	// MaxConcurrency bounds how many of a tick's dispatches execute in
-	// parallel. 0 means unbounded (run every ready dispatch concurrently);
-	// 1 forces sequential execution. Schedulers that emit one dispatch per
-	// tick (Sequential/Router/Supervisor) are unaffected by this field.
+	// parallel. It defaults to 4; 1 forces sequential execution. Schedulers
+	// that emit one dispatch per tick are unaffected by this field.
 	MaxConcurrency int
+	// UnlimitedConcurrency makes a zero MaxConcurrency run every ready
+	// dispatch concurrently. It must be explicit so a zero-value options
+	// struct cannot create unbounded goroutines.
+	UnlimitedConcurrency bool
 	// Sink, when set, receives the live stream.Frames of every node whose
 	// Executor implements StreamingExecutor, each frame stamped with the node
 	// name (AgentInstance.ClassName) as its Source. It is a transient
@@ -96,6 +99,7 @@ func (e *SchedulerFailureError) Error() string {
 func (e *SchedulerFailureError) Unwrap() error { return e.Err }
 
 const defaultMaxTicks = 64
+const defaultMaxConcurrency = 4
 
 // Drive runs scheduler to a terminal state (Next returns no dispatches),
 // executing each Dispatch with executor and folding the result back into
@@ -129,7 +133,11 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		if len(dispatches) == 0 {
 			return DriveResult{State: state, Ticks: tick - 1}, nil
 		}
-		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, opts.MaxConcurrency, opts.Sink)
+		maxConcurrency := opts.MaxConcurrency
+		if maxConcurrency <= 0 && !opts.UnlimitedConcurrency {
+			maxConcurrency = defaultMaxConcurrency
+		}
+		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, maxConcurrency, opts.Sink)
 		state = next
 		if execErr != nil {
 			return DriveResult{State: state, Ticks: tick}, execErr
