@@ -26,42 +26,22 @@ type AcquireResult struct {
 }
 
 func Acquire(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input AcquireInput) (AcquireResult, error) {
-	run, err := uow.Runs().LoadRun(ctx, input.RunID)
+	task, env, err := loadAcquireTarget(ctx, uow, input)
 	if err != nil {
 		return AcquireResult{}, err
 	}
-	if corestate.IsTerminalRun(run.Status) {
-		return AcquireResult{}, model.ErrTerminalState
-	}
-	task, err := uow.Tasks().LoadTask(ctx, input.RunID, input.TaskID)
+	latest, hasLatest, err := uow.Leases().ActiveLeaseForTask(ctx, input.RunID, input.TaskID)
 	if err != nil {
 		return AcquireResult{}, err
 	}
-	if corestate.IsTerminalTask(task.Status) {
-		return AcquireResult{}, model.ErrTerminalState
-	}
-	var env model.TaskEnvelope
-	if input.EnvelopeID != "" {
-		env, err = uow.MailboxOutbox().LoadEnvelope(ctx, input.EnvelopeID)
-		if err != nil {
-			return AcquireResult{}, err
-		}
-		if err := validateEnvelopeForAcquire(input, task, env); err != nil {
-			return AcquireResult{}, err
-		}
-	} else if err := validateTaskHolder(task, input.HolderType, input.HolderID); err != nil {
-		return AcquireResult{}, err
-	}
-	if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, input.RunID, input.TaskID); err != nil {
-		return AcquireResult{}, err
-	} else if ok && lease.Status == model.LeaseStatusActive && model.LeaseExpiry(lease).After(time.Now().UTC()) {
-		return AcquireResult{Lease: lease, Acquired: false}, nil
+	now := time.Now().UTC()
+	if hasLatest && latest.Status == model.LeaseStatusActive && model.LeaseExpiry(latest).After(now) {
+		return AcquireResult{Lease: latest, Acquired: false}, nil
 	}
 	ttl := input.TTL
 	if ttl <= 0 {
 		ttl = time.Minute
 	}
-	now := time.Now().UTC()
 	lease := model.TaskExecutionLease{
 		ID:          newID("lease"),
 		RunID:       input.RunID,
@@ -76,6 +56,21 @@ func Acquire(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input
 		Status:      model.LeaseStatusActive,
 	}
 	model.SyncLeaseExpiry(&lease)
+	expectedVersion := uint64(0)
+	if hasLatest {
+		expectedVersion = latest.Version
+	}
+	acquired, err := uow.Leases().AcquireWithExpectedVersion(ctx, lease, expectedVersion)
+	if err != nil {
+		return AcquireResult{}, err
+	}
+	if !acquired {
+		return currentLease(ctx, uow, input)
+	}
+	lease, err = uow.Leases().LoadLease(ctx, lease.ID)
+	if err != nil {
+		return AcquireResult{}, err
+	}
 	task, err = corestate.TransitionTask(task, model.TaskStatusRunning, false)
 	if err != nil {
 		return AcquireResult{}, err
@@ -92,31 +87,74 @@ func Acquire(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input
 			return AcquireResult{}, err
 		}
 	}
-	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
-		return AcquireResult{}, err
-	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: input.RunID, TaskID: input.TaskID, Type: model.EventTaskExecutionAcquired, Payload: map[string]any{"leaseId": lease.ID, "envelopeId": input.EnvelopeID, "holderType": string(input.HolderType), "holderId": input.HolderID, "taskVersion": task.Version}, RecordedAt: now}); err != nil {
 		return AcquireResult{}, err
 	}
 	return AcquireResult{Lease: lease, Acquired: true}, nil
 }
 
-func Heartbeat(ctx context.Context, uow ports.UnitOfWork, leaseID string, ttl time.Duration) (model.TaskExecutionLease, error) {
+func loadAcquireTarget(ctx context.Context, uow ports.UnitOfWork, input AcquireInput) (model.Task, model.TaskEnvelope, error) {
+	run, err := uow.Runs().LoadRun(ctx, input.RunID)
+	if err != nil {
+		return model.Task{}, model.TaskEnvelope{}, err
+	}
+	if corestate.IsTerminalRun(run.Status) {
+		return model.Task{}, model.TaskEnvelope{}, model.ErrTerminalState
+	}
+	task, err := uow.Tasks().LoadTask(ctx, input.RunID, input.TaskID)
+	if err != nil {
+		return model.Task{}, model.TaskEnvelope{}, err
+	}
+	if corestate.IsTerminalTask(task.Status) {
+		return model.Task{}, model.TaskEnvelope{}, model.ErrTerminalState
+	}
+	var env model.TaskEnvelope
+	if input.EnvelopeID != "" {
+		env, err = uow.MailboxOutbox().LoadEnvelope(ctx, input.EnvelopeID)
+		if err != nil {
+			return model.Task{}, model.TaskEnvelope{}, err
+		}
+		if err := validateEnvelopeForAcquire(input, task, env); err != nil {
+			return model.Task{}, model.TaskEnvelope{}, err
+		}
+	} else if err := validateTaskHolder(task, input.HolderType, input.HolderID); err != nil {
+		return model.Task{}, model.TaskEnvelope{}, err
+	}
+	return task, env, nil
+}
+
+func currentLease(ctx context.Context, uow ports.UnitOfWork, input AcquireInput) (AcquireResult, error) {
+	current, ok, err := uow.Leases().ActiveLeaseForTask(ctx, input.RunID, input.TaskID)
+	if err != nil {
+		return AcquireResult{}, err
+	}
+	if ok {
+		return AcquireResult{Lease: current, Acquired: false}, nil
+	}
+	return AcquireResult{Acquired: false}, nil
+}
+
+func Heartbeat(ctx context.Context, uow ports.UnitOfWork, leaseID, holderID string, ttl time.Duration) (model.TaskExecutionLease, error) {
 	lease, err := uow.Leases().LoadLease(ctx, leaseID)
 	if err != nil {
 		return model.TaskExecutionLease{}, err
 	}
-	if lease.Status != model.LeaseStatusActive {
-		return model.TaskExecutionLease{}, model.ErrLeaseNotActive
+	if lease.HolderID != holderID {
+		return model.TaskExecutionLease{}, model.ErrLeaseHolderMismatch
 	}
 	if ttl <= 0 {
 		ttl = time.Minute
 	}
 	now := time.Now().UTC()
-	lease.HeartbeatAt = now
-	lease.ExpiresAt = now.Add(ttl)
-	model.SyncLeaseExpiry(&lease)
-	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
+	extended, err := uow.Leases().ExtendLease(ctx, leaseID, holderID, now.Add(ttl))
+	if err != nil {
+		return model.TaskExecutionLease{}, err
+	}
+	if !extended {
+		return model.TaskExecutionLease{}, model.ErrLeaseNotActive
+	}
+	lease, err = uow.Leases().LoadLease(ctx, leaseID)
+	if err != nil {
 		return model.TaskExecutionLease{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionHeartbeat, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: now}); err != nil {

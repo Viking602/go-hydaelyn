@@ -50,9 +50,12 @@ func (state *replayState) applyEvent(event model.Event) {
 		state.upsertTask(taskFromPayload(event.Payload))
 	case model.EventTaskDispatched:
 		state.applyTaskDispatched(event)
+	case model.EventMailboxRetryScheduled:
+		state.applyTaskAndMessagePayload(event)
+		state.applyTaskDispatched(event)
 	case model.EventTaskExecutionAcquired:
 		state.applyTaskExecutionAcquired(event)
-	case model.EventTaskCompleted, model.EventTaskFailed, model.EventTaskBlocked, model.EventTaskPaused, model.EventTaskOwnerChanged, model.EventUserMessageQueued:
+	case model.EventTaskCompleted, model.EventTaskFailed, model.EventTaskBlocked, model.EventTaskPaused, model.EventTaskOwnerChanged, model.EventUserMessageQueued, model.EventEnvelopeDeadLettered, model.EventActionReconcileRequired:
 		state.applyTaskAndMessagePayload(event)
 	case model.EventResponsePublished:
 		state.upsertMessage(userMessageFromPayload(mapFromPayload(event.Payload["message"])))

@@ -34,6 +34,8 @@ type (
 	BlackboardStore           = ports.BlackboardReadWriter
 	UnitOfWork                = ports.UnitOfWork
 	StoreProvider             = ports.StoreProvider
+	CapabilityReporter        = ports.CapabilityReporter
+	ProviderCloser            = ports.ProviderCloser
 )
 
 type RuntimeCommand interface {

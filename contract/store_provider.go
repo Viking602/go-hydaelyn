@@ -485,6 +485,14 @@ func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 		}
 		return nil
 	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		duplicate := att
+		duplicate.AttemptID = "att-2"
+		if err := uow.ActionAttempts().SaveActionAttempt(context.Background(), duplicate); err == nil {
+			t.Fatal("SaveActionAttempt accepted a duplicate idempotency tuple")
+		}
+		return nil
+	})
 }
 
 // ─── Transaction suite ──────────────────────────────────────────────────
@@ -766,7 +774,7 @@ func testLeaseConcurrentAcquireOnlyOneWins(t *testing.T, factory ProviderFactory
 		go func() {
 			defer wg.Done()
 			lease := api.TaskExecutionLease{
-				ID: "lease-race", RunID: "r-race", TaskID: "t-race",
+				ID: fmt.Sprintf("lease-race-%d", i), RunID: "r-race", TaskID: "t-race",
 				HolderType: api.HolderAgent, HolderID: fmt.Sprintf("worker-%d", i),
 				Status: api.LeaseStatusActive, AcquiredAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
 			}

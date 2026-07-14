@@ -50,6 +50,24 @@ func (r *Runner) StoreProvider() api.StoreProvider {
 	return adapter.StoreProviderFromCore(r.rt.StoreProvider())
 }
 
+func (r *Runner) StoreCapabilities(ctx context.Context) (api.StoreCapabilities, error) {
+	capabilities, err := r.rt.StoreCapabilities(ctx)
+	if err != nil {
+		return api.StoreCapabilities{}, adapter.ErrorToAPI(err)
+	}
+	return api.StoreCapabilities{
+		SupportsTransactions:        capabilities.SupportsTransactions,
+		SupportsBlackboardSubscribe: capabilities.SupportsBlackboardSubscribe,
+		SupportsListPending:         capabilities.SupportsListPending,
+		SupportsConcurrentWriters:   capabilities.SupportsConcurrentWriters,
+		SupportsDeadLetterRequeue:   capabilities.SupportsDeadLetterRequeue,
+	}, nil
+}
+
+func (r *Runner) Close(ctx context.Context) error {
+	return adapter.ErrorToAPI(r.rt.Close(ctx))
+}
+
 func (r *Runner) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	uow, err := r.rt.Begin(ctx)
 	if err != nil {

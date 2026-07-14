@@ -34,7 +34,7 @@ func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd api.AcquireTaskEx
 }
 
 func (r *Runner) HeartbeatTaskExecution(ctx context.Context, cmd api.HeartbeatTaskExecutionCommand) error {
-	return adapter.ErrorToAPI(r.rt.HeartbeatTaskExecution(ctx, core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, TTL: cmd.TTL}))
+	return adapter.ErrorToAPI(r.rt.HeartbeatTaskExecution(ctx, core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID, TTL: cmd.TTL}))
 }
 
 func (r *Runner) ReleaseTaskExecution(ctx context.Context, cmd api.ReleaseTaskExecutionCommand) error {

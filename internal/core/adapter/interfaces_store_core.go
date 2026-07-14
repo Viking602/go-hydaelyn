@@ -32,6 +32,32 @@ func (a coreStoreProviderAdapter) Begin(ctx context.Context) (api.UnitOfWork, er
 	return UnitOfWorkFromCore(uow), nil
 }
 
+func (a coreStoreProviderAdapter) Capabilities(ctx context.Context) (api.StoreCapabilities, error) {
+	reporter, ok := a.inner.(core.CapabilityReporter)
+	if !ok {
+		return api.DefaultStoreCapabilities(), nil
+	}
+	capabilities, err := reporter.Capabilities(ctx)
+	if err != nil {
+		return api.StoreCapabilities{}, ErrorToAPI(err)
+	}
+	return api.StoreCapabilities{
+		SupportsTransactions:        capabilities.SupportsTransactions,
+		SupportsBlackboardSubscribe: capabilities.SupportsBlackboardSubscribe,
+		SupportsListPending:         capabilities.SupportsListPending,
+		SupportsConcurrentWriters:   capabilities.SupportsConcurrentWriters,
+		SupportsDeadLetterRequeue:   capabilities.SupportsDeadLetterRequeue,
+	}, nil
+}
+
+func (a coreStoreProviderAdapter) Close(ctx context.Context) error {
+	closer, ok := a.inner.(core.ProviderCloser)
+	if !ok {
+		return nil
+	}
+	return ErrorToAPI(closer.Close(ctx))
+}
+
 type coreStoreProviderSubscriberAdapter struct {
 	coreStoreProviderAdapter
 	subscriber core.BlackboardSubscriber

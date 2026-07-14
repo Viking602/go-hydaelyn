@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"encoding/json"
 	"maps"
 	"time"
 
@@ -27,22 +28,15 @@ func taskFromPayload(payload map[string]any) model.Task {
 	if len(payload) == 0 {
 		return model.Task{}
 	}
-	return model.Task{
-		ID:              stringFromPayload(payload["taskId"]),
-		RunID:           stringFromPayload(payload["runId"]),
-		ParentTaskID:    stringFromPayload(payload["parentTaskId"]),
-		Type:            model.TaskType(stringFromPayload(payload["type"])),
-		Goal:            stringFromPayload(payload["goal"]),
-		AssignedAgentID: stringFromPayload(payload["assignedAgentId"]),
-		OwnerAgentID:    stringFromPayload(payload["ownerAgentId"]),
-		OwnerComponent:  stringFromPayload(payload["ownerComponent"]),
-		Status:          model.TaskStatus(stringFromPayload(payload["status"])),
-		Version:         intFromPayload(payload["version"]),
-		Attempts:        intFromPayload(payload["attempts"]),
-		HandoffCount:    intFromPayload(payload["handoffCount"]),
-		CreatedAt:       timeFromPayload(payload["createdAt"]),
-		UpdatedAt:       timeFromPayload(payload["updatedAt"]),
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return model.Task{}
 	}
+	var task model.Task
+	if err := json.Unmarshal(raw, &task); err != nil {
+		return model.Task{}
+	}
+	return task
 }
 
 func userMessageFromPayload(payload map[string]any) model.UserMessage {
@@ -92,8 +86,12 @@ func intFromPayload(value any) int {
 }
 
 func timeFromPayload(value any) time.Time {
-	if current, ok := value.(time.Time); ok {
+	switch current := value.(type) {
+	case time.Time:
 		return current
+	case string:
+		parsed, _ := time.Parse(time.RFC3339Nano, current)
+		return parsed
 	}
 	return time.Time{}
 }
@@ -101,6 +99,15 @@ func timeFromPayload(value any) time.Time {
 func stringMapFromPayload(value any) map[string]string {
 	if raw, ok := value.(map[string]string); ok {
 		return maps.Clone(raw)
+	}
+	if raw, ok := value.(map[string]any); ok {
+		out := make(map[string]string, len(raw))
+		for key, value := range raw {
+			if text, ok := value.(string); ok {
+				out[key] = text
+			}
+		}
+		return out
 	}
 	return nil
 }

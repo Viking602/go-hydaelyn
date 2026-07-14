@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
+	"github.com/Viking602/go-hydaelyn/internal/eventpayload"
+	"github.com/Viking602/go-hydaelyn/internal/execution"
 )
 
 type TraceRecorder func(context.Context, ports.UnitOfWork, string, string, string, string) error
@@ -44,6 +47,12 @@ func (h deadLetterHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd
 	if err != nil {
 		return nil, err
 	}
+	if env.Status == "dead" {
+		return deadLetterResult{Envelope: env, Reason: cmd.Reason}, nil
+	}
+	if env.Status != "delivered" {
+		env.Attempts++
+	}
 	monitor, err := h.monitor()
 	if err != nil {
 		return nil, err
@@ -76,7 +85,6 @@ func (h deadLetterHandler) monitor() (ports.TaskMonitor, error) {
 
 func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env model.TaskEnvelope, reason string, decision model.TaskMonitorDecision) (deadLetterResult, error) {
 	env.Status = "pending"
-	env.Attempts++
 	backoff := env.RetryPolicy.Backoff
 	if backoff <= 0 {
 		backoff = time.Second
@@ -91,11 +99,8 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 		if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, env.RunID, env.TaskID); err != nil {
 			return deadLetterResult{}, err
 		} else if ok && lease.Status == model.LeaseStatusActive {
-			lease.Status = model.LeaseStatusReleased
-			if err := uow.Leases().SaveLease(ctx, lease); err != nil {
-				return deadLetterResult{}, err
-			}
-			if err := uow.Events().AppendEvent(ctx, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {
+			lease, err = execution.Release(ctx, uow, lease.ID, lease.HolderID)
+			if err != nil {
 				return deadLetterResult{}, err
 			}
 			result.Lease = lease
@@ -120,7 +125,7 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 	if err := uow.MailboxOutbox().UpdateEnvelope(ctx, env); err != nil {
 		return deadLetterResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventMailboxRetryScheduled, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "nextRetryAt": env.NextRetryAt}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventMailboxRetryScheduled, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "nextRetryAt": env.NextRetryAt, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(task)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
@@ -131,6 +136,7 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 }
 
 func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env model.TaskEnvelope, reason string, decision model.TaskMonitorDecision) (deadLetterResult, error) {
+	original := env
 	env.Status = "dead"
 	if err := uow.MailboxOutbox().UpdateEnvelope(ctx, env); err != nil {
 		return deadLetterResult{}, err
@@ -140,6 +146,16 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 		return deadLetterResult{}, err
 	}
 	result := deadLetterResult{Envelope: env, Task: task, Decision: decision, Reason: reason}
+	if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, env.RunID, env.TaskID); err != nil {
+		return deadLetterResult{}, err
+	} else if ok && lease.Status == model.LeaseStatusActive {
+		lease, err = execution.Release(ctx, uow, lease.ID, lease.HolderID)
+		if err != nil {
+			return deadLetterResult{}, err
+		}
+		result.Lease = lease
+		result.LeaseReleased = true
+	}
 	if !corestate.IsTerminalTask(task.Status) {
 		next, err := corestate.TransitionTask(task, model.TaskStatusBlocked, true)
 		if err != nil {
@@ -153,7 +169,20 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 		result.TaskChanged = true
 		result.TaskTransition = true
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventEnvelopeDeadLettered, Payload: map[string]any{"envelopeId": env.ID, "reason": reason}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.DeadLetters().AppendDeadLetter(ctx, model.DeadLetterEntry{
+		ID:         "deadletter-" + original.ID,
+		EnvelopeID: original.ID,
+		RunID:      original.RunID,
+		TaskID:     original.TaskID,
+		Reason:     reason,
+		Attempts:   original.Attempts,
+		Envelope:   original,
+		Payload:    maps.Clone(original.Payload),
+		CreatedAt:  time.Now().UTC(),
+	}); err != nil {
+		return deadLetterResult{}, err
+	}
+	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventEnvelopeDeadLettered, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(result.Task)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {

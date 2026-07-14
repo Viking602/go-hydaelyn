@@ -32,7 +32,7 @@ func (heartbeatTaskExecutionHandler) Name() string {
 }
 
 func (heartbeatTaskExecutionHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd HeartbeatTaskExecutionCommand) (any, error) {
-	return Heartbeat(ctx, uow, cmd.LeaseID, cmd.TTL)
+	return Heartbeat(ctx, uow, cmd.LeaseID, cmd.HolderID, cmd.TTL)
 }
 
 type releaseTaskExecutionHandler struct{}

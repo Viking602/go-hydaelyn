@@ -16,8 +16,9 @@ type AcquireTaskExecutionCommand struct {
 }
 
 type HeartbeatTaskExecutionCommand struct {
-	LeaseID string
-	TTL     time.Duration
+	LeaseID  string
+	HolderID string
+	TTL      time.Duration
 }
 
 type ReleaseTaskExecutionCommand struct {

@@ -78,7 +78,7 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	case api.AcquireTaskExecutionCommand:
 		return core.AcquireTaskExecutionCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL}, true
 	case api.HeartbeatTaskExecutionCommand:
-		return core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, TTL: cmd.TTL}, true
+		return core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID, TTL: cmd.TTL}, true
 	case api.ReleaseTaskExecutionCommand:
 		return core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID}, true
 	case api.ToolInvocation:
@@ -120,6 +120,7 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		ParentTaskID:       cmd.ParentTaskID,
 		Type:               model.TaskType(cmd.Type),
 		Goal:               cmd.Goal,
+		Input:              cloneBytes(cmd.Input),
 		AssignedAgentID:    cmd.AssignedAgentID,
 		OwnerAgentID:       cmd.OwnerAgentID,
 		OwnerComponent:     cmd.OwnerComponent,

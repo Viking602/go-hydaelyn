@@ -9,6 +9,20 @@ import (
 	"math/big"
 )
 
+// ValidateJSON validates payload against the supported JSON Schema subset used
+// by OutputPolicy.
+func ValidateJSON(schemaRaw, payload json.RawMessage) error {
+	if len(schemaRaw) == 0 {
+		return nil
+	}
+	schema, err := parseOutputPolicySchema(schemaRaw)
+	if err != nil {
+		return err
+	}
+	_, err = validateStructuredOutputAgainstSchema(schema, string(payload))
+	return err
+}
+
 // OutputPolicy controls structured-output validation and schema repair
 // after each agent loop completion. Engine.Run honors Validate; the
 // Repair loop with MaxRepairAttempts is wired in Phase 2 (v0.8.0

@@ -226,6 +226,12 @@ func hostPolicy() policy.Engine {
 				Reason: "host: workspace-write/execution allowance for the coding task",
 			}, nil
 		}
+		if request.Operation == policy.OperationAction && request.Action != nil && allowed[request.Action.ToolName] {
+			return policy.Decision{
+				Effect: policy.EffectAllow,
+				Reason: "host: action-attempt allowance for the coding task",
+			}, nil
+		}
 		return coded.Authorize(ctx, request)
 	})
 }

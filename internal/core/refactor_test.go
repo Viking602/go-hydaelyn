@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
 func TestCommandPipelinePolicyStoreAndTraceContracts(t *testing.T) {
@@ -323,6 +325,42 @@ func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 	if blocked.Status != TaskStatusBlocked {
 		t.Fatalf("exhausted mailbox delivery should block task, got %#v", blocked)
 	}
+	if active := rt.ActiveLeaseCount(ctx, run.ID, task.ID); active != 0 {
+		t.Fatalf("terminal dead-letter should release active lease, got %d", active)
+	}
+	uow, err := rt.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	entries, err := uow.DeadLetters().ListDeadLetters(ctx, model.DeadLetterSelector{RunID: run.ID, TaskID: task.ID})
+	if err != nil {
+		t.Fatalf("ListDeadLetters() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].EnvelopeID != env.ID || entries[0].Reason != "exhausted" {
+		t.Fatalf("dead-letter ledger = %#v, want one entry for %s", entries, env.ID)
+	}
+}
+
+func TestMailboxOutboxCountsFailureBeforeLeaseAcquisition(t *testing.T) {
+	ctx := context.Background()
+	rt := NewMemoryRuntime()
+	run := mustStartRun(ctx, t, rt, "run-outbox-pre-acquire")
+	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
+		RunID:       run.ID,
+		TaskID:      "worker",
+		RetryPolicy: RetryPolicy{MaxAttempts: 1},
+	})
+	env := mustDispatchTask(ctx, t, rt, DispatchTaskCommand{RunID: run.ID, TaskID: task.ID})
+	if err := rt.DeadLetter(ctx, DeadLetterCommand{EnvelopeID: env.ID, Reason: "delivery failed"}); err != nil {
+		t.Fatalf("DeadLetter() error = %v", err)
+	}
+	got := mustLoadEnvelope(ctx, t, rt, env.ID)
+	if got.Status != "dead" || got.Attempts != 1 {
+		t.Fatalf("dead-lettered envelope = %#v, want one recorded attempt", got)
+	}
 }
 
 func TestApprovalResumeTokenRecovery(t *testing.T) {
@@ -609,7 +647,7 @@ func TestExecutionHeartbeatExtendsLease(t *testing.T) {
 	lease := leaseTask(ctx, t, rt, run.ID, task.ID, HolderAgent, "agent-a")
 
 	beforeHeartbeat := lease.ExpiresAt
-	if err := rt.HeartbeatTaskExecution(ctx, HeartbeatTaskExecutionCommand{LeaseID: lease.ID, TTL: 2 * time.Minute}); err != nil {
+	if err := rt.HeartbeatTaskExecution(ctx, HeartbeatTaskExecutionCommand{LeaseID: lease.ID, HolderID: "agent-a", TTL: 2 * time.Minute}); err != nil {
 		t.Fatalf("HeartbeatTaskExecution() error = %v", err)
 	}
 	heartbeatLease := mustLoadLease(ctx, t, rt, lease.ID)
@@ -634,7 +672,7 @@ func TestExecutionReleaseRejectsWrongHolderAndStopsHeartbeat(t *testing.T) {
 	if err := rt.ReleaseTaskExecution(ctx, ReleaseTaskExecutionCommand{LeaseID: lease.ID, HolderID: "agent-a"}); err != nil {
 		t.Fatalf("ReleaseTaskExecution() error = %v", err)
 	}
-	if err := rt.HeartbeatTaskExecution(ctx, HeartbeatTaskExecutionCommand{LeaseID: lease.ID, TTL: time.Minute}); !errors.Is(err, ErrLeaseNotActive) {
+	if err := rt.HeartbeatTaskExecution(ctx, HeartbeatTaskExecutionCommand{LeaseID: lease.ID, HolderID: "agent-a", TTL: time.Minute}); !errors.Is(err, ErrLeaseNotActive) {
 		t.Fatalf("heartbeat after release should fail with ErrLeaseNotActive, got %v", err)
 	}
 	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventTaskExecutionReleased) {

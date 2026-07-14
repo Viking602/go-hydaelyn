@@ -100,20 +100,19 @@ func (s TeamState) reportInput(className string) json.RawMessage {
 	return raw
 }
 
-// buildDispatch assembles a Dispatch for class as the step-th agent in a
-// run. The TaskID is deterministic per (run, class); the instance ID is
-// deterministic per (class, run, task, step) via ComputeInstanceID, so
-// reconstruction from the event stream reproduces the same identities.
-// taskIDForClass derives the deterministic TaskID for a class within a run.
-// classNameFromTaskID is its inverse; Drive uses it to recover the class a
-// finished Dispatch belonged to (the Dispatch carries only the hashed
-// instance ID, not the class name).
+// buildDispatch assembles a Dispatch for class as the step-th agent in a run.
 func taskIDForClass(runID, className string) string {
 	return runID + "-" + className
 }
 
 func classNameFromTaskID(runID, taskID string) string {
-	return strings.TrimPrefix(taskID, runID+"-")
+	className := strings.TrimPrefix(taskID, runID+"-")
+	if marker := strings.LastIndex(className, "-attempt-"); marker >= 0 {
+		if _, err := strconv.Atoi(className[marker+len("-attempt-"):]); err == nil {
+			return className[:marker]
+		}
+	}
+	return className
 }
 
 func buildDispatch(runID string, class AgentClass, step int, input json.RawMessage) Dispatch {
@@ -123,12 +122,14 @@ func buildDispatch(runID string, class AgentClass, step int, input json.RawMessa
 		goal = class.Description
 	}
 	return Dispatch{
-		To: ComputeInstanceID(class.Name, runID, taskID, strconv.Itoa(step)),
+		To:        ComputeInstanceID(class.Name, runID, taskID, strconv.Itoa(step)),
+		ClassName: class.Name,
 		Task: api.Task{
 			ID:           taskID,
 			RunID:        runID,
 			Type:         api.TaskTypeWorker,
 			Goal:         goal,
+			Input:        input,
 			Status:       api.TaskStatusCreated,
 			InputSchema:  class.InputSchema,
 			OutputSchema: class.OutputSchema,
@@ -139,6 +140,21 @@ func buildDispatch(runID string, class AgentClass, step int, input json.RawMessa
 			Validate: len(class.OutputSchema) > 0,
 		},
 	}
+}
+
+func (s TeamState) buildDispatch(class AgentClass, input json.RawMessage) Dispatch {
+	dispatch := buildDispatch(s.RunID, class, len(s.Instances), input)
+	attempt := 0
+	for _, instance := range s.Instances {
+		if instance.ClassName == class.Name {
+			attempt++
+		}
+	}
+	if attempt > 0 {
+		dispatch.Task.ID = fmt.Sprintf("%s-%s-attempt-%d", s.RunID, class.Name, attempt+1)
+		dispatch.To = ComputeInstanceID(class.Name, s.RunID, dispatch.Task.ID, strconv.Itoa(len(s.Instances)))
+	}
+	return dispatch
 }
 
 // discriminatorValue reads field from a report's Structured payload and

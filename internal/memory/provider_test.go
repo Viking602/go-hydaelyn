@@ -331,12 +331,31 @@ func TestMemoryLeaseStore_AcquireWithExpectedVersion(t *testing.T) {
 		t.Fatalf("expected stale Acquire to return false")
 	}
 
-	winning, err := cas.AcquireWithExpectedVersion(ctx, lease, 1)
+	active, err := cas.AcquireWithExpectedVersion(ctx, lease, 1)
 	if err != nil {
-		t.Fatalf("Acquire(version=1) error = %v", err)
+		t.Fatalf("Acquire(active version=1) error = %v", err)
+	}
+	if active {
+		t.Fatalf("expected an unexpired active lease to reject takeover")
+	}
+
+	loaded, err := uow.Leases().LoadLease(ctx, lease.ID)
+	if err != nil {
+		t.Fatalf("LoadLease() error = %v", err)
+	}
+	loaded.Status = model.LeaseStatusReleased
+	if err := uow.Leases().SaveLease(ctx, loaded); err != nil {
+		t.Fatalf("SaveLease(released) error = %v", err)
+	}
+	replacement := lease
+	replacement.ID = "lease-cas-2"
+	replacement.HolderID = "worker-B"
+	winning, err := cas.AcquireWithExpectedVersion(ctx, replacement, 2)
+	if err != nil {
+		t.Fatalf("Acquire(replacement version=2) error = %v", err)
 	}
 	if !winning {
-		t.Fatalf("expected Acquire with current version to succeed")
+		t.Fatalf("expected released lease takeover to succeed")
 	}
 }
 

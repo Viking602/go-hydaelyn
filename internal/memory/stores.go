@@ -475,24 +475,23 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 		lease.ID = u.nextID("lease")
 	}
 	model.SyncLeaseExpiry(&lease)
-	if existing, ok := u.staged.Leases[lease.ID]; ok && lease.Version <= existing.Version {
+	key := activeLeaseKey(lease.RunID, lease.TaskID)
+	latestID := u.staged.ActiveLeaseByTask[key]
+	if latestID != "" && latestID != lease.ID {
+		return model.ErrLeaseNotActive
+	}
+	if existing, ok := u.staged.Leases[lease.ID]; ok {
 		lease.Version = existing.Version + 1
-	} else if lease.Version == 0 {
+	} else {
 		lease.Version = 1
 	}
 	u.staged.Leases[lease.ID] = lease
-	key := activeLeaseKey(lease.RunID, lease.TaskID)
-	if lease.Status == model.LeaseStatusActive {
-		u.staged.ActiveLeaseByTask[key] = lease.ID
-	} else if u.staged.ActiveLeaseByTask[key] == lease.ID {
-		delete(u.staged.ActiveLeaseByTask, key)
-	}
+	u.staged.ActiveLeaseByTask[key] = lease.ID
 	return nil
 }
 
-// AcquireWithExpectedVersion atomically persists lease iff the currently
-// stored lease for the same ID has Version == expectedVersion. Returns
-// (false, nil) on mismatch. expectedVersion == 0 means "no prior lease".
+// AcquireWithExpectedVersion atomically persists lease iff the latest lease
+// slot for the same task has Version == expectedVersion and is not live.
 // Satisfies ports.LeaseCAS — see api/store.go for the full contract.
 func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error) {
 	u := s.uow()
@@ -503,22 +502,28 @@ func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.T
 		return false, fmt.Errorf("lease.ID required for AcquireWithExpectedVersion: %w", model.ErrInvalidCommand)
 	}
 	model.SyncLeaseExpiry(&lease)
-	existing, exists := u.staged.Leases[lease.ID]
-	var currentVersion uint64
-	if exists {
-		currentVersion = existing.Version
+	key := activeLeaseKey(lease.RunID, lease.TaskID)
+	latestID := u.staged.ActiveLeaseByTask[key]
+	var latest model.TaskExecutionLease
+	if latestID != "" {
+		latest = u.staged.Leases[latestID]
 	}
-	if currentVersion != expectedVersion {
+	if latest.Version != expectedVersion {
 		return false, nil
 	}
-	lease.Version = currentVersion + 1
-	u.staged.Leases[lease.ID] = lease
-	key := activeLeaseKey(lease.RunID, lease.TaskID)
-	if lease.Status == model.LeaseStatusActive {
-		u.staged.ActiveLeaseByTask[key] = lease.ID
-	} else if u.staged.ActiveLeaseByTask[key] == lease.ID {
-		delete(u.staged.ActiveLeaseByTask, key)
+	now := time.Now().UTC()
+	if latest.Status == model.LeaseStatusActive {
+		expiry := model.LeaseExpiry(latest)
+		if !expiry.IsZero() && expiry.After(now) {
+			return false, nil
+		}
 	}
+	if existing, ok := u.staged.Leases[lease.ID]; ok && lease.ID != latestID && existing.Version > 0 {
+		return false, nil
+	}
+	lease.Version = latest.Version + 1
+	u.staged.Leases[lease.ID] = lease
+	u.staged.ActiveLeaseByTask[key] = lease.ID
 	return true, nil
 }
 
@@ -534,16 +539,19 @@ func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID str
 	if !ok {
 		return false, nil
 	}
-	if existing.HolderID != workerID {
+	if u.staged.ActiveLeaseByTask[activeLeaseKey(existing.RunID, existing.TaskID)] != leaseID ||
+		existing.Status != model.LeaseStatusActive ||
+		existing.HolderID != workerID {
 		return false, nil
 	}
+	now := time.Now().UTC()
 	expiry := model.LeaseExpiry(existing)
-	if !expiry.IsZero() && expiry.Before(time.Now()) {
+	if expiry.IsZero() || !expiry.After(now) || !newExpiry.After(expiry) {
 		return false, nil
 	}
 	existing.ExpiresAt = newExpiry
 	existing.Expiry = newExpiry
-	existing.HeartbeatAt = time.Now()
+	existing.HeartbeatAt = now
 	existing.Version++
 	u.staged.Leases[leaseID] = existing
 	return true, nil
@@ -663,6 +671,17 @@ func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
+	}
+	if attempt.IdempotencyKey != "" {
+		for _, existing := range u.staged.ActionAttempts {
+			if existing.AttemptID != attempt.AttemptID &&
+				existing.RunID == attempt.RunID &&
+				existing.TaskID == attempt.TaskID &&
+				existing.ToolName == attempt.ToolName &&
+				existing.IdempotencyKey == attempt.IdempotencyKey {
+				return model.ErrIdempotencyConflict
+			}
+		}
 	}
 	u.staged.ActionAttempts[attempt.AttemptID] = attempt
 	return nil

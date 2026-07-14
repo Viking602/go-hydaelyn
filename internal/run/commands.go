@@ -19,6 +19,7 @@ type CreateTaskCommand struct {
 	ParentTaskID       string
 	Type               model.TaskType
 	Goal               string
+	Input              json.RawMessage
 	AssignedAgentID    string
 	OwnerAgentID       string
 	OwnerComponent     string

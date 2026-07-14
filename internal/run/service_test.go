@@ -2,6 +2,7 @@ package run_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -100,5 +101,25 @@ func TestCreateTaskDefaultsAndCopiesMutableInput(t *testing.T) {
 	}
 	if task.Tags[0] != "research" || task.DependsOn[0] != "dep-1" {
 		t.Fatalf("CreateTask() did not copy mutable inputs: %#v", task)
+	}
+}
+
+func TestCreateTaskRejectsInvalidJSON(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	run, _, err := runsvc.Start(ctx, uow, testIDGenerator(), runsvc.StartInput{Request: "root"})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if _, err := runsvc.CreateTask(ctx, uow, testIDGenerator(), runsvc.CreateTaskInput{
+		RunID: run.ID,
+		Input: json.RawMessage(`{`),
+	}); err == nil {
+		t.Fatal("CreateTask() accepted malformed input JSON")
 	}
 }

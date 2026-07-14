@@ -25,6 +25,7 @@ type CreateTaskCommand struct {
 	ParentTaskID       string
 	Type               TaskType
 	Goal               string
+	Input              json.RawMessage
 	AssignedAgentID    string
 	OwnerAgentID       string
 	OwnerComponent     string
@@ -106,8 +107,9 @@ type AcquireTaskExecutionCommand struct {
 }
 
 type HeartbeatTaskExecutionCommand struct {
-	LeaseID string
-	TTL     time.Duration
+	LeaseID  string
+	HolderID string
+	TTL      time.Duration
 }
 
 type ReleaseTaskExecutionCommand struct {

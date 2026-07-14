@@ -67,7 +67,7 @@ func (g *compiledGraphExecutor) ExecuteStream(ctx context.Context, dispatch Disp
 }
 
 func (g *compiledGraphExecutor) subgraphFor(dispatch Dispatch) *CompiledGraph {
-	nodeID := classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
+	nodeID := dispatchClassName(dispatch)
 	node, ok := g.graph.nodes[nodeID]
 	if !ok || node.sub == nil {
 		return nil
@@ -76,7 +76,14 @@ func (g *compiledGraphExecutor) subgraphFor(dispatch Dispatch) *CompiledGraph {
 }
 
 func (g *compiledGraphExecutor) subRunID(dispatch Dispatch) string {
-	return dispatch.Task.RunID + "/" + classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
+	return dispatch.Task.RunID + "/" + dispatchClassName(dispatch)
+}
+
+func dispatchClassName(dispatch Dispatch) string {
+	if dispatch.ClassName != "" {
+		return dispatch.ClassName
+	}
+	return classNameFromTaskID(dispatch.Task.RunID, dispatch.Task.ID)
 }
 
 var _ StreamingExecutor = (*compiledGraphExecutor)(nil)

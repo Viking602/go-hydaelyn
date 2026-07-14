@@ -53,7 +53,7 @@ func (s SupervisorScheduler) Next(_ context.Context, state TeamState) ([]Dispatc
 	}
 	finished := state.finishedClasses()
 	if !finished[s.Supervisor.Name] {
-		return []Dispatch{buildDispatch(state.RunID, s.Supervisor, 0, nil)}, nil
+		return []Dispatch{state.buildDispatch(s.Supervisor, nil)}, nil
 	}
 
 	report := state.reportForClass(s.Supervisor.Name)
@@ -74,9 +74,9 @@ func (s SupervisorScheduler) Next(_ context.Context, state TeamState) ([]Dispatc
 		if finished[worker.Name] {
 			return nil, nil
 		}
-		return []Dispatch{buildDispatch(state.RunID, worker, 1, state.reportInput(s.Supervisor.Name))}, nil
+		return []Dispatch{state.buildDispatch(worker, state.reportInput(s.Supervisor.Name))}, nil
 	case SupervisorActionRetry:
-		return []Dispatch{buildDispatch(state.RunID, s.Supervisor, len(state.Instances), nil)}, nil
+		return []Dispatch{state.buildDispatch(s.Supervisor, nil)}, nil
 	case SupervisorActionAccept, SupervisorActionAbort, SupervisorActionEscalate:
 		return nil, nil
 	default:

@@ -19,6 +19,7 @@ type Scheduler interface {
 // TeamState is the snapshot a Scheduler.Next sees on each tick.
 type TeamState struct {
 	RunID      string               `json:"runId"`
+	Tick       int                  `json:"tick,omitempty"`
 	Tasks      []api.Task           `json:"tasks,omitempty"`
 	Instances  []AgentInstance      `json:"instances,omitempty"`
 	Blackboard []api.BlackboardItem `json:"blackboard,omitempty"`
