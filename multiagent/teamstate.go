@@ -122,8 +122,9 @@ func buildDispatch(runID string, class AgentClass, step int, input json.RawMessa
 		goal = class.Description
 	}
 	return Dispatch{
-		To:        ComputeInstanceID(class.Name, runID, taskID, strconv.Itoa(step)),
-		ClassName: class.Name,
+		To:             ComputeInstanceID(class.Name, runID, taskID, strconv.Itoa(step)),
+		ClassName:      class.Name,
+		AgentClassName: class.Name,
 		Task: api.Task{
 			ID:           taskID,
 			RunID:        runID,

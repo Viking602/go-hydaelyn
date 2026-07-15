@@ -37,15 +37,13 @@ func (r TeamRunner) Start(ctx context.Context, runID string) (multiagent.DriveRe
 		return multiagent.DriveResult{}, err
 	}
 	if _, err := r.loadState(ctx, runID); err == nil {
-		_ = r.Runner.ReleaseTaskExecution(ctx, api.ReleaseTaskExecutionCommand{LeaseID: lease.ID, HolderID: lease.HolderID})
-		return multiagent.DriveResult{}, api.ErrIdempotencyConflict
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, api.ErrIdempotencyConflict)
 	} else if !errors.Is(err, api.ErrNotFound) {
-		return multiagent.DriveResult{}, err
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
 	}
 	state := multiagent.TeamState{RunID: runID}
 	if err := r.saveState(ctx, state, false); err != nil {
-		_ = r.Runner.ReleaseTaskExecution(ctx, api.ReleaseTaskExecutionCommand{LeaseID: lease.ID, HolderID: lease.HolderID})
-		return multiagent.DriveResult{}, err
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
 	}
 	return r.drive(ctx, state, lease)
 }
@@ -65,19 +63,31 @@ func (r TeamRunner) Resume(ctx context.Context, runID string) (multiagent.DriveR
 	if err != nil {
 		return multiagent.DriveResult{}, err
 	}
-	if run.Status == api.RunStatusCompleted {
+	switch run.Status {
+	case api.RunStatusCompleted:
+		if err := checkpointFailure(checkpoint); err != nil {
+			return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, err
+		}
 		return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, nil
+	case api.RunStatusComposingResponse:
+		if err := checkpointFailure(checkpoint); err != nil {
+			return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, err
+		}
+		if err := r.Runner.TransitionRun(ctx, api.TransitionRunCommand{RunID: runID, To: api.RunStatusCompleted}); err != nil {
+			return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, err
+		}
+		return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, nil
+	case api.RunStatusReconcileRequired:
+		return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, api.ErrActionReconcileRequired
+	case api.RunStatusRunning, api.RunStatusCreated:
+	default:
+		return multiagent.DriveResult{State: checkpoint, Ticks: checkpoint.Tick}, fmt.Errorf("worker: run %q status %q is not resumable: %w", runID, run.Status, api.ErrInvalidTransition)
 	}
 	lease, err := r.acquireScheduler(ctx, runID)
 	if err != nil {
 		return multiagent.DriveResult{}, err
 	}
-	state, err := r.loadState(ctx, runID)
-	if err != nil {
-		_ = r.Runner.ReleaseTaskExecution(ctx, api.ReleaseTaskExecutionCommand{LeaseID: lease.ID, HolderID: lease.HolderID})
-		return multiagent.DriveResult{}, err
-	}
-	return r.drive(ctx, state, lease)
+	return r.drive(ctx, checkpoint, lease)
 }
 
 func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease api.TaskExecutionLease) (multiagent.DriveResult, error) {
@@ -117,8 +127,38 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 	if heartbeatErr != nil {
 		driveErr = errors.Join(driveErr, heartbeatErr)
 	}
+	if driveErr == nil {
+		driveErr = checkpointFailure(result.State)
+	}
 	finalizeErr := r.finishScheduler(context.WithoutCancel(ctx), lease, driveErr)
 	return result, errors.Join(driveErr, finalizeErr)
+}
+
+func (r TeamRunner) releaseSchedulerLease(ctx context.Context, lease api.TaskExecutionLease, cause error) error {
+	cleanupCtx := context.WithoutCancel(ctx)
+	releaseErr := r.Runner.ReleaseTaskExecution(cleanupCtx, api.ReleaseTaskExecutionCommand{
+		LeaseID:  lease.ID,
+		HolderID: lease.HolderID,
+	})
+	return errors.Join(cause, releaseErr)
+}
+
+func checkpointFailure(state multiagent.TeamState) error {
+	tasks := make(map[string]api.Task, len(state.Tasks))
+	for _, task := range state.Tasks {
+		tasks[task.ID] = task
+	}
+	for _, instance := range state.Instances {
+		if instance.State != multiagent.InstanceStateFailed {
+			continue
+		}
+		reason := tasks[instance.TaskID].Error
+		if reason == "" {
+			reason = "agent execution failed"
+		}
+		return fmt.Errorf("%w %q: %s", ErrFailedCheckpoint, instance.ID, reason)
+	}
+	return nil
 }
 
 func (r TeamRunner) acquireScheduler(ctx context.Context, runID string) (api.TaskExecutionLease, error) {

@@ -14,13 +14,14 @@ import (
 // lets a Scheduler emit a placeholder dispatch (e.g. for DAGScheduler's
 // diamond branches) without scheduling actual work.
 type Dispatch struct {
-	To           string             `json:"to"`
-	ClassName    string             `json:"className,omitempty"`
-	Task         api.Task           `json:"task"`
-	Input        json.RawMessage    `json:"input,omitempty"`
-	OutputPolicy agent.OutputPolicy `json:"outputPolicy,omitempty"`
-	Handoff      *Handoff           `json:"handoff,omitempty"`
-	Skip         bool               `json:"skip,omitempty"`
+	To             string             `json:"to"`
+	ClassName      string             `json:"className,omitempty"`
+	AgentClassName string             `json:"agentClassName,omitempty"`
+	Task           api.Task           `json:"task"`
+	Input          json.RawMessage    `json:"input,omitempty"`
+	OutputPolicy   agent.OutputPolicy `json:"outputPolicy,omitempty"`
+	Handoff        *Handoff           `json:"handoff,omitempty"`
+	Skip           bool               `json:"skip,omitempty"`
 }
 
 // ValidateDispatch enforces the typed handoff contract before execution.

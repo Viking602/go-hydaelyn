@@ -18,9 +18,10 @@ import (
 )
 
 var (
-	ErrRunnerMissing   = errors.New("worker: runner missing")
-	ErrProviderMissing = errors.New("worker: provider missing")
-	ErrAgentIDMissing  = errors.New("worker: agent id missing")
+	ErrRunnerMissing    = errors.New("worker: runner missing")
+	ErrProviderMissing  = errors.New("worker: provider missing")
+	ErrAgentIDMissing   = errors.New("worker: agent id missing")
+	ErrFailedCheckpoint = errors.New("worker: checkpoint contains failed instance")
 )
 
 type AgentWorker struct {

@@ -30,19 +30,10 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 	if err := multiagent.ValidateDispatch(dispatch); err != nil {
 		return api.TypedReport{}, err
 	}
-	if len(dispatch.Task.Input) == 0 {
-		dispatch.Task.Input = dispatch.Input
-		if len(dispatch.Task.Input) == 0 && dispatch.Handoff != nil {
-			dispatch.Task.Input = dispatch.Handoff.Payload
-		}
-	}
-	className := dispatch.ClassName
-	if className == "" {
-		className = strings.TrimPrefix(dispatch.Task.ID, dispatch.Task.RunID+"-")
-	}
-	class, ok := e.Classes[className]
-	if !ok {
-		return api.TypedReport{}, fmt.Errorf("worker: agent class %q not found", className)
+	dispatch = dispatchWithTaskInput(dispatch)
+	instanceClassName, class, err := e.resolveClass(dispatch)
+	if err != nil {
+		return api.TypedReport{}, err
 	}
 	engine, err := agent.Build(class.ToSpec(), e.BuildDeps)
 	if err != nil {
@@ -54,12 +45,12 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 		return api.TypedReport{}, err
 	}
 	if task.Status == api.TaskStatusCompleted && task.Result != nil {
-		if err := e.persistInstance(ctx, dispatch, className, multiagent.InstanceStateFinished, multiagent.EventAgentInstanceFinished); err != nil {
+		if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateFinished, multiagent.EventAgentInstanceFinished); err != nil {
 			return *task.Result, err
 		}
 		return *task.Result, nil
 	}
-	if err := e.persistInstance(ctx, dispatch, className, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
+	if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
 		return api.TypedReport{}, err
 	}
 	envelope, ok, err := taskEnvelope(ctx, e.Runner, task.RunID, task.ID, "pending")
@@ -91,10 +82,37 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 	if runErr != nil {
 		state = multiagent.InstanceStateFailed
 	}
-	if err := e.persistInstance(ctx, dispatch, className, state, multiagent.EventAgentInstanceFinished); err != nil {
+	if err := e.persistInstance(ctx, dispatch, instanceClassName, state, multiagent.EventAgentInstanceFinished); err != nil {
 		return reportValue(persisted.Result), errors.Join(runErr, err)
 	}
 	return reportValue(persisted.Result), runErr
+}
+
+func dispatchWithTaskInput(dispatch multiagent.Dispatch) multiagent.Dispatch {
+	if len(dispatch.Task.Input) > 0 {
+		return dispatch
+	}
+	dispatch.Task.Input = dispatch.Input
+	if len(dispatch.Task.Input) == 0 && dispatch.Handoff != nil {
+		dispatch.Task.Input = dispatch.Handoff.Payload
+	}
+	return dispatch
+}
+
+func (e RunnerExecutor) resolveClass(dispatch multiagent.Dispatch) (string, multiagent.AgentClass, error) {
+	instanceClassName := dispatch.ClassName
+	if instanceClassName == "" {
+		instanceClassName = strings.TrimPrefix(dispatch.Task.ID, dispatch.Task.RunID+"-")
+	}
+	agentClassName := dispatch.AgentClassName
+	if agentClassName == "" {
+		agentClassName = instanceClassName
+	}
+	class, ok := e.Classes[agentClassName]
+	if !ok {
+		return "", multiagent.AgentClass{}, fmt.Errorf("worker: agent class %q not found", agentClassName)
+	}
+	return instanceClassName, class, nil
 }
 
 func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Dispatch) (api.Task, error) {

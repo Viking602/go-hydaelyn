@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/agent"
@@ -191,4 +194,434 @@ func TestTeamRunnerRejectsConcurrentResume(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+}
+
+func TestTeamRunnerResumePreservesFailedCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-failed", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+		t.Fatalf("AdvanceRun() error = %v", err)
+	}
+	saveTeamCheckpoint(t, runner, multiagent.TeamState{
+		RunID: run.ID,
+		Tick:  1,
+		Tasks: []api.Task{{
+			ID:     "child",
+			RunID:  run.ID,
+			Status: api.TaskStatusFailed,
+			Error:  "provider failed",
+		}},
+		Instances: []multiagent.AgentInstance{{
+			ID:        "instance-1",
+			ClassName: "worker",
+			TaskID:    "child",
+			State:     multiagent.InstanceStateFailed,
+		}},
+	})
+	teamRunner := TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			return nil, nil
+		})},
+	}
+	result, err := teamRunner.Resume(ctx, run.ID)
+	if !errors.Is(err, ErrFailedCheckpoint) || !strings.Contains(err.Error(), "provider failed") {
+		t.Fatalf("Resume() error = %v, want checkpoint failure", err)
+	}
+	if result.State.Instances[0].State != multiagent.InstanceStateFailed {
+		t.Fatalf("Resume() lost failed checkpoint: %#v", result.State)
+	}
+	gotRun, err := runner.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != api.RunStatusFailed {
+		t.Fatalf("run status = %q, want failed", gotRun.Status)
+	}
+	root, err := runner.Task(ctx, run.ID, run.RootTaskID)
+	if err != nil {
+		t.Fatalf("Task(root) error = %v", err)
+	}
+	if root.Status != api.TaskStatusFailed || root.Result == nil || root.Result.Status != api.ReportStatusFailed {
+		t.Fatalf("root task = %#v, want failed report", root)
+	}
+}
+
+func TestTeamRunnerStartReleasesLeaseAfterStateReadError(t *testing.T) {
+	ctx := context.Background()
+	base := hydaelyn.NewDevelopment()
+	provider := &failSecondTeamStateLoadProvider{StoreProvider: base.StoreProvider()}
+	runner := hydaelyn.NewDevelopment(api.Config{StoreProvider: provider})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-load-error", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	teamRunner := TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			return nil, nil
+		})},
+	}
+	if _, err := teamRunner.Start(ctx, run.ID); !errors.Is(err, errTeamStateLoad) {
+		t.Fatalf("Start() error = %v, want transient team-state read error", err)
+	}
+	uow, err := runner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, run.ID, run.RootTaskID)
+	if err != nil {
+		t.Fatalf("ActiveLeaseForTask() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if !ok || lease.Status != api.LeaseStatusReleased {
+		t.Fatalf("scheduler lease = %#v, want released", lease)
+	}
+	envelopes := listTeamEnvelopes(t, runner, run.ID)
+	if len(envelopes) != 1 || envelopes[0].Status != "delivered" {
+		t.Fatalf("lease cleanup redispatched scheduler envelope: %#v", envelopes)
+	}
+	if _, err := teamRunner.Start(ctx, run.ID); err != nil {
+		t.Fatalf("Start(retry) error = %v", err)
+	}
+}
+
+func TestTeamRunnerResumeRejectsNonRunnableRuns(t *testing.T) {
+	tests := []struct {
+		name   string
+		status api.RunStatus
+		want   error
+	}{
+		{name: "reconciliation", status: api.RunStatusReconcileRequired, want: api.ErrActionReconcileRequired},
+		{name: "approval", status: api.RunStatusWaitingApproval, want: api.ErrInvalidTransition},
+		{name: "user input", status: api.RunStatusWaitingUserInput, want: api.ErrInvalidTransition},
+		{name: "blocked", status: api.RunStatusBlocked, want: api.ErrInvalidTransition},
+		{name: "failed", status: api.RunStatusFailed, want: api.ErrInvalidTransition},
+		{name: "cancelled", status: api.RunStatusCancelled, want: api.ErrInvalidTransition},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			runner := hydaelyn.NewDevelopment()
+			run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+				RunID:      "run-team-" + strings.ReplaceAll(test.name, " ", "-"),
+				RootTaskID: "root",
+			})
+			if err != nil {
+				t.Fatalf("StartRun() error = %v", err)
+			}
+			if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+				t.Fatalf("AdvanceRun() error = %v", err)
+			}
+			saveTeamCheckpoint(t, runner, multiagent.TeamState{RunID: run.ID})
+			if err := runner.TransitionRun(ctx, api.TransitionRunCommand{RunID: run.ID, To: test.status}); err != nil {
+				t.Fatalf("TransitionRun() error = %v", err)
+			}
+			rootBefore, err := runner.Task(ctx, run.ID, run.RootTaskID)
+			if err != nil {
+				t.Fatalf("Task(before) error = %v", err)
+			}
+			teamRunner := TeamRunner{
+				Runner: runner,
+				Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+					t.Fatal("scheduler ran for a non-runnable run")
+					return nil, nil
+				})},
+			}
+			if _, err := teamRunner.Resume(ctx, run.ID); !errors.Is(err, test.want) {
+				t.Fatalf("Resume() error = %v, want %v", err, test.want)
+			}
+			rootAfter, err := runner.Task(ctx, run.ID, run.RootTaskID)
+			if err != nil {
+				t.Fatalf("Task(after) error = %v", err)
+			}
+			if rootAfter.Attempts != rootBefore.Attempts || rootAfter.Status != rootBefore.Status {
+				t.Fatalf("Resume() mutated root task: before=%#v after=%#v", rootBefore, rootAfter)
+			}
+		})
+	}
+}
+
+func TestTeamRunnerResumeCompletesComposingRun(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-composing", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+		t.Fatalf("AdvanceRun() error = %v", err)
+	}
+	saveTeamCheckpoint(t, runner, multiagent.TeamState{RunID: run.ID, Tick: 2})
+	envelope := listTeamEnvelopes(t, runner, run.ID)[0]
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID:      run.ID,
+		TaskID:     run.RootTaskID,
+		EnvelopeID: envelope.ID,
+		HolderType: api.HolderComponent,
+		HolderID:   envelope.TargetComponent,
+		TTL:        time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	if err := runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
+		RunID:       run.ID,
+		TaskID:      run.RootTaskID,
+		LeaseID:     lease.ID,
+		HolderType:  lease.HolderType,
+		HolderID:    lease.HolderID,
+		TaskVersion: lease.TaskVersion,
+		Report:      api.TypedReport{Status: api.ReportStatusSuccess},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport() error = %v", err)
+	}
+	if err := runner.TransitionRun(ctx, api.TransitionRunCommand{RunID: run.ID, To: api.RunStatusComposingResponse}); err != nil {
+		t.Fatalf("TransitionRun(composing) error = %v", err)
+	}
+	result, err := (TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			t.Fatal("scheduler ran while completing composed response")
+			return nil, nil
+		})},
+	}).Resume(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result.Ticks != 2 {
+		t.Fatalf("Resume() ticks = %d, want 2", result.Ticks)
+	}
+	got, err := runner.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got.Status != api.RunStatusCompleted {
+		t.Fatalf("run status = %q, want completed", got.Status)
+	}
+}
+
+func TestTeamRunnerResumeAdvancesCreatedRun(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-created", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	saveTeamCheckpoint(t, runner, multiagent.TeamState{RunID: run.ID})
+	if _, err := (TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			return nil, nil
+		})},
+	}).Resume(ctx, run.ID); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	got, err := runner.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got.Status != api.RunStatusCompleted {
+		t.Fatalf("run status = %q, want completed", got.Status)
+	}
+}
+
+func TestTeamRunnerResumeStopsAfterRecoveryQuarantine(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-team-reconcile",
+		RootTaskID: "root",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+		t.Fatalf("AdvanceRun() error = %v", err)
+	}
+	saveTeamCheckpoint(t, runner, multiagent.TeamState{RunID: run.ID})
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "action",
+		OwnerAgentID: "agent-a",
+		AllowsAction: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID:         run.ID,
+		TaskID:        task.ID,
+		TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID:      run.ID,
+		TaskID:     task.ID,
+		EnvelopeID: envelope.ID,
+		HolderType: api.HolderAgent,
+		HolderID:   "agent-a",
+		TTL:        10 * time.Millisecond,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	if _, err := runner.StartActionAttempt(ctx, api.StartActionAttemptCommand{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  api.HolderAgent,
+		HolderID:    "agent-a",
+		TaskVersion: lease.TaskVersion,
+		ToolName:    "deploy",
+	}); err != nil {
+		t.Fatalf("StartActionAttempt() error = %v", err)
+	}
+	if wait := time.Until(lease.ExpiresAt) + time.Millisecond; wait > 0 {
+		time.Sleep(wait)
+	}
+	envelopesBefore := listTeamEnvelopes(t, runner, run.ID)
+	teamRunner := TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(context.Context, multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			t.Fatal("scheduler ran after recovery quarantine")
+			return nil, nil
+		})},
+	}
+	if _, err := teamRunner.Resume(ctx, run.ID); !errors.Is(err, api.ErrActionReconcileRequired) {
+		t.Fatalf("Resume() error = %v, want ErrActionReconcileRequired", err)
+	}
+	recovered, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if recovered.Status != api.TaskStatusReconcileRequired || recovered.Attempts != 1 {
+		t.Fatalf("recovered task = %#v, want quarantined with one attempt", recovered)
+	}
+	if envelopesAfter := listTeamEnvelopes(t, runner, run.ID); len(envelopesAfter) != len(envelopesBefore) {
+		t.Fatalf("Resume() created replacement envelope: before=%d after=%d", len(envelopesBefore), len(envelopesAfter))
+	}
+}
+
+func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-graph", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	writer := multiagent.AgentClass{Name: "writer", Instructions: "draft", Model: "scripted"}
+	graph, err := multiagent.NewGraph().
+		AddNode("draft-left", writer).
+		AddNode("draft-right", writer).
+		Compile()
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	driver := scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "drafted"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})
+	result, err := (TeamRunner{
+		Runner:    runner,
+		Team:      multiagent.Team{Agents: []multiagent.AgentClass{writer}, Scheduler: graph},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
+		Options:   multiagent.DriveOptions{MaxConcurrency: 2},
+	}).Start(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if len(result.State.Instances) != 2 || len(result.State.Tasks) != 2 {
+		t.Fatalf("graph result = %#v, want two nodes", result.State)
+	}
+	nodes := map[string]string{}
+	for _, instance := range result.State.Instances {
+		nodes[instance.ClassName] = instance.TaskID
+	}
+	if nodes["draft-left"] != run.ID+"-draft-left" || nodes["draft-right"] != run.ID+"-draft-right" {
+		t.Fatalf("durable graph node identities = %#v", nodes)
+	}
+	uow, err := runner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	records, err := uow.AgentInstances().ListAgentInstances(ctx, api.AgentInstanceSelector{RunID: run.ID})
+	if err != nil {
+		_ = uow.Rollback(ctx)
+		t.Fatalf("ListAgentInstances() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	recordNodes := map[string]string{}
+	for _, record := range records {
+		recordNodes[record.ClassName] = record.TaskID
+	}
+	if recordNodes["draft-left"] != run.ID+"-draft-left" || recordNodes["draft-right"] != run.ID+"-draft-right" {
+		t.Fatalf("persisted graph node identities = %#v", recordNodes)
+	}
+}
+
+func saveTeamCheckpoint(t *testing.T, runner *hydaelyn.Runner, state multiagent.TeamState) {
+	t.Helper()
+	if err := (TeamRunner{Runner: runner}).saveState(context.Background(), state, false); err != nil {
+		t.Fatalf("saveState() error = %v", err)
+	}
+}
+
+func listTeamEnvelopes(t *testing.T, runner *hydaelyn.Runner, runID string) []api.TaskEnvelope {
+	t.Helper()
+	envelopes, err := runner.ListEnvelopes(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("ListEnvelopes() error = %v", err)
+	}
+	return envelopes
+}
+
+var errTeamStateLoad = errors.New("transient team-state read")
+
+type failSecondTeamStateLoadProvider struct {
+	api.StoreProvider
+	loads atomic.Int32
+}
+
+func (p *failSecondTeamStateLoadProvider) Begin(ctx context.Context) (api.UnitOfWork, error) {
+	uow, err := p.StoreProvider.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return failSecondTeamStateLoadUOW{UnitOfWork: uow, provider: p}, nil
+}
+
+func (p *failSecondTeamStateLoadProvider) Capabilities(ctx context.Context) (api.StoreCapabilities, error) {
+	return p.StoreProvider.(api.CapabilityReporter).Capabilities(ctx)
+}
+
+type failSecondTeamStateLoadUOW struct {
+	api.UnitOfWork
+	provider *failSecondTeamStateLoadProvider
+}
+
+func (u failSecondTeamStateLoadUOW) TeamStates() api.TeamStateStore {
+	return failSecondTeamStateLoadStore{TeamStateStore: u.UnitOfWork.TeamStates(), provider: u.provider}
+}
+
+type failSecondTeamStateLoadStore struct {
+	api.TeamStateStore
+	provider *failSecondTeamStateLoadProvider
+}
+
+func (s failSecondTeamStateLoadStore) LoadTeamState(ctx context.Context, runID string) (api.TeamStateRecord, error) {
+	if s.provider.loads.Add(1) == 2 {
+		return api.TeamStateRecord{}, errTeamStateLoad
+	}
+	return s.TeamStateStore.LoadTeamState(ctx, runID)
 }
