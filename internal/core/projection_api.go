@@ -6,7 +6,16 @@ import (
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 )
 
-func (r *Runtime) Replay(ctx context.Context, runID string, _ model.ReplayMode) (model.Projection, error) {
+func (r *Runtime) Replay(ctx context.Context, runID string, mode model.ReplayMode) (model.Projection, error) {
+	switch mode {
+	case model.ReplayModeAudit:
+	case model.ReplayModeRecovery:
+		if err := r.recoverExpiredTaskExecutions(ctx, runID); err != nil {
+			return model.Projection{}, err
+		}
+	default:
+		return model.Projection{}, model.ErrInvalidCommand
+	}
 	events, err := r.RunEvents(ctx, runID)
 	if err != nil {
 		return model.Projection{}, err

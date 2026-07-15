@@ -123,12 +123,64 @@ func TestHeartbeatSynchronizesLeaseExpiryFields(t *testing.T) {
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		t.Fatalf("SaveLease() error = %v", err)
 	}
-	got, err := execution.Heartbeat(ctx, uow, lease.ID, time.Hour)
+	got, err := execution.Heartbeat(ctx, uow, lease.ID, lease.HolderID, time.Hour)
 	if err != nil {
 		t.Fatalf("Heartbeat() error = %v", err)
 	}
 	if got.ExpiresAt.IsZero() || got.Expiry.IsZero() || !got.ExpiresAt.Equal(got.Expiry) {
 		t.Fatalf("heartbeat expiry fields not synchronized: %+v", got)
+	}
+	if _, err := execution.Heartbeat(ctx, uow, lease.ID, "agent-2", time.Hour); !errors.Is(err, model.ErrLeaseHolderMismatch) {
+		t.Fatalf("Heartbeat(wrong holder) error = %v, want ErrLeaseHolderMismatch", err)
+	}
+}
+
+func TestAcquireReplacesExpiredLeaseWithMonotonicVersion(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+
+	run, root, err := runsvc.Start(ctx, uow, func(prefix string) string { return prefix + "-seed" }, runsvc.StartInput{
+		RunID:      "run-takeover",
+		RootTaskID: "root",
+		Request:    "execute",
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	root.Status = model.TaskStatusDispatched
+	root.OwnerComponent = "orchestrator"
+	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
+		t.Fatalf("SaveTask(root) error = %v", err)
+	}
+	if err := uow.Leases().SaveLease(ctx, model.TaskExecutionLease{
+		ID:         "lease-expired",
+		RunID:      run.ID,
+		TaskID:     root.ID,
+		HolderType: model.HolderComponent,
+		HolderID:   "old-worker",
+		Status:     model.LeaseStatusActive,
+		ExpiresAt:  time.Now().UTC().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("SaveLease(expired) error = %v", err)
+	}
+
+	got, err := execution.Acquire(ctx, uow, executionIDGenerator(), execution.AcquireInput{
+		RunID:      run.ID,
+		TaskID:     root.ID,
+		HolderType: model.HolderComponent,
+		HolderID:   "orchestrator",
+		TTL:        time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if !got.Acquired || got.Lease.ID == "lease-expired" || got.Lease.Version != 2 {
+		t.Fatalf("Acquire() takeover = %#v, want new lease at version 2", got)
 	}
 }
 

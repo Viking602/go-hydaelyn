@@ -265,6 +265,60 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	}
 }
 
+func TestGovernedToolBusPersistsActionAttempt(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-action-tool", RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "action-task",
+		OwnerAgentID: "agent-a",
+		AllowsAction: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: env.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	driver := &recordingTool{definition: tool.Definition{Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true}}
+	bus := GovernedToolBus{
+		Runner: runner, Bus: tool.NewBus(driver), RunID: run.ID, TaskID: task.ID,
+		LeaseID: lease.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
+	}
+	call := tool.Call{ID: "call-1", Name: "write", Arguments: json.RawMessage(`{"value":1}`)}
+	if _, err := bus.Execute(ctx, call, nil); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	uow, err := runner.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	attempt, err := uow.ActionAttempts().LoadActionAttemptByIdempotencyKey(ctx, run.ID, task.ID, call.Name, call.ID)
+	if err != nil {
+		t.Fatalf("LoadActionAttemptByIdempotencyKey() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if attempt.Status != api.ActionAttemptSucceeded {
+		t.Fatalf("action attempt status = %q, want succeeded", attempt.Status)
+	}
+	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, hydaelyn.ErrActionReconcileRequired) {
+		t.Fatalf("duplicate non-idempotent Execute() error = %v, want ErrActionReconcileRequired", err)
+	}
+}
+
 func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.NewDevelopment()

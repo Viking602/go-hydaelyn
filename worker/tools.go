@@ -2,7 +2,11 @@ package worker
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/Viking602/go-hydaelyn"
 	"github.com/Viking602/go-hydaelyn/api"
@@ -64,22 +68,103 @@ func (d governedToolDriver) Definition() tool.Definition {
 }
 
 func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
-	if d.bus.Runner != nil {
-		_, err := d.bus.Runner.InvokeTool(ctx, api.ToolInvocation{
-			RunID:       d.bus.RunID,
-			TaskID:      d.bus.TaskID,
-			LeaseID:     d.bus.LeaseID,
-			HolderType:  d.bus.HolderType,
-			HolderID:    d.bus.HolderID,
-			TaskVersion: d.bus.TaskVersion,
-			ToolName:    call.Name,
-			Input:       rawToolInput(call.Arguments),
-		})
-		if err != nil {
-			return tool.Result{}, err
-		}
+	if d.bus.Runner == nil {
+		return d.driver.Execute(ctx, call, sink)
 	}
-	return d.driver.Execute(ctx, call, sink)
+	_, err := d.bus.Runner.InvokeTool(ctx, api.ToolInvocation{
+		RunID:       d.bus.RunID,
+		TaskID:      d.bus.TaskID,
+		LeaseID:     d.bus.LeaseID,
+		HolderType:  d.bus.HolderType,
+		HolderID:    d.bus.HolderID,
+		TaskVersion: d.bus.TaskVersion,
+		ToolName:    call.Name,
+		Input:       rawToolInput(call.Arguments),
+	})
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if !requiresActionAttempt(d.definition) {
+		return d.driver.Execute(ctx, call, sink)
+	}
+	if call.ID == "" {
+		return tool.Result{}, fmt.Errorf("worker: guarded tool %q requires a call ID", call.Name)
+	}
+	requestedAttemptID, err := newAttemptID()
+	if err != nil {
+		return tool.Result{}, err
+	}
+	attempt, err := d.bus.Runner.StartActionAttempt(ctx, api.StartActionAttemptCommand{
+		AttemptID:      requestedAttemptID,
+		ActionID:       call.ID,
+		RunID:          d.bus.RunID,
+		TaskID:         d.bus.TaskID,
+		LeaseID:        d.bus.LeaseID,
+		HolderType:     d.bus.HolderType,
+		HolderID:       d.bus.HolderID,
+		TaskVersion:    d.bus.TaskVersion,
+		ToolName:       call.Name,
+		IdempotencyKey: call.ID,
+		InputHash:      fmt.Sprintf("%x", sha256.Sum256(call.Arguments)),
+	})
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
+		return tool.Result{}, hydaelyn.ErrActionReconcileRequired
+	}
+	if attempt.AttemptID != requestedAttemptID && !toolDefinitionIdempotent(d.definition) {
+		return tool.Result{}, hydaelyn.ErrActionReconcileRequired
+	}
+
+	result, executeErr := d.driver.Execute(ctx, call, sink)
+	status := api.ActionAttemptSucceeded
+	requiresReconcile := false
+	switch {
+	case executeErr != nil:
+		status = api.ActionAttemptUnknown
+		requiresReconcile = true
+	case result.IsError:
+		status = api.ActionAttemptFailed
+	}
+	_, completeErr := d.bus.Runner.CompleteActionAttempt(context.WithoutCancel(ctx), api.CompleteActionAttemptCommand{
+		RunID:             d.bus.RunID,
+		TaskID:            d.bus.TaskID,
+		LeaseID:           d.bus.LeaseID,
+		HolderType:        d.bus.HolderType,
+		HolderID:          d.bus.HolderID,
+		TaskVersion:       d.bus.TaskVersion,
+		AttemptID:         attempt.AttemptID,
+		Status:            status,
+		RequiresReconcile: requiresReconcile,
+	})
+	if executeErr != nil {
+		return result, errors.Join(executeErr, completeErr)
+	}
+	if completeErr != nil {
+		return result, completeErr
+	}
+	return result, nil
+}
+
+func requiresActionAttempt(def tool.Definition) bool {
+	return def.RequiresActionTask ||
+		def.RequiresApproval ||
+		def.Security.RequiresApproval ||
+		def.EffectType == tool.EffectWrite ||
+		def.EffectType == tool.EffectExternalSideEffect
+}
+
+func toolDefinitionIdempotent(def tool.Definition) bool {
+	return def.Idempotent || def.Security.Idempotent
+}
+
+func newAttemptID() (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("worker: generate action attempt ID: %w", err)
+	}
+	return fmt.Sprintf("attempt-%x", random[:]), nil
 }
 
 func toolDefinitionToRunnerTool(def tool.Definition) api.Tool {

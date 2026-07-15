@@ -5,6 +5,7 @@ import (
 
 	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/go-hydaelyn/internal/core/ports"
 )
 
 func (r *Runtime) StoreProvider() StoreProvider {
@@ -19,6 +20,22 @@ func (r *Runtime) Begin(ctx context.Context) (UnitOfWork, error) {
 		return r.storeProvider.Begin(ctx)
 	}
 	return r.memProvider.Begin(ctx)
+}
+
+func (r *Runtime) StoreCapabilities(ctx context.Context) (ports.StoreCapabilities, error) {
+	reporter, ok := r.StoreProvider().(ports.CapabilityReporter)
+	if !ok {
+		return ports.DefaultStoreCapabilities(), nil
+	}
+	return reporter.Capabilities(ctx)
+}
+
+func (r *Runtime) Close(ctx context.Context) error {
+	closer, ok := r.StoreProvider().(ports.ProviderCloser)
+	if !ok {
+		return nil
+	}
+	return closer.Close(ctx)
 }
 
 // WriteItem is the public BlackboardStore API. It goes through the UoW command

@@ -34,7 +34,7 @@ func (s SequentialScheduler) Next(_ context.Context, state TeamState) ([]Dispatc
 		if index > 0 {
 			input = state.reportInput(s.Classes[index-1].Name)
 		}
-		return []Dispatch{buildDispatch(state.RunID, class, index, input)}, nil
+		return []Dispatch{state.buildDispatch(class, input)}, nil
 	}
 	return nil, nil
 }

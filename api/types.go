@@ -269,8 +269,8 @@ type TaskExecutionLease struct {
 	ExpiresAt   time.Time   `json:"expiresAt"`
 	HeartbeatAt time.Time   `json:"heartbeatAt"`
 	Status      LeaseStatus `json:"status"`
-	// Version is the monotonic CAS source-of-truth for AcquireWithExpectedVersion.
-	// Providers MUST increment this on every successful save. v0.8.0+.
+	// Version is the monotonic CAS source-of-truth for the task's lease slot.
+	// Providers MUST increment it on every successful acquire, extend, or save.
 	Version uint64 `json:"version,omitempty"`
 	// Expiry is a compatibility alias for ExpiresAt. Providers MUST keep
 	// Expiry and ExpiresAt synchronized when persisting or extending leases.
@@ -532,6 +532,7 @@ type Task struct {
 	ParentTaskID       string               `json:"parentTaskId,omitempty"`
 	Type               TaskType             `json:"type"`
 	Goal               string               `json:"goal,omitempty"`
+	Input              json.RawMessage      `json:"input,omitempty"`
 	AssignedAgentID    string               `json:"assignedAgentId,omitempty"`
 	OwnerAgentID       string               `json:"ownerAgentId,omitempty"`
 	OwnerComponent     string               `json:"ownerComponent,omitempty"`

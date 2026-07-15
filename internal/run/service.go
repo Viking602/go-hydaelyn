@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -28,6 +29,7 @@ type CreateTaskInput struct {
 	ParentTaskID       string
 	Type               model.TaskType
 	Goal               string
+	Input              json.RawMessage
 	AssignedAgentID    string
 	OwnerAgentID       string
 	OwnerComponent     string
@@ -103,6 +105,9 @@ func cloneTaskBudget(budget *model.TaskBudget) *model.TaskBudget {
 }
 
 func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input CreateTaskInput) (model.Task, error) {
+	if err := validateTaskJSON(input); err != nil {
+		return model.Task{}, err
+	}
 	run, err := uow.Runs().LoadRun(ctx, input.RunID)
 	if err != nil {
 		return model.Task{}, err
@@ -125,6 +130,7 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		ParentTaskID:       input.ParentTaskID,
 		Type:               input.Type,
 		Goal:               input.Goal,
+		Input:              slices.Clone(input.Input),
 		AssignedAgentID:    input.AssignedAgentID,
 		OwnerAgentID:       input.OwnerAgentID,
 		OwnerComponent:     input.OwnerComponent,
@@ -163,4 +169,20 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		return model.Task{}, err
 	}
 	return task, nil
+}
+
+func validateTaskJSON(input CreateTaskInput) error {
+	for _, field := range []struct {
+		name  string
+		value json.RawMessage
+	}{
+		{name: "input", value: input.Input},
+		{name: "input schema", value: input.InputSchema},
+		{name: "output schema", value: input.OutputSchema},
+	} {
+		if len(field.value) > 0 && !json.Valid(field.value) {
+			return fmt.Errorf("run: task %s must be valid JSON", field.name)
+		}
+	}
+	return nil
 }

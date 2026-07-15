@@ -63,6 +63,10 @@ type DriveOptions struct {
 	// durability). If a dispatched Executor does not implement
 	// StreamingExecutor, that node runs without frames. nil disables streaming.
 	Sink stream.Sink
+	// InitialState resumes from a previously persisted scheduler snapshot.
+	InitialState *TeamState
+	// AfterTick checkpoints the folded state after each completed tick.
+	AfterTick func(context.Context, TeamState) error
 }
 
 // DriveResult is the terminal snapshot after the scheduler loop ends.
@@ -116,9 +120,16 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		maxTicks = defaultMaxTicks
 	}
 	state := TeamState{RunID: runID}
-	for tick := 1; tick <= maxTicks; tick++ {
+	if opts.InitialState != nil {
+		state = cloneTeamState(*opts.InitialState)
+		if state.RunID == "" {
+			state.RunID = runID
+		}
+	}
+	for additionalTick := 1; additionalTick <= maxTicks; additionalTick++ {
+		tick := state.Tick + 1
 		if err := ctx.Err(); err != nil {
-			return DriveResult{State: state, Ticks: tick - 1}, err
+			return DriveResult{State: state, Ticks: state.Tick}, err
 		}
 		dispatches, err := scheduler.Next(ctx, state)
 		if err != nil {
@@ -126,12 +137,12 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 			// scheduler failure — pass it through unwrapped so integrations
 			// do not map it to a SchedulerFailure event.
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return DriveResult{State: state, Ticks: tick - 1}, err
+				return DriveResult{State: state, Ticks: state.Tick}, err
 			}
-			return DriveResult{State: state, Ticks: tick - 1}, &SchedulerFailureError{RunID: runID, Tick: tick, Err: err}
+			return DriveResult{State: state, Ticks: state.Tick}, &SchedulerFailureError{RunID: runID, Tick: tick, Err: err}
 		}
 		if len(dispatches) == 0 {
-			return DriveResult{State: state, Ticks: tick - 1}, nil
+			return DriveResult{State: state, Ticks: state.Tick}, nil
 		}
 		maxConcurrency := opts.MaxConcurrency
 		if maxConcurrency <= 0 && !opts.UnlimitedConcurrency {
@@ -139,11 +150,24 @@ func Drive(ctx context.Context, runID string, scheduler Scheduler, executor Exec
 		}
 		next, execErr := applyDispatches(ctx, runID, state, dispatches, executor, maxConcurrency, opts.Sink)
 		state = next
+		state.Tick = tick
+		if opts.AfterTick != nil {
+			if err := opts.AfterTick(ctx, cloneTeamState(state)); err != nil {
+				return DriveResult{State: state, Ticks: state.Tick}, err
+			}
+		}
 		if execErr != nil {
-			return DriveResult{State: state, Ticks: tick}, execErr
+			return DriveResult{State: state, Ticks: state.Tick}, execErr
 		}
 	}
-	return DriveResult{State: state, Ticks: maxTicks}, ErrMaxTicksExceeded
+	return DriveResult{State: state, Ticks: state.Tick}, ErrMaxTicksExceeded
+}
+
+func cloneTeamState(state TeamState) TeamState {
+	state.Tasks = append([]api.Task(nil), state.Tasks...)
+	state.Instances = append([]AgentInstance(nil), state.Instances...)
+	state.Blackboard = append([]api.BlackboardItem(nil), state.Blackboard...)
+	return state
 }
 
 func applyDispatches(ctx context.Context, runID string, state TeamState, dispatches []Dispatch, executor Executor, maxConcurrency int, sink stream.Sink) (TeamState, error) {
@@ -254,8 +278,15 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 }
 
 func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, executor Executor, sink stream.Sink) (AgentInstance, api.Task, error) {
-	className := classNameFromTaskID(runID, dispatch.Task.ID)
-	report, execErr := runDispatch(ctx, dispatch, executor, sink, className)
+	className := dispatch.ClassName
+	if className == "" {
+		className = classNameFromTaskID(runID, dispatch.Task.ID)
+	}
+	var report api.TypedReport
+	execErr := ValidateDispatch(dispatch)
+	if execErr == nil {
+		report, execErr = runDispatch(ctx, dispatch, executor, sink, className)
+	}
 	instance := AgentInstance{
 		ID:        dispatch.To,
 		ClassName: className,

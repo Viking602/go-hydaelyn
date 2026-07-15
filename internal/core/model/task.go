@@ -18,6 +18,7 @@ type Task struct {
 	ParentTaskID       string               `json:"parentTaskId,omitempty"`
 	Type               TaskType             `json:"type"`
 	Goal               string               `json:"goal,omitempty"`
+	Input              json.RawMessage      `json:"input,omitempty"`
 	AssignedAgentID    string               `json:"assignedAgentId,omitempty"`
 	OwnerAgentID       string               `json:"ownerAgentId,omitempty"`
 	OwnerComponent     string               `json:"ownerComponent,omitempty"`

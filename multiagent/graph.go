@@ -384,7 +384,9 @@ func buildGraphDispatch(runID, nodeID string, class AgentClass, input json.RawMe
 		goal = class.Description
 	}
 	return Dispatch{
-		To: ComputeInstanceID(nodeID, runID, taskID, "graph"),
+		To:             ComputeInstanceID(nodeID, runID, taskID, "graph"),
+		ClassName:      nodeID,
+		AgentClassName: class.Name,
 		Task: api.Task{
 			ID:           taskID,
 			RunID:        runID,

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/Viking602/go-hydaelyn/internal/core/model"
 	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
@@ -114,7 +115,7 @@ func (r *Runtime) ActiveLeaseCount(ctx context.Context, runID, taskID string) in
 	}
 	defer done()
 	lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, runID, taskID)
-	if err != nil || !ok || lease.Status != model.LeaseStatusActive {
+	if err != nil || !ok || lease.Status != model.LeaseStatusActive || !model.LeaseExpiry(lease).After(time.Now().UTC()) {
 		return 0
 	}
 	return 1

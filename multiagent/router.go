@@ -35,7 +35,7 @@ func (s RouterScheduler) Next(_ context.Context, state TeamState) ([]Dispatch, e
 	}
 	finished := state.finishedClasses()
 	if !finished[s.Entry.Name] {
-		return []Dispatch{buildDispatch(state.RunID, s.Entry, 0, nil)}, nil
+		return []Dispatch{state.buildDispatch(s.Entry, nil)}, nil
 	}
 
 	report := state.reportForClass(s.Entry.Name)
@@ -53,5 +53,5 @@ func (s RouterScheduler) Next(_ context.Context, state TeamState) ([]Dispatch, e
 	if finished[target.Name] {
 		return nil, nil
 	}
-	return []Dispatch{buildDispatch(state.RunID, target, 1, state.reportInput(s.Entry.Name))}, nil
+	return []Dispatch{state.buildDispatch(target, state.reportInput(s.Entry.Name))}, nil
 }

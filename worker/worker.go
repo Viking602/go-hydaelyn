@@ -18,9 +18,10 @@ import (
 )
 
 var (
-	ErrRunnerMissing   = errors.New("worker: runner missing")
-	ErrProviderMissing = errors.New("worker: provider missing")
-	ErrAgentIDMissing  = errors.New("worker: agent id missing")
+	ErrRunnerMissing    = errors.New("worker: runner missing")
+	ErrProviderMissing  = errors.New("worker: provider missing")
+	ErrAgentIDMissing   = errors.New("worker: agent id missing")
+	ErrFailedCheckpoint = errors.New("worker: checkpoint contains failed instance")
 )
 
 type AgentWorker struct {
@@ -201,20 +202,28 @@ func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease)
 }
 
 func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, leaseID string, ttl time.Duration) (agent.Result, error) {
-	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
-	heartbeatDone := make(chan struct{})
-	go w.heartbeatLoop(heartbeatCtx, leaseID, ttl, heartbeatDone)
+	runCtx, stopRun := context.WithCancel(ctx)
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		err := w.heartbeatLoop(runCtx, leaseID, ttl)
+		heartbeatDone <- err
+		if err != nil {
+			stopRun()
+		}
+	}()
 	// The task carries its OutputSchema through the durable store (see
 	// api.Task.OutputSchema); rebuild the OutputPolicy from it so structured
 	// validation actually runs on the worker path. This mirrors the in-process
 	// Dispatch.OutputPolicy that multiagent.buildDispatch constructs (Schema +
 	// Validate, no repair).
-	result := engine.Run(ctx, task, agent.OutputPolicy{
+	result := engine.Run(runCtx, task, agent.OutputPolicy{
 		Schema:   task.OutputSchema,
 		Validate: len(task.OutputSchema) > 0,
 	})
-	stopHeartbeat()
-	<-heartbeatDone
+	stopRun()
+	if err := <-heartbeatDone; err != nil {
+		return result, fmt.Errorf("worker: lease heartbeat failed: %w", err)
+	}
 	if result.Failure != nil {
 		// AgentFailure satisfies the error interface; its Unwrap chain
 		// surfaces the underlying provider/tool error so worker callers
@@ -277,23 +286,29 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 	return reportErr == nil, reportErr
 }
 
-func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration, done chan<- struct{}) {
-	defer close(done)
+func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration) error {
 	interval := ttl / 3
-	if interval < time.Second {
-		interval = time.Second
+	if interval <= 0 {
+		interval = time.Millisecond
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
-			_ = w.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
-				LeaseID: leaseID,
-				TTL:     ttl,
+			err := w.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
+				LeaseID:  leaseID,
+				HolderID: w.AgentID,
+				TTL:      ttl,
 			})
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 		}
 	}
 }
@@ -339,6 +354,9 @@ func (w AgentWorker) buildMessages(run api.Run, task api.Task, inputs []api.Blac
 	prompt := task.Goal
 	if strings.TrimSpace(prompt) == "" {
 		prompt = run.Request
+	}
+	if len(task.Input) > 0 {
+		prompt += "\n\nTask input:\n" + string(task.Input)
 	}
 	if len(inputs) > 0 {
 		var b strings.Builder

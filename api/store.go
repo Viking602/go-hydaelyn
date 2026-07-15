@@ -87,19 +87,23 @@ type MailboxOutboxStore interface {
 type LeaseStore interface {
 	SaveLease(context.Context, TaskExecutionLease) error
 	LoadLease(context.Context, string) (TaskExecutionLease, error)
+	// ActiveLeaseForTask returns the latest lease slot for the task. The
+	// returned lease may be released or expired; callers must inspect Status
+	// and ExpiresAt when deciding whether it is active.
 	ActiveLeaseForTask(context.Context, string, string) (TaskExecutionLease, bool, error)
-	// AcquireWithExpectedVersion atomically persists `lease` if and only if
-	// the currently-stored lease for the same ID has Version ==
-	// expectedVersion. Returns (true, nil) on successful acquire;
-	// (false, nil) on version mismatch. MUST be atomic — no observable
-	// intermediate state where two acquires both think they succeeded.
+	// AcquireWithExpectedVersion atomically persists lease if and only if the
+	// latest lease for the same (RunID, TaskID) has Version ==
+	// expectedVersion and no unexpired active lease exists. A successful
+	// acquire sets Version to expectedVersion+1. Returns (false, nil) on a
+	// version mismatch or active holder. MUST be atomic: concurrent acquires
+	// for one task, even with different lease IDs, have exactly one winner.
 	//
 	// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Lease CAS — the
 	// critical contract".
 	AcquireWithExpectedVersion(ctx context.Context, lease TaskExecutionLease, expectedVersion uint64) (bool, error)
-	// ExtendLease atomically advances the lease Expiry if and only if the
-	// current holder equals workerID. Returns (false, nil) if the lease
-	// has rotated to a different holder, expired, or does not exist.
+	// ExtendLease atomically advances the lease expiry if and only if leaseID
+	// is the task's latest active, unexpired lease and its current holder
+	// equals workerID. Returns (false, nil) otherwise.
 	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
 }
 
@@ -121,6 +125,8 @@ type ResumeTokenStore interface {
 }
 
 type ActionAttemptStore interface {
+	// SaveActionAttempt MUST enforce uniqueness for non-empty
+	// (RunID, TaskID, ToolName, IdempotencyKey) tuples.
 	SaveActionAttempt(context.Context, ActionAttempt) error
 	LoadActionAttempt(context.Context, string) (ActionAttempt, error)
 	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (ActionAttempt, error)
