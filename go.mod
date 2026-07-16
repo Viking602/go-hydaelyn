@@ -4,6 +4,8 @@ go 1.25.0
 
 toolchain go1.25.12
 
+retract v0.10.0 // Published from a reused tag; its public checksum cannot verify.
+
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/robfig/cron/v3 v3.0.1
