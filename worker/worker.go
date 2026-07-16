@@ -79,6 +79,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		engine.LoopPolicy.MaxIterations = w.MaxIterations
 	}
 	engine.ContextBuilder = workerContextBuilder{worker: w, run: run, extra: req.Messages}
+	engine.StepRecorder = w.stepRecorder(task, lease.ID, engine.StepRecorder)
 
 	started := time.Now()
 	result, runErr := w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl)
@@ -199,6 +200,31 @@ func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease)
 		TaskVersion: task.Version,
 	}.ToolBus()
 	return engine
+}
+
+func (w AgentWorker) stepRecorder(task api.Task, executionID string, caller agent.StepRecorder) agent.StepRecorder {
+	durable := agent.StepRecorderFunc(func(ctx context.Context, step agent.Step) error {
+		event, err := agent.NewStepCompletedEvent(agent.StepRecord{
+			RunID:       task.RunID,
+			TaskID:      task.ID,
+			AgentID:     w.AgentID,
+			ExecutionID: executionID,
+			Step:        step,
+		})
+		if err != nil {
+			return err
+		}
+		return w.Runner.AppendEvent(context.WithoutCancel(ctx), event)
+	})
+	if caller == nil {
+		return durable
+	}
+	return agent.StepRecorderFunc(func(ctx context.Context, step agent.Step) error {
+		if err := durable.RecordStep(ctx, step); err != nil {
+			return err
+		}
+		return caller.RecordStep(ctx, step)
+	})
 }
 
 func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, leaseID string, ttl time.Duration) (agent.Result, error) {

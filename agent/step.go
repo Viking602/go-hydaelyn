@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -57,6 +58,20 @@ type BudgetUsage struct {
 	Tokens    int64         `json:"tokens,omitempty"`
 	ToolCalls int           `json:"toolCalls,omitempty"`
 	WallClock time.Duration `json:"wallClock,omitempty"`
+}
+
+// StepRecorder persists a finalized agent-loop step. RunMessages calls the
+// recorder only after the step's final decision is known.
+type StepRecorder interface {
+	RecordStep(context.Context, Step) error
+}
+
+// StepRecorderFunc adapts a function to the StepRecorder interface.
+type StepRecorderFunc func(context.Context, Step) error
+
+// RecordStep delegates to f.
+func (f StepRecorderFunc) RecordStep(ctx context.Context, step Step) error {
+	return f(ctx, step)
 }
 
 // StepPolicy lets a caller override the loop's natural next-step decision at a

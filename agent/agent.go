@@ -95,6 +95,11 @@ type LoopInput struct {
 	// leaves the loop's natural control flow unchanged. See StepPolicy.
 	StepPolicy StepPolicy
 
+	// StepRecorder, when set, receives each Step exactly once after its final
+	// decision is known. A recording failure aborts the loop while preserving
+	// the finalized step in the returned partial trace.
+	StepRecorder StepRecorder
+
 	// Compact, when set, is invoked to shrink the running message history once
 	// the per-loop token budget is approached (MaxTokens > 0 and the consumed
 	// tokens leave one headroom band or less of it). It replaces the working
@@ -111,10 +116,9 @@ type LoopInput struct {
 	//
 	// Determinism: the loop triggers Compact deterministically (the same trigger
 	// fires on replay), so a deterministic compactor keeps the run
-	// replay-faithful (ADR-007) while an LLM-backed one does not. Compact is
-	// also responsible for returning a coherent history (for example, not
-	// splitting a tool_use from its tool_result); the loop does not police what
-	// a compactor returns.
+	// replay-faithful (ADR-007) while an LLM-backed one does not. After Compact
+	// returns successfully, the loop validates that its output contains only
+	// complete tool turns and rejects malformed or split exchanges.
 	Compact func(ctx context.Context, history []message.Message) ([]message.Message, error)
 }
 
@@ -191,6 +195,10 @@ type Engine struct {
 	// Engine-level field rather than a Spec field: set it on the built Engine.
 	// See StepPolicy and LoopInput.StepPolicy.
 	StepPolicy StepPolicy
+
+	// StepRecorder, when set, Engine.Run threads into every LoopInput so each
+	// finalized step can be persisted before the loop advances.
+	StepRecorder StepRecorder
 }
 
 // RunMessages is the low-level loop that drives one LoopInput to
@@ -278,38 +286,15 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			StopReason:   stopReason,
 		}
 		if len(assistant.ToolCalls) == 0 {
-			finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(ctx, input, current, assistant, iteration+1, totalUsage, stopReason)
-			if guardErr != nil {
-				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), guardErr
-			}
-			if len(retryMessages) > 0 {
-				// A guardrail asked to retry: record the turn as a continue
-				// step and loop again with the retry context appended.
-				steps = append(steps, Step{
-					Index:      iteration,
-					ModelCall:  modelCall,
-					Decision:   StepDecisionContinue,
-					BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-				})
-				current = appendRetryContext(current, assistant, retryMessages, retryPolicy)
+			var retry bool
+			current, steps, out, retry, err = e.finalizeNoToolStep(
+				ctx, input, current, assistant, modelCall, totalUsage, steps,
+				stopReason, iteration, toolCallsUsed,
+			)
+			if retry {
 				continue
 			}
-			current = appendFinalAssistant(current, finalOutput)
-			steps = append(steps, Step{
-				Index:      iteration,
-				ModelCall:  modelCall,
-				Decision:   StepDecisionFinish,
-				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-			})
-			return LoopOutput{
-				Messages:      current,
-				Usage:         totalUsage,
-				StopReason:    stopReason,
-				Iterations:    iteration + 1,
-				Thinking:      finalOutput.Thinking,
-				Steps:         steps,
-				ToolCallsUsed: toolCallsUsed,
-			}, nil
+			return out, err
 		}
 		// Reaching here means this turn has tool calls: the no-tool-call branch
 		// above always returns or continues, so len(assistant.ToolCalls) > 0 is
@@ -345,6 +330,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				Decision:   StepDecisionFail,
 				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 			})
+			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), recordErr
+			}
 			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
 		}
 		// Prepare the batch before charging or dispatching it. prepareToolCalls runs
@@ -394,36 +382,13 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		if appendErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
 		}
-		decision := StepDecisionContinue
-		if terminal {
-			decision = StepDecisionFinish
-		}
-		steps = append(steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
-			Decision:   decision,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-		})
-		if terminal {
-			return LoopOutput{
-				Messages:      current,
-				Usage:         totalUsage,
-				StopReason:    provider.StopReasonComplete,
-				Iterations:    iteration + 1,
-				Thinking:      assistant.Thinking,
-				Steps:         steps,
-				ToolCallsUsed: toolCallsUsed,
-			}, nil
-		}
-		// Continue boundary: this non-terminal tool turn would loop again. When a
-		// StepPolicy is set, let it override that decision once a predicate over
-		// the step trace holds — stopping, diverting, or failing the loop. The
-		// natural Continue decision is already recorded on the step above;
-		// stepPolicyOverride updates it so the trace reflects the decision that
-		// actually ended the loop.
-		if out, stop, overrideErr := stepPolicyOverride(input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed); stop {
-			return out, overrideErr
+		var stop bool
+		steps, out, stop, err = finalizeToolStep(
+			ctx, input, current, totalUsage, steps, assistant, modelCall,
+			results, terminal, iteration, toolCallsUsed,
+		)
+		if stop {
+			return out, err
 		}
 	}
 	return LoopOutput{
@@ -434,6 +399,135 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+func (e Engine) finalizeNoToolStep(
+	ctx context.Context,
+	input LoopInput,
+	current []message.Message,
+	assistant message.Message,
+	modelCall *ModelCall,
+	totalUsage provider.Usage,
+	steps []Step,
+	stopReason provider.StopReason,
+	iteration int,
+	toolCallsUsed int,
+) ([]message.Message, []Step, LoopOutput, bool, error) {
+	finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(
+		ctx, input, current, assistant, iteration+1, totalUsage, stopReason,
+	)
+	if guardErr != nil {
+		return current, steps,
+			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
+			false, guardErr
+	}
+	if len(retryMessages) > 0 {
+		steps = append(steps, Step{
+			Index:      iteration,
+			ModelCall:  modelCall,
+			Decision:   StepDecisionContinue,
+			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+		})
+		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+			return current, steps,
+				loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
+				false, recordErr
+		}
+		return appendRetryContext(current, assistant, retryMessages, retryPolicy),
+			steps, LoopOutput{}, true, nil
+	}
+	current = appendFinalAssistant(current, finalOutput)
+	steps = append(steps, Step{
+		Index:      iteration,
+		ModelCall:  modelCall,
+		Decision:   StepDecisionFinish,
+		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+	})
+	if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+		return current, steps,
+			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
+			false, recordErr
+	}
+	return current, steps, LoopOutput{
+		Messages:      current,
+		Usage:         totalUsage,
+		StopReason:    stopReason,
+		Iterations:    iteration + 1,
+		Thinking:      finalOutput.Thinking,
+		Steps:         steps,
+		ToolCallsUsed: toolCallsUsed,
+	}, false, nil
+}
+
+func finalizeToolStep(
+	ctx context.Context,
+	input LoopInput,
+	current []message.Message,
+	totalUsage provider.Usage,
+	steps []Step,
+	assistant message.Message,
+	modelCall *ModelCall,
+	results []tool.Result,
+	terminal bool,
+	iteration int,
+	toolCallsUsed int,
+) ([]Step, LoopOutput, bool, error) {
+	decision := StepDecisionContinue
+	if terminal {
+		decision = StepDecisionFinish
+	}
+	steps = append(steps, Step{
+		Index:      iteration,
+		ModelCall:  modelCall,
+		ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
+		Decision:   decision,
+		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+	})
+	if terminal {
+		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+			return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, recordErr
+		}
+		return steps, LoopOutput{
+			Messages:      current,
+			Usage:         totalUsage,
+			StopReason:    provider.StopReasonComplete,
+			Iterations:    iteration + 1,
+			Thinking:      assistant.Thinking,
+			Steps:         steps,
+			ToolCallsUsed: toolCallsUsed,
+		}, true, nil
+	}
+
+	// Continue boundary: let StepPolicy mutate the latest decision before
+	// persisting that finalized decision exactly once.
+	policyOut, stop, policyErr := stepPolicyOverride(
+		input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed,
+	)
+	recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps)
+	if policyErr != nil && recordErr != nil {
+		return steps, policyOut, true, errors.Join(policyErr, recordErr)
+	}
+	if recordErr != nil {
+		return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, recordErr
+	}
+	if stop {
+		return steps, policyOut, true, policyErr
+	}
+	return steps, LoopOutput{}, false, nil
+}
+
+// recordFinalizedStep invokes recorder for the latest finalized step. The caller
+// appends the step before calling this helper so every failure returns the step
+// in the partial trace.
+func recordFinalizedStep(ctx context.Context, recorder StepRecorder, steps []Step) error {
+	if recorder == nil {
+		return nil
+	}
+	step := steps[len(steps)-1]
+	if err := recorder.RecordStep(ctx, step); err != nil {
+		return fmt.Errorf("agent: record step %d: %w", step.Index, err)
+	}
+	return nil
 }
 
 // loopTurnPreamble runs the per-iteration preamble for turns after the first: it
@@ -535,10 +629,11 @@ const compactionBudgetHeadroomDivisor = 5
 // (MaxTokens > 0 and the consumed tokens leave one headroom band or less). It is
 // a no-op — returning the input history unchanged — when no Compact is set or no
 // token budget bounds the loop, so a run that does not opt into both never
-// changes shape. A Compact error aborts the loop rather than silently proceeding
-// on an unshrunk history. Callers reach this only after the pre-turn budget check
-// has confirmed remaining budget is positive, so the headroom comparison never
-// sees a negative remainder.
+// changes shape. A Compact error or an incomplete tool turn in its successful
+// output aborts the loop rather than silently proceeding on an invalid history.
+// Callers reach this only after the pre-turn budget check has confirmed
+// remaining budget is positive, so the headroom comparison never sees a
+// negative remainder.
 func maybeCompactHistory(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage) ([]message.Message, error) {
 	if input.Compact == nil || input.MaxTokens <= 0 {
 		return current, nil
@@ -549,6 +644,9 @@ func maybeCompactHistory(ctx context.Context, input LoopInput, current []message
 	}
 	compacted, err := input.Compact(ctx, current)
 	if err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
+	if err := message.ValidateCompleteTurns(compacted); err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
 	}
 	return compacted, nil

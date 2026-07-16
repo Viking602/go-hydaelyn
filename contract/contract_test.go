@@ -1,6 +1,7 @@
 package contract_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -20,5 +21,15 @@ import (
 func TestContractSuite_SelfCheck(t *testing.T) {
 	contract.RunStoreProviderContractTests(t, func(t *testing.T) (api.StoreProvider, func()) {
 		return inmemfake.NewProvider(), func() {}
+	})
+	contract.RunRecoveryContractTests(t, func(t *testing.T) (func() api.StoreProvider, func()) {
+		shared := inmemfake.NewProvider()
+		return func() api.StoreProvider {
+				return shared.Reopen()
+			}, func() {
+				if err := shared.Close(context.Background()); err != nil {
+					t.Errorf("recovery provider cleanup error = %v", err)
+				}
+			}
 	})
 }
