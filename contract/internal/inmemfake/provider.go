@@ -36,6 +36,12 @@ func NewProvider() *Provider {
 	return &Provider{inner: internalmem.NewProvider()}
 }
 
+// Reopen returns a distinct provider wrapper sharing this provider's committed
+// in-memory state. It is used only to simulate a new runtime over one store.
+func (p *Provider) Reopen() *Provider {
+	return &Provider{inner: p.inner}
+}
+
 // Begin opens a new unit of work. Writes are serialized — concurrent
 // Begin calls block until the previous UoW closes.
 func (p *Provider) Begin(ctx context.Context) (api.UnitOfWork, error) {

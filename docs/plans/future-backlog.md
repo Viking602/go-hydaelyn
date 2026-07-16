@@ -7,8 +7,6 @@ date or version commitment.
 
 - Resolve the `Team.Start` and `Team.Resume` integration boundary without
   importing the durable Runner into `multiagent`.
-- Add three-surface kill and resume tests for Runner state, agent steps, and
-  scheduler decisions.
 - Evaluate debate, MapReduce, and swarm schedulers after production feedback
   justifies their maintenance cost.
 - Complete automatic handoff validation and persistence through the existing

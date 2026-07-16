@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/Viking602/go-hydaelyn/api"
@@ -14,13 +15,15 @@ import (
 // replace is set, returns that slice as the compacted history. A non-nil fail is
 // returned instead, to exercise the loop's compaction-error path.
 type recordingCompactor struct {
-	calls   int
-	replace []message.Message
-	fail    error
+	calls    int
+	replace  []message.Message
+	fail     error
+	received []message.Message
 }
 
 func (c *recordingCompactor) compact(_ context.Context, history []message.Message) ([]message.Message, error) {
 	c.calls++
+	c.received = append(c.received[:0], history...)
 	if c.fail != nil {
 		return history, c.fail
 	}
@@ -127,6 +130,35 @@ func TestRunMessagesCompactionErrorAbortsLoop(t *testing.T) {
 	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("error = %v, want it to wrap the compaction error", err)
+	}
+}
+
+func TestRunMessagesRejectsIncompleteCompactedToolTurn(t *testing.T) {
+	comp := &recordingCompactor{replace: []message.Message{
+		message.NewText(message.RoleSystem, "compacted"),
+		{
+			Role: message.RoleAssistant,
+			ToolCalls: []message.ToolCall{{
+				ID:   "missing-result",
+				Name: "tool",
+			}},
+		},
+	}}
+	engine := newLoopToolEngine(t, &usageToolProvider{perTurn: usagePerTurn(10)})
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:     "test-model",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "original")},
+		MaxTokens: 45,
+		Compact:   comp.compact,
+	})
+	if !errors.Is(err, message.ErrIncompleteToolTurn) {
+		t.Fatalf("error = %v, want errors.Is(err, message.ErrIncompleteToolTurn)", err)
+	}
+	if comp.calls == 0 {
+		t.Fatal("Compact was never invoked")
+	}
+	if !reflect.DeepEqual(output.Messages, comp.received) {
+		t.Fatalf("partial output did not preserve the pre-compaction history:\noutput: %#v\noriginal: %#v", output.Messages, comp.received)
 	}
 }
 

@@ -75,6 +75,213 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	}
 }
 
+func TestAgentWorkerPersistsStepTrace(t *testing.T) {
+	ctx := context.Background()
+	runner := hydaelyn.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-worker-step-trace",
+		RootTaskID: "root",
+		Request:    "do work",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-worker-step-trace",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID:         run.ID,
+		TaskID:        task.ID,
+		TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+
+	callerRecorded := false
+	engine := agent.Engine{
+		Provider: scripted.New([]provider.Event{
+			{Kind: provider.EventTextDelta, Text: "summary done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}),
+		StepRecorder: agent.StepRecorderFunc(func(ctx context.Context, step agent.Step) error {
+			events, err := runner.ListEvents(ctx, run.ID)
+			if err != nil {
+				return fmt.Errorf("list durable events from caller recorder: %w", err)
+			}
+			records, err := agent.ReconstructStepTrace(events, agent.StepSelector{
+				RunID:   run.ID,
+				TaskID:  task.ID,
+				AgentID: "agent-a",
+			})
+			if err != nil {
+				return fmt.Errorf("reconstruct durable trace from caller recorder: %w", err)
+			}
+			if len(records) != 1 || records[0].Step.Index != step.Index || records[0].Step.Decision != step.Decision {
+				return fmt.Errorf("durable recorder did not run before caller recorder: records=%#v step=%#v", records, step)
+			}
+			callerRecorded = true
+			return nil
+		}),
+	}
+	if err := (AgentWorker{
+		Runner:  runner,
+		Engine:  engine,
+		AgentID: "agent-a",
+		Model:   "scripted",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	if !callerRecorded {
+		t.Fatal("caller-supplied StepRecorder was not invoked")
+	}
+
+	events, err := runner.ListEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	records, err := agent.ReconstructStepTrace(events, agent.StepSelector{
+		RunID:   run.ID,
+		TaskID:  task.ID,
+		AgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("ReconstructStepTrace() error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("step records = %#v, want one finalized step", records)
+	}
+	record := records[0]
+	if record.RunID != run.ID || record.TaskID != task.ID || record.AgentID != "agent-a" {
+		t.Fatalf("step record identity = %#v, want run/task/agent binding", record)
+	}
+	if record.ExecutionID == "" {
+		t.Fatal("step record execution ID is blank")
+	}
+	if record.Step.Index != 0 || record.Step.Decision != agent.StepDecisionFinish {
+		t.Fatalf("persisted step = %#v, want finalized step 0", record.Step)
+	}
+	var acquiredLeaseID string
+	for _, event := range events {
+		if event.Type == api.EventTaskExecutionAcquired && event.TaskID == task.ID {
+			acquiredLeaseID, _ = event.Payload["leaseId"].(string)
+			break
+		}
+	}
+	if acquiredLeaseID == "" || record.ExecutionID != acquiredLeaseID {
+		t.Fatalf("step execution ID = %q, acquired lease ID = %q", record.ExecutionID, acquiredLeaseID)
+	}
+	selected, err := agent.ReconstructStepTrace(events, agent.StepSelector{ExecutionID: record.ExecutionID})
+	if err != nil {
+		t.Fatalf("ReconstructStepTrace(execution) error = %v", err)
+	}
+	if len(selected) != 1 || selected[0].ExecutionID != record.ExecutionID {
+		t.Fatalf("execution-selected records = %#v, want persisted execution", selected)
+	}
+}
+
+func TestAgentWorkerStepPersistenceFailureFailsTask(t *testing.T) {
+	ctx := context.Background()
+	stepAppendErr := errors.New("step event append failed")
+	backing := hydaelyn.NewDevelopment()
+	runner := hydaelyn.NewDevelopment(api.Config{
+		StoreProvider: stepEventFailingProvider{
+			StoreProvider: backing,
+			err:           stepAppendErr,
+		},
+	})
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-worker-step-failure",
+		RootTaskID: "root",
+		Request:    "do work",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-worker-step-failure",
+		Goal:         "summarize",
+		OwnerAgentID: "agent-a",
+		WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID:         run.ID,
+		TaskID:        task.ID,
+		TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+
+	callerRecorded := false
+	err = (AgentWorker{
+		Runner: runner,
+		Engine: agent.Engine{
+			Provider: scripted.New([]provider.Event{
+				{Kind: provider.EventTextDelta, Text: "summary done"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			}),
+			StepRecorder: agent.StepRecorderFunc(func(context.Context, agent.Step) error {
+				callerRecorded = true
+				return nil
+			}),
+		},
+		AgentID: "agent-a",
+		Model:   "scripted",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	if !errors.Is(err, stepAppendErr) {
+		t.Fatalf("ExecuteEnvelope() error = %v, want %v", err, stepAppendErr)
+	}
+	if callerRecorded {
+		t.Fatal("caller StepRecorder ran after durable recorder failed")
+	}
+
+	failed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if failed.Status != api.TaskStatusFailed || failed.Result == nil {
+		t.Fatalf("task after step persistence failure = %#v, want failed report", failed)
+	}
+	if failed.Result.Status != api.ReportStatusFailed || failed.Result.Kind != string(agent.FailureKindEngineError) {
+		t.Fatalf("failure report = %#v, want engine failure", failed.Result)
+	}
+	events, err := runner.ListEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	records, err := agent.ReconstructStepTrace(events, agent.StepSelector{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		AgentID:     "agent-a",
+		ExecutionID: "",
+	})
+	if err != nil {
+		t.Fatalf("ReconstructStepTrace() error = %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("persisted step records = %#v, want none after rejected append", records)
+	}
+	for _, event := range events {
+		if event.Type == api.EventTaskCompleted && event.TaskID == task.ID {
+			t.Fatalf("success completion event was submitted after recorder failure: %#v", event)
+		}
+	}
+}
+
 func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 	ctx := context.Background()
 	runner := hydaelyn.NewDevelopment()
@@ -443,6 +650,40 @@ func (p *recordingProvider) Stream(_ context.Context, request provider.Request) 
 		events = []provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}}
 	}
 	return provider.NewSliceStream(events), nil
+}
+
+type stepEventFailingProvider struct {
+	api.StoreProvider
+	err error
+}
+
+func (p stepEventFailingProvider) Begin(ctx context.Context) (api.UnitOfWork, error) {
+	uow, err := p.StoreProvider.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return stepEventFailingUoW{UnitOfWork: uow, err: p.err}, nil
+}
+
+type stepEventFailingUoW struct {
+	api.UnitOfWork
+	err error
+}
+
+func (u stepEventFailingUoW) Events() api.EventStore {
+	return stepEventFailingStore{EventStore: u.UnitOfWork.Events(), err: u.err}
+}
+
+type stepEventFailingStore struct {
+	api.EventStore
+	err error
+}
+
+func (s stepEventFailingStore) AppendEvent(ctx context.Context, event api.Event) error {
+	if event.Type == agent.EventStepCompleted {
+		return s.err
+	}
+	return s.EventStore.AppendEvent(ctx, event)
 }
 
 func TestAgentWorkerPersistsUsageRecord(t *testing.T) {

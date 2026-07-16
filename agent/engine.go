@@ -77,6 +77,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		OutputRecorder:   e.OutputRecorder,
 		Sink:             sink,
 		StepPolicy:       e.StepPolicy,
+		StepRecorder:     e.StepRecorder,
 		Compact:          e.compactor(runtime),
 	}
 
@@ -135,6 +136,14 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 				Retryable: false,
 			}
 			return result
+		}
+		if input.StepRecorder != nil {
+			recorder := input.StepRecorder
+			indexOffset := len(accumulatedSteps)
+			repairInput.StepRecorder = StepRecorderFunc(func(ctx context.Context, step Step) error {
+				step.Index += indexOffset
+				return recorder.RecordStep(ctx, step)
+			})
 		}
 		repairInput.Messages = append(cloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
 		repairOutput, repairErr := e.RunMessages(ctx, repairInput)

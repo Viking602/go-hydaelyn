@@ -28,34 +28,31 @@ func (c *LLMCompactor) Compact(ctx context.Context, messages []message.Message) 
 	if maxMessages <= 2 {
 		maxMessages = 4
 	}
-	if len(messages) <= maxMessages {
+
+	first, dropped, tail, changed, err := compactionParts(messages, maxMessages)
+	if err != nil {
+		return messages, err
+	}
+	if !changed {
 		return messages, nil
 	}
 
-	keepFirst := 1
-	keepLast := maxMessages - keepFirst - 1
-	if keepLast < 1 {
-		keepLast = 1
-	}
-
-	dropped := messages[keepFirst : len(messages)-keepLast]
 	summary, err := c.summarize(ctx, dropped)
 	if err != nil {
 		// Fall back to the simple placeholder on LLM failure so the
 		// conversation can continue.
-		placeholder := fmt.Sprintf("[Compaction summary: %d earlier messages omitted]", len(dropped))
-		summary = placeholder
+		summary = fmt.Sprintf("[Compaction summary: %d earlier messages omitted]", len(dropped))
 	}
 
-	compacted := make([]message.Message, 0, maxMessages)
-	compacted = append(compacted, messages[:keepFirst]...)
+	compacted := make([]message.Message, 0, len(first)+1+len(tail))
+	compacted = append(compacted, first...)
 	compacted = append(compacted, message.Message{
 		Role:       message.RoleSystem,
 		Kind:       message.KindCompactionSummary,
 		Text:       summary,
 		Visibility: message.VisibilityPrivate,
 	})
-	compacted = append(compacted, messages[len(messages)-keepLast:]...)
+	compacted = append(compacted, tail...)
 	return compacted, nil
 }
 
