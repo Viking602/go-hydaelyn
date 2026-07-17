@@ -1094,9 +1094,9 @@ func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent f
 	return nil
 }
 
-// applyNormalized copies the text, thinking, signatures, and tool calls from the
-// events collected so far onto the assistant turn, and reports the turn's usage
-// and stop reason. It centralizes the normalization collect performs on both its
+// applyNormalized copies text, thinking, signatures, tool calls, and opaque
+// provider state from the events collected so far onto the assistant turn,
+// and reports the turn's usage and stop reason. It centralizes the
 // success path and its failure paths (a callback error or a recovered panic),
 // where the partial turn must still carry whatever the model already produced. A
 // normalize error (a malformed stream prefix) leaves the assistant untouched and
@@ -1112,5 +1112,6 @@ func applyNormalized(assistant *message.Message, events []provider.Event) (provi
 	assistant.ThinkingSignature = normalized.Signature
 	assistant.RedactedThinking = normalized.RedactedThinking
 	assistant.ToolCalls = normalized.ToolCalls
+	assistant.ProviderState = normalized.ProviderState
 	return normalized.Usage, normalized.StopReason, nil
 }

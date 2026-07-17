@@ -41,7 +41,8 @@ func (f fakeProvider) Stream(_ context.Context, request provider.Request) (provi
 func TestEngineRunsToolLoop(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result:" + input.Query, nil
 	})
 	if err != nil {
@@ -96,7 +97,8 @@ func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (prov
 func TestRunMessagesDefaultMaxIterationsIsTwelve(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
@@ -283,7 +285,8 @@ func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 	}
 	driverTool, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result:" + input.Query, nil
 	})
 	if err != nil {
@@ -472,5 +475,28 @@ func TestEngineStopsAfterTerminalTool(t *testing.T) {
 	}
 	if result.Messages[len(result.Messages)-1].ToolResult == nil {
 		t.Fatalf("expected final message to be tool result, got %#v", result.Messages[len(result.Messages)-1])
+	}
+}
+
+func TestEnginePersistsProviderState(t *testing.T) {
+	state := json.RawMessage(`[{"type":"reasoning","id":"rs_1"}]`)
+	driver := &scriptedProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, ProviderState: state},
+		}},
+	}
+	engine := Engine{Provider: driver}
+	result, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:         "test-model",
+		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if string(last.ProviderState) != string(state) {
+		t.Fatalf("assistant ProviderState = %s, want %s", last.ProviderState, state)
 	}
 }

@@ -131,6 +131,18 @@ func TestNormalizeEventsConformanceCases(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "opaque provider state",
+			events: []Event{
+				{Kind: EventTextDelta, Text: "answer"},
+				{Kind: EventDone, StopReason: StopReasonComplete, ProviderState: json.RawMessage(`[{"type":"reasoning","id":"rs_1"}]`)},
+			},
+			assertion: func(t *testing.T, response NormalizedResponse) {
+				if string(response.ProviderState) != `[{"type":"reasoning","id":"rs_1"}]` {
+					t.Fatalf("provider state = %s", response.ProviderState)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

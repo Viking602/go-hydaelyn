@@ -38,6 +38,36 @@ func TestFrameFromEventMapsEveryProviderKind(t *testing.T) {
 	}
 }
 
+func TestFrameRoundTripsTextPhaseAndProviderState(t *testing.T) {
+	textEvent := provider.Event{
+		Kind:      provider.EventTextDelta,
+		Text:      "checking",
+		TextPhase: provider.TextPhaseCommentary,
+	}
+	textFrame, ok := FrameFromEvent(textEvent)
+	if !ok || textFrame.TextPhase != provider.TextPhaseCommentary {
+		t.Fatalf("text frame = %#v, ok = %v", textFrame, ok)
+	}
+	gotText, ok := textFrame.ToEvent()
+	if !ok || gotText.TextPhase != provider.TextPhaseCommentary {
+		t.Fatalf("round-tripped text event = %#v, ok = %v", gotText, ok)
+	}
+
+	state := json.RawMessage(`[{"type":"reasoning","id":"rs_1"}]`)
+	doneFrame, ok := FrameFromEvent(provider.Event{
+		Kind:          provider.EventDone,
+		StopReason:    provider.StopReasonComplete,
+		ProviderState: state,
+	})
+	if !ok || string(doneFrame.ProviderState) != string(state) {
+		t.Fatalf("done frame = %#v, ok = %v", doneFrame, ok)
+	}
+	gotDone, ok := doneFrame.ToEvent()
+	if !ok || string(gotDone.ProviderState) != string(state) {
+		t.Fatalf("round-tripped done event = %#v, ok = %v", gotDone, ok)
+	}
+}
+
 func TestFrameFromEventRejectsUnknownKind(t *testing.T) {
 	if _, ok := FrameFromEvent(provider.Event{Kind: "nonsense"}); ok {
 		t.Fatal("FrameFromEvent should report ok=false for an unknown kind")

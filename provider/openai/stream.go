@@ -178,13 +178,10 @@ func safeEmitLen(s, target string) int {
 	return len(s)
 }
 
-func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.Stream, error) {
-	apiKey := d.config.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("openai api key is required")
+func (d Driver) streamChatCompletions(ctx context.Context, request provider.Request) (provider.Stream, error) {
+	apiKey, err := d.apiKey()
+	if err != nil {
+		return nil, err
 	}
 	body, err := marshalChatCompletionRequest(chatCompletionRequest{
 		Model:          request.Model,
@@ -199,7 +196,29 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimRight(d.config.BaseURL, "/") + "/chat/completions"
+	bodyStream, err := d.postEventStream(ctx, "/chat/completions", body, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	return &openAIStream{
+		body:  bodyStream,
+		state: streamState{reader: shared.NewReader(bodyStream)},
+	}, nil
+}
+
+func (d Driver) apiKey() (string, error) {
+	apiKey := d.config.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("openai api key is required")
+	}
+	return apiKey, nil
+}
+
+func (d Driver) postEventStream(ctx context.Context, path string, body []byte, apiKey string) (io.ReadCloser, error) {
+	endpoint := strings.TrimRight(d.config.BaseURL, "/") + path
 	client := d.config.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -229,10 +248,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return nil, fmt.Errorf("openai api returned unexpected content type %q: %s", resp.Header.Get("Content-Type"), strings.TrimSpace(string(payload)))
 	}
-	return &openAIStream{
-		body:  resp.Body,
-		state: streamState{reader: shared.NewReader(resp.Body)},
-	}, nil
+	return resp.Body, nil
 }
 
 func marshalChatCompletionRequest(payload chatCompletionRequest, extraBody map[string]any) ([]byte, error) {

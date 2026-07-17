@@ -15,6 +15,8 @@
 package stream
 
 import (
+	"encoding/json"
+
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 )
@@ -51,10 +53,11 @@ const (
 type Frame struct {
 	// Source is an optional origin label (e.g. an AgentInstance ID). It is
 	// empty for single-agent streams and set by Merge for fan-in.
-	Source   string    `json:"source,omitempty"`
-	Kind     FrameKind `json:"kind"`
-	Text     string    `json:"text,omitempty"`
-	Thinking string    `json:"thinking,omitempty"`
+	Source    string             `json:"source,omitempty"`
+	Kind      FrameKind          `json:"kind"`
+	Text      string             `json:"text,omitempty"`
+	TextPhase provider.TextPhase `json:"textPhase,omitempty"`
+	Thinking  string             `json:"thinking,omitempty"`
 	// Signature carries the opaque thinking-block signature (Anthropic
 	// signature_delta) associated with the Thinking delta. Threaded through
 	// FrameFromEvent/ToEvent so the streaming path preserves it; without it
@@ -70,6 +73,7 @@ type Frame struct {
 	ToolResult       *message.ToolResult     `json:"toolResult,omitempty"`
 	Usage            provider.Usage          `json:"usage,omitempty"`
 	StopReason       provider.StopReason     `json:"stopReason,omitempty"`
+	ProviderState    json.RawMessage         `json:"providerState,omitempty"`
 	// Err is set only on FrameError frames. It is not serialized.
 	Err error `json:"-"`
 }
@@ -80,7 +84,7 @@ type Frame struct {
 func FrameFromEvent(event provider.Event) (Frame, bool) {
 	switch event.Kind {
 	case provider.EventTextDelta:
-		return Frame{Kind: FrameText, Text: event.Text, Usage: event.Usage}, true
+		return Frame{Kind: FrameText, Text: event.Text, TextPhase: event.TextPhase, Usage: event.Usage}, true
 	case provider.EventThinkingDelta:
 		return Frame{Kind: FrameThinking, Thinking: event.Thinking, Signature: event.Signature, RedactedThinking: event.RedactedThinking, Usage: event.Usage}, true
 	case provider.EventToolCall:
@@ -88,7 +92,7 @@ func FrameFromEvent(event provider.Event) (Frame, bool) {
 	case provider.EventToolCallDelta:
 		return Frame{Kind: FrameToolCallDelta, ToolCallDelta: event.ToolCallDelta, Usage: event.Usage}, true
 	case provider.EventDone:
-		return Frame{Kind: FrameDone, StopReason: event.StopReason, Usage: event.Usage}, true
+		return Frame{Kind: FrameDone, StopReason: event.StopReason, Usage: event.Usage, ProviderState: event.ProviderState}, true
 	case provider.EventError:
 		return Frame{Kind: FrameError, Err: event.Err, Usage: event.Usage}, true
 	default:
@@ -103,7 +107,7 @@ func FrameFromEvent(event provider.Event) (Frame, bool) {
 func (f Frame) ToEvent() (provider.Event, bool) {
 	switch f.Kind {
 	case FrameText:
-		return provider.Event{Kind: provider.EventTextDelta, Text: f.Text, Usage: f.Usage}, true
+		return provider.Event{Kind: provider.EventTextDelta, Text: f.Text, TextPhase: f.TextPhase, Usage: f.Usage}, true
 	case FrameThinking:
 		return provider.Event{Kind: provider.EventThinkingDelta, Thinking: f.Thinking, Signature: f.Signature, RedactedThinking: f.RedactedThinking, Usage: f.Usage}, true
 	case FrameToolCall:
@@ -111,7 +115,7 @@ func (f Frame) ToEvent() (provider.Event, bool) {
 	case FrameToolCallDelta:
 		return provider.Event{Kind: provider.EventToolCallDelta, ToolCallDelta: f.ToolCallDelta, Usage: f.Usage}, true
 	case FrameDone:
-		return provider.Event{Kind: provider.EventDone, StopReason: f.StopReason, Usage: f.Usage}, true
+		return provider.Event{Kind: provider.EventDone, StopReason: f.StopReason, Usage: f.Usage, ProviderState: f.ProviderState}, true
 	case FrameError:
 		return provider.Event{Kind: provider.EventError, Err: f.Err, Usage: f.Usage}, true
 	default:
