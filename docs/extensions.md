@@ -101,7 +101,13 @@ its managed request. `ExtraBody` cannot override protocol-managed fields:
 
 - Chat Completions: `model`, `messages`, `tools`, `stream`, `stream_options`,
   `stop`, `reasoning`, and `response_format`
-- Responses: `model`, `input`, `tools`, `stream`, `reasoning`, and `text`
+- Responses: `model`, `input`, `tools`, `stream`, `include`, `reasoning`, and
+  `text`
+
+Responses requests always include `reasoning.encrypted_content` so opaque
+reasoning can be replayed in stateless and zero-data-retention tool loops. An
+`include` array supplied through `ExtraBody` is merged with that required value
+and deduplicated.
 
 ## Opaque Provider State
 

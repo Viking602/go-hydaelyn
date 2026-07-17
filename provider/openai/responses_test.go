@@ -102,6 +102,11 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 			Schema: &message.JSONSchema{Type: "object"},
 		},
 		ExtraBody: map[string]any{
+			"include": []string{
+				responsesEncryptedReasoningInclude,
+				"message.output_text.logprobs",
+				"message.output_text.logprobs",
+			},
 			"model":       "overridden",
 			"input":       "overridden",
 			"tools":       "overridden",
@@ -130,6 +135,7 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 	requireResponsesInput(t, captured["input"])
 	requireResponsesTools(t, captured["tools"])
 	requireResponsesReasoningAndText(t, captured)
+	requireResponsesInclude(t, captured["include"])
 }
 
 func TestDriverStreamRejectsResponsesStopSequences(t *testing.T) {
@@ -186,6 +192,17 @@ func requireResponsesTools(t *testing.T, value any) {
 	parameters, _ := tool["parameters"].(map[string]any)
 	if parameters["type"] != "object" {
 		t.Fatalf("tool parameters = %#v", parameters)
+	}
+}
+
+func requireResponsesInclude(t *testing.T, value any) {
+	t.Helper()
+	include, ok := value.([]any)
+	if !ok || len(include) != 2 {
+		t.Fatalf("include = %#v, want required reasoning plus caller value", value)
+	}
+	if include[0] != responsesEncryptedReasoningInclude || include[1] != "message.output_text.logprobs" {
+		t.Fatalf("include = %#v", include)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 type responsesRequest struct {
 	Model     string              `json:"model"`
 	Input     []json.RawMessage   `json:"input"`
+	Include   []string            `json:"include,omitempty"`
 	Tools     []responsesTool     `json:"tools,omitempty"`
 	Stream    bool                `json:"stream"`
 	Reasoning *responsesReasoning `json:"reasoning,omitempty"`
@@ -127,7 +128,14 @@ func (d Driver) streamResponses(ctx context.Context, request provider.Request) (
 	}, nil
 }
 
+const responsesEncryptedReasoningInclude = "reasoning.encrypted_content"
+
 func marshalResponsesRequest(payload responsesRequest, extraBody map[string]any) ([]byte, error) {
+	include, err := responsesIncludes(extraBody)
+	if err != nil {
+		return nil, err
+	}
+	payload.Include = include
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -146,6 +154,31 @@ func marshalResponsesRequest(payload responsesRequest, extraBody map[string]any)
 	return json.Marshal(merged)
 }
 
+func responsesIncludes(extraBody map[string]any) ([]string, error) {
+	include := []string{responsesEncryptedReasoningInclude}
+	requested, ok := extraBody["include"]
+	if !ok || requested == nil {
+		return include, nil
+	}
+	encoded, err := json.Marshal(requested)
+	if err != nil {
+		return nil, fmt.Errorf("marshal openai responses include: %w", err)
+	}
+	var extra []string
+	if err := json.Unmarshal(encoded, &extra); err != nil {
+		return nil, fmt.Errorf("openai responses ExtraBody include must be an array of strings: %w", err)
+	}
+	seen := map[string]struct{}{responsesEncryptedReasoningInclude: {}}
+	for _, item := range extra {
+		if _, duplicate := seen[item]; duplicate {
+			continue
+		}
+		seen[item] = struct{}{}
+		include = append(include, item)
+	}
+	return include, nil
+}
+
 func extraResponsesBodyFields(extraBody map[string]any) map[string]any {
 	fields := make(map[string]any, len(extraBody))
 	for key, value := range extraBody {
@@ -158,6 +191,7 @@ func extraResponsesBodyFields(extraBody map[string]any) map[string]any {
 
 var managedResponsesBodyFields = map[string]struct{}{
 	"model":     {},
+	"include":   {},
 	"input":     {},
 	"tools":     {},
 	"stream":    {},
