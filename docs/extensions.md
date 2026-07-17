@@ -58,6 +58,26 @@ result, err := engine.Run(ctx, agent.Input{
 })
 ```
 
+## OpenAI Wire APIs
+
+The OpenAI provider uses Chat Completions by default, including when
+`Config.WireAPI` is empty. Select the Responses API explicitly for Codex models:
+
+```go
+providerDriver := openai.New(openai.Config{
+	APIKey:  os.Getenv("OPENAI_API_KEY"),
+	WireAPI: openai.WireResponses,
+})
+```
+
+`openai.WireChatCompletions` selects `/chat/completions`;
+`openai.WireResponses` selects `/responses`. Selection is driver configuration,
+not model-name inference, so a request's model can change without silently
+changing its wire protocol.
+
+Responses requests do not support `agent.Input.StopSequences`. A non-empty stop
+sequence list returns an error before the HTTP request is sent.
+
 ## Provider Body Extras
 
 Callers can pass provider-specific request body fields through
@@ -77,9 +97,21 @@ result, err := engine.Run(ctx, agent.Input{
 ```
 
 The OpenAI provider appends extra fields to the JSON body after Hydaelyn builds
-its managed request. Managed fields such as `model`, `messages`, `tools`,
-`stream`, `stream_options`, `stop`, `reasoning`, and `response_format` are not
-overridden by `ExtraBody`.
+its managed request. `ExtraBody` cannot override protocol-managed fields:
+
+- Chat Completions: `model`, `messages`, `tools`, `stream`, `stream_options`,
+  `stop`, `reasoning`, and `response_format`
+- Responses: `model`, `input`, `tools`, `stream`, `reasoning`, and `text`
+
+## Opaque Provider State
+
+Responses turns store the terminal API `output` array in
+`message.Message.ProviderState`. Hydaelyn keeps normalized text, reasoning, and
+tool calls for provider-neutral consumers, while replaying the opaque output
+items exactly before the following `function_call_output`. This preserves
+reasoning items, function-call identity, encrypted fields, and phased Codex
+messages across tool turns. Applications that persist or resume message history
+should preserve `ProviderState` without interpreting or rewriting it.
 
 ## Agent Turn Order
 

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 
@@ -17,6 +18,16 @@ const (
 	StopReasonMaxTurns StopReason = "max_turns"
 	StopReasonAborted  StopReason = "aborted"
 	StopReasonError    StopReason = "error"
+)
+
+// TextPhase identifies the semantic phase of streamed assistant text.
+type TextPhase string
+
+const (
+	// TextPhaseCommentary is intermediate commentary emitted before the answer.
+	TextPhaseCommentary TextPhase = "commentary"
+	// TextPhaseFinalAnswer is assistant text intended as the final answer.
+	TextPhaseFinalAnswer TextPhase = "final_answer"
 )
 
 type EventKind string
@@ -76,9 +87,10 @@ type ResponseFormat struct {
 }
 
 type Event struct {
-	Kind     EventKind `json:"kind"`
-	Text     string    `json:"text,omitempty"`
-	Thinking string    `json:"thinking,omitempty"`
+	Kind      EventKind `json:"kind"`
+	Text      string    `json:"text,omitempty"`
+	TextPhase TextPhase `json:"textPhase,omitempty"`
+	Thinking  string    `json:"thinking,omitempty"`
 	// Signature carries the opaque thinking-block signature emitted alongside
 	// reasoning (Anthropic signature_delta). It is associated with the
 	// current thinking block and accumulated by NormalizeEvents.
@@ -90,7 +102,10 @@ type Event struct {
 	ToolCallDelta    *ToolCallDelta    `json:"toolCallDelta,omitempty"`
 	Usage            Usage             `json:"usage,omitempty"`
 	StopReason       StopReason        `json:"stopReason,omitempty"`
-	Err              error             `json:"-"`
+	// ProviderState carries an opaque provider-owned turn payload that must be
+	// replayed verbatim on a later request.
+	ProviderState json.RawMessage `json:"providerState,omitempty"`
+	Err           error           `json:"-"`
 }
 
 type Stream interface {

@@ -322,3 +322,18 @@ func TestVisibilityConstants(t *testing.T) {
 		}
 	}
 }
+
+func TestMessageProviderStateJSONRoundTrip(t *testing.T) {
+	state := json.RawMessage(`[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"}]`)
+	encoded, err := json.Marshal(Message{Role: RoleAssistant, ProviderState: state})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if string(decoded.ProviderState) != string(state) {
+		t.Fatalf("ProviderState = %s, want %s", decoded.ProviderState, state)
+	}
+}

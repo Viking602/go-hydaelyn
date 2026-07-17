@@ -111,16 +111,19 @@ type Message struct {
 	// RedactedThinking carries the opaque payload of a redacted_thinking
 	// block (reasoning encrypted by Anthropic's safety systems) so it can be
 	// replayed verbatim on a later turn. Empty in the common case.
-	RedactedThinking string            `json:"redactedThinking,omitempty"`
-	ToolCalls        []ToolCall        `json:"toolCalls,omitempty"`
-	ToolResult       *ToolResult       `json:"toolResult,omitempty"`
-	TeamID           string            `json:"teamId,omitempty"`
-	AgentID          string            `json:"agentId,omitempty"`
-	RunID            string            `json:"runId,omitempty"`
-	ParentRunID      string            `json:"parentRunId,omitempty"`
-	Visibility       Visibility        `json:"visibility,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	CreatedAt        time.Time         `json:"createdAt,omitempty"`
+	RedactedThinking string `json:"redactedThinking,omitempty"`
+	// ProviderState carries opaque provider output that must be replayed
+	// verbatim on the next turn. Empty for providers that do not require it.
+	ProviderState json.RawMessage   `json:"providerState,omitempty"`
+	ToolCalls     []ToolCall        `json:"toolCalls,omitempty"`
+	ToolResult    *ToolResult       `json:"toolResult,omitempty"`
+	TeamID        string            `json:"teamId,omitempty"`
+	AgentID       string            `json:"agentId,omitempty"`
+	RunID         string            `json:"runId,omitempty"`
+	ParentRunID   string            `json:"parentRunId,omitempty"`
+	Visibility    Visibility        `json:"visibility,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	CreatedAt     time.Time         `json:"createdAt,omitempty"`
 }
 
 func NewText(role Role, text string) Message {

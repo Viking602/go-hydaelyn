@@ -8,8 +8,10 @@ import (
 	"github.com/Viking602/go-hydaelyn/message"
 )
 
-var ErrInvalidToolCallArguments = errors.New("invalid tool call arguments")
-var ErrDuplicateToolCallID = errors.New("duplicate tool call id")
+var (
+	ErrInvalidToolCallArguments = errors.New("invalid tool call arguments")
+	ErrDuplicateToolCallID      = errors.New("duplicate tool call id")
+)
 
 type NormalizedResponse struct {
 	Text     string `json:"text,omitempty"`
@@ -23,6 +25,7 @@ type NormalizedResponse struct {
 	ToolCalls        []message.ToolCall `json:"toolCalls,omitempty"`
 	Usage            Usage              `json:"usage,omitempty"`
 	StopReason       StopReason         `json:"stopReason,omitempty"`
+	ProviderState    json.RawMessage    `json:"providerState,omitempty"`
 }
 
 // NormalizeEvents replays a stream of provider Events into a single
@@ -72,6 +75,9 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			response.StopReason = event.StopReason
 			if event.Usage != (Usage{}) {
 				response.Usage = event.Usage
+			}
+			if len(event.ProviderState) > 0 {
+				response.ProviderState = event.ProviderState
 			}
 		}
 	}
