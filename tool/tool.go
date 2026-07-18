@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/Viking602/go-hydaelyn/message"
@@ -113,6 +114,7 @@ func (b *Bus) Definitions() []Definition {
 	for _, driver := range b.drivers {
 		defs = append(defs, driver.Definition())
 	}
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }
 

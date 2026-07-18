@@ -53,3 +53,13 @@ func TestBusSubsetKeepsExplicitlyGrantedTools(t *testing.T) {
 		t.Fatalf("unexpected tool result %#v", result)
 	}
 }
+
+func TestBusDefinitionsAreStableAndSorted(t *testing.T) {
+	bus := NewBus(staticDriver{name: "zeta"}, staticDriver{name: "alpha"}, staticDriver{name: "middle"})
+	for range 100 {
+		definitions := bus.Definitions()
+		if len(definitions) != 3 || definitions[0].Name != "alpha" || definitions[1].Name != "middle" || definitions[2].Name != "zeta" {
+			t.Fatalf("definitions are not sorted: %#v", definitions)
+		}
+	}
+}
