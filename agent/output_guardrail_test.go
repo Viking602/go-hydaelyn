@@ -94,6 +94,41 @@ func TestEngineOutputGuardrailCanRetryFinalOutput(t *testing.T) {
 	}
 }
 
+func TestUnlimitedIterationsAlsoAppliesToOutputGuardrailRetries(t *testing.T) {
+	turns := make([][]provider.Event, 14)
+	for iteration := range turns {
+		turns[iteration] = []provider.Event{
+			{Kind: provider.EventTextDelta, Text: "draft"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}
+	}
+	driver := &scriptedProvider{turns: turns}
+	engine := Engine{Provider: driver}
+	result, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:               "test-model",
+		Messages:            []message.Message{message.NewText(message.RoleUser, "keep revising")},
+		MaxIterations:       2,
+		UnlimitedIterations: true,
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("retry", func(_ context.Context, input OutputGuardrailInput) (OutputGuardrailResult, error) {
+				if !input.UnlimitedIterations {
+					t.Fatal("guardrail did not receive unlimited iteration policy")
+				}
+				if input.Iteration < 13 {
+					return RetryOutput(message.NewText(message.RoleUser, "revise again")), nil
+				}
+				return AllowOutput(), nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if result.StopReason != provider.StopReasonComplete || driver.callIndex != 13 {
+		t.Fatalf("result stop=%q provider calls=%d, want completion beyond the default 12-turn ceiling", result.StopReason, driver.callIndex)
+	}
+}
+
 func TestEngineOutputGuardrailRetryDoesNotIncludeRejectedOutputByDefault(t *testing.T) {
 	driver := &scriptedProvider{
 		turns: [][]provider.Event{

@@ -53,9 +53,11 @@ type OutputGuardrailInput struct {
 	Output        message.Message
 	Iteration     int
 	MaxIterations int
-	Usage         provider.Usage
-	StopReason    provider.StopReason
-	Metadata      map[string]string
+	// UnlimitedIterations takes precedence over MaxIterations when true.
+	UnlimitedIterations bool
+	Usage               provider.Usage
+	StopReason          provider.StopReason
+	Metadata            map[string]string
 }
 
 type OutputGuardrailResult struct {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Viking602/go-hydaelyn/api"
 	"github.com/Viking602/go-hydaelyn/message"
 	"github.com/Viking602/go-hydaelyn/provider"
 	"github.com/Viking602/go-hydaelyn/tool"
@@ -71,9 +72,12 @@ func TestEngineRunsToolLoop(t *testing.T) {
 	}
 }
 
-// alwaysToolProvider emits a (non-terminal) tool call on every turn, so the
-// loop only ever stops by hitting its iteration ceiling.
-type alwaysToolProvider struct{ calls int }
+// alwaysToolProvider emits a non-terminal tool call on every turn unless
+// completeAfter is positive and that many tool turns have completed.
+type alwaysToolProvider struct {
+	calls         int
+	completeAfter int
+}
 
 func (*alwaysToolProvider) Metadata() provider.Metadata {
 	return provider.Metadata{Name: "always-tool"}
@@ -81,6 +85,12 @@ func (*alwaysToolProvider) Metadata() provider.Metadata {
 
 func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (provider.Stream, error) {
 	p.calls++
+	if p.completeAfter > 0 && p.calls > p.completeAfter {
+		return provider.NewSliceStream([]provider.Event{
+			{Kind: provider.EventTextDelta, Text: "done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}), nil
+	}
 	return provider.NewSliceStream([]provider.Event{
 		{
 			Kind: provider.EventToolCall,
@@ -122,6 +132,49 @@ func TestRunMessagesDefaultMaxIterationsIsTwelve(t *testing.T) {
 	}
 	if prov.calls != 12 {
 		t.Fatalf("expected 12 provider calls at the default ceiling, got %d", prov.calls)
+	}
+}
+
+func TestRunMessagesUnlimitedIterationsRunsUntilCompletion(t *testing.T) {
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	},
+	) (string, error) {
+		return "result", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	prov := &alwaysToolProvider{completeAfter: 20}
+	engine := Engine{Provider: prov, Tools: tool.NewBus(driver)}
+	result, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:               "test-model",
+		Messages:            []message.Message{message.NewText(message.RoleUser, "continue until done")},
+		UnlimitedIterations: true,
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if result.StopReason != provider.StopReasonComplete || result.Iterations != 21 {
+		t.Fatalf("result stop=%q iterations=%d, want complete after 21", result.StopReason, result.Iterations)
+	}
+	if prov.calls != 21 {
+		t.Fatalf("provider calls = %d, want 21", prov.calls)
+	}
+}
+
+func TestEngineRunForwardsUnlimitedIterations(t *testing.T) {
+	prov := &alwaysToolProvider{completeAfter: 20}
+	engine := newLoopToolEngine(t, prov)
+	engine.LoopPolicy = LoopPolicy{UnlimitedIterations: true}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "continue until done"}, OutputPolicy{})
+
+	if result.Failure != nil {
+		t.Fatalf("Engine.Run() failure = %v", result.Failure)
+	}
+	if result.StopReason != provider.StopReasonComplete || len(result.Steps) != 21 {
+		t.Fatalf("result stop=%q steps=%d, want complete after 21", result.StopReason, len(result.Steps))
 	}
 }
 

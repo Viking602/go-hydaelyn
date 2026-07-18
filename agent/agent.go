@@ -55,7 +55,10 @@ type LoopInput struct {
 	Metadata      map[string]string
 	ToolMode      tool.Mode
 	MaxIterations int
-	OnEvent       func(provider.Event) error
+	// UnlimitedIterations explicitly disables the model-turn ceiling. When
+	// false, an unset MaxIterations retains the conservative default of 12.
+	UnlimitedIterations bool
+	OnEvent             func(provider.Event) error
 
 	// Sink, when set, receives a live stream.Frame for every provider
 	// event and tool result as the loop runs. It is a transient
@@ -217,7 +220,7 @@ type Engine struct {
 // RunMessages is the low-level loop that drives one LoopInput to
 // completion. Engine.Run is the task-level wrapper most callers want.
 func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutput, err error) {
-	if input.MaxIterations <= 0 {
+	if !input.UnlimitedIterations && input.MaxIterations <= 0 {
 		// Default loop ceiling when the caller sets no bound. 12 sits above
 		// OpenAI's default of 10 and well below LangGraph's 25; the prior
 		// default of 4 truncated legitimate multi-tool runs. This is the soft
@@ -230,7 +233,11 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	}
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
-	steps := make([]Step, 0, input.MaxIterations)
+	stepCapacity := input.MaxIterations
+	if input.UnlimitedIterations {
+		stepCapacity = 16
+	}
+	steps := make([]Step, 0, stepCapacity)
 	toolCallsUsed := 0
 	// turnsRun counts the model turns that have actually run (their usage folded
 	// into totalUsage). It is set once a turn completes, before the per-turn Step
@@ -258,7 +265,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
 		}
 	}()
-	for iteration := 0; iteration < input.MaxIterations; iteration++ {
+	for iteration := 0; input.UnlimitedIterations || iteration < input.MaxIterations; iteration++ {
 		// A cancelled or expired context ends the loop promptly rather than
 		// issuing another model turn; the cause (context.Canceled or
 		// context.DeadlineExceeded) flows through loopErrorFailure, which maps a
@@ -821,14 +828,15 @@ func (e Engine) applyOutputGuardrails(ctx context.Context, input LoopInput, curr
 			continue
 		}
 		result, err := guardrail.Check(ctx, OutputGuardrailInput{
-			Model:         input.Model,
-			Messages:      cloneMessages(current),
-			Output:        candidate,
-			Iteration:     iteration,
-			MaxIterations: input.MaxIterations,
-			Usage:         usage,
-			StopReason:    stopReason,
-			Metadata:      cloneStringMap(input.Metadata),
+			Model:               input.Model,
+			Messages:            cloneMessages(current),
+			Output:              candidate,
+			Iteration:           iteration,
+			MaxIterations:       input.MaxIterations,
+			UnlimitedIterations: input.UnlimitedIterations,
+			Usage:               usage,
+			StopReason:          stopReason,
+			Metadata:            cloneStringMap(input.Metadata),
 		})
 		if err != nil {
 			return message.Message{}, nil, RetryPolicy{}, err
@@ -845,7 +853,7 @@ func (e Engine) applyOutputGuardrails(ctx context.Context, input LoopInput, curr
 			candidate = *normalized.Replacement
 		case OutputGuardrailActionRetry:
 			e.recordOutputGuardrailDecision(ctx, input, guardrail.Name(), normalized.Action, normalized.Reason, iteration, normalized.Metadata)
-			if iteration >= input.MaxIterations {
+			if !input.UnlimitedIterations && iteration >= input.MaxIterations {
 				return message.Message{}, nil, RetryPolicy{}, &OutputGuardrailRetryLimitExceededError{
 					Guardrail: guardrail.Name(),
 					Output:    candidate,
