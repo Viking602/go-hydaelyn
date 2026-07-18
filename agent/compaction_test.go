@@ -191,3 +191,146 @@ func TestEngineRunWiresContextManagerCompact(t *testing.T) {
 		t.Fatalf("Engine.Run did not invoke ContextManager.Compact; failure=%#v", result.Failure)
 	}
 }
+
+func TestEngineRunUsesLegacyCompactAsContextTargetFallback(t *testing.T) {
+	cm := &recordingContextManager{}
+	engine := newLoopToolEngine(t, &usageToolProvider{})
+	engine.ContextBuilder = cm
+	engine.LoopPolicy = LoopPolicy{MaxIterations: 2, ContextTokenTarget: 1_000}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "loop"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Engine.Run failure = %#v", result.Failure)
+	}
+	if cm.compactCalls != 2 {
+		t.Fatalf("legacy Compact calls = %d, want one before each request", cm.compactCalls)
+	}
+}
+
+type recordingTargetContextManager struct {
+	legacyCalls int
+	targets     []int
+	histories   [][]message.Message
+	replace     []message.Message
+	fail        error
+}
+
+func (*recordingTargetContextManager) Build(_ context.Context, task api.Task) ([]message.Message, error) {
+	return []message.Message{message.NewText(message.RoleUser, task.Goal)}, nil
+}
+
+func (c *recordingTargetContextManager) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
+	c.legacyCalls++
+	return history, nil
+}
+
+func (c *recordingTargetContextManager) CompactTo(_ context.Context, history []message.Message, targetTokens int) ([]message.Message, error) {
+	c.targets = append(c.targets, targetTokens)
+	c.histories = append(c.histories, append([]message.Message(nil), history...))
+	if c.fail != nil {
+		return history, c.fail
+	}
+	if c.replace != nil {
+		return append([]message.Message(nil), c.replace...), nil
+	}
+	return history, nil
+}
+
+func TestEngineRunCompactsToContextTargetBeforeFirstRequest(t *testing.T) {
+	marker := message.NewText(message.RoleUser, "COMPACTED-BEFORE-FIRST-REQUEST")
+	cm := &recordingTargetContextManager{replace: []message.Message{marker}}
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}}
+	engine := Engine{
+		Provider:       driver,
+		ContextBuilder: cm,
+		LoopPolicy:     LoopPolicy{ContextTokenTarget: 1_000},
+	}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "oversized history"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Engine.Run failure = %#v", result.Failure)
+	}
+	if !reflect.DeepEqual(cm.targets, []int{1_000}) {
+		t.Fatalf("CompactTo targets = %v, want [1000]", cm.targets)
+	}
+	if cm.legacyCalls != 0 {
+		t.Fatalf("legacy Compact calls = %d, want 0 when CompactTo is available", cm.legacyCalls)
+	}
+	if len(driver.requests) != 1 || len(driver.requests[0].Messages) != 1 || driver.requests[0].Messages[0].Text != marker.Text {
+		t.Fatalf("first provider request messages = %#v, want compacted marker", driver.requests)
+	}
+}
+
+func TestEngineRunPreparesContextAfterToolResult(t *testing.T) {
+	cm := &recordingTargetContextManager{}
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup"}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+		{
+			{Kind: provider.EventTextDelta, Text: "done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		},
+	}}
+	engine := newLoopToolEngine(t, driver)
+	engine.ContextBuilder = cm
+	engine.LoopPolicy = LoopPolicy{ContextTokenTarget: 2_000}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "use a tool"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Engine.Run failure = %#v", result.Failure)
+	}
+	if !reflect.DeepEqual(cm.targets, []int{2_000, 2_000}) {
+		t.Fatalf("CompactTo targets = %v, want one call before each request", cm.targets)
+	}
+	if len(cm.histories) != 2 {
+		t.Fatalf("CompactTo history count = %d, want 2", len(cm.histories))
+	}
+	foundToolResult := false
+	for _, current := range cm.histories[1] {
+		if current.Role == message.RoleTool {
+			foundToolResult = true
+			break
+		}
+	}
+	if !foundToolResult {
+		t.Fatalf("second CompactTo history omitted tool result: %#v", cm.histories[1])
+	}
+}
+
+func TestEngineRunContextPreparationFailureSkipsProvider(t *testing.T) {
+	boom := errors.New("target compact boom")
+	cm := &recordingTargetContextManager{fail: boom}
+	driver := &scriptedProvider{}
+	engine := Engine{
+		Provider:       driver,
+		ContextBuilder: cm,
+		LoopPolicy:     LoopPolicy{ContextTokenTarget: 1_000},
+	}
+
+	result := engine.Run(context.Background(), api.Task{Goal: "oversized history"}, OutputPolicy{})
+	if result.Failure == nil || !errors.Is(result.Failure, boom) {
+		t.Fatalf("Engine.Run failure = %#v, want wrapped compaction error", result.Failure)
+	}
+	if len(driver.requests) != 0 {
+		t.Fatalf("provider received %d requests after context preparation failed", len(driver.requests))
+	}
+}
+
+func TestTargetedCompactionMustPreserveSkillContext(t *testing.T) {
+	skillMessage := message.NewText(message.RoleSystem, "required skill")
+	skillMessage.Metadata = map[string]string{skillContextMetadataKey: "active"}
+	before := []message.Message{skillMessage, message.NewText(message.RoleUser, "task")}
+	after := []message.Message{message.NewText(message.RoleUser, "task")}
+
+	if err := validateSkillContextPreserved(before, after); err == nil {
+		t.Fatal("targeted compaction accepted history without required skill context")
+	}
+	if err := validateSkillContextPreserved(before, before); err != nil {
+		t.Fatalf("targeted compaction rejected preserved skill context: %v", err)
+	}
+}

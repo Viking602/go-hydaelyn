@@ -8,22 +8,35 @@ import (
 )
 
 // ContextManager builds the initial message slice for one api.Task and
-// compacts historical message lists when the loop's token budget is
-// tight. Engine.Run reads ContextManager.Build to seed the loop and wires
-// Compact into it: once the LoopPolicy.MaxTokens / TaskBudget boundary is
-// approached, the loop calls Compact before every remaining turn, so an
-// implementation must be idempotent on an already-compacted history. See
-// LoopInput.Compact for the trigger and determinism contract.
+// compacts historical message lists. Engine.Run reads ContextManager.Build to
+// seed the loop and wires Compact into it. See LoopInput.Compact for the legacy
+// cumulative-budget trigger and TargetContextManager for context-aware
+// preparation before each model request.
 //
-// Compact receives only the history — not the remaining token budget —
-// so an implementation cannot size its output toward a target; it must
-// instead be deterministic and idempotent (compacting an
-// already-compacted history is cheap and stable), because the loop
-// invokes it before every remaining turn once the budget boundary is
-// approached and replay must reproduce the same compactions (ADR-007).
+// Compact receives only the history, so it cannot guarantee a token target. It
+// must be deterministic and idempotent because the legacy cumulative-budget
+// path may call it on every remaining turn, while the context-target fallback
+// may call it before every request including the first. Replay must reproduce
+// the same compactions (ADR-007).
 type ContextManager interface {
 	Build(ctx context.Context, task api.Task) ([]message.Message, error)
 	Compact(ctx context.Context, history []message.Message) ([]message.Message, error)
+}
+
+// TargetContextManager optionally extends ContextManager with token-targeted
+// context preparation. Engine.Run invokes CompactTo before every model request,
+// including the first, when LoopPolicy.ContextTokenTarget is positive. The
+// implementation owns model-appropriate token estimation and should cheaply
+// return history unchanged when it already fits. targetTokens is the caller's
+// usable history allowance after reserving space for output, tools, schemas,
+// reasoning, and provider framing; it is not the model's raw context window.
+//
+// CompactTo must be deterministic and idempotent for replay, preserve complete
+// tool turns, and retain framework-owned skill context messages. The engine
+// validates both invariants before issuing the request.
+type TargetContextManager interface {
+	ContextManager
+	CompactTo(ctx context.Context, history []message.Message, targetTokens int) ([]message.Message, error)
 }
 
 // ContextBuilderFunc adapts a plain function to the ContextManager

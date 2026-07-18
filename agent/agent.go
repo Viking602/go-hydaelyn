@@ -88,6 +88,13 @@ type LoopInput struct {
 	MaxToolCalls int
 	MaxSteps     int
 
+	// ContextTokenTarget is the usable token allowance for message history in
+	// one provider request, after the caller reserves room for output, tools,
+	// schemas, reasoning, and provider framing. It is independent of MaxTokens,
+	// which remains the cumulative run-spend ceiling. When positive, the loop
+	// prepares context before every model turn, including the first.
+	ContextTokenTarget int
+
 	// StepPolicy, when set, is consulted at each continue boundary (after a
 	// non-terminal tool turn) so a caller can override the loop's natural
 	// decision to iterate again — stopping early, diverting to a handoff, or
@@ -100,14 +107,13 @@ type LoopInput struct {
 	// the finalized step in the returned partial trace.
 	StepRecorder StepRecorder
 
-	// Compact, when set, is invoked to shrink the running message history once
-	// the per-loop token budget is approached (MaxTokens > 0 and the consumed
-	// tokens leave one headroom band or less of it). It replaces the working
-	// history with the returned slice before the next turn, so subsequent turns
-	// send a smaller prompt. It never runs when MaxTokens is zero, so a run with
-	// no token budget never compacts. Engine.Run wires this from the Engine's
-	// ContextManager.Compact; the default context managers pass the history
-	// through unchanged, so compaction is opt-in via a real compactor.
+	// Compact is the source-compatible history compaction hook. With no
+	// ContextTokenTarget it retains the legacy trigger: the loop invokes it once
+	// cumulative MaxTokens spend enters the final headroom band. With a positive
+	// target and no CompactTo, the loop invokes Compact before every request as a
+	// best-effort fallback, including when MaxTokens is zero; because Compact does
+	// not receive the target it cannot guarantee a fit. Engine.Run wires this from
+	// ContextManager.Compact.
 	//
 	// Consumed tokens only grow, so once the loop enters the headroom band the
 	// trigger holds for every remaining turn and Compact runs before each one. A
@@ -120,6 +126,13 @@ type LoopInput struct {
 	// returns successfully, the loop validates that its output contains only
 	// complete tool turns and rejects malformed or split exchanges.
 	Compact func(ctx context.Context, history []message.Message) ([]message.Message, error)
+
+	// CompactTo is the token-aware context preparation hook. When
+	// ContextTokenTarget is positive, the loop invokes CompactTo before every
+	// provider request and prefers it over Compact. The implementation owns
+	// model-specific token estimation and should return history unchanged when it
+	// already fits. Engine.Run wires this from TargetContextManager.
+	CompactTo func(ctx context.Context, history []message.Message, targetTokens int) ([]message.Message, error)
 }
 
 // LoopOutput is the message-level result from Engine.RunMessages. The
@@ -263,6 +276,12 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				return out, preErr
 			}
 			current = next
+		} else if input.ContextTokenTarget > 0 {
+			prepared, prepareErr := maybeCompactHistory(ctx, input, current, totalUsage)
+			if prepareErr != nil {
+				return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), prepareErr
+			}
+			current = prepared
 		}
 		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
@@ -531,8 +550,8 @@ func recordFinalizedStep(ctx context.Context, recorder StepRecorder, steps []Ste
 }
 
 // loopTurnPreamble runs the per-iteration preamble for turns after the first: it
-// stops the loop when a budget dimension is exhausted (budgetAbort) and compacts
-// the running history when the token budget is approached. When stop is true the
+// stops the loop when a budget dimension is exhausted (budgetAbort), then
+// prepares the running history for the upcoming request. When stop is true the
 // loop returns out/err as-is; otherwise next is the history — possibly
 // compacted — to drive the upcoming turn with. iteration is the count of model
 // turns already issued, matching the budget-abort contract.
@@ -624,25 +643,36 @@ func budgetRemaining(input LoopInput, usage provider.Usage, toolCallsUsed, steps
 // trigger in integer arithmetic, off the floating-point path.
 const compactionBudgetHeadroomDivisor = 5
 
-// maybeCompactHistory returns the history to drive the next turn with, compacted
-// when a Compact hook is wired and the per-loop token budget is being approached
-// (MaxTokens > 0 and the consumed tokens leave one headroom band or less). It is
-// a no-op — returning the input history unchanged — when no Compact is set or no
-// token budget bounds the loop, so a run that does not opt into both never
-// changes shape. A Compact error or an incomplete tool turn in its successful
-// output aborts the loop rather than silently proceeding on an invalid history.
-// Callers reach this only after the pre-turn budget check has confirmed
-// remaining budget is positive, so the headroom comparison never sees a
-// negative remainder.
+// maybeCompactHistory returns the history to drive the next turn. A positive
+// ContextTokenTarget invokes token-targeted preparation on every request,
+// preferring CompactTo and falling back to Compact for source-compatible
+// managers. With no target it preserves the legacy behavior: Compact runs only
+// when cumulative MaxTokens spend enters its final headroom band. A compaction
+// error or incomplete tool turn aborts rather than sending malformed history.
 func maybeCompactHistory(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage) ([]message.Message, error) {
-	if input.Compact == nil || input.MaxTokens <= 0 {
-		return current, nil
+	var (
+		compacted []message.Message
+		err       error
+	)
+	if input.ContextTokenTarget > 0 {
+		switch {
+		case input.CompactTo != nil:
+			compacted, err = input.CompactTo(ctx, current, input.ContextTokenTarget)
+		case input.Compact != nil:
+			compacted, err = input.Compact(ctx, current)
+		default:
+			return current, nil
+		}
+	} else {
+		if input.Compact == nil || input.MaxTokens <= 0 {
+			return current, nil
+		}
+		remaining := input.MaxTokens - int64(usage.TotalTokens)
+		if remaining > input.MaxTokens/compactionBudgetHeadroomDivisor {
+			return current, nil
+		}
+		compacted, err = input.Compact(ctx, current)
 	}
-	remaining := input.MaxTokens - int64(usage.TotalTokens)
-	if remaining > input.MaxTokens/compactionBudgetHeadroomDivisor {
-		return current, nil
-	}
-	compacted, err := input.Compact(ctx, current)
 	if err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
 	}

@@ -58,6 +58,26 @@ result, err := engine.Run(ctx, agent.Input{
 })
 ```
 
+## Context-Aware Compaction
+
+`api.TaskBudget.MaxTokens` limits cumulative token spend across an agent run; it
+is not a model context-window setting. Derive a usable per-request history target
+from the selected model after reserving room for output, reasoning, tool schemas,
+and provider framing, then set `LoopPolicy.ContextTokenTarget`:
+
+```go
+engine.LoopPolicy.ContextTokenTarget = modelContextWindow * 3 / 4
+```
+
+Implement `agent.TargetContextManager` to receive that target in `CompactTo`.
+When the target is positive, the engine invokes `CompactTo` before every model
+request, including the first request and requests following tool results. The
+manager owns model-appropriate token estimation, returns unchanged history when
+it already fits, and must preserve complete tool turns and framework-owned skill
+context. Existing `ContextManager` implementations remain compatible; their
+`Compact` method is used as a best-effort fallback but cannot guarantee a token
+target because it does not receive one.
+
 ## OpenAI Wire APIs
 
 The OpenAI provider uses Chat Completions by default, including when
