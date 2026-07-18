@@ -16,11 +16,12 @@ import (
 // TeamRunner connects multiagent.Drive to Runner-backed execution and
 // checkpoints TeamState after every scheduler tick.
 type TeamRunner struct {
-	Runner    *hydaelyn.Runner
-	Team      multiagent.Team
-	BuildDeps agent.BuildDeps
-	Options   multiagent.DriveOptions
-	TTL       time.Duration
+	Runner         *hydaelyn.Runner
+	Team           multiagent.Team
+	BuildDeps      agent.BuildDeps
+	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
+	Options        multiagent.DriveOptions
+	TTL            time.Duration
 }
 
 func (r TeamRunner) Start(ctx context.Context, runID string) (multiagent.DriveResult, error) {
@@ -117,10 +118,11 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 		classes[class.Name] = class
 	}
 	result, driveErr := multiagent.Drive(runCtx, state.RunID, r.Team.Scheduler, RunnerExecutor{
-		Runner:    r.Runner,
-		Classes:   classes,
-		BuildDeps: r.BuildDeps,
-		TTL:       r.TTL,
+		Runner:         r.Runner,
+		Classes:        classes,
+		BuildDeps:      r.BuildDeps,
+		DecorateEngine: r.DecorateEngine,
+		TTL:            r.TTL,
 	}, opts)
 	cancel()
 	heartbeatErr := <-heartbeatDone

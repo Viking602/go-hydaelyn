@@ -133,10 +133,15 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 			Payload: json.RawMessage(`{"value":"evidence"}`),
 		},
 	}
+	decorated := false
 	executor := RunnerExecutor{
 		Runner:    runner,
 		Classes:   map[string]multiagent.AgentClass{class.Name: class},
 		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
+		DecorateEngine: func(engine agent.Engine, got multiagent.Dispatch, gotClass multiagent.AgentClass) agent.Engine {
+			decorated = got.To == dispatch.To && gotClass.Name == class.Name
+			return engine
+		},
 	}
 	report, err := executor.Execute(ctx, dispatch)
 	if err != nil {
@@ -144,6 +149,9 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	}
 	if report.Status != api.ReportStatusSuccess {
 		t.Fatalf("Execute() report = %#v, want success", report)
+	}
+	if !decorated {
+		t.Fatal("Execute() did not decorate the built engine")
 	}
 	uow, err := runner.Begin(ctx)
 	if err != nil {

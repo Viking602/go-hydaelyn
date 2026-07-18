@@ -17,10 +17,11 @@ import (
 // RunnerExecutor persists a multi-agent dispatch through Runner before
 // executing it with the bounded agent engine.
 type RunnerExecutor struct {
-	Runner    *hydaelyn.Runner
-	Classes   map[string]multiagent.AgentClass
-	BuildDeps agent.BuildDeps
-	TTL       time.Duration
+	Runner         *hydaelyn.Runner
+	Classes        map[string]multiagent.AgentClass
+	BuildDeps      agent.BuildDeps
+	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
+	TTL            time.Duration
 }
 
 func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatch) (api.TypedReport, error) {
@@ -38,6 +39,9 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 	engine, err := agent.Build(class.ToSpec(), e.BuildDeps)
 	if err != nil {
 		return api.TypedReport{}, err
+	}
+	if e.DecorateEngine != nil {
+		engine = e.DecorateEngine(engine, dispatch, class)
 	}
 	e.Runner.RegisterAgent(api.AgentProfile{ID: dispatch.To})
 	task, err := e.ensureTask(ctx, dispatch)
