@@ -66,9 +66,12 @@ type responsesResponse struct {
 }
 
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+	InputTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
 }
 
 type responsesIncompleteDetails struct {
@@ -462,9 +465,10 @@ func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, st
 	return provider.Event{
 		Kind: provider.EventDone,
 		Usage: provider.Usage{
-			InputTokens:  usage.InputTokens,
-			OutputTokens: usage.OutputTokens,
-			TotalTokens:  usage.TotalTokens,
+			InputTokens:       usage.InputTokens,
+			CachedInputTokens: usage.InputTokensDetails.CachedTokens,
+			OutputTokens:      usage.OutputTokens,
+			TotalTokens:       usage.TotalTokens,
 		},
 		StopReason:    stopReason,
 		ProviderState: state,

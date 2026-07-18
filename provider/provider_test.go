@@ -15,14 +15,16 @@ func TestUsageAdd(t *testing.T) {
 		u1         Usage
 		u2         Usage
 		wantInput  int
+		wantCached int
 		wantOutput int
 		wantTotal  int
 	}{
 		{
 			name:       "add two usages",
-			u1:         Usage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
-			u2:         Usage{InputTokens: 5, OutputTokens: 10, TotalTokens: 15},
+			u1:         Usage{InputTokens: 10, CachedInputTokens: 4, OutputTokens: 20, TotalTokens: 30},
+			u2:         Usage{InputTokens: 5, CachedInputTokens: 3, OutputTokens: 10, TotalTokens: 15},
 			wantInput:  15,
+			wantCached: 7,
 			wantOutput: 30,
 			wantTotal:  45,
 		},
@@ -34,6 +36,9 @@ func TestUsageAdd(t *testing.T) {
 
 			if u.InputTokens != tt.wantInput {
 				t.Errorf("InputTokens = %v, want %v", u.InputTokens, tt.wantInput)
+			}
+			if u.CachedInputTokens != tt.wantCached {
+				t.Errorf("CachedInputTokens = %v, want %v", u.CachedInputTokens, tt.wantCached)
 			}
 			if u.OutputTokens != tt.wantOutput {
 				t.Errorf("OutputTokens = %v, want %v", u.OutputTokens, tt.wantOutput)

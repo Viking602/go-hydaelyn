@@ -43,7 +43,7 @@ func TestDriverStreamParsesChatCompletionSSE(t *testing.T) {
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"hy\"}}]}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"daelyn\\\"}\"}}]}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n"))
-		_, _ = writer.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8}}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8,\"prompt_tokens_details\":{\"cached_tokens\":2}}}\n\n"))
 		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -76,7 +76,7 @@ func TestDriverStreamParsesChatCompletionSSE(t *testing.T) {
 	if last.Kind != provider.EventDone || last.StopReason != provider.StopReasonToolUse {
 		t.Fatalf("expected tool-use done event, got %#v", last)
 	}
-	if last.Usage.TotalTokens != 8 {
+	if last.Usage.TotalTokens != 8 || last.Usage.CachedInputTokens != 2 {
 		t.Fatalf("expected usage in final event, got %#v", last)
 	}
 }
