@@ -9,6 +9,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
 )
 
 // ErrNotInitialized is returned when an operation requires an MCP session
@@ -36,16 +37,28 @@ type Client struct {
 	closeErr      error
 	operationCtx  context.Context
 	operationStop context.CancelFunc
+	options       Options
+}
+
+type Options struct {
+	ElicitationHandler mcpcontract.ElicitationHandler
 }
 
 // New creates a client for transport. Initialize establishes the session.
 func New(transport Transport) *Client {
+	return NewWithOptions(transport, Options{})
+}
+
+// NewWithOptions creates a client with handlers for optional server-to-client
+// MCP capabilities.
+func NewWithOptions(transport Transport, options Options) *Client {
 	operationCtx, operationStop := context.WithCancel(context.Background())
 	return &Client{
 		transport:     transport,
 		transportErr:  validateTransport(transport),
 		operationCtx:  operationCtx,
 		operationStop: operationStop,
+		options:       options,
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
 )
 
 // Initialize connects the transport, negotiates the protocol, and sends the
@@ -45,7 +47,21 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (Initiali
 		c.initTransport = transport
 		c.mu.Unlock()
 
-		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: name, Version: version}, nil)
+		var clientOptions *sdkmcp.ClientOptions
+		if c.options.ElicitationHandler != nil {
+			clientOptions = &sdkmcp.ClientOptions{ElicitationHandler: func(handlerCtx context.Context, request *sdkmcp.ElicitRequest) (*sdkmcp.ElicitResult, error) {
+				params := request.Params
+				result, handlerErr := c.options.ElicitationHandler(handlerCtx, mcpcontract.Elicitation{
+					Mode: params.Mode, Message: params.Message, URL: params.URL,
+					ElicitationID: params.ElicitationID, RequestedSchema: params.RequestedSchema,
+				})
+				if handlerErr != nil {
+					return nil, handlerErr
+				}
+				return &sdkmcp.ElicitResult{Action: result.Action, Content: result.Content}, nil
+			}}
+		}
+		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: name, Version: version}, clientOptions)
 		session, initErr := client.Connect(connectCtx, transport, nil)
 		cancel()
 		if initErr != nil {

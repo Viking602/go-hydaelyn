@@ -17,6 +17,21 @@ type Client interface {
 	Close() error
 }
 
+type Elicitation struct {
+	Mode            string
+	Message         string
+	URL             string
+	ElicitationID   string
+	RequestedSchema any
+}
+
+type ElicitationResult struct {
+	Action  string
+	Content map[string]any
+}
+
+type ElicitationHandler func(context.Context, Elicitation) (ElicitationResult, error)
+
 type ServerInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`

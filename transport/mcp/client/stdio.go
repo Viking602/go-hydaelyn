@@ -24,6 +24,11 @@ type StdioConfig struct {
 // DialStdio configures a stdio client. Initialize starts the subprocess and
 // completes the MCP handshake.
 func DialStdio(ctx context.Context, cfg StdioConfig) (*Client, error) {
+	return DialStdioWithOptions(ctx, cfg, Options{})
+}
+
+// DialStdioWithOptions configures a stdio client with optional MCP capability handlers.
+func DialStdioWithOptions(ctx context.Context, cfg StdioConfig, options Options) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -34,5 +39,5 @@ func DialStdio(ctx context.Context, cfg StdioConfig) (*Client, error) {
 	} else {
 		cmd.Env = append(make([]string, 0, len(cfg.Env)), cfg.Env...)
 	}
-	return New(newCommandIOTransport(cmd, defaultStdioCloseTimeout)), nil
+	return NewWithOptions(newCommandIOTransport(cmd, defaultStdioCloseTimeout), options), nil
 }
