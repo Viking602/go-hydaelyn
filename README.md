@@ -10,7 +10,7 @@ human approvals, and idempotent side effects. Its `Runner` records typed `Run`,
 configurable stores. Applications embed the runner and provide the production
 storage implementation.
 
-> **Status:** The latest release is [v0.11.3](https://github.com/Viking602/go-hydaelyn/releases/tag/v0.11.3).
+> **Status:** The latest release is [v0.11.5](https://github.com/Viking602/go-hydaelyn/releases/tag/v0.11.5).
 > The public API may still change before v1.0.
 
 ## Why Hydaelyn
