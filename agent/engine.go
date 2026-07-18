@@ -62,23 +62,26 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 	}
 
 	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(task)
+	compact, compactTo := e.compactors(runtime)
 	input := LoopInput{
-		Model:            e.Model,
-		Messages:         messages,
-		ToolMode:         e.ToolMode,
-		MaxIterations:    e.LoopPolicy.MaxIterations,
-		MaxTokens:        maxTokens,
-		MaxToolCalls:     maxToolCalls,
-		MaxSteps:         maxSteps,
-		StopSequences:    e.StopSequences,
-		ThinkingBudget:   e.ThinkingBudget,
-		ExtraBody:        e.ExtraBody,
-		OutputGuardrails: e.OutputGuardrails,
-		OutputRecorder:   e.OutputRecorder,
-		Sink:             sink,
-		StepPolicy:       e.StepPolicy,
-		StepRecorder:     e.StepRecorder,
-		Compact:          e.compactor(runtime),
+		Model:              e.Model,
+		Messages:           messages,
+		ToolMode:           e.ToolMode,
+		MaxIterations:      e.LoopPolicy.MaxIterations,
+		MaxTokens:          maxTokens,
+		MaxToolCalls:       maxToolCalls,
+		MaxSteps:           maxSteps,
+		ContextTokenTarget: e.LoopPolicy.ContextTokenTarget,
+		StopSequences:      e.StopSequences,
+		ThinkingBudget:     e.ThinkingBudget,
+		ExtraBody:          e.ExtraBody,
+		OutputGuardrails:   e.OutputGuardrails,
+		OutputRecorder:     e.OutputRecorder,
+		Sink:               sink,
+		StepPolicy:         e.StepPolicy,
+		StepRecorder:       e.StepRecorder,
+		Compact:            compact,
+		CompactTo:          compactTo,
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
@@ -397,6 +400,52 @@ func (e Engine) compactor(runtime *skillRuntime) func(context.Context, []message
 		}
 		return injectSkillMessages(compacted, runtime.skillsForCompaction(compacted), runtime.availableSkills()), nil
 	}
+}
+
+// compactors binds the source-compatible ContextManager hook and, when the
+// manager opts in, its token-targeted extension. The targeted path injects
+// active skill context before fitting and verifies that compaction preserves it,
+// so framework content cannot grow the request after the fit decision.
+func (e Engine) compactors(runtime *skillRuntime) (
+	func(context.Context, []message.Message) ([]message.Message, error),
+	func(context.Context, []message.Message, int) ([]message.Message, error),
+) {
+	compact := e.compactor(runtime)
+	targeted, ok := e.ContextBuilder.(TargetContextManager)
+	if !ok {
+		return compact, nil
+	}
+	compactTo := func(ctx context.Context, history []message.Message, targetTokens int) ([]message.Message, error) {
+		prepared := injectSkillMessages(history, runtime.skillsForCompaction(history), runtime.availableSkills())
+		compacted, err := targeted.CompactTo(ctx, prepared, targetTokens)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateSkillContextPreserved(prepared, compacted); err != nil {
+			return nil, err
+		}
+		return compacted, nil
+	}
+	return compact, compactTo
+}
+
+func validateSkillContextPreserved(before, after []message.Message) error {
+	required := map[string]string{}
+	for _, current := range before {
+		if kind := current.Metadata[skillContextMetadataKey]; kind != "" {
+			required[kind] = current.Text
+		}
+	}
+	for _, current := range after {
+		kind := current.Metadata[skillContextMetadataKey]
+		if required[kind] == current.Text {
+			delete(required, kind)
+		}
+	}
+	if len(required) != 0 {
+		return fmt.Errorf("agent: targeted context compaction removed framework skill context")
+	}
+	return nil
 }
 
 type defaultContextBuilder struct{}
