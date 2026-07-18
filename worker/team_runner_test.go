@@ -133,7 +133,7 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 			Payload: json.RawMessage(`{"value":"evidence"}`),
 		},
 	}
-	decorated := false
+	decorated, created, prepared := false, false, false
 	executor := RunnerExecutor{
 		Runner:    runner,
 		Classes:   map[string]multiagent.AgentClass{class.Name: class},
@@ -141,6 +141,14 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 		DecorateEngine: func(engine agent.Engine, got multiagent.Dispatch, gotClass multiagent.AgentClass) agent.Engine {
 			decorated = got.To == dispatch.To && gotClass.Name == class.Name
 			return engine
+		},
+		BeforeTask: func(_ context.Context, got multiagent.Dispatch, gotClass multiagent.AgentClass) error {
+			created = got.To == dispatch.To && gotClass.Name == class.Name
+			return nil
+		},
+		PrepareEngine: func(_ context.Context, engine agent.Engine, got multiagent.Dispatch, gotClass multiagent.AgentClass) (agent.Engine, error) {
+			prepared = got.To == dispatch.To && gotClass.Name == class.Name
+			return engine, nil
 		},
 	}
 	report, err := executor.Execute(ctx, dispatch)
@@ -150,8 +158,8 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	if report.Status != api.ReportStatusSuccess {
 		t.Fatalf("Execute() report = %#v, want success", report)
 	}
-	if !decorated {
-		t.Fatal("Execute() did not decorate the built engine")
+	if !decorated || !created || !prepared {
+		t.Fatalf("Execute() lifecycle callbacks = decorated:%t created:%t prepared:%t", decorated, created, prepared)
 	}
 	uow, err := runner.Begin(ctx)
 	if err != nil {

@@ -20,6 +20,8 @@ type RunnerExecutor struct {
 	Runner         *hydaelyn.Runner
 	Classes        map[string]multiagent.AgentClass
 	BuildDeps      agent.BuildDeps
+	BeforeTask     func(context.Context, multiagent.Dispatch, multiagent.AgentClass) error
+	PrepareEngine  func(context.Context, agent.Engine, multiagent.Dispatch, multiagent.AgentClass) (agent.Engine, error)
 	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
 	TTL            time.Duration
 }
@@ -40,11 +42,8 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 	if err != nil {
 		return api.TypedReport{}, err
 	}
-	if e.DecorateEngine != nil {
-		engine = e.DecorateEngine(engine, dispatch, class)
-	}
 	e.Runner.RegisterAgent(api.AgentProfile{ID: dispatch.To})
-	task, err := e.ensureTask(ctx, dispatch)
+	task, err := e.ensureTask(ctx, dispatch, class)
 	if err != nil {
 		return api.TypedReport{}, err
 	}
@@ -53,6 +52,15 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 			return *task.Result, err
 		}
 		return *task.Result, nil
+	}
+	if e.DecorateEngine != nil {
+		engine = e.DecorateEngine(engine, dispatch, class)
+	}
+	if e.PrepareEngine != nil {
+		engine, err = e.PrepareEngine(ctx, engine, dispatch, class)
+		if err != nil {
+			return api.TypedReport{}, err
+		}
 	}
 	if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
 		return api.TypedReport{}, err
@@ -119,13 +127,18 @@ func (e RunnerExecutor) resolveClass(dispatch multiagent.Dispatch) (string, mult
 	return instanceClassName, class, nil
 }
 
-func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Dispatch) (api.Task, error) {
+func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Dispatch, class multiagent.AgentClass) (api.Task, error) {
 	existing, err := e.Runner.Task(ctx, dispatch.Task.RunID, dispatch.Task.ID)
 	if err == nil {
 		return existing, nil
 	}
 	if !errors.Is(err, api.ErrNotFound) {
 		return api.Task{}, err
+	}
+	if e.BeforeTask != nil {
+		if err := e.BeforeTask(ctx, dispatch, class); err != nil {
+			return api.Task{}, err
+		}
 	}
 	return e.Runner.CreateTask(ctx, api.CreateTaskCommand{
 		RunID:        dispatch.Task.RunID,

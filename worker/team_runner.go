@@ -19,6 +19,8 @@ type TeamRunner struct {
 	Runner         *hydaelyn.Runner
 	Team           multiagent.Team
 	BuildDeps      agent.BuildDeps
+	BeforeTask     func(context.Context, multiagent.Dispatch, multiagent.AgentClass) error
+	PrepareEngine  func(context.Context, agent.Engine, multiagent.Dispatch, multiagent.AgentClass) (agent.Engine, error)
 	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
 	Options        multiagent.DriveOptions
 	TTL            time.Duration
@@ -121,6 +123,8 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 		Runner:         r.Runner,
 		Classes:        classes,
 		BuildDeps:      r.BuildDeps,
+		BeforeTask:     r.BeforeTask,
+		PrepareEngine:  r.PrepareEngine,
 		DecorateEngine: r.DecorateEngine,
 		TTL:            r.TTL,
 	}, opts)
