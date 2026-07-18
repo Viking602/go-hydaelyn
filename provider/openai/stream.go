@@ -68,9 +68,12 @@ type chatToolCallDetail struct {
 type chunk struct {
 	Choices []choiceChunk `json:"choices"`
 	Usage   struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -379,9 +382,10 @@ func (s *openAIStream) handleDoneMarker() {
 func (s *openAIStream) consumeChunk(parsed chunk) {
 	if parsed.Usage.TotalTokens > 0 {
 		s.state.usage = provider.Usage{
-			InputTokens:  parsed.Usage.PromptTokens,
-			OutputTokens: parsed.Usage.CompletionTokens,
-			TotalTokens:  parsed.Usage.TotalTokens,
+			InputTokens:       parsed.Usage.PromptTokens,
+			CachedInputTokens: parsed.Usage.PromptTokensDetails.CachedTokens,
+			OutputTokens:      parsed.Usage.CompletionTokens,
+			TotalTokens:       parsed.Usage.TotalTokens,
 		}
 	}
 	for _, choice := range parsed.Choices {

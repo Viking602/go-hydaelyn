@@ -368,7 +368,7 @@ data: {"type":"response.output_text.delta","output_index":3,"delta":"Answer"}
 
 data: {"type":"response.refusal.delta","output_index":3,"delta":" refused"}
 
-data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}
+data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":6}}}}
 
 `)
 	events := collectEvents(t, stream)
@@ -405,7 +405,7 @@ data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"re
 	if done.Kind != provider.EventDone || done.StopReason != provider.StopReasonToolUse {
 		t.Fatalf("done event = %#v", done)
 	}
-	if done.Usage != (provider.Usage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18}) {
+	if done.Usage != (provider.Usage{InputTokens: 11, CachedInputTokens: 6, OutputTokens: 7, TotalTokens: 18}) {
 		t.Fatalf("usage = %#v", done.Usage)
 	}
 	wantState := `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}]`

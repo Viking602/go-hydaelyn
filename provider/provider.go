@@ -48,16 +48,18 @@ type Metadata struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"inputTokens,omitempty"`
-	OutputTokens int `json:"outputTokens,omitempty"`
-	TotalTokens  int `json:"totalTokens,omitempty"`
+	InputTokens       int `json:"inputTokens,omitempty"`
+	CachedInputTokens int `json:"cachedInputTokens,omitempty"`
+	OutputTokens      int `json:"outputTokens,omitempty"`
+	TotalTokens       int `json:"totalTokens,omitempty"`
 }
 
 func (u Usage) Add(v Usage) Usage {
 	return Usage{
-		InputTokens:  u.InputTokens + v.InputTokens,
-		OutputTokens: u.OutputTokens + v.OutputTokens,
-		TotalTokens:  u.TotalTokens + v.TotalTokens,
+		InputTokens:       u.InputTokens + v.InputTokens,
+		CachedInputTokens: u.CachedInputTokens + v.CachedInputTokens,
+		OutputTokens:      u.OutputTokens + v.OutputTokens,
+		TotalTokens:       u.TotalTokens + v.TotalTokens,
 	}
 }
 
