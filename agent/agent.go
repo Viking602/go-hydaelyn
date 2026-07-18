@@ -220,23 +220,12 @@ type Engine struct {
 // RunMessages is the low-level loop that drives one LoopInput to
 // completion. Engine.Run is the task-level wrapper most callers want.
 func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutput, err error) {
-	if !input.UnlimitedIterations && input.MaxIterations <= 0 {
-		// Default loop ceiling when the caller sets no bound. 12 sits above
-		// OpenAI's default of 10 and well below LangGraph's 25; the prior
-		// default of 4 truncated legitimate multi-tool runs. This is the soft
-		// ceiling: exhausting it yields StopReasonMaxTurns, which flows through
-		// output validation (validate-first) rather than surfacing a failure.
-		input.MaxIterations = 12
-	}
+	input, stepCapacity := normalizeIterationPolicy(input)
 	if input.ToolMode == "" {
 		input.ToolMode = tool.ModeSequential
 	}
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
-	stepCapacity := input.MaxIterations
-	if input.UnlimitedIterations {
-		stepCapacity = 16
-	}
 	steps := make([]Step, 0, stepCapacity)
 	toolCallsUsed := 0
 	// turnsRun counts the model turns that have actually run (their usage folded
@@ -265,7 +254,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
 		}
 	}()
-	for iteration := 0; input.UnlimitedIterations || iteration < input.MaxIterations; iteration++ {
+	for iteration := 0; iterationAllowed(input, iteration); iteration++ {
 		// A cancelled or expired context ends the loop promptly rather than
 		// issuing another model turn; the cause (context.Canceled or
 		// context.DeadlineExceeded) flows through loopErrorFailure, which maps a
@@ -425,6 +414,22 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+func normalizeIterationPolicy(input LoopInput) (LoopInput, int) {
+	if input.UnlimitedIterations {
+		return input, 16
+	}
+	if input.MaxIterations <= 0 {
+		// The conservative default remains in place unless a caller explicitly
+		// opts into unlimited interactive turns.
+		input.MaxIterations = 12
+	}
+	return input, input.MaxIterations
+}
+
+func iterationAllowed(input LoopInput, iteration int) bool {
+	return input.UnlimitedIterations || iteration < input.MaxIterations
 }
 
 func (e Engine) finalizeNoToolStep(
