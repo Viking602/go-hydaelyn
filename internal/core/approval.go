@@ -3,9 +3,9 @@ package core
 import (
 	"context"
 
-	approvalsvc "github.com/Viking602/go-hydaelyn/internal/approval"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/lifecycle"
+	approvalsvc "github.com/Viking602/venat/internal/approval"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/lifecycle"
 )
 
 type (

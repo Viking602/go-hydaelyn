@@ -6,8 +6,8 @@ import (
 	"go/format"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/tool"
 )
 
 // gofmtInput is the decoded argument shape for coding.gofmt.

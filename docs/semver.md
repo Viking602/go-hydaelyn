@@ -2,7 +2,7 @@
 
 ## Version Policy
 
-Hydaelyn follows SemVer from `v1.0.0` onward:
+Venat follows SemVer from `v1.0.0` onward:
 
 - `MAJOR`: breaking public API or contract changes
 - `MINOR`: backward-compatible features and additive fields
@@ -14,7 +14,7 @@ Runtime correctness has higher priority than benchmark breadth. When a change ti
 
 Stable packages:
 
-- `hydaelyn`
+- `venat`
 - `api`
 - `agent`
 - `blackboard`

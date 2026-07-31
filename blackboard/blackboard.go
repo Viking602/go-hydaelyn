@@ -1,8 +1,8 @@
 // Package blackboard exposes only the stable item and selector contracts used
-// by the Hydaelyn runtime.
+// by the Venat runtime.
 package blackboard
 
-import "github.com/Viking602/go-hydaelyn/api"
+import "github.com/Viking602/venat/api"
 
 type (
 	Visibility     = api.BlackboardVisibility

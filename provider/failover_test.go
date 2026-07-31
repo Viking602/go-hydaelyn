@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/errorprovider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/errorprovider"
+	"github.com/Viking602/venat/provider/scripted"
 )
 
 func TestFallback_UsesSecondaryWhenPrimaryFails(t *testing.T) {

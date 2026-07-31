@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 // ExampleNewText demonstrates building a user-authored conversation turn.

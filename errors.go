@@ -1,6 +1,6 @@
-package hydaelyn
+package venat
 
-import "github.com/Viking602/go-hydaelyn/api"
+import "github.com/Viking602/venat/api"
 
 // Public sentinel errors are owned by api and re-exported here for callers
 // that only need root-level construction and error checks.

@@ -1,6 +1,6 @@
-// Package cli implements the deliberately minimal hydaelyn binary. The
+// Package cli implements the deliberately minimal venat binary. The
 // framework is library-first, so the CLI only exposes
-// utilities for inspecting event logs emitted by a hydaelyn Runner.
+// utilities for inspecting event logs emitted by a Venat Runner.
 //
 // The richer recipe / eval / pattern-driven CLI from v1 lives on the
 // archive/legacy-v1 branch.
@@ -16,7 +16,7 @@ import (
 
 func Execute(ctx context.Context, args []string, stdout io.Writer, _ io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("missing command — try `hydaelyn help`")
+		return errors.New("missing command — try `venat help`")
 	}
 	buildInfo, _ := debug.ReadBuildInfo()
 	version := resolveBuildVersion(buildInfo)
@@ -43,12 +43,12 @@ func resolveBuildVersion(info *debug.BuildInfo) string {
 }
 
 func runHelp(stdout io.Writer, version string) error {
-	_, err := fmt.Fprintf(stdout, `hydaelyn — multi-agent orchestrator runtime (%s)
+	_, err := fmt.Fprintf(stdout, `venat — multi-agent orchestrator runtime (%s)
 
 Usage:
-  hydaelyn version
-  hydaelyn inspect-events --events PATH [--task TASKID]
-  hydaelyn help
+  venat version
+  venat inspect-events --events PATH [--task TASKID]
+  venat help
 `, version)
 	return err
 }

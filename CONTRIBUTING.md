@@ -1,6 +1,6 @@
-# Contributing to Hydaelyn
+# Contributing to Venat
 
-This document defines the coding standards for the Hydaelyn repository.
+This document defines the coding standards for the Venat repository.
 
 ## Formatting
 
@@ -32,8 +32,8 @@ Avoid repeating the package name in file or symbol names. Rely on package contex
 Names should make sense at the call site. When a type or function is used through its package, the combination should read naturally.
 
 ```go
-// GOOD: hydaelyn.New(), hydaelyn.Config, hydaelyn.Runner
-// The root package provides the runner, not "hydaelyn.HydaelynRunner"
+// GOOD: venat.New(), venat.Config, venat.Runner
+// The root package provides the runner, not "venat.VenatRunner"
 
 // GOOD: team.Profile, team.RoleSupervisor
 // "team" context makes "Profile" and "Role" clear
@@ -69,7 +69,7 @@ Use `runtime` only for historical compatibility aliases or when it is the
 clearest domain term in surrounding context.
 
 ```go
-// GOOD: hydaelyn.Runner, worker.AgentWorker, internal/core
+// GOOD: venat.Runner, worker.AgentWorker, internal/core
 // AVOID: NewRuntime-style names for new public APIs
 ```
 

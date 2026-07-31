@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/multiagent"
-	"github.com/Viking602/go-hydaelyn/policy"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/multiagent"
+	"github.com/Viking602/venat/policy"
+	"github.com/Viking602/venat/tool"
 )
 
 // AgentClassName is the AgentClass name for the coding agent.

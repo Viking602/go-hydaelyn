@@ -4,7 +4,7 @@ package core
 // Test code in package core may use bare names; this file makes them available
 // without modifying every test file to add a model import.
 
-import "github.com/Viking602/go-hydaelyn/internal/core/model"
+import "github.com/Viking602/venat/internal/core/model"
 
 type (
 	ActionOutcome        = model.ActionOutcome

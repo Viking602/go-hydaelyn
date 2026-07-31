@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 const (
@@ -46,7 +46,7 @@ func (approvalGate) Authorize(_ context.Context, req api.PolicyRequest) (api.Pol
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
+	runner := venat.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
 
 	// --- topology ----------------------------------------------------------
 	specialists := []string{"monitor", "logreader", "changelog"}
@@ -157,7 +157,7 @@ func main() {
 		TaskVersion: actionTask.Version, ToolName: toolRollback,
 	})
 	switch {
-	case errors.Is(err, hydaelyn.ErrPolicyDenied):
+	case errors.Is(err, venat.ErrPolicyDenied):
 		fmt.Println("tool invocation paused — policy demanded approval")
 	case err != nil:
 		panic(fmt.Errorf("unexpected tool error: %w", err))
@@ -183,7 +183,7 @@ func main() {
 }
 
 // runSpecialist plays one specialist: acquire a lease, write Evidence, submit.
-func runSpecialist(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, idx int) {
+func runSpecialist(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, idx int) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: runID, TaskID: taskID, TargetAgentID: agentID,
 	})
@@ -211,7 +211,7 @@ func runSpecialist(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, 
 }
 
 // runWorker is a 1-shot dispatch+lease+submit for non-action tasks.
-func runWorker(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, report api.TypedReport) {
+func runWorker(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, report api.TypedReport) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: runID, TaskID: taskID, TargetAgentID: agentID,
 	})

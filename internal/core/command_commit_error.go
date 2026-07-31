@@ -1,6 +1,6 @@
 package core
 
-import commandbus "github.com/Viking602/go-hydaelyn/internal/command"
+import commandbus "github.com/Viking602/venat/internal/command"
 
 func commitWithError(err error) error {
 	return commandbus.CommitWithError(err)

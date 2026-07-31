@@ -1,4 +1,4 @@
-package hydaelyn
+package venat
 
 import (
 	"go/ast"
@@ -140,8 +140,8 @@ func isAnySlice(expr ast.Expr) bool {
 func allowsAny(doc, comment *ast.CommentGroup) bool {
 	return commentGroupContains(doc, "godoc-allow-any") ||
 		commentGroupContains(comment, "godoc-allow-any") ||
-		commentGroupContains(doc, "hydaelyn:allow-public-any") ||
-		commentGroupContains(comment, "hydaelyn:allow-public-any")
+		commentGroupContains(doc, "venat:allow-public-any") ||
+		commentGroupContains(comment, "venat:allow-public-any")
 }
 
 func commentGroupContains(group *ast.CommentGroup, marker string) bool {

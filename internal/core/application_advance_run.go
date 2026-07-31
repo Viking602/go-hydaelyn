@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
+	"github.com/Viking602/venat/internal/core/model"
+	runsvc "github.com/Viking602/venat/internal/run"
 )
 
 func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (model.Run, error) {

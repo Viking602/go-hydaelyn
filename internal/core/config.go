@@ -4,10 +4,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
-	storedel "github.com/Viking602/go-hydaelyn/internal/store"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/memory"
+	storedel "github.com/Viking602/venat/internal/store"
 )
 
 const maxHandoffDepth = 8

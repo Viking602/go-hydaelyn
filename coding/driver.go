@@ -3,8 +3,8 @@ package coding
 import (
 	"encoding/json"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/tool"
 )
 
 // Tool name constants. They share the coding.* namespace and are referenced

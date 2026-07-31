@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 func TestClientInitializeConnectsOfficialSession(t *testing.T) {

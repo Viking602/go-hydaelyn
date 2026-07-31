@@ -4,9 +4,9 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
-	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 // ErrInvalidClient is returned when a gateway has no usable MCP client.

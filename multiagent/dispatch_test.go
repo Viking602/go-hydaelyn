@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 func TestValidateDispatchTypedHandoff(t *testing.T) {

@@ -3,10 +3,10 @@ package middleware
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/hook"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/hook"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
 )
 
 type Stage string

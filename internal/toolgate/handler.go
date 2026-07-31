@@ -3,10 +3,10 @@ package toolgate
 import (
 	"context"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
-	"github.com/Viking602/go-hydaelyn/internal/execution"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
+	"github.com/Viking602/venat/internal/execution"
 )
 
 type ToolLookup func(string) (model.Tool, bool)

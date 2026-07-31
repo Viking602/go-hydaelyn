@@ -1,4 +1,4 @@
-# Hydaelyn architectural rules — enforced via `sentrux check`.
+# Venat architectural rules — enforced via `sentrux check`.
 # See ADR-008 for the framework-vs-business boundary that motivates these rules.
 #
 # Strategy notes:
@@ -12,7 +12,7 @@
 # these path-scoped import rules precisely. They are enforced from the compiled
 # package graph by scripts/check-import-boundaries.sh instead:
 #
-#   api                    — no Hydaelyn imports
+#   api                    — no Venat imports
 #   agent                  — no multiagent imports
 #   multiagent             — no root, worker, or internal imports
 #   root package facade    — no multiagent imports
@@ -28,7 +28,7 @@
 #   internal/blackboard      — model + ports (service struct injection)
 #   service/domain packages  — model, ports, state, other services
 #                              NO root internal/core import
-#                              NO hydaelyn / orchestrator / worker import
+#                              NO venat / orchestrator / worker import
 #                              NO internal/core/application import
 #   internal/core            — Runtime façade/composition root; wires domain
 #                              packages and keeps public compatibility aliases

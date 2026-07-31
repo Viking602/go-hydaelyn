@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/policy"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/policy"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestNewToolSet_RegistersAllTools(t *testing.T) {

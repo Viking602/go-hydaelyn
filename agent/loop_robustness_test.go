@@ -7,13 +7,13 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/hook"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/stream"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/hook"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/stream"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 // TestRunRecoversGuardrailPanicAsEngineError pins the loop's panic backstop:

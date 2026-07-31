@@ -1,8 +1,8 @@
 package core
 
 import (
-	reportsvc "github.com/Viking602/go-hydaelyn/internal/report"
-	userinputsvc "github.com/Viking602/go-hydaelyn/internal/userinput"
+	reportsvc "github.com/Viking602/venat/internal/report"
+	userinputsvc "github.com/Viking602/venat/internal/userinput"
 )
 
 type SubmitTypedReportCommand = reportsvc.SubmitTypedCommand

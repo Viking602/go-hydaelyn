@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 // NewApprovalPair creates a new ApprovalRequest and ResumeToken pair for the given task.

@@ -1,6 +1,6 @@
-# Releasing `go-hydaelyn`
+# Releasing `venat`
 
-`go-hydaelyn` is a Go module. Publishing is controlled by git tags, not by uploading package artifacts to a separate registry.
+`venat` is a Go module. Publishing is controlled by git tags, not by uploading package artifacts to a separate registry.
 
 ## What counts as a release
 
@@ -9,7 +9,7 @@
 - Consumers install with:
 
 ```bash
-go get github.com/Viking602/go-hydaelyn@v0.1.0
+go get github.com/Viking602/venat@v0.12.0
 ```
 
 ## GitHub Actions behavior
@@ -75,14 +75,14 @@ git push origin v0.1.0
 ```bash
 tmp_bin="$(mktemp -d)"
 GOBIN="$tmp_bin" GOPROXY=direct \
-  go install github.com/Viking602/go-hydaelyn/cmd/hydaelyn@v0.1.0
-test "$("$tmp_bin/hydaelyn" version)" = "v0.1.0"
-"$tmp_bin/hydaelyn" --help
+  go install github.com/Viking602/venat/cmd/venat@v0.12.0
+test "$("$tmp_bin/venat" version)" = "v0.12.0"
+"$tmp_bin/venat" --help
 rm -rf "$tmp_bin"
 ```
 
 8. Confirm the GitHub Release exists and
-   `go list -m github.com/Viking602/go-hydaelyn@v0.1.0` resolves.
+   `go list -m github.com/Viking602/venat@v0.12.0` resolves.
 
 ## Updating release tooling
 
@@ -104,7 +104,7 @@ rm -rf "$tmp_bin"
 - If you ever release `v2.0.0` or later, update `go.mod` to use a major-version suffix:
 
 ```go
-module github.com/Viking602/go-hydaelyn/v2
+module github.com/Viking602/venat/v2
 ```
 
 and update all internal imports to match that suffix before tagging `v2.0.0`

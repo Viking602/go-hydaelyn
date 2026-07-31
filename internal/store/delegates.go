@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 // Options wires Delegates to the runtime's selected store provider without

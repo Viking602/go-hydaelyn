@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/provider"
 )
 
 // Step is one iteration of the bounded agent loop. Engine.RunMessages

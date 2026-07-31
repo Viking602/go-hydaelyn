@@ -7,15 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/skill"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/skill"
 )
 
 func main() {
-	root, err := os.MkdirTemp("", "hydaelyn-skills-")
+	root, err := os.MkdirTemp("", "venat-skills-")
 	if err != nil {
 		panic(err)
 	}

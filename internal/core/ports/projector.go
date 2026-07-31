@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 type Projector interface {

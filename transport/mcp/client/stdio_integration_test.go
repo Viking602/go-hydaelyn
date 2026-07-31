@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 const (
-	stdioHelperModeEnv    = "HYDAELYN_MCP_STDIO_HELPER_MODE"
-	stdioHandshakeFileEnv = "HYDAELYN_MCP_STDIO_HANDSHAKE_FILE"
-	stdioCloseFileEnv     = "HYDAELYN_MCP_STDIO_CLOSE_FILE"
-	stdioParentSecretEnv  = "HYDAELYN_MCP_STDIO_PARENT_SECRET"
-	stdioOversizeModeEnv  = "HYDAELYN_MCP_STDIO_OVERSIZE"
+	stdioHelperModeEnv    = "VENAT_MCP_STDIO_HELPER_MODE"
+	stdioHandshakeFileEnv = "VENAT_MCP_STDIO_HANDSHAKE_FILE"
+	stdioCloseFileEnv     = "VENAT_MCP_STDIO_CLOSE_FILE"
+	stdioParentSecretEnv  = "VENAT_MCP_STDIO_PARENT_SECRET"
+	stdioOversizeModeEnv  = "VENAT_MCP_STDIO_OVERSIZE"
 	stdioLargeResponseLen = 2 << 20
 )
 

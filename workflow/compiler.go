@@ -3,8 +3,8 @@ package workflow
 import (
 	"errors"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
 )
 
 var ErrCompiledWorkflowEmpty = errors.New("workflow: definition has no steps")

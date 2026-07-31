@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
+	"github.com/Viking602/venat/internal/core/model"
+	runsvc "github.com/Viking602/venat/internal/run"
 )
 
 type (

@@ -1,11 +1,11 @@
 // Package policy exposes the stable authorization contract used by the
-// Hydaelyn runner.
+// Venat runner.
 package policy
 
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 type (

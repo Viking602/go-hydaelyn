@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 type AgentProvider func() []model.AgentProfile

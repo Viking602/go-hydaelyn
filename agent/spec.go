@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/hook"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/hook"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/tool"
 )
 
 // ErrProviderResolverMissing is returned by Build when BuildDeps carries no
@@ -206,7 +206,7 @@ type instructionsContext struct {
 func (c instructionsContext) Build(_ context.Context, task api.Task) ([]message.Message, error) {
 	system := strings.TrimSpace(c.instructions)
 	if system == "" {
-		system = "You are a Hydaelyn agent."
+		system = "You are a Venat agent."
 	}
 	goal := strings.TrimSpace(task.Goal)
 	if goal == "" {

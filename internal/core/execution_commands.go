@@ -1,6 +1,6 @@
 package core
 
-import executionsvc "github.com/Viking602/go-hydaelyn/internal/execution"
+import executionsvc "github.com/Viking602/venat/internal/execution"
 
 type (
 	AcquireTaskExecutionCommand   = executionsvc.AcquireTaskExecutionCommand

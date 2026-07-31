@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (model.Run, error) {

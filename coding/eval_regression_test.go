@@ -4,7 +4,7 @@ package coding_test
 //
 // These cases are built ONLY from the existing eval framework: eval.EvalCase +
 // assertions.* + eval.RunSuite. There is deliberately NO gate/judge/replay
-// harness, no score rollup, no artifact bundle, and no "hydaelyn eval" CLI —
+// harness, no score rollup, no artifact bundle, and no "venat eval" CLI —
 // that benchmark/gate harness was explicitly rejected (see the eval-harness
 // decision and spec §9/§10).
 //
@@ -14,7 +14,7 @@ package coding_test
 // through the worker bridge and registers NO custom tool.Drivers and NO policy
 // engine, so it cannot, by itself, exercise coding.NewToolSet / coding.
 // PolicyEngine(). Each case therefore supplies its own eval.Harness via
-// EvalCase.Setup: codingHarness builds a *hydaelyn.Runner whose PolicyEngine is
+// EvalCase.Setup: codingHarness builds a *venat.Runner whose PolicyEngine is
 // coding.PolicyEngine() composed with the host's workspace-write allowance
 // (exactly the composition _examples/coding_hashline demonstrates), seeds a
 // temp workspace, and drives the real coding tool sequence through the real
@@ -60,14 +60,14 @@ import (
 	"testing"
 	"time"
 
-	hydaelyn "github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/coding"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/assertions"
-	"github.com/Viking602/go-hydaelyn/eval/matcher"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/coding"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/assertions"
+	"github.com/Viking602/venat/eval/matcher"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/worker"
 )
 
 // TestCodingEvalRegressions runs the four deterministic coding regression cases
@@ -359,7 +359,7 @@ func allOrNothingRegression(t *testing.T) eval.EvalCase {
 // workspace, and the run/task/lease the coding tools execute under.
 type codingHarness struct {
 	t       *testing.T
-	runner  *hydaelyn.Runner
+	runner  *venat.Runner
 	ws      coding.Workspace
 	root    string
 	runID   string
@@ -398,7 +398,7 @@ func newCodingHarnessWithPolicy(t *testing.T, runID string, engine api.PolicyEng
 		}
 	}
 
-	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: engine})
+	runner := venat.NewDevelopment(api.Config{PolicyEngine: engine})
 	runner.RegisterAgent(api.AgentProfile{ID: codingHarnessAgentID})
 
 	ctx := context.Background()
@@ -454,7 +454,7 @@ func writeTargets(files map[string]string) []string {
 }
 
 // Runner returns the live runner the assertions query.
-func (h *codingHarness) Runner() *hydaelyn.Runner { return h.runner }
+func (h *codingHarness) Runner() *venat.Runner { return h.runner }
 
 // RegisterAgent registers an additional agent profile.
 func (h *codingHarness) RegisterAgent(profile api.AgentProfile) { h.runner.RegisterAgent(profile) }

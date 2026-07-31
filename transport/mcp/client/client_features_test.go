@@ -16,7 +16,6 @@ func TestClientListToolsMapsOfficialTool(t *testing.T) {
 
 	// When
 	tools, err := client.ListTools(context.Background())
-
 	// Then
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
@@ -35,7 +34,6 @@ func TestClientCallToolMapsOfficialResult(t *testing.T) {
 
 	// When
 	result, err := client.CallTool(context.Background(), "echo", map[string]any{"text": "hello"})
-
 	// Then
 	if err != nil {
 		t.Fatalf("CallTool() error = %v", err)
@@ -75,7 +73,6 @@ func TestClientResourcesMapOfficialValues(t *testing.T) {
 
 	// When
 	resources, err := client.ListResources(context.Background())
-
 	// Then
 	if err != nil {
 		t.Fatalf("ListResources() error = %v", err)
@@ -91,12 +88,11 @@ func TestClientReadResourceMapsOfficialContent(t *testing.T) {
 
 	// When
 	contents, err := client.ReadResource(context.Background(), "file:///readme.md")
-
 	// Then
 	if err != nil {
 		t.Fatalf("ReadResource() error = %v", err)
 	}
-	if len(contents) != 1 || contents[0].Text != "# Hydaelyn" {
+	if len(contents) != 1 || contents[0].Text != "# Venat" {
 		t.Fatalf("ReadResource() = %#v", contents)
 	}
 }
@@ -107,7 +103,6 @@ func TestClientPromptsMapOfficialValues(t *testing.T) {
 
 	// When
 	prompts, err := client.ListPrompts(context.Background())
-
 	// Then
 	if err != nil {
 		t.Fatalf("ListPrompts() error = %v", err)
@@ -123,7 +118,6 @@ func TestClientGetPromptMapsOfficialMessage(t *testing.T) {
 
 	// When
 	messages, err := client.GetPrompt(context.Background(), "summarize", map[string]string{"text": "hello"})
-
 	// Then
 	if err != nil {
 		t.Fatalf("GetPrompt() error = %v", err)
@@ -181,7 +175,7 @@ func newFeatureTestServer() *sdkmcp.Server {
 		return nil, &jsonrpc.Error{Code: -32001, Message: "tool failed", Data: []byte(`{"detail":"boom"}`)}
 	})
 	server.AddResource(&sdkmcp.Resource{URI: "file:///readme.md", Name: "README", MIMEType: "text/markdown"}, func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
-		return &sdkmcp.ReadResourceResult{Contents: []*sdkmcp.ResourceContents{{URI: "file:///readme.md", MIMEType: "text/markdown", Text: "# Hydaelyn"}}}, nil
+		return &sdkmcp.ReadResourceResult{Contents: []*sdkmcp.ResourceContents{{URI: "file:///readme.md", MIMEType: "text/markdown", Text: "# Venat"}}}, nil
 	})
 	server.AddPrompt(&sdkmcp.Prompt{
 		Name: "summarize",

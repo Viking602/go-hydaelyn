@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Hydaelyn is a durable, typed multi-agent framework for Go (`github.com/Viking602/go-hydaelyn`, Go 1.25). Four layers: Packs → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `worker/`, `memory/`, `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`.
+Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Four layers: Packs → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `worker/`, `memory/`, `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`.
 
 ## Build, test, and development commands
 
@@ -23,14 +23,14 @@ Hydaelyn is a durable, typed multi-agent framework for Go (`github.com/Viking602
 
 Exported functions in `api/`, `agent/`, `multiagent/`, and the root package must not return `[]any`, and exported fields must not be loose `any`. Add a typed result struct (e.g. `api.StartRunResult`) instead of returning `[]any`. Genuine exceptions (host payloads, provider bodies, JSON Schema objects) require an escape-hatch comment on the line immediately above:
 
-- `//hydaelyn:allow-public-any` — above a function signature.
+- `//venat:allow-public-any` — above a function signature.
 - `// godoc-allow-any` — above a struct field.
 
 Enforced by `scripts/check-public-any.sh`. Test files are exempt.
 
 ## Coding style & naming
 
-Use `gofmt` as the source of truth; goimports uses local prefix `github.com/Viking602/go-hydaelyn`. Go files and `Makefile` use tabs; Markdown uses two spaces, LF, final newlines (`.editorconfig`). Prefer package-context names that read naturally at call sites (`hydaelyn.New()`, `team.Profile`). Avoid package-name stutter, generic files (`types.go`, `helpers.go`, `utils.go`), package/directory renames, exported-symbol renames, and new linting stacks unless explicitly approved.
+Use `gofmt` as the source of truth; goimports uses local prefix `github.com/Viking602/venat`. Go files and `Makefile` use tabs; Markdown uses two spaces, LF, final newlines (`.editorconfig`). Prefer package-context names that read naturally at call sites (`venat.New()`, `team.Profile`). Avoid package-name stutter, generic files (`types.go`, `helpers.go`, `utils.go`), package/directory renames, exported-symbol renames, and new linting stacks unless explicitly approved.
 
 ## Testing
 

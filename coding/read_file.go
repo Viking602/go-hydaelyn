@@ -3,8 +3,8 @@ package coding
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/tool"
 )
 
 // readFileInput is the decoded argument shape for coding.read_file.

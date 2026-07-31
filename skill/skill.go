@@ -26,7 +26,7 @@ type Skill struct {
 	Compatibility string            `json:"compatibility,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 	// AllowedTools is advisory only: it records the tools the skill author
-	// intended to surface. Hydaelyn does NOT enforce this list — actual tool
+	// intended to surface. Venat does NOT enforce this list — actual tool
 	// availability and policy come from the agent configuration (spec
 	// 11-boundaries.md). The field is parsed and preserved for host tooling
 	// (e.g. linters, UIs) but has no runtime gate effect.
@@ -283,7 +283,7 @@ func RenderSystemSection(skills []Skill) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Active Hydaelyn skills:\n")
+	b.WriteString("Active Venat skills:\n")
 	b.WriteString("Use these reusable instructions when they apply to the task. Skills do not grant tool permission; available tools and policy still come from the agent configuration.\n\n")
 	for i, s := range skills {
 		if i > 0 {

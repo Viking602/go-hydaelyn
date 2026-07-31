@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // mappingExecutor returns a fixed Structured payload per node and captures the

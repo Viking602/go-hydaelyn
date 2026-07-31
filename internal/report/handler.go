@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
-	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
-	"github.com/Viking602/go-hydaelyn/internal/eventpayload"
-	"github.com/Viking602/go-hydaelyn/internal/execution"
-	"github.com/Viking602/go-hydaelyn/internal/handoff"
-	responsesvc "github.com/Viking602/go-hydaelyn/internal/response"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
+	corestate "github.com/Viking602/venat/internal/core/state"
+	"github.com/Viking602/venat/internal/eventpayload"
+	"github.com/Viking602/venat/internal/execution"
+	"github.com/Viking602/venat/internal/handoff"
+	responsesvc "github.com/Viking602/venat/internal/response"
 )
 
 type IDGenerator func(string) string

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/eval/assertions"
+	"github.com/Viking602/venat/eval/assertions"
 )
 
 func TestAssertion_WithinDuration_Pass(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 // goTestInput is the decoded argument shape for coding.go_test.

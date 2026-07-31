@@ -2,13 +2,13 @@
 
 ## Current Capabilities
 
-Hydaelyn persists enough runner detail to replay task execution, blackboard
+Venat persists enough runner detail to replay task execution, blackboard
 exchange flow, user-message outbox state, and action/approval decisions — not
 only final summaries.
 
 The primary path exposes durability through:
 
-- `hydaelyn.Runner` methods using `api.*Command` inputs
+- `venat.Runner` methods using `api.*Command` inputs
 - `api.StoreProvider -> api.UnitOfWork`
 - append-only events
 - mailbox outbox
@@ -18,13 +18,13 @@ The primary path exposes durability through:
 Default startup uses the in-memory store:
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 ```
 
 Custom durable storage is injected only when needed:
 
 ```go
-runner, err := hydaelyn.NewProduction(api.Config{
+runner, err := venat.NewProduction(api.Config{
 	StoreProvider: myStoreProvider,
 	PolicyEngine:  myPolicy,
 })

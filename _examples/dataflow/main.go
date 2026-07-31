@@ -9,13 +9,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "producer"})
 	runner.RegisterAgent(api.AgentProfile{ID: "consumer"})
 

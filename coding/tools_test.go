@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/tool"
 )
 
 // driverByName finds a driver in the toolset by its tool name.

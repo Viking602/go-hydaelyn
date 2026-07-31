@@ -1,6 +1,6 @@
 package core
 
-import runsvc "github.com/Viking602/go-hydaelyn/internal/run"
+import runsvc "github.com/Viking602/venat/internal/run"
 
 func (r *Runtime) registerUoWCommandHandlers() {
 	runsvc.RegisterHandlers(r.commandBus, r.newID)

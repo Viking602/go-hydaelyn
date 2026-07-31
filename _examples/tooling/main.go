@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "researcher"})
 	runner.RegisterTool(api.Tool{
 		Name:       "web.search",
@@ -44,7 +44,7 @@ func main() {
 		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
 		HolderType: api.HolderAgent, HolderID: "researcher",
 		TaskVersion: task.Version, ToolName: "web.search",
-		Input: map[string]any{"q": "go-hydaelyn"},
+		Input: map[string]any{"q": "venat"},
 	})
 	must(err)
 	fmt.Printf("invoked tool=%s output=%v\n", result.ToolName, result.Output)

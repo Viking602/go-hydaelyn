@@ -3,8 +3,8 @@ package research_test
 import (
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/packs/research"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/packs/research"
 )
 
 // TestResearchPack_SmokeSuite is the canonical per-pack self-check: a pack

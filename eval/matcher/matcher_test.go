@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/eval/matcher"
+	"github.com/Viking602/venat/eval/matcher"
 )
 
 func TestContainsSubstring_Match(t *testing.T) {

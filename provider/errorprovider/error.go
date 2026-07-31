@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/provider"
 )
 
 type Kind string

@@ -26,6 +26,10 @@ ADR-001 through ADR-008 were originally authored in Chinese (before the English-
 
 All six v0.8.0 ADRs are locked before Phase 1 implementation begins. Each carries an explicit list of anti-patterns it exists to reject, so PR review can cite a concrete clause rather than re-debate the principle.
 
+## v0.12.0 (complete)
+
+- [ADR-019 Project Identity — Venat](ADR-019-project-identity-venat.md) — clean repository, module, root package, CLI, and local skill-directory cutover; preserved persisted skill wire identifiers
+
 ## Convention
 
 All ADRs MUST be written in English. Conversation language with users may be Chinese, but the artifact in the repo is English.

@@ -1,6 +1,6 @@
 package core
 
-import mailboxsvc "github.com/Viking602/go-hydaelyn/internal/mailbox"
+import mailboxsvc "github.com/Viking602/venat/internal/mailbox"
 
 type (
 	DispatchTaskCommand       = mailboxsvc.DispatchTaskCommand

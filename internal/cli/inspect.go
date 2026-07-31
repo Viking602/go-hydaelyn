@@ -6,7 +6,7 @@ import (
 	"flag"
 	"io"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error {

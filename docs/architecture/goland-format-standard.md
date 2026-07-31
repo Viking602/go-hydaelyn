@@ -6,15 +6,15 @@ This repository treats GoLand formatting as a command-line reproducible contract
 
 - `.editorconfig` controls cross-file whitespace: UTF-8, LF, final newline, trailing whitespace trimming, tab indentation for Go and Makefile files.
 - `.goland/inspection-profile.xml` is the tracked GoLand headless inspection profile for repository review.
-- `.golangci.yml` enables `gofmt` and `goimports`, with `github.com/Viking602/go-hydaelyn` as the local import prefix.
+- `.golangci.yml` enables `gofmt` and `goimports`, with `github.com/Viking602/venat` as the local import prefix.
 
 ## Go Formatting Contract
 
 Use the same order locally and in review:
 
-1. `$(go env GOPATH)/bin/goimports -w -local github.com/Viking602/go-hydaelyn $(git ls-files '*.go')`
+1. `$(go env GOPATH)/bin/goimports -w -local github.com/Viking602/venat $(git ls-files '*.go')`
 2. `gofmt -l $(git ls-files '*.go')`
-3. `$(go env GOPATH)/bin/goimports -l -local github.com/Viking602/go-hydaelyn $(git ls-files '*.go')`
+3. `$(go env GOPATH)/bin/goimports -l -local github.com/Viking602/venat $(git ls-files '*.go')`
 4. `git diff --check`
 
 The second and third commands must print no files. `git diff --check` must print nothing.
@@ -47,9 +47,9 @@ GoLand inspection is complete only when this headless check writes no problem fi
 
 ```bash
 /Users/viking/Applications/GoLand.app/Contents/bin/inspect.sh \
-  /Users/viking/GolandProjects/go-hydaelyn \
-  /Users/viking/GolandProjects/go-hydaelyn/.goland/inspection-profile.xml \
-  /tmp/go-hydaelyn-inspection-results \
+  /Users/viking/GolandProjects/venat \
+  /Users/viking/GolandProjects/venat/.goland/inspection-profile.xml \
+  /tmp/venat-inspection-results \
   -format json -v1
 ```
 

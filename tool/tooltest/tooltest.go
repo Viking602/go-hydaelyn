@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 func MustCall(t *testing.T, driver tool.Driver, payload any) tool.Result {

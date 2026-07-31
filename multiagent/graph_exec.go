@@ -3,8 +3,8 @@ package multiagent
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/stream"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/stream"
 )
 
 // Executor wiring for graphs lives here: subgraph delegation and the

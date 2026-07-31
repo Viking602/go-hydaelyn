@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 // Compactor summarizes or truncates message histories to fit within a

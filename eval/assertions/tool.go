@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/matcher"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/matcher"
 )
 
 // Compile-time guarantees that every M2 assertion satisfies eval.Assertion.

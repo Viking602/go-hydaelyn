@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 // requireNoStepTimestamps asserts that the loop left every Step's wall-clock
@@ -32,7 +32,8 @@ func requireNoStepTimestamps(t *testing.T, steps []Step) {
 func TestRunMessagesEmitsStepPerIterationToolThenFinish(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result:" + input.Query, nil
 	})
 	if err != nil {
@@ -42,7 +43,7 @@ func TestRunMessagesEmitsStepPerIterationToolThenFinish(t *testing.T) {
 
 	output, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
 	})
@@ -93,7 +94,8 @@ func TestRunMessagesEmitsStepPerIterationToolThenFinish(t *testing.T) {
 func TestRunMessagesEmitsStepPerIterationAtMaxTurns(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {

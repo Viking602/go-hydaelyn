@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 )
 
 type ScriptedProvider struct {

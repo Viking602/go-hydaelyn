@@ -37,7 +37,7 @@ func (t *observingRoundTripper) RoundTrip(request *http.Request) (*http.Response
 		requestContentType: request.Header.Get("Content-Type"),
 		sessionID:          request.Header.Get("Mcp-Session-Id"),
 		protocolVersion:    request.Header.Get("Mcp-Protocol-Version"),
-		customHeader:       request.Header.Get("X-Hydaelyn-Test"),
+		customHeader:       request.Header.Get("X-Venat-Test"),
 	}
 	response, err := t.base.RoundTrip(request)
 	if response != nil {
@@ -109,7 +109,7 @@ func newHTTPFeatureServer() *sdkmcp.Server {
 		Text string `json:"text"`
 	}
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "http-server", Version: "v1.0.0"}, &sdkmcp.ServerOptions{
-		GetSessionID: func() string { return "hydaelyn-session" },
+		GetSessionID: func() string { return "venat-session" },
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "echo", Description: "Echo text"}, func(_ context.Context, _ *sdkmcp.CallToolRequest, arguments echoArguments) (*sdkmcp.CallToolResult, map[string]any, error) {
 		return &sdkmcp.CallToolResult{

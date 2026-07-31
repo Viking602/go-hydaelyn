@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	researchers := []string{"alpha", "beta", "gamma"}
 	for _, id := range researchers {
@@ -73,7 +73,7 @@ func main() {
 	fmt.Printf("research recipe complete: %d evidence → 1 finding\n", len(items))
 }
 
-func runResearcher(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, idx int) {
+func runResearcher(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, idx int) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{

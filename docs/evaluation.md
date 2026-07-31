@@ -39,7 +39,7 @@ eval/
     └── text.go          Text
 ```
 
-`eval/` imports the root `github.com/Viking602/go-hydaelyn` façade plus
+`eval/` imports the root `github.com/Viking602/venat` façade plus
 `provider/scripted`, `api`, and `multiagent`. Nothing imports `eval` except
 `_test.go` files and per-pack `eval_test.go` files, so the dependency direction
 stays acyclic.
@@ -59,7 +59,7 @@ type EvalCase struct {
 }
 
 type Harness interface {
-    Runner() *hydaelyn.Runner
+    Runner() *venat.Runner
     RegisterAgent(profile api.AgentProfile)
     Cleanup()
     EmbeddingProvider() EmbeddingProvider // nil unless EmbeddingSimilarity is used
@@ -87,7 +87,7 @@ fields. Fold a slice of records into one with `eval.SummarizeUsage(records)`.
 ### Harness
 
 `eval.NewHarness(opts ...HarnessOption)` returns the reference `*DefaultHarness`,
-backed by a fresh in-memory `hydaelyn.NewDevelopment()` runner and a deterministic scripted
+backed by a fresh in-memory `venat.NewDevelopment()` runner and a deterministic scripted
 provider. It registers a single agent (default id `"agent"`) that owns the
 case's task. Options:
 
@@ -255,10 +255,10 @@ package mypack_test
 import (
     "testing"
 
-    "github.com/Viking602/go-hydaelyn/api"
-    "github.com/Viking602/go-hydaelyn/eval"
-    "github.com/Viking602/go-hydaelyn/eval/assertions"
-    "github.com/Viking602/go-hydaelyn/provider"
+    "github.com/Viking602/venat/api"
+    "github.com/Viking602/venat/eval"
+    "github.com/Viking602/venat/eval/assertions"
+    "github.com/Viking602/venat/provider"
 )
 
 func TestSummaryQuality(t *testing.T) {
@@ -298,7 +298,7 @@ shape.
 ## Non-goals
 
 - Hosted eval dashboard — integrate with existing CI dashboards via reporters.
-- Eval-as-a-service — the framework is a library only; there is no `hydaelyn`
+- Eval-as-a-service — the framework is a library only; there is no `venat`
   eval CLI.
 - Synthetic data generation — the application's call.
 - Artifact bundles, gate-policy rollups, baseline regression comparison, and

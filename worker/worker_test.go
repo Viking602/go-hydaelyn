@@ -9,19 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 
 func TestAgentWorkerPersistsStepTrace(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 		RunID:      "run-worker-step-trace",
@@ -191,8 +191,8 @@ func TestAgentWorkerPersistsStepTrace(t *testing.T) {
 func TestAgentWorkerStepPersistenceFailureFailsTask(t *testing.T) {
 	ctx := context.Background()
 	stepAppendErr := errors.New("step event append failed")
-	backing := hydaelyn.NewDevelopment()
-	runner := hydaelyn.NewDevelopment(api.Config{
+	backing := venat.NewDevelopment()
+	runner := venat.NewDevelopment(api.Config{
 		StoreProvider: stepEventFailingProvider{
 			StoreProvider: backing,
 			err:           stepAppendErr,
@@ -284,7 +284,7 @@ func TestAgentWorkerStepPersistenceFailureFailsTask(t *testing.T) {
 
 func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-skills", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -327,7 +327,7 @@ func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("provider messages = %d, want worker system + skills + user: %+v", len(got), got)
 	}
-	if got[0].Role != message.RoleSystem || got[0].Text != "You are Hydaelyn agent agent-a. Complete the assigned task and return a concise result." {
+	if got[0].Role != message.RoleSystem || got[0].Text != "You are Venat agent agent-a. Complete the assigned task and return a concise result." {
 		t.Fatalf("first message = %+v, want worker system identity", got[0])
 	}
 	if got[1].Role != message.RoleSystem ||
@@ -342,7 +342,7 @@ func TestAgentWorkerInjectsEngineSkillsIntoWorkerContext(t *testing.T) {
 
 func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-schema", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -389,7 +389,7 @@ func TestAgentWorkerValidatesAgainstTaskOutputSchema(t *testing.T) {
 
 func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-structured", RootTaskID: "root", Request: "do work"})
 	if err != nil {
@@ -439,7 +439,7 @@ func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 
 func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-tool", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -464,7 +464,7 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 		LeaseID: lease.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
 	}
 	_, err = bus.Execute(ctx, tool.Call{ID: "call-1", Name: "write", Arguments: json.RawMessage(`{"value":1}`)}, nil)
-	if !errors.Is(err, hydaelyn.ErrActionTaskRequired) {
+	if !errors.Is(err, venat.ErrActionTaskRequired) {
 		t.Fatalf("expected ErrActionTaskRequired, got %v", err)
 	}
 	if driver.called {
@@ -474,7 +474,7 @@ func TestGovernedToolBusRejectsSideEffectWithoutActionTask(t *testing.T) {
 
 func TestGovernedToolBusPersistsActionAttempt(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-action-tool", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -521,14 +521,14 @@ func TestGovernedToolBusPersistsActionAttempt(t *testing.T) {
 	if attempt.Status != api.ActionAttemptSucceeded {
 		t.Fatalf("action attempt status = %q, want succeeded", attempt.Status)
 	}
-	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, hydaelyn.ErrActionReconcileRequired) {
+	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, venat.ErrActionReconcileRequired) {
 		t.Fatalf("duplicate non-idempotent Execute() error = %v, want ErrActionReconcileRequired", err)
 	}
 }
 
 func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-worker-failure", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -688,7 +688,7 @@ func (s stepEventFailingStore) AppendEvent(ctx context.Context, event api.Event)
 
 func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-usage", RootTaskID: "root", Request: "meter me"})
 	if err != nil {

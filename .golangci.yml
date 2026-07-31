@@ -1,4 +1,4 @@
-# golangci-lint configuration for go-hydaelyn (schema v2)
+# golangci-lint configuration for venat (schema v2)
 #
 # Tuned for Go 1.25 / Standard Project Layout.
 # We deliberately set linters.default=none so the enabled set is explicit and stable.
@@ -101,7 +101,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/Viking602/go-hydaelyn
+        - github.com/Viking602/venat
   exclusions:
     generated: lax
     paths:

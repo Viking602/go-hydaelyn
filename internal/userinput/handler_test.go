@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
-	"github.com/Viking602/go-hydaelyn/internal/userinput"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/memory"
+	"github.com/Viking602/venat/internal/userinput"
 )
 
 func userInputIDGenerator() userinput.IDGenerator {

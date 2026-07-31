@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 )
 
 // Accumulator is a Sink that folds a live Frame stream back into the same

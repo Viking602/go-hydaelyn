@@ -3,7 +3,7 @@ package eval
 import (
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // EvalResult is the typed verdict for a single executed EvalCase.

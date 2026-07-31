@@ -1,4 +1,4 @@
-// Package coding is the Hydaelyn coding capability: a set of sandboxed
+// Package coding is the Venat coding capability: a set of sandboxed
 // tool.Drivers (read_file, search, edit_hashline, write_file, gofmt,
 // go_test, git_diff) over a workspace-relative filesystem, plus the policy
 // engine, agent class, and system instructions that govern them.
@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/coding/internal/workspace"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/coding/internal/workspace"
 )
 
 // Workspace is the sandboxed filesystem and command surface the coding tools

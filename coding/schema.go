@@ -1,6 +1,6 @@
 package coding
 
-import "github.com/Viking602/go-hydaelyn/message"
+import "github.com/Viking602/venat/message"
 
 // property is one named field in an object schema.
 type property struct {

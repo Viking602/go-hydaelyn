@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/multiagent"
 )
 
 // Compile-time guarantees that every M4 multi-agent assertion satisfies

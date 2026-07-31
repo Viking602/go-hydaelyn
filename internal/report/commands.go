@@ -1,6 +1,6 @@
 package report
 
-import "github.com/Viking602/go-hydaelyn/internal/core/model"
+import "github.com/Viking602/venat/internal/core/model"
 
 type SubmitTypedCommand struct {
 	RunID       string

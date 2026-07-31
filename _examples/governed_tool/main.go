@@ -8,16 +8,16 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/policy"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/policy"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/worker"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: policy.DenySideEffectsByDefault()})
+	runner := venat.NewDevelopment(api.Config{PolicyEngine: policy.DenySideEffectsByDefault()})
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "try a write tool"})
@@ -38,7 +38,7 @@ func main() {
 		LeaseID: lease.ID, HolderType: api.HolderAgent, HolderID: "agent-a", TaskVersion: task.Version,
 	}
 	_, err = bus.Execute(ctx, tool.Call{Name: "write_file"}, nil)
-	if errors.Is(err, hydaelyn.ErrPolicyDenied) {
+	if errors.Is(err, venat.ErrPolicyDenied) {
 		fmt.Println("write tool denied by policy")
 		return
 	}

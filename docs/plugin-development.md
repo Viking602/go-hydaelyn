@@ -2,7 +2,7 @@
 
 ## Plugin Model
 
-Hydaelyn uses an internal `plugin.Registry` with `type/name` keys for runtime
+Venat uses an internal `plugin.Registry` with `type/name` keys for runtime
 composition experiments and tests.
 
 Supported plugin types:
@@ -22,7 +22,7 @@ Supported plugin types:
 Most application code should integrate through the public runner surface:
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	PolicyEngine:  customPolicy,
 	StoreProvider: customStore,
 })

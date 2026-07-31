@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 func ApplyObligations(ctx context.Context, uow ports.UnitOfWork, message model.UserMessage, decision model.PolicyDecision) (model.UserMessage, error) {

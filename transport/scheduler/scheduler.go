@@ -1,10 +1,10 @@
 // Package scheduler is a deprecated compatibility shim for the cron trigger
 // transport.
 //
-// Deprecated: use github.com/Viking602/go-hydaelyn/transport/cron.
+// Deprecated: use github.com/Viking602/venat/transport/cron.
 package scheduler
 
-import "github.com/Viking602/go-hydaelyn/transport/cron"
+import "github.com/Viking602/venat/transport/cron"
 
 // Driver installs api.TriggerSchedule firings on top of robfig/cron.
 //

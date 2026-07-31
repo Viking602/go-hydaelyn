@@ -6,7 +6,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 func mapInitializeResult(result *sdkmcp.InitializeResult) (InitializeResult, error) {

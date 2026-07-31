@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/internal/core"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 func StoreProviderToCore(inner api.StoreProvider) core.StoreProvider {

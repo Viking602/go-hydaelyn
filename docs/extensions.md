@@ -1,8 +1,8 @@
 # Runtime Extension Points
 
-Hydaelyn currently exposes extension points at two levels:
+Venat currently exposes extension points at two levels:
 
-1. `hydaelyn.Runner` runtime contracts configured through `api.Config`
+1. `venat.Runner` runtime contracts configured through `api.Config`
 2. `agent.Engine` model/tool turn hooks configured through `agent.Input` and
    `hook.Chain`
 
@@ -21,7 +21,7 @@ Hydaelyn currently exposes extension points at two levels:
 ## Runtime Configuration
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	StoreProvider: durableStore,
 	PolicyEngine:  policyEngine,
 	OutputGateway: outputGateway,
@@ -102,7 +102,7 @@ sequence list returns an error before the HTTP request is sent.
 
 Callers can pass provider-specific request body fields through
 `agent.Input.ExtraBody`. This is intended for OpenAI-compatible extensions such
-as `chat_template_kwargs` or sampling fields not modeled by Hydaelyn yet:
+as `chat_template_kwargs` or sampling fields not modeled by Venat yet:
 
 ```go
 result, err := engine.Run(ctx, agent.Input{
@@ -116,7 +116,7 @@ result, err := engine.Run(ctx, agent.Input{
 })
 ```
 
-The OpenAI provider appends extra fields to the JSON body after Hydaelyn builds
+The OpenAI provider appends extra fields to the JSON body after Venat builds
 its managed request. `ExtraBody` cannot override protocol-managed fields:
 
 - Chat Completions: `model`, `messages`, `tools`, `stream`, `stream_options`,
@@ -132,7 +132,7 @@ and deduplicated.
 ## Opaque Provider State
 
 Responses turns store the terminal API `output` array in
-`message.Message.ProviderState`. Hydaelyn keeps normalized text, reasoning, and
+`message.Message.ProviderState`. Venat keeps normalized text, reasoning, and
 tool calls for provider-neutral consumers, while replaying the opaque output
 items exactly before the following `function_call_output`. This preserves
 reasoning items, function-call identity, encrypted fields, and phased Codex
@@ -141,7 +141,7 @@ should preserve `ProviderState` without interpreting or rewriting it.
 
 ## Agent Turn Order
 
-For an `agent.Engine` turn, Hydaelyn runs:
+For an `agent.Engine` turn, Venat runs:
 
 1. `hook.Chain.TransformContext`
 2. `hook.Chain.BeforeModelCall`

@@ -1,7 +1,7 @@
 package projection
 
 import (
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 // Project replays a run's event log into a consistent Projection snapshot.

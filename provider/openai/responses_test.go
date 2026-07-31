@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/shared"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/shared"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestNewDefaultsToChatCompletionsWire(t *testing.T) {
@@ -74,7 +74,7 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 				ToolCalls: []message.ToolCall{{
 					ID:        "call_1",
 					Name:      "lookup",
-					Arguments: json.RawMessage(`{"query":"hydaelyn"}`),
+					Arguments: json.RawMessage(`{"query":"venat"}`),
 				}},
 			},
 			message.NewToolResult(message.ToolResult{
@@ -268,7 +268,7 @@ func TestDriverStreamReplaysResponsesProviderStateBeforeToolOutput(t *testing.T)
 	}))
 	defer server.Close()
 
-	state := json.RawMessage(`[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_1","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Checking","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"}]`)
+	state := json.RawMessage(`[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_1","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Checking","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"}]`)
 	driver := New(Config{
 		APIKey:  "test",
 		BaseURL: server.URL,
@@ -356,11 +356,11 @@ data: {"type":"response.reasoning_text.delta","output_index":1,"delta":" raw"}
 
 data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}
 
-data: {"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"query\":\"hy"}
+data: {"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"query\":\"ve"}
 
-data: {"type":"response.function_call_arguments.delta","output_index":2,"delta":"daelyn\"}"}
+data: {"type":"response.function_call_arguments.delta","output_index":2,"delta":"nat\"}"}
 
-data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"}}
+data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"}}
 
 data: {"type":"response.output_item.added","output_index":3,"item":{"id":"msg_final","type":"message","phase":"final_answer"}}
 
@@ -368,7 +368,7 @@ data: {"type":"response.output_text.delta","output_index":3,"delta":"Answer"}
 
 data: {"type":"response.refusal.delta","output_index":3,"delta":" refused"}
 
-data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":6}}}}
+data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":6}}}}
 
 `)
 	events := collectEvents(t, stream)
@@ -408,7 +408,7 @@ data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"re
 	if done.Usage != (provider.Usage{InputTokens: 11, CachedInputTokens: 6, OutputTokens: 7, TotalTokens: 18}) {
 		t.Fatalf("usage = %#v", done.Usage)
 	}
-	wantState := `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}]`
+	wantState := `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","phase":"commentary"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"},{"id":"msg_final","type":"message","phase":"final_answer"}]`
 	if string(done.ProviderState) != wantState {
 		t.Fatalf("provider state = %s, want %s", done.ProviderState, wantState)
 	}
@@ -419,7 +419,7 @@ data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"re
 	if normalized.Text != "CheckingAnswer refused" || normalized.Thinking != "Plan raw" {
 		t.Fatalf("normalized response = %#v", normalized)
 	}
-	if len(normalized.ToolCalls) != 1 || string(normalized.ToolCalls[0].Arguments) != `{"query":"hydaelyn"}` {
+	if len(normalized.ToolCalls) != 1 || string(normalized.ToolCalls[0].Arguments) != `{"query":"venat"}` {
 		t.Fatalf("normalized tool calls = %#v", normalized.ToolCalls)
 	}
 }
@@ -427,9 +427,9 @@ data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"re
 func TestResponsesStreamFallsBackToCompletedFunctionCall(t *testing.T) {
 	stream := newResponsesTestStream(`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}
 
-data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"}}
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"}}
 
-data: {"type":"response.completed","response":{"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"}],"usage":{}}}
+data: {"type":"response.completed","response":{"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"}],"usage":{}}}
 
 `)
 	events := collectEvents(t, stream)
@@ -437,7 +437,7 @@ data: {"type":"response.completed","response":{"output":[{"id":"fc_1","type":"fu
 		t.Fatalf("events = %#v, want fallback tool delta and done", events)
 	}
 	delta := events[0].ToolCallDelta
-	if delta == nil || delta.ID != "call_1" || delta.Name != "lookup" || delta.ArgumentsDelta != `{"query":"hydaelyn"}` {
+	if delta == nil || delta.ID != "call_1" || delta.Name != "lookup" || delta.ArgumentsDelta != `{"query":"venat"}` {
 		t.Fatalf("fallback delta = %#v", delta)
 	}
 }
@@ -506,7 +506,7 @@ func TestResponsesStreamRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestDriverResponsesTwoTurnToolLoop(t *testing.T) {
-	firstOutput := `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Checking.","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"hydaelyn\"}"}]`
+	firstOutput := `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"msg_commentary","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Checking.","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"venat\"}"}]`
 	secondOutput := `[{"id":"msg_final","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Done.","annotations":[]}]}]`
 	var (
 		attempts atomic.Int32
@@ -530,8 +530,8 @@ func TestDriverResponsesTwoTurnToolLoop(t *testing.T) {
 			_, _ = writer.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"Checking.\"}\n\n"))
 			_, _ = writer.Write([]byte("data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\"}}\n\n"))
 			_, _ = writer.Write([]byte("data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}\n\n"))
-			_, _ = writer.Write([]byte("data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"query\\\":\\\"hydaelyn\\\"}\"}\n\n"))
-			_, _ = writer.Write([]byte("data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"hydaelyn\\\"}\"}}\n\n"))
+			_, _ = writer.Write([]byte("data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"query\\\":\\\"venat\\\"}\"}\n\n"))
+			_, _ = writer.Write([]byte("data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"venat\\\"}\"}}\n\n"))
 			_, _ = writer.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"output\":" + firstOutput + ",\"usage\":{\"input_tokens\":8,\"output_tokens\":5,\"total_tokens\":13}}}\n\n"))
 			return
 		}

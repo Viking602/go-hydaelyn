@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/errorprovider"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/errorprovider"
 )
 
 // Example demonstrates injecting a deterministic provider failure — useful

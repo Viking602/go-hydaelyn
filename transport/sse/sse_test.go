@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/stream"
+	"github.com/Viking602/venat/stream"
 )
 
 // newTestWriter builds a Writer against a fresh ResponseRecorder with a

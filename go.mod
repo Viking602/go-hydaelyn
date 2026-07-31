@@ -1,4 +1,4 @@
-module github.com/Viking602/go-hydaelyn
+module github.com/Viking602/venat
 
 go 1.25.0
 

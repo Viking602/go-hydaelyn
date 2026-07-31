@@ -335,7 +335,7 @@ func TestScrubEnv_DefaultsGOCACHEWhenMissing(t *testing.T) {
 			_ = os.Unsetenv("GOCACHE")
 		}
 	})
-	want := "GOCACHE=" + filepath.Join(os.TempDir(), "hydaelyn-go-build-cache")
+	want := "GOCACHE=" + filepath.Join(os.TempDir(), "venat-go-build-cache")
 	if !containsKV(scrubEnv(nil), want) {
 		t.Errorf("scrubEnv() should set fallback %q; env=%v", want, scrubEnv(nil))
 	}

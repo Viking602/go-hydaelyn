@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/assertions"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/assertions"
+	"github.com/Viking602/venat/multiagent"
 )
 
 // appendEvent records a multi-agent transport event on the run's event store

@@ -6,15 +6,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 )
 
 func TestDriverStreamPreservesToolCallIndexAndNormalizesOpenAIStyleDeltas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"hy\"}}]}}]}\n\n"))
-		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"daelyn\\\"}\"}}]}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"ve\"}}]}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"nat\\\"}\"}}]}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n"))
 		_, _ = writer.Write([]byte("data: [DONE]\n\n"))
 	}))
@@ -59,7 +59,7 @@ func TestDriverStreamPreservesToolCallIndexAndNormalizesOpenAIStyleDeltas(t *tes
 	if normalized.ToolCalls[0].ID != "call-1" || normalized.ToolCalls[0].Name != "lookup" {
 		t.Fatalf("expected normalized tool call metadata, got %#v", normalized.ToolCalls[0])
 	}
-	if string(normalized.ToolCalls[0].Arguments) != `{"query":"hydaelyn"}` {
+	if string(normalized.ToolCalls[0].Arguments) != `{"query":"venat"}` {
 		t.Fatalf("expected normalized arguments, got %#v", normalized.ToolCalls[0])
 	}
 }

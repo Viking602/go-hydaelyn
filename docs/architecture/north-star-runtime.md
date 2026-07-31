@@ -1,8 +1,8 @@
-# Hydaelyn 北极星架构
+# Venat 北极星架构
 
 ## 产品定位
 
-Hydaelyn 的目标不是再做一个 Go 版 LLM 调用封装，而是做成一个 Go-native、可嵌入、可持久化、可观测、可治理、以 Supervisor 驱动 DAG 为核心的多 Agent Runtime。
+Venat 的目标不是再做一个 Go 版 LLM 调用封装，而是做成一个 Go-native、可嵌入、可持久化、可观测、可治理、以 Supervisor 驱动 DAG 为核心的多 Agent Runtime。
 
 ## 保留项
 

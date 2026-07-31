@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	branches := []string{"api", "ui", "data"}
 	for _, b := range branches {
@@ -68,7 +68,7 @@ func main() {
 	fmt.Println("collab recipe complete (quorum=2 of 3 branches)")
 }
 
-func runBranch(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, branch string) {
+func runBranch(ctx context.Context, runner *venat.Runner, runID, taskID, branch string) {
 	implID, reviewID := "impl-"+branch, "review-"+branch
 	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
@@ -83,7 +83,7 @@ func runBranch(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, bran
 	})
 }
 
-func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, report api.TypedReport) {
+func runOnce(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, report api.TypedReport) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{

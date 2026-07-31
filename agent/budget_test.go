@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 // usageToolProvider emits a non-terminal tool call every turn and reports a

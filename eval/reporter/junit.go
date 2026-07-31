@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/eval"
 )
 
 // JUnit renders results as a JUnit XML document for CI ingestion. The output

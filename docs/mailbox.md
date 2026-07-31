@@ -1,6 +1,6 @@
 # Mailbox — task envelopes between agents
 
-`go-hydaelyn` has two orthogonal planes for agent collaboration:
+Venat has two orthogonal planes for agent collaboration:
 
 | Plane       | Purpose                                                | Public surface                                                          |
 |-------------|--------------------------------------------------------|-------------------------------------------------------------------------|
@@ -18,7 +18,7 @@ through the same durable stores as the rest of the run.
 ## Quick tour
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 runner.RegisterAgent(api.AgentProfile{ID: "alice"})
 runner.RegisterAgent(api.AgentProfile{ID: "bob"})
 

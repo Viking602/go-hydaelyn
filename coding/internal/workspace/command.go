@@ -494,7 +494,7 @@ func scrubEnv(extra map[string]string) []string {
 		base[k] = v
 	}
 	if base["GOCACHE"] == "" {
-		base["GOCACHE"] = filepath.Join(os.TempDir(), "hydaelyn-go-build-cache")
+		base["GOCACHE"] = filepath.Join(os.TempDir(), "venat-go-build-cache")
 	}
 	// Pin GOENV=off so the Go toolchain ignores the per-user `go env` config file
 	// ($HOME/.config/go/env, or the OS equivalent under the passed-through HOME).

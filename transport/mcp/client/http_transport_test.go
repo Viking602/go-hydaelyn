@@ -25,14 +25,13 @@ func TestHTTPTransportPreservesSDKOwnedHeadersWhenCustomHeadersConflict(t *testi
 		"Content-Type":         {"text/plain"},
 		"Mcp-Session-Id":       {"spoofed-session"},
 		"Mcp-Protocol-Version": {"1900-01-01"},
-		"X-Hydaelyn-Test":      {"preserved"},
+		"X-Venat-Test":         {"preserved"},
 	})
 	client := New(transport)
 	t.Cleanup(func() { _ = client.Close() })
 
 	// When
 	_, err := client.Initialize(context.Background(), "http-client", "v1.0.0")
-
 	// Then
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
@@ -56,7 +55,6 @@ func TestHeaderRoundTripperClosesDeleteResponseBodyAfterStickyOverflow(t *testin
 
 	// When
 	response, err := roundTripper.RoundTrip(request)
-
 	// Then
 	if err != nil {
 		t.Fatalf("RoundTrip() error = %v", err)

@@ -5,8 +5,8 @@
 package devops
 
 import (
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/packs"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/packs"
 )
 
 // PackName is the registry identifier for this pack.

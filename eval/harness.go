@@ -7,7 +7,7 @@
 //
 //   - EvalCase: a single named scenario carrying an api.StartRunCommand input
 //     and a list of Assertions, plus a Setup hook that returns a Harness.
-//   - Harness: the execution environment for a case. It owns the *hydaelyn.Runner,
+//   - Harness: the execution environment for a case. It owns the *venat.Runner,
 //     registers agents, and is torn down via Cleanup. The default implementation
 //     wires a scripted provider into the agent loop through the worker bridge.
 //   - Assertion: a typed predicate over the executed api.Run plus the Harness it
@@ -21,9 +21,9 @@
 package eval
 
 import (
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/provider"
 )
 
 // Harness is the execution environment a single EvalCase runs in. Setup
@@ -31,7 +31,7 @@ import (
 // the harness down via Cleanup after the case finishes.
 type Harness interface {
 	// Runner returns the live runner the case executes against.
-	Runner() *hydaelyn.Runner
+	Runner() *venat.Runner
 	// RegisterAgent registers an agent profile with the runner so the run
 	// can dispatch tasks to it.
 	RegisterAgent(profile api.AgentProfile)
@@ -57,7 +57,7 @@ type EmbeddingProvider interface {
 // as the M0 spike proved. Construct it with NewHarness; the zero value is not
 // usable.
 type DefaultHarness struct {
-	runner    *hydaelyn.Runner
+	runner    *venat.Runner
 	agentID   string
 	model     string
 	script    []provider.Event
@@ -99,7 +99,7 @@ func WithEmbeddingProvider(p EmbeddingProvider) HarnessOption {
 // needed; M1 keeps the default in-memory config.
 func NewHarness(opts ...HarnessOption) *DefaultHarness {
 	h := &DefaultHarness{
-		runner:  hydaelyn.NewDevelopment(),
+		runner:  venat.NewDevelopment(),
 		agentID: "agent",
 		model:   "scripted",
 		script: []provider.Event{
@@ -115,7 +115,7 @@ func NewHarness(opts ...HarnessOption) *DefaultHarness {
 }
 
 // Runner returns the live runner.
-func (h *DefaultHarness) Runner() *hydaelyn.Runner { return h.runner }
+func (h *DefaultHarness) Runner() *venat.Runner { return h.runner }
 
 // RegisterAgent registers an additional agent profile with the runner.
 func (h *DefaultHarness) RegisterAgent(profile api.AgentProfile) { h.runner.RegisterAgent(profile) }

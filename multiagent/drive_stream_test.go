@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/stream"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/stream"
 )
 
 // collectSink records every frame; safe for concurrent Emit so it can sit

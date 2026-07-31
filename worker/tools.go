@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/tool"
 )
 
 type GovernedToolBus struct {
-	Runner      *hydaelyn.Runner
+	Runner      *venat.Runner
 	Bus         *tool.Bus
 	RunID       string
 	TaskID      string
@@ -111,10 +111,10 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		return tool.Result{}, err
 	}
 	if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
-		return tool.Result{}, hydaelyn.ErrActionReconcileRequired
+		return tool.Result{}, venat.ErrActionReconcileRequired
 	}
 	if attempt.AttemptID != requestedAttemptID && !toolDefinitionIdempotent(d.definition) {
-		return tool.Result{}, hydaelyn.ErrActionReconcileRequired
+		return tool.Result{}, venat.ErrActionReconcileRequired
 	}
 
 	result, executeErr := d.driver.Execute(ctx, call, sink)

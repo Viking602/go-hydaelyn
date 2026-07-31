@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/worker"
 )
 
 func TestRuntime_RequiresPollerAndExecutor(t *testing.T) {

@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 func (r *Runtime) beginReadUoW(ctx context.Context) (ports.UnitOfWork, func(), error) {

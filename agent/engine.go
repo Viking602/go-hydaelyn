@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/stream"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/stream"
+	"github.com/Viking602/venat/tool"
 )
 
 // Run drives the agent loop against one api.Task under the supplied
@@ -457,7 +457,7 @@ func (defaultContextBuilder) Build(_ context.Context, task api.Task) ([]message.
 		goal = "Complete the assigned task and return a concise result."
 	}
 	return []message.Message{
-		message.NewText(message.RoleSystem, "You are a Hydaelyn agent."),
+		message.NewText(message.RoleSystem, "You are a Venat agent."),
 		message.NewText(message.RoleUser, goal),
 	}, nil
 }

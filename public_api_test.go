@@ -1,19 +1,19 @@
-package hydaelyn
+package venat
 
 import (
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/blackboard"
-	"github.com/Viking602/go-hydaelyn/flow"
-	"github.com/Viking602/go-hydaelyn/policy"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/transport/mcp"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/blackboard"
+	"github.com/Viking602/venat/flow"
+	"github.com/Viking602/venat/policy"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/transport/mcp"
 )
 
 type allowAPIEngine struct{}

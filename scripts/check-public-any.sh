@@ -10,7 +10,7 @@
 # returned []any; new commands that need multi-value results MUST add a typed
 # struct, never []any.
 #
-# Allowed exceptions are tagged `//hydaelyn:allow-public-any` on the line
+# Allowed exceptions are tagged `//venat:allow-public-any` on the line
 # immediately above an offending signature. Public fields containing any are
 # allowed only when tagged `// godoc-allow-any` on the line immediately above
 # the field.
@@ -52,7 +52,7 @@ for f in "${files[@]}"; do
     # Allow if previous line is the escape-hatch tag.
     prev_lineno=$((lineno - 1))
     prev_line="$(sed -n "${prev_lineno}p" "$f")"
-    if [[ "$prev_line" == *"//hydaelyn:allow-public-any"* ]]; then
+    if [[ "$prev_line" == *"//venat:allow-public-any"* ]]; then
       continue
     fi
     output+="${f}:${lineno}: ${line}"$'\n'

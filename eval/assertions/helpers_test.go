@@ -3,8 +3,8 @@ package assertions_test
 import (
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
 )
 
 // runToTerminal executes an assertion-free case to terminal status through the

@@ -19,9 +19,9 @@ package inmemfake
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
-	internalmem "github.com/Viking602/go-hydaelyn/internal/memory"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core/adapter"
+	internalmem "github.com/Viking602/venat/internal/memory"
 )
 
 // Provider is the in-memory api.StoreProvider used by the framework's

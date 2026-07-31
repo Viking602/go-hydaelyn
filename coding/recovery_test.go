@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 // readHeader reads a file through the toolset and returns its current ¶PATH#TAG

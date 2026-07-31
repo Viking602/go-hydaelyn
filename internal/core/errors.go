@@ -1,6 +1,6 @@
 package core
 
-import "github.com/Viking602/go-hydaelyn/internal/core/model"
+import "github.com/Viking602/venat/internal/core/model"
 
 // Package-level error vars re-exported from model so that internal/core files
 // can reference them without an explicit model import on every call site.

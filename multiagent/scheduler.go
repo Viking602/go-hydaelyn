@@ -3,7 +3,7 @@ package multiagent
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // Scheduler decides which AgentInstance executes which api.Task next.

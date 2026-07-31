@@ -13,6 +13,8 @@ const (
 	maxDiscoveryEntriesPerRoot = 2000
 	maxDiscoveredSkills        = 2000
 	maxAdditionalDirs          = 64
+	defaultSkillDirectory      = ".venat"
+	legacySkillDirectory       = ".hydaelyn"
 )
 
 // DiscoveryOptions names every trusted location eligible for scanning.
@@ -50,7 +52,7 @@ func Discover(options DiscoveryOptions) (DiscoveryResult, error) {
 
 	byName := make(map[string]Skill)
 	loadedCandidates := 0
-	var diagnostics []Diagnostic
+	diagnostics := legacyDiscoveryDiagnostics(options)
 	for _, candidate := range roots {
 		canonicalRoot, entries, diagnostic, err := readDiscoveryRoot(candidate)
 		if err != nil {
@@ -117,7 +119,7 @@ func discoveryRoots(options DiscoveryOptions) ([]discoveryRoot, error) {
 		}
 		roots = append(roots,
 			discoveryRoot{path: filepath.Join(base, ".agents", "skills"), optional: true},
-			discoveryRoot{path: filepath.Join(base, ".hydaelyn", "skills"), optional: true},
+			discoveryRoot{path: filepath.Join(base, defaultSkillDirectory, "skills"), optional: true},
 		)
 	}
 	appendConventional(options.UserDir)
@@ -130,6 +132,34 @@ func discoveryRoots(options DiscoveryOptions) ([]discoveryRoot, error) {
 		}
 	}
 	return roots, nil
+}
+
+func legacyDiscoveryDiagnostics(options DiscoveryOptions) []Diagnostic {
+	diagnostics := make([]Diagnostic, 0, 2)
+	appendLegacy := func(base string) {
+		if base == "" {
+			return
+		}
+		legacy := filepath.Join(base, legacySkillDirectory, "skills")
+		_, err := os.Lstat(legacy)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return
+		case err != nil:
+			diagnostics = append(diagnostics, Diagnostic{Path: legacy, Message: err.Error()})
+			return
+		}
+		replacement := filepath.Join(base, defaultSkillDirectory, "skills")
+		diagnostics = append(diagnostics, Diagnostic{
+			Path:    legacy,
+			Message: fmt.Sprintf("legacy discovery root is ignored; move skills to %s", replacement),
+		})
+	}
+	appendLegacy(options.UserDir)
+	if options.TrustProject {
+		appendLegacy(options.ProjectDir)
+	}
+	return diagnostics
 }
 
 func readDiscoveryRoot(candidate discoveryRoot) (string, []os.DirEntry, *Diagnostic, error) {

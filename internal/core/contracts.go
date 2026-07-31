@@ -3,9 +3,9 @@ package core
 import (
 	"context"
 
-	blackboardsvc "github.com/Viking602/go-hydaelyn/internal/blackboard"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	blackboardsvc "github.com/Viking602/venat/internal/blackboard"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 type (

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/venat/agent"
 )
 
 func ballot(voter, option string) Ballot {

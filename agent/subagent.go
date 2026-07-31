@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
 )
 
 // DefaultSubagentMaxDepth bounds how deep a chain of subagents may nest when a

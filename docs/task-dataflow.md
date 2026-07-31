@@ -2,7 +2,7 @@
 
 ## Why This Exists
 
-Hydaelyn already had parallel task execution. The missing piece was explicit task-to-task dataflow.
+Venat already had parallel task execution. The missing piece was explicit task-to-task dataflow.
 
 The runtime now models:
 

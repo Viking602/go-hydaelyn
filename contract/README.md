@@ -1,6 +1,6 @@
 # `contract/`: Ecosystem Adapter Contract Test Suite
 
-This package is the **public** validation gate for any Hydaelyn ecosystem adapter
+This package is the **public** validation gate for any Venat ecosystem adapter
 that implements a kernel interface. Spec anchor:
 [`docs/product-spec/v0.8.0/07-storage.md`](../docs/product-spec/v0.8.0/07-storage.md)
 §"Contract test suite" + [ADR-012](../docs/adr/ADR-012-storage-contract-position-c.md).
@@ -12,7 +12,7 @@ that implements a kernel interface. Spec anchor:
 > contract against their own data stack.
 
 If your provider passes `contract.RunStoreProviderContractTests`, it is correct
-as far as Hydaelyn is concerned. The framework runs the same suite on every PR
+as far as Venat is concerned. The framework runs the same suite on every PR
 via a non-exported in-memory adapter at `contract/internal/inmemfake/`; see
 [ADR-012 (revised, Position D)](../docs/adr/ADR-012-storage-contract-position-c.md).
 
@@ -25,8 +25,8 @@ import (
     "context"
     "testing"
 
-    "github.com/Viking602/go-hydaelyn/api"
-    "github.com/Viking602/go-hydaelyn/contract"
+    "github.com/Viking602/venat/api"
+    "github.com/Viking602/venat/contract"
     "example.com/myorg/mystorage"
 )
 

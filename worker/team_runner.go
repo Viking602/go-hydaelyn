@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
 )
 
 // TeamRunner connects multiagent.Drive to Runner-backed execution and
 // checkpoints TeamState after every scheduler tick.
 type TeamRunner struct {
-	Runner         *hydaelyn.Runner
+	Runner         *venat.Runner
 	Team           multiagent.Team
 	BuildDeps      agent.BuildDeps
 	BeforeTask     func(context.Context, multiagent.Dispatch, multiagent.AgentClass) error

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 // initGitRepo initializes a git repo at root with one committed file so a

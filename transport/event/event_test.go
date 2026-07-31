@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/transport/event"
-	"github.com/Viking602/go-hydaelyn/transport/trigger"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/transport/event"
+	"github.com/Viking602/venat/transport/trigger"
 )
 
 func TestDriver_PublishFiresMatchingTrigger(t *testing.T) {
