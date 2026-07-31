@@ -12,6 +12,7 @@ import (
 	"github.com/Viking602/venat"
 	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/provider/scripted"
@@ -129,6 +130,70 @@ func TestAgentWorkerContinuesFromCompletedTurnCheckpointWithoutReplayingProvider
 	}
 	if outcome.Result.Text != "completed before crash" || outcome.Result.Usage.TotalTokens != 10 {
 		t.Fatalf("recovered terminal result = %#v", outcome.Result)
+	}
+}
+
+func TestAgentWorkerRestoresStructuredOutputFromTerminalCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-structured-checkpoint", RootTaskID: "root", Request: "finish once",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-structured-checkpoint", Goal: "finish once",
+		OwnerAgentID: "agent-a", WriteTargets: []string{"summary"},
+		OutputSchema: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	checkpoint, err := agent.NewExecutionCheckpointedEvent(agent.ExecutionCheckpointRecord{
+		RunID: run.ID, TaskID: task.ID, AgentID: "agent-a", ExecutionID: "execution-before-crash",
+		Checkpoint: agent.TurnCheckpoint{
+			Messages: []message.Message{message.NewText(message.RoleAssistant, `{"summary":"completed before crash"}`)},
+			Step: agent.Step{
+				Index: 0, Decision: agent.StepDecisionFinish,
+				ModelCall: &agent.ModelCall{Model: "scripted", StopReason: provider.StopReasonComplete},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewExecutionCheckpointedEvent() error = %v", err)
+	}
+	if err := runner.AppendEvent(ctx, checkpoint); err != nil {
+		t.Fatalf("AppendEvent(checkpoint) error = %v", err)
+	}
+	providerDriver := &recordingProvider{events: []provider.Event{
+		{Kind: provider.EventError, Err: errors.New("provider must not be replayed")},
+	}}
+	outcome, err := (AgentWorker{
+		Runner: runner, Engine: agent.Engine{Provider: providerDriver}, AgentID: "agent-a", Model: "scripted",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	if err != nil || outcome.State != ExecutionCompleted {
+		t.Fatalf("ExecuteEnvelope() outcome=%#v error=%v, want completed", outcome, err)
+	}
+	if len(providerDriver.requests) != 0 {
+		t.Fatalf("provider was replayed after valid structured checkpoint: %d requests", len(providerDriver.requests))
+	}
+	if !outcome.Result.Valid || string(outcome.Result.Structured) != `{"summary":"completed before crash"}` {
+		t.Fatalf("recovered structured result = %#v", outcome.Result)
+	}
+	completed, err := runner.Task(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if completed.Result == nil || completed.Result.Structured["summary"] != "completed before crash" {
+		t.Fatalf("persisted structured report = %#v", completed.Result)
 	}
 }
 
@@ -912,7 +977,7 @@ func TestAgentWorkerResumesApprovedActionFromCheckpoint(t *testing.T) {
 	providerDriver := &sequenceProvider{turns: [][]provider.Event{
 		{
 			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{
-				ID: "approval-call", Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+				ID: "approval-call", Name: "write_alias", Arguments: json.RawMessage(`{"value":1}`),
 			}},
 			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
 		},
@@ -926,20 +991,27 @@ func TestAgentWorkerResumesApprovedActionFromCheckpoint(t *testing.T) {
 		EffectType:       tool.EffectWrite,
 		RequiresApproval: true,
 	}}
+	toolHook := &resumeToolLifecycleHook{}
 	worker := AgentWorker{
 		Runner:  runner,
-		Engine:  agent.Engine{Provider: providerDriver, Tools: tool.NewBus(actionDriver)},
+		Engine:  agent.Engine{Provider: providerDriver, Tools: tool.NewBus(actionDriver), Hooks: hook.NewChain(toolHook)},
 		AgentID: "agent-a",
 		Model:   "scripted",
 	}
 
-	first, err := worker.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	first, err := worker.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
+		Envelope: envelope,
+		Messages: []message.Message{message.NewText(message.RoleSystem, "supplemental resume context")},
+	})
 	if first.State != ExecutionSuspended || first.Suspension == nil ||
 		first.Suspension.Kind != SuspensionApproval {
 		t.Fatalf("first ExecuteEnvelope() state=%q suspension=%#v error=%v", first.State, first.Suspension, err)
 	}
 	if actionDriver.calls != 0 {
 		t.Fatalf("driver calls before approval = %d, want zero", actionDriver.calls)
+	}
+	if toolHook.before != 1 || toolHook.after != 0 {
+		t.Fatalf("hooks before suspension = before:%d after:%d, want 1 and 0", toolHook.before, toolHook.after)
 	}
 	attempts, err := runner.ListActionAttempts(ctx, api.ActionAttemptSelector{RunID: run.ID, TaskID: task.ID})
 	if err != nil || len(attempts) != 0 {
@@ -975,7 +1047,10 @@ func TestAgentWorkerResumesApprovedActionFromCheckpoint(t *testing.T) {
 	}
 	envelope = pending[0]
 
-	second, err := worker.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	second, err := worker.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
+		Envelope: envelope,
+		Messages: []message.Message{message.NewText(message.RoleSystem, "supplemental resume context")},
+	})
 	if err != nil || second.State != ExecutionCompleted {
 		t.Fatalf("second ExecuteEnvelope() outcome=%#v error=%v, want completed", second, err)
 	}
@@ -984,6 +1059,28 @@ func TestAgentWorkerResumesApprovedActionFromCheckpoint(t *testing.T) {
 	}
 	if len(providerDriver.requests) != 2 {
 		t.Fatalf("provider requests = %d, want two turns across both executions", len(providerDriver.requests))
+	}
+	if toolHook.before != 2 || toolHook.after != 1 {
+		t.Fatalf("hooks after resume = before:%d after:%d, want 2 and 1", toolHook.before, toolHook.after)
+	}
+	var supplementalCount int
+	var hookedResult bool
+	for _, current := range providerDriver.requests[1].Messages {
+		if current.Role == message.RoleSystem && current.Text == "supplemental resume context" {
+			supplementalCount++
+		}
+		if current.Role == message.RoleTool && current.ToolResult != nil &&
+			current.ToolResult.ToolCallID == "approval-call" &&
+			current.ToolResult.Name == "write" &&
+			current.ToolResult.Content == "hooked: ok" {
+			hookedResult = true
+		}
+	}
+	if supplementalCount != 1 {
+		t.Fatalf("resumed supplemental message count = %d, want 1: %#v", supplementalCount, providerDriver.requests[1].Messages)
+	}
+	if !hookedResult {
+		t.Fatalf("resumed provider messages missing hook-processed result: %#v", providerDriver.requests[1].Messages)
 	}
 }
 
@@ -1070,6 +1167,37 @@ func TestFailureReportPlainErrorHasNoKind(t *testing.T) {
 	if report.Kind != "" || report.Retryable || report.Escalatable {
 		t.Fatalf("plain error should leave failure fields empty, got %#v", report)
 	}
+}
+
+type resumeToolLifecycleHook struct {
+	before int
+	after  int
+}
+
+func (h *resumeToolLifecycleHook) TransformContext(_ context.Context, messages []message.Message) ([]message.Message, error) {
+	return messages, nil
+}
+
+func (h *resumeToolLifecycleHook) BeforeModelCall(context.Context, *provider.Request) error {
+	return nil
+}
+
+func (h *resumeToolLifecycleHook) BeforeToolCall(_ context.Context, call *tool.Call) error {
+	h.before++
+	if call.Name == "write_alias" {
+		call.Name = "write"
+	}
+	return nil
+}
+
+func (h *resumeToolLifecycleHook) AfterToolCall(_ context.Context, result *tool.Result) error {
+	h.after++
+	result.Content = "hooked: " + result.Content
+	return nil
+}
+
+func (h *resumeToolLifecycleHook) OnEvent(context.Context, provider.Event) error {
+	return nil
 }
 
 type recordingTool struct {

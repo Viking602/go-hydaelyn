@@ -100,6 +100,66 @@ func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
 	}
 }
 
+func TestTeamRunnerResumesPendingInstanceWithDistinctAgentClass(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-team-class-identity",
+		RootTaskID: "root",
+		Request:    "resume aliased class",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "draft-task", Goal: "write",
+		OwnerAgentID: "draft-instance", WriteTargets: []string{"result"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	class := multiagent.AgentClass{Name: "writer", Instructions: "write", Model: "scripted"}
+	state := multiagent.TeamState{
+		RunID: run.ID,
+		Tasks: []api.Task{task},
+		Instances: []multiagent.AgentInstance{{
+			ID:             "draft-instance",
+			ClassName:      "draft-slot",
+			AgentClassName: class.Name,
+			RunID:          run.ID,
+			TaskID:         task.ID,
+			State:          multiagent.InstanceStatePending,
+		}},
+	}
+	teamRunner := TeamRunner{Runner: runner}
+	if err := teamRunner.saveState(ctx, state, false); err != nil {
+		t.Fatalf("saveState() error = %v", err)
+	}
+	checkpoint, err := teamRunner.loadState(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if checkpoint.Instances[0].AgentClassName != class.Name {
+		t.Fatalf("checkpoint lost agent class identity: %#v", checkpoint.Instances[0])
+	}
+	providerDriver := &recordingProvider{events: []provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}
+	classes := map[string]multiagent.AgentClass{class.Name: class}
+	resumed, err := teamRunner.resumePendingInstances(ctx, checkpoint, classes, RunnerExecutor{
+		Runner:    runner,
+		Classes:   classes,
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(providerDriver)},
+	})
+	if err != nil {
+		t.Fatalf("resumePendingInstances() error = %v", err)
+	}
+	if resumed.Instances[0].State != multiagent.InstanceStateFinished || len(providerDriver.requests) != 1 {
+		t.Fatalf("resumed state = %#v, provider requests = %d", resumed, len(providerDriver.requests))
+	}
+}
+
 func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()

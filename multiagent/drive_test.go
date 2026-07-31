@@ -50,6 +50,38 @@ func TestDriveRunsSequentialToCompletion(t *testing.T) {
 	}
 }
 
+func TestDrivePersistsDistinctAgentClassIdentity(t *testing.T) {
+	scheduler := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		return []Dispatch{{
+			To:             "instance-1",
+			ClassName:      "draft-slot",
+			AgentClassName: "writer",
+			Task: api.Task{
+				ID:    "run-1-draft",
+				RunID: "run-1",
+			},
+		}}, nil
+	})
+	result, err := Drive(context.Background(), "run-1", scheduler, ExecutorFunc(
+		func(context.Context, Dispatch) (api.TypedReport, error) {
+			return api.TypedReport{Status: api.ReportStatusSuccess}, nil
+		},
+	), DriveOptions{})
+	if err != nil {
+		t.Fatalf("Drive error = %v", err)
+	}
+	if len(result.State.Instances) != 1 {
+		t.Fatalf("instances = %#v, want one", result.State.Instances)
+	}
+	instance := result.State.Instances[0]
+	if instance.ClassName != "draft-slot" || instance.AgentClassName != "writer" {
+		t.Fatalf("persisted instance identity = %#v", instance)
+	}
+}
+
 func TestDriveRoutesThenTerminates(t *testing.T) {
 	scheduler := RouterScheduler{
 		Entry:              AgentClass{Name: "triage"},

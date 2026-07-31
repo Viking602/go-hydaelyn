@@ -190,14 +190,18 @@ func (r TeamRunner) resumePendingInstances(
 		case api.TaskStatusReconcileRequired:
 			return state, api.ErrActionReconcileRequired
 		}
-		class, ok := classes[instance.ClassName]
+		agentClassName := instance.AgentClassName
+		if agentClassName == "" {
+			agentClassName = instance.ClassName
+		}
+		class, ok := classes[agentClassName]
 		if !ok {
-			return state, fmt.Errorf("worker: resumed instance %s references unknown class %s", instance.ID, instance.ClassName)
+			return state, fmt.Errorf("worker: resumed instance %s references unknown agent class %s", instance.ID, agentClassName)
 		}
 		dispatch := multiagent.Dispatch{
 			To:             instance.ID,
 			ClassName:      instance.ClassName,
-			AgentClassName: instance.ClassName,
+			AgentClassName: agentClassName,
 			Task:           task,
 			Input:          append(json.RawMessage(nil), task.Input...),
 			OutputPolicy: agent.OutputPolicy{

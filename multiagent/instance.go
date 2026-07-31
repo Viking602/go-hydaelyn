@@ -14,12 +14,13 @@ import (
 //
 // Spec anchor: docs/product-spec/v0.8.0/04-agent-class.md.
 type AgentInstance struct {
-	ID        string        `json:"id"`
-	ClassName string        `json:"className"`
-	RunID     string        `json:"runId"`
-	TaskID    string        `json:"taskId,omitempty"`
-	State     InstanceState `json:"state"`
-	CreatedAt time.Time     `json:"createdAt"`
+	ID             string        `json:"id"`
+	ClassName      string        `json:"className"`
+	AgentClassName string        `json:"agentClassName,omitempty"`
+	RunID          string        `json:"runId"`
+	TaskID         string        `json:"taskId,omitempty"`
+	State          InstanceState `json:"state"`
+	CreatedAt      time.Time     `json:"createdAt"`
 }
 
 type InstanceState string

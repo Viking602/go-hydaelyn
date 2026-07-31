@@ -1036,6 +1036,17 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 	return prepared, terminal, nil
 }
 
+// ResumeToolCalls executes tool calls restored from a durable checkpoint
+// through the same preparation, validation, and hook pipeline as a live turn.
+// The caller remains responsible for appending the returned results to history.
+func (e Engine) ResumeToolCalls(ctx context.Context, calls []message.ToolCall) ([]message.ToolResult, error) {
+	prepared, _, err := e.prepareToolCalls(ctx, calls)
+	if err != nil {
+		return nil, err
+	}
+	return e.dispatchPreparedTools(ctx, prepared, e.ToolMode)
+}
+
 // dispatchPreparedTools executes the hook-prepared calls on the bus and runs
 // AfterToolCall on each result. prepareToolCalls already validated every call as
 // registered, so a dispatch error comes from a driver that actually ran (or, for a

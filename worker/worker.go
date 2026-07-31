@@ -154,10 +154,9 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	var runErr error
 	recoveredTerminal := hasCheckpoint &&
 		!checkpoint.Checkpoint.PendingToolCalls &&
-		checkpoint.Checkpoint.Step.Decision == agent.StepDecisionFinish &&
-		len(task.OutputSchema) == 0
+		checkpoint.Checkpoint.Step.Decision == agent.StepDecisionFinish
 	if recoveredTerminal {
-		result = resultFromTerminalCheckpoint(checkpoint.Checkpoint)
+		result, runErr = resultFromTerminalCheckpoint(checkpoint.Checkpoint, task.OutputSchema)
 	} else {
 		if hasCheckpoint && checkpoint.Checkpoint.PendingToolCalls {
 			resumeMessages, runErr = withLeaseHeartbeat(ctx, w, lease.ID, ttl, func(runCtx context.Context) ([]message.Message, error) {
@@ -617,17 +616,8 @@ func (w AgentWorker) resumePendingToolCalls(
 	if len(calls) == 0 {
 		return messages, nil
 	}
-	if engine.Tools == nil {
-		return messages, fmt.Errorf("%w: pending checkpoint tool calls", tool.ErrToolNotFound)
-	}
-	results, err := engine.Tools.ExecuteBatch(ctx, calls, engine.ToolMode, nil)
-	for index, result := range results {
-		if result.ToolCallID == "" {
-			result.ToolCallID = calls[index].ID
-		}
-		if result.Name == "" {
-			result.Name = calls[index].Name
-		}
+	results, err := engine.ResumeToolCalls(ctx, calls)
+	for _, result := range results {
 		messages = append(messages, message.NewToolResult(result))
 	}
 	return messages, err
@@ -637,7 +627,7 @@ func pendingToolCallCount(messages []message.Message) int {
 	return len(pendingToolCalls(messages))
 }
 
-func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint) agent.Result {
+func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint, schema json.RawMessage) (agent.Result, error) {
 	text := ""
 	thinking := ""
 	for index := len(checkpoint.Messages) - 1; index >= 0; index-- {
@@ -653,7 +643,7 @@ func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint) agent.Result 
 	if checkpoint.Step.ModelCall != nil {
 		stopReason = checkpoint.Step.ModelCall.StopReason
 	}
-	return agent.Result{
+	result := agent.Result{
 		Text:          text,
 		Valid:         true,
 		Steps:         []agent.Step{checkpoint.Step},
@@ -663,6 +653,21 @@ func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint) agent.Result 
 		Messages:      append([]message.Message(nil), checkpoint.Messages...),
 		Thinking:      thinking,
 	}
+	if len(schema) == 0 {
+		return result, nil
+	}
+	if err := agent.ValidateJSON(schema, json.RawMessage(text)); err != nil {
+		failure := &agent.AgentFailure{
+			Kind:      agent.FailureKindSchemaInvalid,
+			Reason:    err.Error(),
+			Retryable: false,
+		}
+		result.Valid = false
+		result.Failure = failure
+		return result, failure
+	}
+	result.Structured = append(json.RawMessage(nil), text...)
+	return result, nil
 }
 
 func pendingToolCalls(messages []message.Message) []tool.Call {
@@ -832,10 +837,7 @@ type workerContextBuilder struct {
 
 func (b workerContextBuilder) Build(ctx context.Context, task api.Task) ([]message.Message, error) {
 	if len(b.resume) > 0 {
-		messages := make([]message.Message, 0, len(b.resume)+len(b.extra))
-		messages = append(messages, b.resume...)
-		messages = append(messages, b.extra...)
-		return messages, nil
+		return append([]message.Message(nil), b.resume...), nil
 	}
 	if b.inner != nil {
 		messages, err := b.inner.Build(ctx, task)

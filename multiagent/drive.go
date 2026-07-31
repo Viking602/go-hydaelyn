@@ -326,18 +326,23 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 	if className == "" {
 		className = classNameFromTaskID(runID, dispatch.Task.ID)
 	}
+	agentClassName := dispatch.AgentClassName
+	if agentClassName == "" {
+		agentClassName = className
+	}
 	var report api.TypedReport
 	execErr := ValidateDispatch(dispatch)
 	if execErr == nil {
 		report, execErr = runDispatch(ctx, dispatch, executor, sink, className)
 	}
 	instance := AgentInstance{
-		ID:        dispatch.To,
-		ClassName: className,
-		RunID:     runID,
-		TaskID:    dispatch.Task.ID,
-		State:     InstanceStateFinished,
-		CreatedAt: time.Now().UTC(),
+		ID:             dispatch.To,
+		ClassName:      className,
+		AgentClassName: agentClassName,
+		RunID:          runID,
+		TaskID:         dispatch.Task.ID,
+		State:          InstanceStateFinished,
+		CreatedAt:      time.Now().UTC(),
 	}
 	task := dispatch.Task
 	var suspension *ExecutionSuspendedError
