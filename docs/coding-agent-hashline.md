@@ -2,7 +2,7 @@
 
 Status: Approved for implementation (2026-06-02). Supersedes the v1 draft.
 
-This document specifies a sandboxed **coding capability** for Hydaelyn plus a
+This document specifies a sandboxed **coding capability** for Venat plus a
 **pure-Go implementation of the hashline line-anchored edit protocol**. It is the
 single source of truth for the implementation; every package, type, and behavior
 below is decision-complete.
@@ -16,7 +16,7 @@ below is decision-complete.
   shell, through a strict allowlist).
 - **No new third-party dependencies.** Do not modify `go.mod` require directives.
   Standard library only.
-- **Tabs** in Go source; goimports local prefix `github.com/Viking602/go-hydaelyn`.
+- **Tabs** in Go source; goimports local prefix `github.com/Viking602/venat`.
 - Typed result structs only in the public `coding/` surface — never return `[]any`
   or expose loose `any` fields (house style; `coding/` is outside the ADR-009
   enforcement set but follows the same rule).
@@ -668,7 +668,7 @@ exact `api.AgentDefinition`/`api.CapabilityManifest` field names against
   retry; write_file on existing → redirected to edit_hashline.
 - **eval** (M7): use `eval.EvalCase` + `assertions.*` (`PolicyDecisionDeniedBy`,
   `ToolCalledWithArg`, `RunTerminatedWithStatus`, `EventEmitted`) + `eval.RunSuite`.
-  NO gate/judge/replay/score artifacts and NO `hydaelyn eval` CLI (explicitly out of
+  NO gate/judge/replay/score artifacts and NO `venat eval` CLI (explicitly out of
   scope — see the eval-harness decision).
 
 ## 10. Milestones & PRs

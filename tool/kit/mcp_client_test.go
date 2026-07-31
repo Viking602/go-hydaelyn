@@ -10,8 +10,8 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Viking602/go-hydaelyn/tool"
-	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
+	"github.com/Viking602/venat/tool"
+	mcpclient "github.com/Viking602/venat/transport/mcp/client"
 )
 
 func TestImportMCPToolsMapsExternalToolsToLocalDrivers(t *testing.T) {

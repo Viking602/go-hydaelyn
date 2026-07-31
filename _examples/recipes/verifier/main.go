@@ -1,4 +1,4 @@
-// verifier demonstrates feedback-loop engineering on the Hydaelyn agent layer:
+// verifier demonstrates feedback-loop engineering on the Venat agent layer:
 // a writer agent drafts an answer, a verifier subagent checks it against a
 // rubric, and the writer revises on the verifier's feedback until it passes.
 // The verify-revise cycle IS the loop — built entirely from existing primitives
@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
 )
 
 const (

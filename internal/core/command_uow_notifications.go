@@ -1,6 +1,6 @@
 package core
 
-import "github.com/Viking602/go-hydaelyn/internal/core/model"
+import "github.com/Viking602/venat/internal/core/model"
 
 // BlackboardNotifier is implemented by command results that produced
 // blackboard items needing commit-time fan-out to in-memory subscribers.

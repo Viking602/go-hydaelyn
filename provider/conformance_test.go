@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 func TestNormalizeEventsConformanceCases(t *testing.T) {
@@ -47,7 +47,7 @@ func TestNormalizeEventsConformanceCases(t *testing.T) {
 		{
 			name: "full tool call event",
 			events: []Event{
-				{Kind: EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"q":"hydaelyn"}`)}},
+				{Kind: EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"q":"venat"}`)}},
 				{Kind: EventDone, StopReason: StopReasonToolUse},
 			},
 			assertion: func(t *testing.T, response NormalizedResponse) {
@@ -59,12 +59,12 @@ func TestNormalizeEventsConformanceCases(t *testing.T) {
 		{
 			name: "delta tool call event",
 			events: []Event{
-				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", Name: "lookup", ArgumentsDelta: "{\"q\":\"hy"}},
-				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", ArgumentsDelta: "daelyn\"}"}},
+				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", Name: "lookup", ArgumentsDelta: "{\"q\":\"ve"}},
+				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", ArgumentsDelta: "nat\"}"}},
 				{Kind: EventDone, StopReason: StopReasonToolUse},
 			},
 			assertion: func(t *testing.T, response NormalizedResponse) {
-				if len(response.ToolCalls) != 1 || string(response.ToolCalls[0].Arguments) != "{\"q\":\"hydaelyn\"}" {
+				if len(response.ToolCalls) != 1 || string(response.ToolCalls[0].Arguments) != "{\"q\":\"venat\"}" {
 					t.Fatalf("unexpected response %#v", response)
 				}
 			},
@@ -73,11 +73,11 @@ func TestNormalizeEventsConformanceCases(t *testing.T) {
 			name: "mixed full and delta tool event",
 			events: []Event{
 				{Kind: EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup"}},
-				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", ArgumentsDelta: "{\"q\":\"hydaelyn\"}"}},
+				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", ArgumentsDelta: "{\"q\":\"venat\"}"}},
 				{Kind: EventDone, StopReason: StopReasonToolUse},
 			},
 			assertion: func(t *testing.T, response NormalizedResponse) {
-				if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "lookup" || string(response.ToolCalls[0].Arguments) != "{\"q\":\"hydaelyn\"}" {
+				if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "lookup" || string(response.ToolCalls[0].Arguments) != "{\"q\":\"venat\"}" {
 					t.Fatalf("unexpected response %#v", response)
 				}
 			},
@@ -122,7 +122,7 @@ func TestNormalizeEventsConformanceCases(t *testing.T) {
 			name: "text and tool mixed response",
 			events: []Event{
 				{Kind: EventTextDelta, Text: "first "},
-				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", Name: "lookup", ArgumentsDelta: "{\"q\":\"hydaelyn\"}"}},
+				{Kind: EventToolCallDelta, ToolCallDelta: &ToolCallDelta{ID: "call-1", Name: "lookup", ArgumentsDelta: "{\"q\":\"venat\"}"}},
 				{Kind: EventDone, StopReason: StopReasonToolUse, Usage: Usage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}},
 			},
 			assertion: func(t *testing.T, response NormalizedResponse) {

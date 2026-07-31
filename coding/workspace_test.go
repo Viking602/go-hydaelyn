@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/coding/internal/workspace"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/coding/internal/workspace"
 )
 
 // gitRepoCmd runs a git command in dir for test setup, failing on error.

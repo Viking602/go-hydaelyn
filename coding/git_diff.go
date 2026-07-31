@@ -3,7 +3,7 @@ package coding
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 // gitDiffInput is the decoded argument shape for coding.git_diff.

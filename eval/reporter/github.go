@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/eval"
 )
 
 // GitHub renders results as GitHub Actions workflow commands. Each failed

@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
 )
 
 // RunnerExecutor persists a multi-agent dispatch through Runner before
 // executing it with the bounded agent engine.
 type RunnerExecutor struct {
-	Runner         *hydaelyn.Runner
+	Runner         *venat.Runner
 	Classes        map[string]multiagent.AgentClass
 	BuildDeps      agent.BuildDeps
 	BeforeTask     func(context.Context, multiagent.Dispatch, multiagent.AgentClass) error
@@ -153,7 +153,7 @@ func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Disp
 	})
 }
 
-func taskEnvelope(ctx context.Context, runner *hydaelyn.Runner, runID, taskID string, statuses ...string) (api.TaskEnvelope, bool, error) {
+func taskEnvelope(ctx context.Context, runner *venat.Runner, runID, taskID string, statuses ...string) (api.TaskEnvelope, bool, error) {
 	uow, err := runner.Begin(ctx)
 	if err != nil {
 		return api.TaskEnvelope{}, false, err

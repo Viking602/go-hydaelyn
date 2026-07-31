@@ -16,14 +16,14 @@ func TestNormalizeEventsOpenAIStyleToolCallDeltaWithoutRepeatedID(t *testing.T) 
 				Index:          intPtr(0),
 				ID:             "call-1",
 				Name:           "lookup",
-				ArgumentsDelta: `{"query":"hy`,
+				ArgumentsDelta: `{"query":"ve`,
 			},
 		},
 		{
 			Kind: EventToolCallDelta,
 			ToolCallDelta: &ToolCallDelta{
 				Index:          intPtr(0),
-				ArgumentsDelta: `daelyn"}`,
+				ArgumentsDelta: `nat"}`,
 			},
 		},
 		{Kind: EventDone, StopReason: StopReasonToolUse},
@@ -40,7 +40,7 @@ func TestNormalizeEventsOpenAIStyleToolCallDeltaWithoutRepeatedID(t *testing.T) 
 	if response.ToolCalls[0].Name != "lookup" {
 		t.Fatalf("expected tool call name lookup, got %#v", response.ToolCalls[0])
 	}
-	if string(response.ToolCalls[0].Arguments) != `{"query":"hydaelyn"}` {
+	if string(response.ToolCalls[0].Arguments) != `{"query":"venat"}` {
 		t.Fatalf("expected merged arguments, got %#v", response.ToolCalls[0])
 	}
 }

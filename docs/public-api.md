@@ -2,13 +2,13 @@
 
 ## Runner Construction
 
-Use `hydaelyn.NewDevelopment()` for local work and tests. It returns a Runner
+Use `venat.NewDevelopment()` for local work and tests. It returns a Runner
 with in-memory storage and development policy defaults.
 
-Import `github.com/Viking602/go-hydaelyn/api` for all public contracts:
+Import `github.com/Viking602/venat/api` for all public contracts:
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
@@ -16,20 +16,20 @@ runner := hydaelyn.NewDevelopment(api.Config{
 Production startup is fail-closed at construction:
 
 ```go
-runner, err := hydaelyn.NewProduction(api.Config{
+runner, err := venat.NewProduction(api.Config{
 	StoreProvider: durableStore,
 	PolicyEngine:  policy.DenySideEffectsByDefault(),
 })
 ```
 
-The legacy `hydaelyn.New` development constructor remains available during the
+The legacy `venat.New` development constructor remains available during the
 pre-v1 migration and is deprecated.
 
 ## Stable Packages
 
 The major-version public surface includes:
 
-- `hydaelyn` — primary façade and recommended import path for construction
+- `venat` — primary façade and recommended import path for construction
 - `api` — Config, commands, interfaces, Run/Task value contracts, constants, errors
 - `agent`
 - `blackboard`
@@ -48,7 +48,7 @@ These packages follow the compatibility rules in [SemVer And Compatibility](semv
 
 The primary contract is split across the root facade and the api package:
 
-- `hydaelyn.NewDevelopment`, `hydaelyn.NewProduction`, `hydaelyn.Runner`
+- `venat.NewDevelopment`, `venat.NewProduction`, `venat.Runner`
 - `api.Config`
 - `api.StartRunCommand`, `api.CreateTaskCommand`, other `api.*Command` values
 - `api.Run`, `api.Task`, `api.TaskEnvelope`, `api.TaskExecutionLease`, `api.TypedReport`
@@ -76,7 +76,7 @@ Durable storage contracts are exposed through `api`:
 Example:
 
 ```go
-runner, err := hydaelyn.NewProduction(api.Config{
+runner, err := venat.NewProduction(api.Config{
 	StoreProvider: myStoreProvider,
 	PolicyEngine:  myPolicy,
 })
@@ -87,9 +87,9 @@ runner, err := hydaelyn.NewProduction(api.Config{
 The v2 CLI is intentionally minimal:
 
 ```text
-hydaelyn version
-hydaelyn inspect-events --events PATH [--task TASKID]
-hydaelyn help
+venat version
+venat inspect-events --events PATH [--task TASKID]
+venat help
 ```
 
 The library is the primary surface.
@@ -109,5 +109,5 @@ Archived v1 package names such as `host`, `team`, `planner`, `scheduler`,
 surface. Use the explicit development or production constructor plus `api`
 contracts for new code.
 
-Hydaelyn does not ship endpoint catalogs, a standard-library router, or a
+Venat does not ship endpoint catalogs, a standard-library router, or a
 canonical `net/http` route tree as part of the primary runner API.

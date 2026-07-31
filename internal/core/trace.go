@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
+	"github.com/Viking602/venat/internal/core/model"
+	tracesvc "github.com/Viking602/venat/internal/trace"
 )
 
 type (

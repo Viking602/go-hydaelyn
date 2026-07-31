@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/contract"
-	"github.com/Viking602/go-hydaelyn/contract/internal/inmemfake"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/contract"
+	"github.com/Viking602/venat/contract/internal/inmemfake"
 )
 
 // TestContractSuite_SelfCheck runs the public contract suite against the

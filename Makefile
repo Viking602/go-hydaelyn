@@ -1,4 +1,4 @@
-# go-hydaelyn developer workflow
+# venat developer workflow
 #
 # Common targets:
 #   make fmt          - format Go sources (gofmt + goimports if available)
@@ -36,7 +36,7 @@ help:
 fmt: ## Format Go sources via gofmt (and goimports if installed)
 	$(GOFMT) -w $(GO_FILES)
 	@if command -v $(GOIMPORTS) >/dev/null 2>&1; then \
-		$(GOIMPORTS) -w -local github.com/Viking602/go-hydaelyn $(GO_FILES); \
+		$(GOIMPORTS) -w -local github.com/Viking602/venat $(GO_FILES); \
 	else \
 		echo "goimports not installed; skipped (install: go install golang.org/x/tools/cmd/goimports@latest)"; \
 	fi

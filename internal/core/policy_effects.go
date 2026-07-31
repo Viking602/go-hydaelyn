@@ -6,8 +6,8 @@ import (
 	"maps"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, request model.PolicyRequest) (model.PolicyDecision, error) {

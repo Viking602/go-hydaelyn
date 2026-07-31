@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/transport/trigger"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/transport/trigger"
 )
 
 func TestScheduleSpecAppliesTimezone(t *testing.T) {

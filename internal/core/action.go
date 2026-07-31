@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	actionsvc "github.com/Viking602/go-hydaelyn/internal/action"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	actionsvc "github.com/Viking602/venat/internal/action"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 type (

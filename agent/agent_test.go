@@ -6,11 +6,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 type fakeProvider struct{}
@@ -32,7 +32,7 @@ func (f fakeProvider) Stream(_ context.Context, request provider.Request) (provi
 			ToolCall: &message.ToolCall{
 				ID:        "call-1",
 				Name:      "lookup",
-				Arguments: json.RawMessage(`{"query":"hydaelyn"}`),
+				Arguments: json.RawMessage(`{"query":"venat"}`),
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
@@ -56,7 +56,7 @@ func TestEngineRunsToolLoop(t *testing.T) {
 	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model: "test-model",
 		Messages: []message.Message{
-			message.NewText(message.RoleUser, "find hydaelyn"),
+			message.NewText(message.RoleUser, "find venat"),
 		},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
@@ -182,7 +182,7 @@ func TestEngineFailsWhenToolCallsExistButToolBusMissing(t *testing.T) {
 	engine := Engine{Provider: fakeProvider{}}
 	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 1,
 	})
 	if !errors.Is(err, ErrToolBusMissing) {
@@ -309,7 +309,7 @@ func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 					ToolCall: &message.ToolCall{
 						ID:        "call-1",
 						Name:      "lookup",
-						Arguments: json.RawMessage(`{"query":"hydaelyn"}`),
+						Arguments: json.RawMessage(`{"query":"venat"}`),
 					},
 				},
 				{
@@ -351,7 +351,7 @@ func TestEngineAccumulatesUsageAcrossTurns(t *testing.T) {
 	}
 	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
 	})
@@ -409,7 +409,7 @@ func TestCollectMergesFullAndDeltaToolCalls(t *testing.T) {
 			Kind: provider.EventToolCallDelta,
 			ToolCallDelta: &provider.ToolCallDelta{
 				ID:             "call-1",
-				ArgumentsDelta: `{"query":"hydaelyn"}`,
+				ArgumentsDelta: `{"query":"venat"}`,
 			},
 		},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
@@ -420,7 +420,7 @@ func TestCollectMergesFullAndDeltaToolCalls(t *testing.T) {
 	if len(assistant.ToolCalls) != 1 {
 		t.Fatalf("expected one merged tool call, got %#v", assistant.ToolCalls)
 	}
-	if got := string(assistant.ToolCalls[0].Arguments); got != `{"query":"hydaelyn"}` {
+	if got := string(assistant.ToolCalls[0].Arguments); got != `{"query":"venat"}` {
 		t.Fatalf("expected merged arguments, got %q", got)
 	}
 }

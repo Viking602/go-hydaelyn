@@ -8,12 +8,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/tool"
 )
+
+func TestLegacySkillWireIdentifiersRemainStable(t *testing.T) {
+	if SkillActivationToolName != "hydaelyn_activate_skill" {
+		t.Fatalf("SkillActivationToolName = %q", SkillActivationToolName)
+	}
+	if SkillResourceToolName != "hydaelyn_read_skill_resource" {
+		t.Fatalf("SkillResourceToolName = %q", SkillResourceToolName)
+	}
+	if skillContextMetadataKey != "hydaelyn.skill.context" {
+		t.Fatalf("skillContextMetadataKey = %q", skillContextMetadataKey)
+	}
+}
 
 func TestBuildAvailableSkillsDisclosesCatalogWithoutBody(t *testing.T) {
 	driver := &scriptedProvider{turns: [][]provider.Event{{
@@ -204,7 +216,7 @@ func TestSkillRuntimeDirectEngineOverlapDoesNotDuplicate(t *testing.T) {
 	if count := strings.Count(joinMessageText(compacted), "ONE BODY"); count != 1 {
 		t.Fatalf("compacted body count = %d, want 1", count)
 	}
-	if strings.Contains(joinMessageText(compacted), "Available Hydaelyn skills") {
+	if strings.Contains(joinMessageText(compacted), "Available Venat skills") {
 		t.Fatal("eager skill was also disclosed as available")
 	}
 }

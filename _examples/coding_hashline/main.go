@@ -27,16 +27,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/coding"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/policy"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/stream"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/coding"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/policy"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/stream"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/worker"
 )
 
 const (
@@ -75,7 +75,7 @@ func main() {
 	//    action task by composing an allow rule for the two coding write tools
 	//    the run uses. That composition is exactly the "explicit allowance"
 	//    spec section 7.1 says must clear the default deny.
-	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: hostPolicy()})
+	runner := venat.NewDevelopment(api.Config{PolicyEngine: hostPolicy()})
 	runner.RegisterAgent(api.AgentProfile{ID: agentID})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "fix the Add bug"})
@@ -197,7 +197,7 @@ func reportToolResult(res message.ToolResult) {
 
 // reloadTask reloads the durable task so the engine runs against the same
 // record the runtime gate validates against (Version, AllowsAction, Goal).
-func reloadTask(ctx context.Context, runner *hydaelyn.Runner, runID, taskID string) api.Task {
+func reloadTask(ctx context.Context, runner *venat.Runner, runID, taskID string) api.Task {
 	task, err := runner.Task(ctx, runID, taskID)
 	must(err)
 	return task

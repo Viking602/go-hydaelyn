@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
-	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
-	"github.com/Viking602/go-hydaelyn/internal/lifecycle"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
+	corestate "github.com/Viking602/venat/internal/core/state"
+	"github.com/Viking602/venat/internal/lifecycle"
 )
 
 type Factory func(model.Task, string, string) (model.ApprovalRequest, model.ResumeToken)

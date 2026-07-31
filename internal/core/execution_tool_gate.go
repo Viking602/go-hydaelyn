@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	toolgatesvc "github.com/Viking602/go-hydaelyn/internal/toolgate"
+	toolgatesvc "github.com/Viking602/venat/internal/toolgate"
 )
 
 type (

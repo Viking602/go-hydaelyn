@@ -166,17 +166,17 @@ jobs:
           export GOPROXY=direct
           mkdir -p "$GOBIN"
 
-          go install "github.com/Viking602/go-hydaelyn/cmd/hydaelyn@${GITHUB_REF_NAME}"
-          HYDAELYN="$GOBIN/hydaelyn"
-          INSTALLED_VERSION="$("$HYDAELYN" version)"
+          go install "github.com/Viking602/venat/cmd/venat@${GITHUB_REF_NAME}"
+          VENAT="$GOBIN/venat"
+          INSTALLED_VERSION="$("$VENAT" version)"
           if [ "$INSTALLED_VERSION" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Installed version ${INSTALLED_VERSION} does not match tag ${GITHUB_REF_NAME}"
             exit 1
           fi
-          "$HYDAELYN" --help >/dev/null
+          "$VENAT" --help >/dev/null
 
           set +e
-          "$HYDAELYN" unknown-command >"$TMP_DIR/unknown.stdout" 2>"$TMP_DIR/unknown.stderr"
+          "$VENAT" unknown-command >"$TMP_DIR/unknown.stdout" 2>"$TMP_DIR/unknown.stderr"
           UNKNOWN_STATUS=$?
           set -e
           test "$UNKNOWN_STATUS" -eq 1
@@ -185,16 +185,20 @@ jobs:
 
           mkdir -p "$TMP_DIR/consumer"
           cd "$TMP_DIR/consumer"
-          go mod init example.com/hydaelyn-release-consumer
+          go mod init example.com/venat-release-consumer
           cat > consumer.go <<'EOF'
           package consumer
 
           import (
-              "github.com/Viking602/go-hydaelyn/agent"
-              "github.com/Viking602/go-hydaelyn/provider"
-              "github.com/Viking602/go-hydaelyn/provider/scripted"
-              "github.com/Viking602/go-hydaelyn/skill"
+              "github.com/Viking602/venat"
+              "github.com/Viking602/venat/agent"
+              "github.com/Viking602/venat/provider"
+              "github.com/Viking602/venat/provider/scripted"
+              "github.com/Viking602/venat/skill"
           )
+          func NewRunner() *venat.Runner {
+              return venat.NewDevelopment()
+          }
 
           func NewEngine() (agent.Engine, error) {
               registry := skill.NewRegistry()
@@ -222,6 +226,9 @@ jobs:
           import "testing"
 
           func TestNewEngine(t *testing.T) {
+              if NewRunner() == nil {
+                  t.Fatal("NewRunner() returned nil")
+              }
               engine, err := NewEngine()
               if err != nil {
                   t.Fatal(err)
@@ -231,7 +238,7 @@ jobs:
               }
           }
           EOF
-          go mod edit -require="github.com/Viking602/go-hydaelyn@${GITHUB_REF_NAME}"
+          go mod edit -require="github.com/Viking602/venat@${GITHUB_REF_NAME}"
           go mod tidy
           go test ./...
           go build ./...

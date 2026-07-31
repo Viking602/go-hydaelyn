@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/eval"
 )
 
 // Text renders results as a terminal-friendly summary: one PASS/FAIL line per

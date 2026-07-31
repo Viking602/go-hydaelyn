@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/stream"
+	"github.com/Viking602/venat/stream"
 )
 
 // ErrNotFlushable is returned by NewWriter when the http.ResponseWriter

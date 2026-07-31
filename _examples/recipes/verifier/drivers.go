@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 )
 
 // turnDriver is a deterministic, turn-aware provider.Driver: each Stream call

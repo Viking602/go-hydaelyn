@@ -3,8 +3,8 @@ package workflow
 import (
 	"encoding/json"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
 )
 
 type Condition func(api.TypedReport) bool

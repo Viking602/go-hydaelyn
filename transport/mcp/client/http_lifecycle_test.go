@@ -27,7 +27,7 @@ func TestHTTPTransportCompletesOfficialStreamableLifecycle(t *testing.T) {
 				return server
 			}, &sdkmcp.StreamableHTTPOptions{JSONResponse: test.jsonResponse}))
 			t.Cleanup(httpServer.Close)
-			transport := NewHTTPTransport(httpServer.URL, http.Header{"X-Hydaelyn-Test": {"preserved"}})
+			transport := NewHTTPTransport(httpServer.URL, http.Header{"X-Venat-Test": {"preserved"}})
 			headerTransport := transport.client.Transport.(*headerRoundTripper)
 			observer := &observingRoundTripper{base: headerTransport.base}
 			headerTransport.base = observer
@@ -74,7 +74,7 @@ func TestHTTPTransportCompletesOfficialStreamableLifecycle(t *testing.T) {
 				t.Fatalf("tools/call response Content-Type = %q, want %q", call.responseContentType, test.wantResponseContent)
 			}
 			deleted := observer.requireHTTP(t, http.MethodDelete)
-			if deleted.sessionID != "hydaelyn-session" || deleted.protocolVersion != initialized.ProtocolVersion {
+			if deleted.sessionID != "venat-session" || deleted.protocolVersion != initialized.ProtocolVersion {
 				t.Fatalf("DELETE headers = session %q protocol %q", deleted.sessionID, deleted.protocolVersion)
 			}
 		})
@@ -83,9 +83,9 @@ func TestHTTPTransportCompletesOfficialStreamableLifecycle(t *testing.T) {
 
 func TestHTTPTransportClonesCustomAndRequestHeaders(t *testing.T) {
 	// Given
-	headers := http.Header{"X-Hydaelyn-Test": {"original"}, "Accept": {"text/plain"}}
+	headers := http.Header{"X-Venat-Test": {"original"}, "Accept": {"text/plain"}}
 	transport := NewHTTPTransport("https://mcp.example.test", headers)
-	headers.Set("X-Hydaelyn-Test", "mutated")
+	headers.Set("X-Venat-Test", "mutated")
 	roundTripper := transport.client.Transport.(*headerRoundTripper)
 	var observed http.Header
 	roundTripper.base = roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -103,13 +103,13 @@ func TestHTTPTransportClonesCustomAndRequestHeaders(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 
 	// Then
-	if observed.Get("X-Hydaelyn-Test") != "original" {
-		t.Fatalf("custom header = %q, want original", observed.Get("X-Hydaelyn-Test"))
+	if observed.Get("X-Venat-Test") != "original" {
+		t.Fatalf("custom header = %q, want original", observed.Get("X-Venat-Test"))
 	}
 	if observed.Get("Accept") != "application/json, text/event-stream" {
 		t.Fatalf("Accept = %q, want SDK value", observed.Get("Accept"))
 	}
-	if request.Header.Get("X-Hydaelyn-Test") != "" {
+	if request.Header.Get("X-Venat-Test") != "" {
 		t.Fatalf("shared request was mutated: %#v", request.Header)
 	}
 }
@@ -170,7 +170,7 @@ func assertSDKRequestHeaders(t *testing.T, observation httpObservation, initiali
 	if observation.customHeader != "preserved" {
 		t.Fatalf("custom header = %q, want preserved", observation.customHeader)
 	}
-	if initialized && (observation.sessionID != "hydaelyn-session" || observation.protocolVersion == "") {
+	if initialized && (observation.sessionID != "venat-session" || observation.protocolVersion == "") {
 		t.Fatalf("SDK session headers = session %q protocol %q", observation.sessionID, observation.protocolVersion)
 	}
 }

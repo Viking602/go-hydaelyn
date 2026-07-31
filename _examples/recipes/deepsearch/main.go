@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	researchers := []string{"r1", "r2"}
 	for _, id := range researchers {
@@ -75,7 +75,7 @@ func main() {
 	fmt.Printf("deepsearch recipe complete: %d timeline items\n", len(timeline))
 }
 
-func runWithEvidence(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, idx int) {
+func runWithEvidence(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, idx int) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
@@ -100,7 +100,7 @@ func runWithEvidence(ctx context.Context, runner *hydaelyn.Runner, runID, taskID
 	}))
 }
 
-func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, report api.TypedReport) {
+func runOnce(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, report api.TypedReport) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{

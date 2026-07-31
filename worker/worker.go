@@ -1,4 +1,4 @@
-// Package worker provides optional glue between the Hydaelyn runner and the
+// Package worker provides optional glue between the Venat runner and the
 // single-agent engine.
 package worker
 
@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/tool"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 )
 
 type AgentWorker struct {
-	Runner        *hydaelyn.Runner
+	Runner        *venat.Runner
 	Engine        agent.Engine
 	AgentID       string
 	Model         string
@@ -376,7 +376,7 @@ func (w AgentWorker) materializeInputs(ctx context.Context, task api.Task) ([]ap
 
 func (w AgentWorker) buildMessages(run api.Run, task api.Task, inputs []api.BlackboardItem, extra []message.Message) []message.Message {
 	messages := make([]message.Message, 0, len(extra)+2)
-	messages = append(messages, message.NewText(message.RoleSystem, "You are Hydaelyn agent "+w.AgentID+". Complete the assigned task and return a concise result."))
+	messages = append(messages, message.NewText(message.RoleSystem, "You are Venat agent "+w.AgentID+". Complete the assigned task and return a concise result."))
 	prompt := task.Goal
 	if strings.TrimSpace(prompt) == "" {
 		prompt = run.Request

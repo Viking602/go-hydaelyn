@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
+	"github.com/Viking602/venat/internal/core/model"
+	corestate "github.com/Viking602/venat/internal/core/state"
 )
 
 func dependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, fatal bool) {

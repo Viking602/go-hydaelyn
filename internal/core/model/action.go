@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 type ToolEffectType = message.ToolEffectType

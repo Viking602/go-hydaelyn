@@ -19,7 +19,7 @@ is:
    does NOT execute the agent run." Four assertions: Contains, Equals, Regex,
    JudgedBy.
 2. **`docs/evaluation.md`** (stale, orphaned): documents `evaluation.Evaluate`,
-   `evalrun.Run`, `evalrun.RunSuite`, `hydaelyn run-deterministic`, and a 10-file
+   `evalrun.Run`, `evalrun.RunSuite`, `venat run-deterministic`, and a 10-file
    artifact bundle. **Every package and CLI command it names was deleted.**
 3. **`docs/product-spec/v0.8.0/10-evaluation.md`** (canonical spec): a third,
    richer design — a `Harness` that *executes* the agent run, 18 assertions
@@ -52,7 +52,7 @@ plan completes the skeleton into the documented framework. We explicitly do
 own non-goals)
 - ❌ Artifact bundles (`events.json` / `state.replayed.json` / `score.json` /
   `summary.md` files).
-- ❌ Gate policy, score rollup files, `hydaelyn eval gate`, **any `hydaelyn
+- ❌ Gate policy, score rollup files, `venat eval gate`, **any `venat
   eval *` CLI subcommand**.
 - ❌ Baseline regression comparison, flaky-quota management, historical archival.
 - ❌ Hosted eval dashboard, eval-as-a-service, synthetic data generation
@@ -85,7 +85,7 @@ Deterministic provider:
 
 ## 4. Architecture & dependency direction (gate-safe)
 
-`eval/` will import the root `github.com/Viking602/go-hydaelyn` façade plus
+`eval/` will import the root `github.com/Viking602/venat` façade plus
 `provider/scripted`, `api`, and `multiagent`. This is **precedented and
 gate-safe**:
 
@@ -104,7 +104,7 @@ gate-safe**:
 ### Data flow (acyclic)
 
 ```
-EvalCase ──Setup()──▶ Harness ──┬─ Runner() (hydaelyn.New)
+EvalCase ──Setup()──▶ Harness ──┬─ Runner() (venat.New)
    │                            └─ provider/scripted (deterministic model output)
    │
    └─Input(api.StartRunCommand)─▶ [run agent loop to terminal RunStatus]
@@ -134,7 +134,7 @@ type EvalCase struct {
 }
 
 type Harness interface {
-    Runner() *hydaelyn.Runner
+    Runner() *venat.Runner
     RegisterAgent(profile api.AgentProfile)
     Cleanup()
     // EmbeddingProvider is optional; only EmbeddingSimilarity matcher needs it.
@@ -200,7 +200,7 @@ type Assertion interface {
 
 ### M0 — Wiring spike (GATE, ~1–2 days)
 Prove a `provider/scripted` provider can drive a full agent run to a terminal
-`api.RunStatus` through the public surface (`hydaelyn.New(...)` + `provider/scripted`
+`api.RunStatus` through the public surface (`venat.New(...)` + `provider/scripted`
 + whatever `agent.Engine` / `worker` wiring is required).
 - **Deliverable:** one end-to-end test that starts a run with a scripted script
   and asserts it reaches a terminal status, plus a short written note of the exact

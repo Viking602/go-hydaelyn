@@ -7,17 +7,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/worker"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "summarize a task"})

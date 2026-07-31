@@ -10,12 +10,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/tool"
 )
 
 const (
+	// These legacy Hydaelyn wire identifiers are intentionally stable across
+	// the Venat project rename because transcripts and tool allowlists may
+	// persist them outside this module.
 	// SkillActivationToolName is the framework-owned read-only tool used for
 	// model-driven skill activation.
 	SkillActivationToolName = "hydaelyn_activate_skill"
@@ -25,7 +28,8 @@ const (
 
 	activateSkillToolName     = SkillActivationToolName
 	readSkillResourceToolName = SkillResourceToolName
-	skillContextMetadataKey   = "hydaelyn.skill.context"
+	// skillContextMetadataKey is also a legacy persisted transcript key.
+	skillContextMetadataKey = "hydaelyn.skill.context"
 )
 
 var errSkillToolConflict = errors.New("agent: reserved skill tool name is already registered")
@@ -317,7 +321,7 @@ func renderSkillCatalog(skills []skill.Skill) string {
 	ordered := append([]skill.Skill(nil), skills...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
 	var b strings.Builder
-	b.WriteString("Available Hydaelyn skills:\n")
+	b.WriteString("Available Venat skills:\n")
 	b.WriteString("When a task matches a description, call ")
 	b.WriteString(activateSkillToolName)
 	b.WriteString(" before proceeding. Skill resources remain unavailable until activation.\n")

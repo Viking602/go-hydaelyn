@@ -1,6 +1,6 @@
 package multiagent
 
-import "github.com/Viking602/go-hydaelyn/api"
+import "github.com/Viking602/venat/api"
 
 // Multi-agent EventType extensions added in v0.8.0. These are valid
 // api.EventType values for transport over the event store; the runner

@@ -1,6 +1,6 @@
 // Package packs is the v0.8.0 "vertical pack" registry root. A pack is a
 // curated bundle of AgentDefinitions, Capabilities, eval cases, and
-// recipes for one application domain. Packs MUST NOT touch the Hydaelyn
+// recipes for one application domain. Packs MUST NOT touch the Venat
 // kernel surface — they only consume the public api/* and runtime/* types
 // and re-export configuration the host application can mount into its
 // own Runner.
@@ -19,8 +19,8 @@ package packs
 import (
 	"sort"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
 )
 
 // Pack is the declarative bundle a vertical pack exports.

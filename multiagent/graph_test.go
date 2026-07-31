@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // graphExecutor returns a fixed Structured payload per node id, mirroring

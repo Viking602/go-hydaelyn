@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	reportsvc "github.com/Viking602/go-hydaelyn/internal/report"
+	reportsvc "github.com/Viking602/venat/internal/report"
 )
 
 func (r *Runtime) SubmitTypedReport(ctx context.Context, cmd SubmitTypedReportCommand) error {

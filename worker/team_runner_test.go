@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/scripted"
 )
 
 func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 		RunID:      "run-team",
 		RootTaskID: "root",
@@ -98,7 +98,7 @@ func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
 
 func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 		RunID:      "run-handoff",
 		RootTaskID: "root",
@@ -179,7 +179,7 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 
 func TestTeamRunnerRejectsConcurrentResume(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 		RunID:      "run-team-owner",
 		RootTaskID: "root",
@@ -214,7 +214,7 @@ func TestTeamRunnerRejectsConcurrentResume(t *testing.T) {
 
 func TestTeamRunnerResumePreservesFailedCheckpoint(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-failed", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -269,9 +269,9 @@ func TestTeamRunnerResumePreservesFailedCheckpoint(t *testing.T) {
 
 func TestTeamRunnerStartReleasesLeaseAfterStateReadError(t *testing.T) {
 	ctx := context.Background()
-	base := hydaelyn.NewDevelopment()
+	base := venat.NewDevelopment()
 	provider := &failSecondTeamStateLoadProvider{StoreProvider: base.StoreProvider()}
-	runner := hydaelyn.NewDevelopment(api.Config{StoreProvider: provider})
+	runner := venat.NewDevelopment(api.Config{StoreProvider: provider})
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-load-error", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -324,7 +324,7 @@ func TestTeamRunnerResumeRejectsNonRunnableRuns(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			runner := hydaelyn.NewDevelopment()
+			runner := venat.NewDevelopment()
 			run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 				RunID:      "run-team-" + strings.ReplaceAll(test.name, " ", "-"),
 				RootTaskID: "root",
@@ -366,7 +366,7 @@ func TestTeamRunnerResumeRejectsNonRunnableRuns(t *testing.T) {
 
 func TestTeamRunnerResumeCompletesComposingRun(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-composing", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -425,7 +425,7 @@ func TestTeamRunnerResumeCompletesComposingRun(t *testing.T) {
 
 func TestTeamRunnerResumeAdvancesCreatedRun(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-created", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -450,7 +450,7 @@ func TestTeamRunnerResumeAdvancesCreatedRun(t *testing.T) {
 
 func TestTeamRunnerResumeStopsAfterRecoveryQuarantine(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
 		RunID:      "run-team-reconcile",
 		RootTaskID: "root",
@@ -529,7 +529,7 @@ func TestTeamRunnerResumeStopsAfterRecoveryQuarantine(t *testing.T) {
 
 func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-graph", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -586,14 +586,14 @@ func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
 	}
 }
 
-func saveTeamCheckpoint(t *testing.T, runner *hydaelyn.Runner, state multiagent.TeamState) {
+func saveTeamCheckpoint(t *testing.T, runner *venat.Runner, state multiagent.TeamState) {
 	t.Helper()
 	if err := (TeamRunner{Runner: runner}).saveState(context.Background(), state, false); err != nil {
 		t.Fatalf("saveState() error = %v", err)
 	}
 }
 
-func listTeamEnvelopes(t *testing.T, runner *hydaelyn.Runner, runID string) []api.TaskEnvelope {
+func listTeamEnvelopes(t *testing.T, runner *venat.Runner, runID string) []api.TaskEnvelope {
 	t.Helper()
 	envelopes, err := runner.ListEnvelopes(context.Background(), runID)
 	if err != nil {

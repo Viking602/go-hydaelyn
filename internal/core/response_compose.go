@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	responsesvc "github.com/Viking602/go-hydaelyn/internal/response"
+	responsesvc "github.com/Viking602/venat/internal/response"
 )
 
 func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOutputCommand) error {

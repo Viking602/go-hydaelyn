@@ -1,13 +1,13 @@
-package hydaelyn
+package venat
 
 import (
 	"context"
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core/adapter"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func (r *Runner) WriteItem(ctx context.Context, item api.BlackboardItem) error {

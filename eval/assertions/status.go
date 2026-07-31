@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
 )
 
 // RunTerminatedWithStatus asserts that the run reached a specific terminal

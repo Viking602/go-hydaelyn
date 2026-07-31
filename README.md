@@ -1,22 +1,22 @@
-# Hydaelyn
+# Venat
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Viking602/go-hydaelyn.svg)](https://pkg.go.dev/github.com/Viking602/go-hydaelyn)
-[![CI](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml/badge.svg)](https://github.com/Viking602/go-hydaelyn/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Viking602/go-hydaelyn?sort=semver)](https://github.com/Viking602/go-hydaelyn/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Viking602/venat.svg)](https://pkg.go.dev/github.com/Viking602/venat)
+[![CI](https://github.com/Viking602/venat/actions/workflows/ci.yml/badge.svg)](https://github.com/Viking602/venat/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Viking602/venat?sort=semver)](https://github.com/Viking602/venat/releases)
 
-Hydaelyn is a Go library for multi-agent workloads that need crash recovery,
+Venat is a Go library for multi-agent workloads that need crash recovery,
 human approvals, and idempotent side effects. Its `Runner` records typed `Run`,
 `Task`, `Event`, `Lease`, `Approval`, and `ActionAttempt` state through
 configurable stores. Applications embed the runner and provide the production
 storage implementation.
 
-> **Status:** The latest release is [v0.11.6](https://github.com/Viking602/go-hydaelyn/releases/tag/v0.11.6).
+> **Status:** The latest release is [v0.12.0](https://github.com/Viking602/venat/releases/tag/v0.12.0).
 > The public API may still change before v1.0.
 
-## Why Hydaelyn
+## Why Venat
 
 Agent workloads must preserve state across crashes, prevent duplicate side
-effects, and record decisions that cross process or human boundaries. Hydaelyn
+effects, and record decisions that cross process or human boundaries. Venat
 handles those concerns in four concrete ways:
 
 - **Recovery:** commands are persisted, leased, audited, and resumable; guarded
@@ -25,7 +25,7 @@ handles those concerns in four concrete ways:
   the public API.
 - **Storage ownership:** applications implement the storage contract; the
   kernel ships no production backend or domain schema.
-- **Embedding:** Hydaelyn runs as a library in a normal Go program. It ships no
+- **Embedding:** Venat runs as a library in a normal Go program. It ships no
   UI or hosted service.
 
 ## At a glance
@@ -51,7 +51,7 @@ handles those concerns in four concrete ways:
 ## Install
 
 ```bash
-go get github.com/Viking602/go-hydaelyn@latest
+go get github.com/Viking602/venat@latest
 ```
 
 Requires Go 1.25+.
@@ -59,7 +59,7 @@ Repository development and release gates pin Go 1.25.12.
 
 ## Agent Skills
 
-Hydaelyn supports the complete local Agent Skills lifecycle: trusted directory
+Venat supports the complete local Agent Skills lifecycle: trusted directory
 discovery, standards-compatible `SKILL.md` parsing, explicit activation,
 metadata-only catalog disclosure, model-driven activation, and bounded on-demand
 reads from `scripts/`, `references/`, and `assets/`.
@@ -107,12 +107,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 		Request: "compare options for a Go research assistant",
@@ -132,7 +132,7 @@ func main() {
 Override defaults via `api.Config`:
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	PolicyEngine: policy.DenySideEffectsByDefault(),
 })
 ```
@@ -143,8 +143,8 @@ flow.
 
 ## How it works
 
-Hydaelyn is four layers. Their critical import seams are explicit and checked
-in CI: `api/` imports no Hydaelyn package, `agent/` never imports
+Venat is four layers. Their critical import seams are explicit and checked
+in CI: `api/` imports no Venat package, `agent/` never imports
 `multiagent/`, `multiagent/` never imports the root Runner, `worker/`, or
 `internal/`, and the root facade never imports `multiagent/`. The shared
 `stream/` package is intentionally available to `multiagent/`; it is a

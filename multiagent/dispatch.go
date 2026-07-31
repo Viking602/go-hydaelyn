@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
 )
 
 // Dispatch describes one scheduler decision: assign a Task to an

@@ -3,12 +3,12 @@
 The v2 main branch does not ship the old declarative recipe compiler as a
 primary runtime surface. New code should compose `api.Run`, `api.Task`,
 dependencies, blackboard selectors, and flows directly through
-`hydaelyn.Runner`.
+`venat.Runner`.
 
 For direct orchestration, prefer:
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "..."})
 ```
 

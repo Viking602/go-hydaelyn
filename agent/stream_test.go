@@ -4,16 +4,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/stream"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/stream"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 func TestEngineStreamsFramesWithoutChangingResult(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result:" + input.Query, nil
 	})
 	if err != nil {
@@ -33,7 +34,7 @@ func TestEngineStreamsFramesWithoutChangingResult(t *testing.T) {
 
 	input := LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
 		Sink:          sink,
@@ -63,7 +64,7 @@ func TestEngineStreamsFramesWithoutChangingResult(t *testing.T) {
 	// terminal output the stream consumer could fold for itself.
 	plain, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
 	})

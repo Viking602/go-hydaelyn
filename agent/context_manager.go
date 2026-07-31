@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
 )
 
 // ContextManager builds the initial message slice for one api.Task and

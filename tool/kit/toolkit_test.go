@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/tooltest"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/tooltest"
 )
 
 func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {
@@ -28,8 +28,8 @@ func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {
 	if schema.Properties["query"].Description != "search query" {
 		t.Fatalf("expected field description, got %q", schema.Properties["query"].Description)
 	}
-	result := tooltest.MustCall(t, driver, map[string]any{"query": "hydaelyn"})
-	if result.Content != "hydaelyn" {
+	result := tooltest.MustCall(t, driver, map[string]any{"query": "venat"})
+	if result.Content != "venat" {
 		t.Fatalf("unexpected content: %q", result.Content)
 	}
 }

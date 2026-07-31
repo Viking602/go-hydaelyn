@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 func TestUsageAdd(t *testing.T) {

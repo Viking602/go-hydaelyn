@@ -13,13 +13,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/assertions"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/assertions"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/worker"
 )
 
 func main() {

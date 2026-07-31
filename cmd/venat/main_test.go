@@ -7,7 +7,7 @@ import (
 
 func TestMainRunsVersionCommand(t *testing.T) {
 	originalArgs := os.Args
-	os.Args = []string{"hydaelyn", "version"}
+	os.Args = []string{"venat", "version"}
 	t.Cleanup(func() { os.Args = originalArgs })
 
 	main()

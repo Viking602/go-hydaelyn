@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/shared"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/shared"
 )
 
 const defaultResponseHeaderTimeout = 30 * time.Second

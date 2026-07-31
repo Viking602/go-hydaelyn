@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // fakeEntry verifies api.Identified is satisfiable by an application-defined

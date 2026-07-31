@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // EvalCase is one named scenario the framework executes and grades. Setup

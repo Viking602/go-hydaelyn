@@ -6,7 +6,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 // Initialize connects the transport, negotiates the protocol, and sends the

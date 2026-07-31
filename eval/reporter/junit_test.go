@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/reporter"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/reporter"
 )
 
 func sampleResults() []eval.EvalResult {

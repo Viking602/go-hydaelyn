@@ -3,7 +3,7 @@ package projection
 import (
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 // Timeline converts a run's events into a human-readable timeline.

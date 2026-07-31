@@ -2,10 +2,10 @@
 
 ## Core Repo
 
-`go-hydaelyn` now keeps the following in-tree:
+`venat` now keeps the following in-tree:
 
 - runtime core
-- public `hydaelyn.Runner` and `api` Run/Task contracts
+- public `venat.Runner` and `api` Run/Task contracts
 - blackboard, policy, provider, tool, worker, and MCP integration packages
 - CLI and official examples
 

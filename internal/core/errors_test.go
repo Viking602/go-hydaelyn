@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/internal/core"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 // Verify that each package-level error var in internal/core is the same

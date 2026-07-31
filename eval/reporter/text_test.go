@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/eval/reporter"
+	"github.com/Viking602/venat/eval/reporter"
 )
 
 func TestReporter_Text_FailuresAndTotals(t *testing.T) {

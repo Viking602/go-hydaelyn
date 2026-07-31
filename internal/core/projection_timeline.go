@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	proj "github.com/Viking602/go-hydaelyn/internal/projection"
+	"github.com/Viking602/venat/internal/core/model"
+	proj "github.com/Viking602/venat/internal/projection"
 )
 
 func (r *Runtime) RunTimeline(ctx context.Context, runID string) ([]model.RunTimelineItem, error) {

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 type Definition = message.ToolDefinition

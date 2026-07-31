@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // EventStepCompleted identifies an event containing one finalized agent step.

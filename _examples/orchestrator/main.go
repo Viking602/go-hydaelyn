@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	run, err := runner.QueueRun(ctx, api.StartRunCommand{
 		Request: "prepare a launch checklist",

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/transport/cron"
-	"github.com/Viking602/go-hydaelyn/transport/trigger"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/transport/cron"
+	"github.com/Viking602/venat/transport/trigger"
 )
 
 func TestDriver_RegisterDeregister_List(t *testing.T) {

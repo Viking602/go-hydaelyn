@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Viking602/go-hydaelyn/agent"
+	"github.com/Viking602/venat/agent"
 )
 
 // VotingResult aggregates votes cast by AgentInstances on a candidate

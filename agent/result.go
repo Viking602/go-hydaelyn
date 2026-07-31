@@ -3,8 +3,8 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 )
 
 // Result is the typed outcome of Engine.Run on one api.Task. The

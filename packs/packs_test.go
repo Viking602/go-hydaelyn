@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/packs"
-	"github.com/Viking602/go-hydaelyn/packs/aiops"
-	"github.com/Viking602/go-hydaelyn/packs/customersupport"
-	"github.com/Viking602/go-hydaelyn/packs/devops"
-	"github.com/Viking602/go-hydaelyn/packs/research"
+	"github.com/Viking602/venat/packs"
+	"github.com/Viking602/venat/packs/aiops"
+	"github.com/Viking602/venat/packs/customersupport"
+	"github.com/Viking602/venat/packs/devops"
+	"github.com/Viking602/venat/packs/research"
 )
 
 func TestRegistry_RegisterListDeregister(t *testing.T) {

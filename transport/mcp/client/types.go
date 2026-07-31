@@ -1,6 +1,6 @@
 package mcpclient
 
-import "github.com/Viking602/go-hydaelyn/transport/mcpcontract"
+import "github.com/Viking602/venat/transport/mcpcontract"
 
 type ServerInfo = mcpcontract.ServerInfo
 

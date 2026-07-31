@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
 )
 
 // The reference Schedulers (SequentialScheduler, RouterScheduler,

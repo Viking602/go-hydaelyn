@@ -1,17 +1,17 @@
-// Package hydaelyn is the public façade for the Hydaelyn runner.
+// Package venat is the public façade for the Venat runner.
 //
-// Import github.com/Viking602/go-hydaelyn/api for public contracts such as
+// Import github.com/Viking602/venat/api for public contracts such as
 // Config, commands, interfaces, and value types. The root package owns only
 // construction, Runner methods, and sentinel error re-exports.
-package hydaelyn
+package venat
 
 import (
 	"fmt"
 	"reflect"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/internal/core"
-	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core"
+	"github.com/Viking602/venat/internal/core/adapter"
 )
 
 // New constructs an in-memory development runner.

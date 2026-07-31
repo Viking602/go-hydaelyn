@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
-	tracesvc "github.com/Viking602/go-hydaelyn/internal/trace"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/memory"
+	tracesvc "github.com/Viking602/venat/internal/trace"
 )
 
 func traceIDGenerator() tracesvc.IDGenerator {

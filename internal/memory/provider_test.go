@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func TestMemoryUnitOfWorkRollbackRunStore(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
-	"github.com/Viking602/go-hydaelyn/workflow"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
+	"github.com/Viking602/venat/workflow"
 )
 
 func TestEngineStartRunsCompiledWorkflow(t *testing.T) {

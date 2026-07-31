@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 // panicDriver always panics from Execute, modeling a buggy tool driver.

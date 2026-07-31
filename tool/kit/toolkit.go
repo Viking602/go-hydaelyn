@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/tool"
 )
 
 type ToolOption func(*toolConfig)

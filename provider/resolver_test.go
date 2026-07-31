@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/provider"
+	"github.com/Viking602/venat/provider"
 )
 
 // fakeDriver is a minimal Driver that records the models it advertises. Stream

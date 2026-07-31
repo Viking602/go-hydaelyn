@@ -9,15 +9,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 const groupResearchers = "researchers"
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	pool := []string{"r1", "r2", "r3"}
 	for _, id := range pool {

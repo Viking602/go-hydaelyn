@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
-	runsvc "github.com/Viking602/go-hydaelyn/internal/run"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/memory"
+	runsvc "github.com/Viking602/venat/internal/run"
 )
 
 func testIDGenerator() runsvc.IDGenerator {

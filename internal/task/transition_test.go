@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
-	tasksvc "github.com/Viking602/go-hydaelyn/internal/task"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/memory"
+	tasksvc "github.com/Viking602/venat/internal/task"
 )
 
 func TestPureTaskTransitionCanBumpVersion(t *testing.T) {

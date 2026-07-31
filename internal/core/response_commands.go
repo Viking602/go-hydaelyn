@@ -1,6 +1,6 @@
 package core
 
-import responsesvc "github.com/Viking602/go-hydaelyn/internal/response"
+import responsesvc "github.com/Viking602/venat/internal/response"
 
 type (
 	SubmitResponseOutputCommand = responsesvc.SubmitOutputCommand

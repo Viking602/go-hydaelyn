@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	mailboxsvc "github.com/Viking602/go-hydaelyn/internal/mailbox"
+	"github.com/Viking602/venat/internal/core/model"
+	mailboxsvc "github.com/Viking602/venat/internal/mailbox"
 )
 
 func (r *Runtime) DispatchTask(ctx context.Context, cmd DispatchTaskCommand) (model.TaskEnvelope, error) {

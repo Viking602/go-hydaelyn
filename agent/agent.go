@@ -7,12 +7,12 @@ import (
 	"io"
 	"maps"
 
-	"github.com/Viking602/go-hydaelyn/hook"
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/skill"
-	"github.com/Viking602/go-hydaelyn/stream"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/hook"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/skill"
+	"github.com/Viking602/venat/stream"
+	"github.com/Viking602/venat/tool"
 )
 
 var ErrToolBusMissing = errors.New("tool bus missing")

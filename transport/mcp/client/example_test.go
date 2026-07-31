@@ -8,7 +8,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
+	mcpclient "github.com/Viking602/venat/transport/mcp/client"
 )
 
 // Example demonstrates the standard usage of the mcpclient package: connect to

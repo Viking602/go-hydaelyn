@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	userinputsvc "github.com/Viking602/go-hydaelyn/internal/userinput"
+	userinputsvc "github.com/Viking602/venat/internal/userinput"
 )
 
 func (r *Runtime) SubmitUserInput(ctx context.Context, cmd SubmitUserInputCommand) error {

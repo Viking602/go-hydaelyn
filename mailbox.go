@@ -1,11 +1,11 @@
-package hydaelyn
+package venat
 
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/internal/core"
-	"github.com/Viking602/go-hydaelyn/internal/core/adapter"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core"
+	"github.com/Viking602/venat/internal/core/adapter"
 )
 
 func (r *Runner) DispatchTask(ctx context.Context, cmd api.DispatchTaskCommand) (api.TaskEnvelope, error) {

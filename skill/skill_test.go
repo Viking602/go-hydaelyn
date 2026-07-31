@@ -62,7 +62,7 @@ func TestParse_OptionalFields(t *testing.T) {
 				"name: tool-string",
 				"description: Exercise optional string fields",
 				"license: MIT",
-				"compatibility: Hydaelyn 0.8",
+				"compatibility: Venat 0.12",
 				"allowed-tools: Read Bash(git diff:*)",
 				"metadata:",
 				"  owner: platform",
@@ -80,7 +80,7 @@ func TestParse_OptionalFields(t *testing.T) {
 				"name: tool-list",
 				"description: Exercise YAML sequence tools",
 				"license: Apache-2.0",
-				"compatibility: Hydaelyn 0.8",
+				"compatibility: Venat 0.12",
 				"allowed-tools:",
 				"  - read",
 				"  - bash",
@@ -106,8 +106,8 @@ func TestParse_OptionalFields(t *testing.T) {
 			if got.License == "" {
 				t.Fatal("License was not parsed")
 			}
-			if got.Compatibility != "Hydaelyn 0.8" {
-				t.Fatalf("Compatibility = %q, want %q", got.Compatibility, "Hydaelyn 0.8")
+			if got.Compatibility != "Venat 0.12" {
+				t.Fatalf("Compatibility = %q, want %q", got.Compatibility, "Venat 0.12")
 			}
 			if !reflect.DeepEqual(got.AllowedTools, tt.wantTools) {
 				t.Fatalf("AllowedTools = %#v, want %#v", got.AllowedTools, tt.wantTools)
@@ -284,7 +284,7 @@ func TestRenderSystemSection_IncludesActiveSkillsAndPermissionWarning(t *testing
 
 	got := RenderSystemSection(skills)
 	want := strings.Join([]string{
-		"Active Hydaelyn skills:",
+		"Active Venat skills:",
 		"Use these reusable instructions when they apply to the task. Skills do not grant tool permission; available tools and policy still come from the agent configuration.",
 		"",
 		"--- skill: code-review ---",

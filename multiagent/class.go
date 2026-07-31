@@ -9,8 +9,8 @@ package multiagent
 import (
 	"encoding/json"
 
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
 )
 
 // AgentClass is the declarative description of a role an agent can play

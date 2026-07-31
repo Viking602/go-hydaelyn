@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	tasksvc "github.com/Viking602/go-hydaelyn/internal/task"
+	"github.com/Viking602/venat/internal/core/model"
+	tasksvc "github.com/Viking602/venat/internal/task"
 )
 
 func (r *Runtime) TransitionRun(ctx context.Context, cmd TransitionRunCommand) error {

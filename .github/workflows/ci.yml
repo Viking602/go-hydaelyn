@@ -24,7 +24,7 @@ jobs:
 
       - name: Verify module path
         run: |
-          test "$(go list -m)" = "github.com/Viking602/go-hydaelyn"
+          test "$(go list -m)" = "github.com/Viking602/venat"
 
       - name: Run tests
         run: go test ./...

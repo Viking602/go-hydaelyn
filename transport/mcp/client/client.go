@@ -8,8 +8,8 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/transport/mcpcontract"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 // ErrNotInitialized is returned when an operation requires an MCP session

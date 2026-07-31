@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	commandbus "github.com/Viking602/go-hydaelyn/internal/command"
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
-	"github.com/Viking602/go-hydaelyn/internal/memory"
+	commandbus "github.com/Viking602/venat/internal/command"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
+	"github.com/Viking602/venat/internal/memory"
 )
 
 func TestSubmitTypedReportCompletesTaskAndReleasesLease(t *testing.T) {

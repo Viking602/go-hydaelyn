@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/agent"
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/multiagent"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/provider/scripted"
-	"github.com/Viking602/go-hydaelyn/worker"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/agent"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/multiagent"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/worker"
 )
 
 // RecoveryProviderFactory creates an isolated backing store for one recovery
@@ -66,13 +66,13 @@ func (recoveryAllowPolicy) Authorize(context.Context, api.PolicyRequest) (api.Po
 	return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 }
 
-func openRecoveryRunner(t *testing.T, open func() api.StoreProvider) *hydaelyn.Runner {
+func openRecoveryRunner(t *testing.T, open func() api.StoreProvider) *venat.Runner {
 	t.Helper()
 	p := open()
 	if p == nil {
 		t.Fatal("contract: recovery open returned nil provider")
 	}
-	runner, err := hydaelyn.NewProduction(api.Config{StoreProvider: p, PolicyEngine: recoveryAllowPolicy{}})
+	runner, err := venat.NewProduction(api.Config{StoreProvider: p, PolicyEngine: recoveryAllowPolicy{}})
 	if err != nil {
 		t.Fatalf("contract: NewProduction() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func testResumeReconstructsRunState(t *testing.T, open func() api.StoreProvider)
 	testUnresolvedActionRecovery(t, runtimeA, runtimeB)
 }
 
-func testExpiredExecutionRecovery(t *testing.T, open func() api.StoreProvider) (*hydaelyn.Runner, *hydaelyn.Runner) {
+func testExpiredExecutionRecovery(t *testing.T, open func() api.StoreProvider) (*venat.Runner, *venat.Runner) {
 	t.Helper()
 	ctx := context.Background()
 	runtimeA := openRecoveryRunner(t, open)
@@ -153,7 +153,7 @@ func testExpiredExecutionRecovery(t *testing.T, open func() api.StoreProvider) (
 	return runtimeA, runtimeB
 }
 
-func testUnresolvedActionRecovery(t *testing.T, actionA, actionB *hydaelyn.Runner) {
+func testUnresolvedActionRecovery(t *testing.T, actionA, actionB *venat.Runner) {
 	t.Helper()
 	ctx := context.Background()
 	actionRun, _, err := actionA.StartRun(ctx, api.StartRunCommand{RunID: "recovery-action-state", RootTaskID: "root-action", Request: "perform action"})
@@ -327,7 +327,7 @@ type recoveryKillCheckpoint struct {
 
 func assertRecoverySurfacesAfterKill(
 	t *testing.T,
-	runtimeB *hydaelyn.Runner,
+	runtimeB *venat.Runner,
 	frozen frozenRecoveryTeam,
 	driver *countingScriptedDriver,
 ) recoveryKillCheckpoint {
@@ -367,7 +367,7 @@ func assertRecoverySurfacesAfterKill(
 
 func guardCompletedRecoveryTrace(
 	t *testing.T,
-	runtimeB *hydaelyn.Runner,
+	runtimeB *venat.Runner,
 	frozen frozenRecoveryTeam,
 	driver *countingScriptedDriver,
 	checkpoint recoveryKillCheckpoint,
@@ -393,7 +393,7 @@ func guardCompletedRecoveryTrace(
 
 func resumeAllRecoverySurfaces(
 	t *testing.T,
-	runtimeB *hydaelyn.Runner,
+	runtimeB *venat.Runner,
 	frozen frozenRecoveryTeam,
 	driver *countingScriptedDriver,
 	checkpoint recoveryKillCheckpoint,
@@ -422,7 +422,7 @@ func resumeAllRecoverySurfaces(
 
 func assertStaleRecoveryRuntimeCannotFinalize(
 	t *testing.T,
-	runtimeB *hydaelyn.Runner,
+	runtimeB *venat.Runner,
 	frozen frozenRecoveryTeam,
 ) {
 	t.Helper()
@@ -500,7 +500,7 @@ type frozenRecoveryTeam struct {
 	results    <-chan frozenRecoveryResult
 }
 
-func (f frozenRecoveryTeam) teamRunner(runner *hydaelyn.Runner) worker.TeamRunner {
+func (f frozenRecoveryTeam) teamRunner(runner *venat.Runner) worker.TeamRunner {
 	return worker.TeamRunner{
 		Runner:    runner,
 		Team:      f.team,
@@ -510,7 +510,7 @@ func (f frozenRecoveryTeam) teamRunner(runner *hydaelyn.Runner) worker.TeamRunne
 	}
 }
 
-func startFrozenRecoveryTeam(t *testing.T, runtimeA *hydaelyn.Runner, driver *countingScriptedDriver, runID string) frozenRecoveryTeam {
+func startFrozenRecoveryTeam(t *testing.T, runtimeA *venat.Runner, driver *countingScriptedDriver, runID string) frozenRecoveryTeam {
 	t.Helper()
 	ctx := context.Background()
 	run, _, err := runtimeA.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "run two classes"})
@@ -567,7 +567,7 @@ func recoveryScript() []provider.Event {
 	return []provider.Event{{Kind: provider.EventTextDelta, Text: "done"}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}}
 }
 
-func expireRecoveryLease(t *testing.T, runner *hydaelyn.Runner, leaseID string) {
+func expireRecoveryLease(t *testing.T, runner *venat.Runner, leaseID string) {
 	t.Helper()
 	ctx := context.Background()
 	uow, err := runner.Begin(ctx)
@@ -590,7 +590,7 @@ func expireRecoveryLease(t *testing.T, runner *hydaelyn.Runner, leaseID string) 
 	}
 }
 
-func expireActiveRecoveryLease(t *testing.T, runner *hydaelyn.Runner, runID, taskID string) {
+func expireActiveRecoveryLease(t *testing.T, runner *venat.Runner, runID, taskID string) {
 	t.Helper()
 	ctx := context.Background()
 	uow, err := runner.Begin(ctx)
@@ -612,7 +612,7 @@ func expireActiveRecoveryLease(t *testing.T, runner *hydaelyn.Runner, runID, tas
 	expireRecoveryLease(t, runner, lease.ID)
 }
 
-func saveRecoveryTeamState(t *testing.T, runner *hydaelyn.Runner, state multiagent.TeamState) {
+func saveRecoveryTeamState(t *testing.T, runner *venat.Runner, state multiagent.TeamState) {
 	t.Helper()
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -632,7 +632,7 @@ func saveRecoveryTeamState(t *testing.T, runner *hydaelyn.Runner, state multiage
 	}
 }
 
-func loadRecoveryTeamState(t *testing.T, runner *hydaelyn.Runner, runID string) (multiagent.TeamState, []api.AgentInstanceRecord) {
+func loadRecoveryTeamState(t *testing.T, runner *venat.Runner, runID string) (multiagent.TeamState, []api.AgentInstanceRecord) {
 	t.Helper()
 	ctx := context.Background()
 	uow, err := runner.Begin(ctx)
@@ -669,7 +669,7 @@ func assertTickOneCheckpoint(t *testing.T, state multiagent.TeamState, instances
 	}
 }
 
-func recoveryEvents(t *testing.T, runner *hydaelyn.Runner, runID string) []api.Event {
+func recoveryEvents(t *testing.T, runner *venat.Runner, runID string) []api.Event {
 	t.Helper()
 	events, err := runner.ListEvents(context.Background(), runID)
 	if err != nil {
@@ -678,7 +678,7 @@ func recoveryEvents(t *testing.T, runner *hydaelyn.Runner, runID string) []api.E
 	return events
 }
 
-func recoveryEnvelopes(t *testing.T, runner *hydaelyn.Runner, runID string) []api.TaskEnvelope {
+func recoveryEnvelopes(t *testing.T, runner *venat.Runner, runID string) []api.TaskEnvelope {
 	t.Helper()
 	envelopes, err := runner.ListEnvelopes(context.Background(), runID)
 	if err != nil {

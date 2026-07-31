@@ -17,7 +17,7 @@ var originBoundTestHeaders = http.Header{
 	"Authorization":        {"Bearer secret"},
 	"Cookie":               {"session=secret"},
 	"Proxy-Authorization":  {"Basic proxy-secret"},
-	"Mcp-Session-Id":       {"hydaelyn-session"},
+	"Mcp-Session-Id":       {"venat-session"},
 	"Mcp-Protocol-Version": {"2025-06-18"},
 	"Last-Event-Id":        {"event-42"},
 }

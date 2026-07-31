@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
-	mcpclient "github.com/Viking602/go-hydaelyn/transport/mcp/client"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
+	mcpclient "github.com/Viking602/venat/transport/mcp/client"
 )
 
 func TestNewGateway(t *testing.T) {

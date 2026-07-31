@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Viking602/go-hydaelyn/coding/internal/hashline"
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/coding/internal/hashline"
+	"github.com/Viking602/venat/tool"
 )
 
 // writeFileInput is the decoded argument shape for coding.write_file.

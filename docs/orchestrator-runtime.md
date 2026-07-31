@@ -1,6 +1,6 @@
 # Runner Runtime
 
-The root `hydaelyn` package is the recommended façade for the primary Run/Task
+The root `venat` package is the recommended façade for the primary Run/Task
 runner. Public contracts live in the `api` package; `internal/core` remains the
 composition root behind the façade.
 
@@ -86,7 +86,7 @@ The in-memory implementation covers the contract-level primitives:
 New code should use:
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 ```
 
 Use `api.Config{...}` only for overrides. The internal runtime remains an

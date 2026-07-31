@@ -2,7 +2,7 @@
 
 ## Start here
 
-- [Quickstart](quickstart.md): install Hydaelyn and run the first task.
+- [Quickstart](quickstart.md): install Venat and run the first task.
 - [Public API](public-api.md): exported contracts and stability guarantees.
 - [Examples](../_examples/): runnable programs for common integration paths.
 
@@ -33,7 +33,7 @@
 
 | Path | Purpose |
 |------|---------|
-| `hydaelyn` (root) | `Runner` facade: construction, run/task commands, approvals, leases, action attempts, and event reads |
+| `venat` (root) | `Runner` facade: construction, run/task commands, approvals, leases, action attempts, and event reads |
 | `api/` | Public contracts: configuration, commands, models, stores, and policy interfaces |
 | `agent/` | Bounded model/tool loop, output policy, tool safety, context management, and typed failures |
 | `skill/` | Agent Skills discovery, parsing, registry, activation rendering, and bounded resource access |

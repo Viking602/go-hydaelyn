@@ -20,15 +20,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 const roleExpert = "panel.expert"
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment()
+	runner := venat.NewDevelopment()
 
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {
@@ -90,7 +90,7 @@ func main() {
 	fmt.Printf("panel recipe complete: %d claims → 1 synthesis\n", len(claims))
 }
 
-func runExpert(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string) {
+func runExpert(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
@@ -115,7 +115,7 @@ func runExpert(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agen
 	}))
 }
 
-func runOnce(ctx context.Context, runner *hydaelyn.Runner, runID, taskID, agentID string, report api.TypedReport) {
+func runOnce(ctx context.Context, runner *venat.Runner, runID, taskID, agentID string, report api.TypedReport) {
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: runID, TaskID: taskID, TargetAgentID: agentID})
 	must(err)
 	lease, _, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{

@@ -3,7 +3,7 @@
 ## 1. Minimal Runner
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 
 run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
 	Request: "compare options for a Go research assistant",
@@ -15,8 +15,8 @@ if err != nil {
 timeline, err := runner.RunTimeline(context.Background(), run.ID)
 ```
 
-`hydaelyn.NewDevelopment()` starts an in-memory runner with development policy
-defaults. Production hosts use `hydaelyn.NewProduction` and must provide both
+`venat.NewDevelopment()` starts an in-memory runner with development policy
+defaults. Production hosts use `venat.NewProduction` and must provide both
 a `StoreProvider` and `PolicyEngine`.
 
 `QueueRun` uses the primary runner path:
@@ -72,7 +72,7 @@ envelope to `agent.Engine`, use the optional `worker.AgentWorker` package.
 ## 3. Optional Config
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```
@@ -80,7 +80,7 @@ runner := hydaelyn.NewDevelopment(api.Config{
 For production startup:
 
 ```go
-runner, err := hydaelyn.NewProduction(api.Config{
+runner, err := venat.NewProduction(api.Config{
 	StoreProvider: durableStore,
 	PolicyEngine:  policy.DenySideEffectsByDefault(),
 })
@@ -100,9 +100,9 @@ err := runner.RegisterFlow(api.Flow{Name: "deepsearch"})
 The v2 CLI is deliberately small and library-first:
 
 ```bash
-hydaelyn version
-hydaelyn inspect-events --events events.json
-hydaelyn help
+venat version
+venat inspect-events --events events.json
+venat help
 ```
 
 ## 6. Next Docs

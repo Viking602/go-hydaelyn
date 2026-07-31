@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/Viking602/go-hydaelyn/message"
+	"github.com/Viking602/venat/message"
 )
 
 type StopReason string

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/message"
-	"github.com/Viking602/go-hydaelyn/provider"
-	"github.com/Viking602/go-hydaelyn/tool"
-	"github.com/Viking602/go-hydaelyn/tool/kit"
+	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
+	"github.com/Viking602/venat/tool/kit"
 )
 
 func TestEngineOutputGuardrailCanReplaceFinalOutput(t *testing.T) {
@@ -276,7 +276,7 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 					ToolCall: &message.ToolCall{
 						ID:        "call-1",
 						Name:      "lookup",
-						Arguments: []byte(`{"query":"hydaelyn"}`),
+						Arguments: []byte(`{"query":"venat"}`),
 					},
 				},
 				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
@@ -289,7 +289,8 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 	}
 	toolDriver, err := kit.Tool("lookup", func(_ context.Context, input struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result:" + input.Query, nil
 	})
 	if err != nil {
@@ -302,7 +303,7 @@ func TestEngineOutputGuardrailsOnlyRunOnTerminalOutput(t *testing.T) {
 	}
 	result, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "find hydaelyn")},
+		Messages:      []message.Message{message.NewText(message.RoleUser, "find venat")},
 		MaxIterations: 3,
 		ToolMode:      tool.ModeSequential,
 		OutputGuardrails: []OutputGuardrail{

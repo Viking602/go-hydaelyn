@@ -1,5 +1,45 @@
 # Migration Notes
 
+## v0.11 → v0.12 — project rename to Venat
+
+v0.12.0 moves the project from `Hydaelyn` / `go-hydaelyn` to the canonical
+`Venat` identity. This is a pre-v1 breaking module-path change; there is no
+compatibility package or second CLI.
+
+Update dependencies and imports:
+
+```bash
+go get github.com/Viking602/venat@v0.12.0
+go mod tidy
+```
+
+| Old | New |
+| --- | --- |
+| `github.com/Viking602/go-hydaelyn` | `github.com/Viking602/venat` |
+| `hydaelyn.NewDevelopment()` | `venat.NewDevelopment()` |
+| `hydaelyn.NewProduction(...)` | `venat.NewProduction(...)` |
+| `go install github.com/Viking602/go-hydaelyn/cmd/hydaelyn@...` | `go install github.com/Viking602/venat/cmd/venat@v0.12.0` |
+| `hydaelyn version` | `venat version` |
+| `.hydaelyn/skills` | `.venat/skills` |
+
+After changing the import prefix, rename the root import qualifier from
+`hydaelyn` to `venat`. Package-specific qualifiers such as `api`, `agent`, and
+`tool` do not change.
+
+Move product-owned skill files explicitly. Discovery scans `.venat/skills` and
+reports a diagnostic when `.hydaelyn/skills` still exists; it does not merge
+both directories. Explicit `AdditionalDirs` continue to work unchanged.
+
+Three persisted skill wire identifiers deliberately keep the old prefix:
+`hydaelyn_activate_skill`, `hydaelyn_read_skill_resource`, and
+`hydaelyn.skill.context`. Do not rewrite stored transcripts or external
+allowlists containing those values.
+
+Published `github.com/Viking602/go-hydaelyn` versions remain immutable and
+resolvable through the renamed GitHub repository's redirect. New releases use
+only `github.com/Viking602/venat`. See
+[ADR-019](adr/ADR-019-project-identity-venat.md) for the full decision.
+
 ## v0.7 → v0.8 — public framework release
 
 v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Most v0.7 callers can upgrade with a single search-and-replace pass. The full plan, including the Path A (use a reference store impl) vs Path B (bring-your-own-provider) decision rule and an end-to-end ent-based provider template, lives in `docs/product-spec/v0.8.0/12-migration-guide.md`.
@@ -61,8 +101,8 @@ See `docs/release-notes/v0.8.0.md` for the full deferral list.
 
 当前模型：
 
-- `hydaelyn.NewDevelopment()` 创建本地/测试 `Runner`；生产环境使用
-  `hydaelyn.NewProduction(api.Config)`。
+- `venat.NewDevelopment()` 创建本地/测试 `Runner`；生产环境使用
+  `venat.NewProduction(api.Config)`。
 - `Runner.StartRun` 创建 `Run + RootTask`。
 - `Runner.ExecuteCommand` 作为命令层入口，状态变更走 `api.StoreProvider + api.UnitOfWork`。
 - planner/router adapter 创建一等 `api.Task`。
@@ -79,13 +119,13 @@ See `docs/release-notes/v0.8.0.md` for the full deferral list.
 默认：
 
 ```go
-runner := hydaelyn.NewDevelopment()
+runner := venat.NewDevelopment()
 ```
 
 自定义配置：
 
 ```go
-runner := hydaelyn.NewDevelopment(api.Config{
+runner := venat.NewDevelopment(api.Config{
 	PolicyEngine: customPolicy,
 })
 ```

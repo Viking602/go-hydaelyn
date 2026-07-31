@@ -14,7 +14,7 @@ func TestDiscover_TrustedRootsPrecedenceAndStableOrder(t *testing.T) {
 	project := filepath.Join(root, "project")
 	additional := filepath.Join(root, "additional")
 	writeTestSkill(t, filepath.Join(user, ".agents", "skills", "shared"), "shared", "user")
-	writeTestSkill(t, filepath.Join(user, ".hydaelyn", "skills", "zeta"), "zeta", "user zeta")
+	writeTestSkill(t, filepath.Join(user, defaultSkillDirectory, "skills", "zeta"), "zeta", "user zeta")
 	writeTestSkill(t, filepath.Join(project, ".agents", "skills", "shared"), "shared", "project")
 	writeTestSkill(t, filepath.Join(additional, "shared"), "shared", "additional")
 	writeTestSkill(t, filepath.Join(additional, "alpha"), "alpha", "additional alpha")
@@ -100,6 +100,40 @@ func TestDiscover_BoundsAdditionalDirsAndLoadedCandidates(t *testing.T) {
 			t.Fatalf("Discover candidate limit error = %v", err)
 		}
 	})
+}
+
+func TestDiscover_ReportsIgnoredLegacyRoot(t *testing.T) {
+	user := t.TempDir()
+	legacyRoot := filepath.Join(user, legacySkillDirectory, "skills")
+	writeTestSkill(t, filepath.Join(legacyRoot, "legacy"), "legacy", "legacy")
+
+	result, err := Discover(DiscoveryOptions{UserDir: user})
+	if err != nil {
+		t.Fatalf("Discover legacy root: %v", err)
+	}
+	if len(result.Skills) != 0 {
+		t.Fatalf("legacy skills loaded = %#v, want none", result.Skills)
+	}
+	if len(result.Diagnostics) != 1 {
+		t.Fatalf("legacy diagnostics = %#v, want one", result.Diagnostics)
+	}
+	diagnostic := result.Diagnostics[0]
+	replacement := filepath.Join(user, defaultSkillDirectory, "skills")
+	if diagnostic.Path != legacyRoot || !strings.Contains(diagnostic.Message, "ignored") || !strings.Contains(diagnostic.Message, replacement) {
+		t.Fatalf("legacy diagnostic = %#v, want path %q and replacement %q", diagnostic, legacyRoot, replacement)
+	}
+
+	writeTestSkill(t, filepath.Join(replacement, "current"), "current", "current")
+	result, err = Discover(DiscoveryOptions{UserDir: user})
+	if err != nil {
+		t.Fatalf("Discover migrated root: %v", err)
+	}
+	if len(result.Skills) != 1 || result.Skills[0].Name != "current" {
+		t.Fatalf("migrated skills = %#v, want current only", result.Skills)
+	}
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Path != legacyRoot {
+		t.Fatalf("migrated diagnostics = %#v, want ignored legacy root", result.Diagnostics)
+	}
 }
 
 func writeTestSkill(t *testing.T, dir, name, body string) {

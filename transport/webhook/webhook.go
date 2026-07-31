@@ -29,8 +29,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/transport/trigger"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/transport/trigger"
 )
 
 const defaultMaxBodyBytes = 1 << 20 // 1 MiB

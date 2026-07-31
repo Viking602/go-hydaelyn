@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn"
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat"
+	"github.com/Viking602/venat/api"
 )
 
 type approvalGate struct{}
@@ -26,7 +26,7 @@ func (approvalGate) Authorize(_ context.Context, req api.PolicyRequest) (api.Pol
 
 func main() {
 	ctx := context.Background()
-	runner := hydaelyn.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
+	runner := venat.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
 
 	runner.RegisterAgent(api.AgentProfile{ID: "actuator"})
 	runner.RegisterTool(api.Tool{
@@ -58,7 +58,7 @@ func main() {
 		HolderType: api.HolderAgent, HolderID: "actuator",
 		TaskVersion: task.Version, ToolName: "deploy.rollback",
 	})
-	if !errors.Is(err, hydaelyn.ErrPolicyDenied) {
+	if !errors.Is(err, venat.ErrPolicyDenied) {
 		panic(fmt.Errorf("expected ErrPolicyDenied, got %v", err))
 	}
 	fmt.Println("paused: policy demands approval")

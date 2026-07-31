@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/tool"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestHTTPTool(t *testing.T) {
@@ -26,7 +26,7 @@ func TestHTTPTool(t *testing.T) {
 	result, err := driver.Execute(context.Background(), tool.Call{
 		ID:        "call-1",
 		Name:      "remote",
-		Arguments: json.RawMessage(`{"query":"hydaelyn"}`),
+		Arguments: json.RawMessage(`{"query":"venat"}`),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -54,7 +54,7 @@ func TestHTTPToolRejectsOversizedResponse(t *testing.T) {
 }
 
 func TestProcessToolRejectsOversizedOutput(t *testing.T) {
-	if os.Getenv("HYDAELYN_PROCESS_OVERSIZED_OUTPUT_HELPER") == "1" {
+	if os.Getenv("VENAT_PROCESS_OVERSIZED_OUTPUT_HELPER") == "1" {
 		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), 1<<20+1))
 		os.Exit(0)
 	}
@@ -62,7 +62,7 @@ func TestProcessToolRejectsOversizedOutput(t *testing.T) {
 	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
 		Command: os.Args[0],
 		Args:    []string{"-test.run=^TestProcessToolRejectsOversizedOutput$"},
-		Env:     append(os.Environ(), "HYDAELYN_PROCESS_OVERSIZED_OUTPUT_HELPER=1"),
+		Env:     append(os.Environ(), "VENAT_PROCESS_OVERSIZED_OUTPUT_HELPER=1"),
 	})
 	_, err := driver.Execute(context.Background(), tool.Call{
 		ID:        "call-process-oversized",
@@ -75,7 +75,7 @@ func TestProcessToolRejectsOversizedOutput(t *testing.T) {
 }
 
 func TestProcessToolPreservesCommandContextCancel(t *testing.T) {
-	if os.Getenv("HYDAELYN_PROCESS_CANCEL_HELPER") == "1" {
+	if os.Getenv("VENAT_PROCESS_CANCEL_HELPER") == "1" {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		time.Sleep(time.Hour)
 	}
@@ -85,7 +85,7 @@ func TestProcessToolPreservesCommandContextCancel(t *testing.T) {
 	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
 		Command: os.Args[0],
 		Args:    []string{"-test.run=^TestProcessToolPreservesCommandContextCancel$"},
-		Env:     append(os.Environ(), "HYDAELYN_PROCESS_CANCEL_HELPER=1"),
+		Env:     append(os.Environ(), "VENAT_PROCESS_CANCEL_HELPER=1"),
 	})
 	_, err := driver.Execute(ctx, tool.Call{
 		ID:        "call-process-cancel",

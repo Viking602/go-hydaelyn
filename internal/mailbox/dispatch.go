@@ -5,10 +5,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/internal/core/model"
-	"github.com/Viking602/go-hydaelyn/internal/core/ports"
-	corestate "github.com/Viking602/go-hydaelyn/internal/core/state"
-	"github.com/Viking602/go-hydaelyn/internal/eventpayload"
+	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
+	corestate "github.com/Viking602/venat/internal/core/state"
+	"github.com/Viking602/venat/internal/eventpayload"
 )
 
 type IDGenerator func(prefix string) string

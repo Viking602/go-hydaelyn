@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	mailboxsvc "github.com/Viking602/go-hydaelyn/internal/mailbox"
+	mailboxsvc "github.com/Viking602/venat/internal/mailbox"
 )
 
 func (r *Runtime) AckEnvelope(ctx context.Context, cmd AckEnvelopeCommand) error {

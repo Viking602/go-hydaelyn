@@ -17,7 +17,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Viking602/go-hydaelyn/api"
+	"github.com/Viking602/venat/api"
 )
 
 // TriggerContext is the value handed to a Handler each time a Trigger

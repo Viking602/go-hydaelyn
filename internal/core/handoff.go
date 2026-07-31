@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	handoffsvc "github.com/Viking602/go-hydaelyn/internal/handoff"
+	handoffsvc "github.com/Viking602/venat/internal/handoff"
 )
 
 type HandoffCommand = handoffsvc.HandoffCommand

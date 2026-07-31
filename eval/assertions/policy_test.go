@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/api"
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/eval/assertions"
+	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/eval/assertions"
 )
 
 // saveDecisionTask attaches policy decisions to a fresh task on the run so the

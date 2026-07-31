@@ -3,7 +3,7 @@ package scheduler_test
 import (
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/transport/scheduler"
+	"github.com/Viking602/venat/transport/scheduler"
 )
 
 func TestDeprecatedSchedulerPackageAliasesCronDriver(t *testing.T) {

@@ -1,4 +1,4 @@
-# Hydaelyn Future Backlog
+# Venat Future Backlog
 
 This backlog is intentionally unversioned. Items listed here have no release
 date or version commitment.
@@ -20,7 +20,7 @@ date or version commitment.
 - Add an artifact contract only after concrete downstream storage requirements
   are available.
 
-Hydaelyn does not plan to ship a general storage backend under
+Venat does not plan to ship a general storage backend under
 [ADR-012](../adr/ADR-012-storage-contract-position-c.md), or a framework memory
 backend under [ADR-013](../adr/ADR-013-memory-kernel-vs-pipeline.md).
 

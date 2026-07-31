@@ -3,8 +3,8 @@ package coding_test
 import (
 	"testing"
 
-	"github.com/Viking602/go-hydaelyn/eval"
-	"github.com/Viking602/go-hydaelyn/packs/coding"
+	"github.com/Viking602/venat/eval"
+	"github.com/Viking602/venat/packs/coding"
 )
 
 // TestCodingPack_SmokeSuite is the per-pack self-check: the pack ships its eval
