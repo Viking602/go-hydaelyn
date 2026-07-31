@@ -65,6 +65,9 @@ func TestToolMetadata_MatchesSpecTable(t *testing.T) {
 			t.Errorf("%s policyTags = %v, want %v", name, def.PolicyTags, w.tags)
 		}
 	}
+	if !byName[ToolGofmt].Idempotent {
+		t.Errorf("%s must be idempotent", ToolGofmt)
+	}
 }
 
 func equalStrings(a, b []string) bool {

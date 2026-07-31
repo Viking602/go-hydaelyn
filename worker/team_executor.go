@@ -140,17 +140,36 @@ func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Disp
 			return api.Task{}, err
 		}
 	}
-	return e.Runner.CreateTask(ctx, api.CreateTaskCommand{
-		RunID:        dispatch.Task.RunID,
-		TaskID:       dispatch.Task.ID,
-		Type:         dispatch.Task.Type,
-		Goal:         dispatch.Task.Goal,
-		Input:        dispatch.Task.Input,
-		OwnerAgentID: dispatch.To,
-		InputSchema:  dispatch.Task.InputSchema,
-		OutputSchema: dispatch.Task.OutputSchema,
-		Budget:       dispatch.Task.Budget,
-	})
+	return e.Runner.CreateTask(ctx, createTaskCommand(dispatch))
+}
+
+func createTaskCommand(dispatch multiagent.Dispatch) api.CreateTaskCommand {
+	task := dispatch.Task
+	return api.CreateTaskCommand{
+		RunID:              task.RunID,
+		TaskID:             task.ID,
+		ParentTaskID:       task.ParentTaskID,
+		Type:               task.Type,
+		Goal:               task.Goal,
+		Input:              task.Input,
+		AssignedAgentID:    task.AssignedAgentID,
+		OwnerAgentID:       dispatch.To,
+		OwnerComponent:     task.OwnerComponent,
+		AllowsAction:       task.AllowsAction,
+		Tags:               task.Tags,
+		CompletionCriteria: task.CompletionCriteria,
+		DependsOn:          task.DependsOn,
+		AwaitMode:          task.AwaitMode,
+		AwaitQuorum:        task.AwaitQuorum,
+		OnDependencyFailed: task.OnDependencyFailed,
+		ReadSelectors:      task.ReadSelectors,
+		WriteTargets:       task.WriteTargets,
+		RetryPolicy:        task.RetryPolicy,
+		PolicyDecisions:    task.PolicyDecisions,
+		InputSchema:        task.InputSchema,
+		OutputSchema:       task.OutputSchema,
+		Budget:             task.Budget,
+	}
 }
 
 func taskEnvelope(ctx context.Context, runner *venat.Runner, runID, taskID string, statuses ...string) (api.TaskEnvelope, bool, error) {
