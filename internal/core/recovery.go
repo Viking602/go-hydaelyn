@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/Viking602/venat/internal/core/model"
@@ -88,15 +89,22 @@ func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.T
 	if err != nil {
 		return false, err
 	}
-	if hasLease && lease.Status == model.LeaseStatusActive && model.LeaseExpiry(lease).After(time.Now().UTC()) {
-		return false, nil
-	}
 	if hasLease && lease.Status == model.LeaseStatusActive {
+		if model.LeaseExpiry(lease).After(recovery.now) {
+			return false, nil
+		}
+		released, err := recovery.uow.Leases().ReleaseExpiredLease(ctx, lease.ID, lease.Version, recovery.now)
+		if err != nil {
+			return false, err
+		}
+		if !released {
+			return false, nil
+		}
 		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
 			RunID:      recovery.runID,
 			TaskID:     task.ID,
 			Type:       model.EventTaskExecutionReleased,
-			Payload:    map[string]any{"leaseId": lease.ID, "reason": "expired"},
+			Payload:    map[string]any{"leaseId": lease.ID, "reason": "expired", "version": lease.Version},
 			RecordedAt: recovery.now,
 		}); err != nil {
 			return false, err
@@ -109,6 +117,33 @@ func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.T
 }
 
 func (recovery *executionRecovery) quarantine(ctx context.Context, task model.Task, attemptIDs []string) error {
+	sort.Strings(attemptIDs)
+	for _, attemptID := range attemptIDs {
+		attempt, err := recovery.uow.ActionAttempts().LoadActionAttempt(ctx, attemptID)
+		if err != nil {
+			return err
+		}
+		if attempt.Status == model.ActionAttemptUnknown && attempt.RequiresReconcile {
+			continue
+		}
+		if attempt.Status != model.ActionAttemptRunning {
+			continue
+		}
+		attempt.Status = model.ActionAttemptUnknown
+		attempt.RequiresReconcile = true
+		if err := recovery.uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
+			return err
+		}
+		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
+			RunID:      recovery.runID,
+			TaskID:     task.ID,
+			Type:       model.EventActionAttemptUpdated,
+			Payload:    map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "requiresReconcile": true},
+			RecordedAt: recovery.now,
+		}); err != nil {
+			return err
+		}
+	}
 	next, err := corestate.TransitionTask(task, model.TaskStatusReconcileRequired, true)
 	if err != nil {
 		return err

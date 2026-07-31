@@ -44,9 +44,12 @@ type Tool struct {
 	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
+// RetryPolicy configures durable task retries. MaxAttempts counts the first
+// execution and must be between 0 and 10; 0 disables durable retries.
 type RetryPolicy struct {
 	MaxAttempts int           `json:"maxAttempts,omitempty"`
 	Backoff     time.Duration `json:"backoff,omitempty"`
+	MaxBackoff  time.Duration `json:"maxBackoff,omitempty"`
 }
 
 type ActionAttempt struct {
@@ -54,13 +57,26 @@ type ActionAttempt struct {
 	ActionID          string              `json:"actionId,omitempty"`
 	RunID             string              `json:"runId"`
 	TaskID            string              `json:"taskId"`
+	LeaseID           string              `json:"leaseId,omitempty"`
 	ToolName          string              `json:"toolName,omitempty"`
 	Status            ActionAttemptStatus `json:"status"`
 	IdempotencyKey    string              `json:"idempotencyKey,omitempty"`
 	InputHash         string              `json:"inputHash,omitempty"`
 	ExternalRequestID string              `json:"externalRequestId,omitempty"`
 	ExternalResultRef string              `json:"externalResultRef,omitempty"`
+	ToolResult        json.RawMessage     `json:"toolResult,omitempty"`
 	RequiresReconcile bool                `json:"requiresReconcile,omitempty"`
+}
+
+// ActionAttemptSelector filters the durable side-effect ledger. Set fields
+// AND-combine; Statuses match any listed status.
+type ActionAttemptSelector struct {
+	RunID             string                `json:"runId,omitempty"`
+	TaskID            string                `json:"taskId,omitempty"`
+	ToolName          string                `json:"toolName,omitempty"`
+	Statuses          []ActionAttemptStatus `json:"statuses,omitempty"`
+	RequiresReconcile *bool                 `json:"requiresReconcile,omitempty"`
+	Limit             int                   `json:"limit,omitempty"`
 }
 
 type AddressKind string
@@ -178,6 +194,7 @@ const (
 	EventTaskExecutionAcquired       EventType = "TaskExecutionAcquired"
 	EventTaskExecutionHeartbeat      EventType = "TaskExecutionHeartbeat"
 	EventTaskExecutionReleased       EventType = "TaskExecutionReleased"
+	EventExecutionCheckpointed       EventType = "ExecutionCheckpointed"
 	EventTypedReportSubmitted        EventType = "TypedReportSubmitted"
 	EventTaskCompleted               EventType = "TaskCompleted"
 	EventTaskFailed                  EventType = "TaskFailed"
@@ -684,19 +701,22 @@ type CapabilitySelector struct {
 // Spec anchor: docs/product-spec/v0.8.0/06-usage-metering.md (detailed
 // fields may be added there; this is the v0.8.0 baseline).
 type UsageRecord struct {
-	ID           string            `json:"id"`
-	RunID        string            `json:"runId"`
-	TaskID       string            `json:"taskId,omitempty"`
-	AgentID      string            `json:"agentId,omitempty"`
-	Provider     string            `json:"provider,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	InputTokens  int               `json:"inputTokens,omitempty"`
-	OutputTokens int               `json:"outputTokens,omitempty"`
-	ToolCalls    int               `json:"toolCalls,omitempty"`
-	DurationMS   int64             `json:"durationMs,omitempty"`
-	Credits      int64             `json:"credits,omitempty"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-	CreatedAt    time.Time         `json:"createdAt"`
+	ID                string            `json:"id"`
+	RunID             string            `json:"runId"`
+	TaskID            string            `json:"taskId,omitempty"`
+	AgentID           string            `json:"agentId,omitempty"`
+	Provider          string            `json:"provider,omitempty"`
+	Model             string            `json:"model,omitempty"`
+	InputTokens       int               `json:"inputTokens,omitempty"`
+	OutputTokens      int               `json:"outputTokens,omitempty"`
+	CachedInputTokens int               `json:"cachedInputTokens,omitempty"`
+	TotalTokens       int               `json:"totalTokens,omitempty"`
+	ToolCalls         int               `json:"toolCalls,omitempty"`
+	Steps             int               `json:"steps,omitempty"`
+	DurationMS        int64             `json:"durationMs,omitempty"`
+	Credits           int64             `json:"credits,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	CreatedAt         time.Time         `json:"createdAt"`
 }
 
 // UsageSelector filters UsageStore.Query.

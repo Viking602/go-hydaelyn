@@ -493,6 +493,9 @@ func TestResponsesStreamSurfacesAPIErrorEvents(t *testing.T) {
 			if !strings.Contains(events[0].Err.Error(), test.want) {
 				t.Fatalf("error = %v, want code %q", events[0].Err, test.want)
 			}
+			if provider.ErrorKindOf(events[0].Err) != provider.ErrorServer || !provider.IsRetryableError(events[0].Err) {
+				t.Fatalf("error classification = %q retryable=%v", provider.ErrorKindOf(events[0].Err), provider.IsRetryableError(events[0].Err))
+			}
 		})
 	}
 }

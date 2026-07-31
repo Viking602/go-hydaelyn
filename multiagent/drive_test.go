@@ -108,6 +108,22 @@ func TestDriveSurfacesExecutorErrorAsFailedInstance(t *testing.T) {
 	}
 }
 
+func TestDriveContainsExecutorPanicAsFailedInstance(t *testing.T) {
+	scheduler := SequentialScheduler{Classes: []AgentClass{{Name: "a"}}}
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		panic("provider adapter bug")
+	})
+	result, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
+	if !errors.Is(err, ErrExecutorPanic) {
+		t.Fatalf("Drive error = %v, want ErrExecutorPanic", err)
+	}
+	if len(result.State.Instances) != 1 ||
+		result.State.Instances[0].State != InstanceStateFailed ||
+		result.State.Tasks[0].Status != api.TaskStatusFailed {
+		t.Fatalf("panic result = %#v", result.State)
+	}
+}
+
 func TestDrive_WrapsSchedulerErrorAsSchedulerFailure(t *testing.T) {
 	boom := errors.New("no agent can handle current state")
 	scheduler := SchedulerFunc(func(context.Context, TeamState) ([]Dispatch, error) {

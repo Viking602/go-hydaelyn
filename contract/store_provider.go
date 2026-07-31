@@ -132,6 +132,7 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 		{"TestSaveAndList_UsageRecords", testSaveAndListUsageRecords},
 		{"TestSaveAndList_DeadLetters", testSaveAndListDeadLetters},
 		{"TestSaveAndList_ActionAttempts", testSaveAndListActionAttempts},
+		{"TestActionAttempt_ResolveCAS", testActionAttemptResolveCAS},
 	})
 }
 
@@ -461,20 +462,54 @@ func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 		AttemptID:      "att-1",
 		RunID:          "run-act",
 		TaskID:         "task-act",
+		LeaseID:        "lease-act",
 		ToolName:       "tool-x",
 		IdempotencyKey: "idem-1",
 		InputHash:      "hash-1",
+		ToolResult:     json.RawMessage(`{"content":"stored"}`),
 	}
+	other := att
+	other.AttemptID = "att-2"
+	other.TaskID = "task-other"
+	other.ToolName = "tool-y"
+	other.Status = api.ActionAttemptSucceeded
+	other.IdempotencyKey = "idem-2"
+	other.RequiresReconcile = false
+	outsideRun := other
+	outsideRun.AttemptID = "att-3"
+	outsideRun.RunID = "run-other"
+	outsideRun.IdempotencyKey = "idem-3"
+	reconcile := other
+	reconcile.AttemptID = "att-4"
+	reconcile.IdempotencyKey = "idem-4"
+	reconcile.RequiresReconcile = true
+	wrongTask := other
+	wrongTask.AttemptID = "att-5"
+	wrongTask.TaskID = "task-wrong"
+	wrongTask.IdempotencyKey = "idem-5"
+	wrongTool := other
+	wrongTool.AttemptID = "att-6"
+	wrongTool.ToolName = "tool-wrong"
+	wrongTool.IdempotencyKey = "idem-6"
+	wrongStatus := other
+	wrongStatus.AttemptID = "att-7"
+	wrongStatus.Status = api.ActionAttemptFailed
+	wrongStatus.IdempotencyKey = "idem-7"
 	withUoW(t, p, func(uow api.UnitOfWork) error {
-		return uow.ActionAttempts().SaveActionAttempt(context.Background(), att)
+		for _, value := range []api.ActionAttempt{att, other, outsideRun, reconcile, wrongTask, wrongTool, wrongStatus} {
+			if err := uow.ActionAttempts().SaveActionAttempt(context.Background(), value); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		got, err := uow.ActionAttempts().LoadActionAttempt(context.Background(), att.AttemptID)
 		if err != nil {
 			return err
 		}
-		if got.ToolName != att.ToolName {
-			t.Fatalf("action attempt mismatch: %q", got.ToolName)
+		if got.ToolName != att.ToolName || got.LeaseID != att.LeaseID || string(got.ToolResult) != string(att.ToolResult) {
+			t.Fatalf("action attempt mismatch: %+v", got)
 		}
 		byKey, err := uow.ActionAttempts().LoadActionAttemptByIdempotencyKey(context.Background(), att.RunID, att.TaskID, att.ToolName, att.IdempotencyKey)
 		if err != nil {
@@ -483,6 +518,21 @@ func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 		if byKey.AttemptID != att.AttemptID || byKey.InputHash != att.InputHash {
 			t.Fatalf("action attempt idempotency lookup mismatch: %+v", byKey)
 		}
+		requireReconcile := false
+		matches, err := uow.ActionAttempts().ListActionAttempts(context.Background(), api.ActionAttemptSelector{
+			RunID:             att.RunID,
+			TaskID:            other.TaskID,
+			ToolName:          other.ToolName,
+			Statuses:          []api.ActionAttemptStatus{api.ActionAttemptSucceeded},
+			RequiresReconcile: &requireReconcile,
+			Limit:             1,
+		})
+		if err != nil {
+			return err
+		}
+		if len(matches) != 1 || matches[0].AttemptID != other.AttemptID {
+			t.Fatalf("action attempt selector mismatch: %+v", matches)
+		}
 		return nil
 	})
 	withUoW(t, p, func(uow api.UnitOfWork) error {
@@ -490,6 +540,57 @@ func testSaveAndListActionAttempts(t *testing.T, factory ProviderFactory) {
 		duplicate.AttemptID = "att-2"
 		if err := uow.ActionAttempts().SaveActionAttempt(context.Background(), duplicate); err == nil {
 			t.Fatal("SaveActionAttempt accepted a duplicate idempotency tuple")
+		}
+		return nil
+	})
+}
+
+func testActionAttemptResolveCAS(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	ctx := context.Background()
+	attempt := api.ActionAttempt{
+		AttemptID:         "att-resolve",
+		ActionID:          "action-resolve",
+		RunID:             "run-resolve",
+		TaskID:            "task-resolve",
+		LeaseID:           "lease-resolve",
+		ToolName:          "deploy",
+		Status:            api.ActionAttemptUnknown,
+		IdempotencyKey:    "idem-resolve",
+		InputHash:         "hash-resolve",
+		RequiresReconcile: true,
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		return uow.ActionAttempts().SaveActionAttempt(ctx, attempt)
+	})
+	resolved := attempt
+	resolved.Status = api.ActionAttemptSucceeded
+	resolved.ExternalResultRef = "result://resolve"
+	resolved.RequiresReconcile = false
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.ActionAttempts().ResolveActionAttempt(ctx, resolved)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			t.Fatal("ResolveActionAttempt(unknown): want true")
+		}
+		return nil
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.ActionAttempts().ResolveActionAttempt(ctx, resolved)
+		if err != nil {
+			return err
+		}
+		if ok {
+			t.Fatal("ResolveActionAttempt(already resolved): want false")
+		}
+		got, err := uow.ActionAttempts().LoadActionAttempt(ctx, attempt.AttemptID)
+		if err != nil {
+			return err
+		}
+		if got.Status != api.ActionAttemptSucceeded || got.RequiresReconcile || got.ExternalResultRef != resolved.ExternalResultRef {
+			t.Fatalf("resolved attempt = %#v", got)
 		}
 		return nil
 	})
@@ -643,6 +744,8 @@ func runLeaseCASSuite(t *testing.T, factory ProviderFactory) {
 		{"TestLease_ExtendLease_HonorsWorkerID", testLeaseExtendHonorsWorker},
 		{"TestLease_ExtendLease_RejectsAfterTransfer", testLeaseExtendRejectsAfterTransfer},
 		{"TestLease_ConcurrentAcquireOnlyOneWins", testLeaseConcurrentAcquireOnlyOneWins},
+		{"TestLease_ReleaseExpiredLease_Succeeds", testLeaseReleaseExpiredSucceeds},
+		{"TestLease_ReleaseExpiredLease_FencedByHeartbeat", testLeaseReleaseExpiredFencedByHeartbeat},
 	})
 }
 
@@ -757,6 +860,94 @@ func testLeaseExtendRejectsAfterTransfer(t *testing.T, factory ProviderFactory) 
 		}
 		if ok {
 			t.Fatal("ExtendLease(wrong worker): want false")
+		}
+		return nil
+	})
+}
+
+func testLeaseReleaseExpiredSucceeds(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	ctx := context.Background()
+	releasedAt := time.Now().UTC()
+	lease := api.TaskExecutionLease{
+		ID: "lease-expired", RunID: "r-expired", TaskID: "t-expired",
+		HolderType: api.HolderAgent, HolderID: "worker-A",
+		Status: api.LeaseStatusActive, AcquiredAt: releasedAt.Add(-2 * time.Minute), ExpiresAt: releasedAt.Add(-time.Minute),
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.Leases().AcquireWithExpectedVersion(ctx, lease, 0)
+		if err != nil || !ok {
+			t.Fatalf("acquire: ok=%v err=%v", ok, err)
+		}
+		return nil
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		current, err := uow.Leases().LoadLease(ctx, lease.ID)
+		if err != nil {
+			return err
+		}
+		ok, err := uow.Leases().ReleaseExpiredLease(ctx, lease.ID, current.Version, releasedAt)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			t.Fatal("ReleaseExpiredLease(expired): want true")
+		}
+		released, err := uow.Leases().LoadLease(ctx, lease.ID)
+		if err != nil {
+			return err
+		}
+		if released.Status != api.LeaseStatusReleased || released.Version != current.Version+1 {
+			t.Fatalf("released lease = %#v", released)
+		}
+		return nil
+	})
+}
+
+func testLeaseReleaseExpiredFencedByHeartbeat(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	lease := api.TaskExecutionLease{
+		ID: "lease-heartbeat-fence", RunID: "r-heartbeat-fence", TaskID: "t-heartbeat-fence",
+		HolderType: api.HolderAgent, HolderID: "worker-A",
+		Status: api.LeaseStatusActive, AcquiredAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	var observedVersion uint64
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.Leases().AcquireWithExpectedVersion(ctx, lease, 0)
+		if err != nil || !ok {
+			t.Fatalf("acquire: ok=%v err=%v", ok, err)
+		}
+		current, err := uow.Leases().LoadLease(ctx, lease.ID)
+		if err != nil {
+			return err
+		}
+		observedVersion = current.Version
+		return nil
+	})
+	newExpiry := now.Add(5 * time.Minute)
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.Leases().ExtendLease(ctx, lease.ID, lease.HolderID, newExpiry)
+		if err != nil || !ok {
+			t.Fatalf("heartbeat: ok=%v err=%v", ok, err)
+		}
+		return nil
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		ok, err := uow.Leases().ReleaseExpiredLease(ctx, lease.ID, observedVersion, now.Add(2*time.Minute))
+		if err != nil {
+			return err
+		}
+		if ok {
+			t.Fatal("ReleaseExpiredLease(stale pre-heartbeat version): want false")
+		}
+		current, err := uow.Leases().LoadLease(ctx, lease.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status != api.LeaseStatusActive || !current.ExpiresAt.Equal(newExpiry) {
+			t.Fatalf("heartbeat lease was stolen: %#v", current)
 		}
 		return nil
 	})

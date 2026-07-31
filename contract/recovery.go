@@ -230,7 +230,7 @@ func testResumeReconstructsStepTrace(t *testing.T, open func() api.StoreProvider
 		t.Fatalf("DispatchTask() error = %v", err)
 	}
 	driver := scripted.New(recoveryScript())
-	if err := (worker.AgentWorker{Runner: runtimeA, Engine: agent.Engine{Provider: driver}, AgentID: "trace-agent", Model: "scripted", TTL: time.Hour}).ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: envelope, TTL: time.Hour}); err != nil {
+	if _, err := (worker.AgentWorker{Runner: runtimeA, Engine: agent.Engine{Provider: driver}, AgentID: "trace-agent", Model: "scripted", TTL: time.Hour}).ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: envelope, TTL: time.Hour}); err != nil {
 		t.Fatalf("ExecuteEnvelope() error = %v", err)
 	}
 	eventsA := recoveryEvents(t, runtimeA, run.ID)

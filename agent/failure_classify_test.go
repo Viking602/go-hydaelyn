@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"github.com/Viking602/venat/api"
@@ -30,7 +31,8 @@ func TestEngineRunClassifiesUnavailableToolAsToolUnavailable(t *testing.T) {
 		t.Helper()
 		driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 			Query string `json:"query"`
-		}) (string, error) {
+		},
+		) (string, error) {
 			return "result", nil
 		})
 		if err != nil {
@@ -102,5 +104,27 @@ func TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction(t *testing.T)
 	var retryLimit *OutputGuardrailRetryLimitExceededError
 	if !errors.As(result.Failure, &retryLimit) {
 		t.Fatalf("Failure cause = %v, want OutputGuardrailRetryLimitExceededError", result.Failure)
+	}
+}
+
+func TestLoopErrorFailureNeverRetriesStateIntegrityErrors(t *testing.T) {
+	transient := &net.DNSError{IsTimeout: true}
+	for _, fatal := range []error{
+		api.ErrTerminalState,
+		api.ErrStaleTaskVersion,
+		api.ErrLeaseHolderMismatch,
+		api.ErrLeaseNotActive,
+		api.ErrActionReconcileRequired,
+		api.ErrIdempotencyConflict,
+		api.ErrCheckpointLimitExceeded,
+	} {
+		err := errors.Join(transient, fatal)
+		failure := loopErrorFailure(context.Background(), err, false)
+		if failure.Retryable {
+			t.Fatalf("%v joined with retryable transport error was marked retryable", fatal)
+		}
+		if !errors.Is(failure, fatal) {
+			t.Fatalf("failure %v lost fatal cause %v", failure, fatal)
+		}
 	}
 }

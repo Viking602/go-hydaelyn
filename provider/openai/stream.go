@@ -66,7 +66,8 @@ type chatToolCallDetail struct {
 }
 
 type chunk struct {
-	Choices []choiceChunk `json:"choices"`
+	Choices []choiceChunk      `json:"choices"`
+	Error   *responsesAPIError `json:"error,omitempty"`
 	Usage   struct {
 		PromptTokens        int `json:"prompt_tokens"`
 		CompletionTokens    int `json:"completion_tokens"`
@@ -226,6 +227,10 @@ func (d Driver) postEventStream(ctx context.Context, path string, body []byte, a
 	if client == nil {
 		client = http.DefaultClient
 	}
+	idempotencyKey, err := shared.NewIdempotencyKey()
+	if err != nil {
+		return nil, fmt.Errorf("openai: generate idempotency key: %w", err)
+	}
 	// Stream initiation is retried (never mid-stream): the request body is
 	// rebuilt per attempt and transient 429/5xx responses back off per
 	// Config.Retry.
@@ -236,6 +241,7 @@ func (d Driver) postEventStream(ctx context.Context, path string, body []byte, a
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", idempotencyKey)
 		return req, nil
 	})
 	if err != nil {
@@ -244,7 +250,7 @@ func (d Driver) postEventStream(ctx context.Context, path string, body []byte, a
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		return nil, fmt.Errorf("openai api returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
+		return nil, provider.NewHTTPError("openai", resp.StatusCode, strings.TrimSpace(string(payload)))
 	}
 	if !isEventStreamContentType(resp.Header.Get("Content-Type")) {
 		defer func() { _ = resp.Body.Close() }()
@@ -348,6 +354,9 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 		var parsed chunk
 		if err := json.Unmarshal([]byte(current.Data), &parsed); err != nil {
 			return provider.Event{}, err
+		}
+		if parsed.Error != nil {
+			return provider.Event{}, responsesError(parsed.Error)
 		}
 		s.consumeChunk(parsed)
 	}

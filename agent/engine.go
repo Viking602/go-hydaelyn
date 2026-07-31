@@ -9,6 +9,7 @@ import (
 
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
 	"github.com/Viking602/venat/stream"
 	"github.com/Viking602/venat/tool"
@@ -73,6 +74,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		MaxToolCalls:        maxToolCalls,
 		MaxSteps:            maxSteps,
 		ContextTokenTarget:  e.LoopPolicy.ContextTokenTarget,
+		OperationTurn:       e.OperationTurn,
 		StopSequences:       e.StopSequences,
 		ThinkingBudget:      e.ThinkingBudget,
 		ExtraBody:           e.ExtraBody,
@@ -81,6 +83,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		Sink:                sink,
 		StepPolicy:          e.StepPolicy,
 		StepRecorder:        e.StepRecorder,
+		CheckpointRecorder:  e.CheckpointRecorder,
 		Compact:             compact,
 		CompactTo:           compactTo,
 	}
@@ -88,12 +91,13 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
 		return Result{
-			Messages:   output.Messages,
-			Usage:      output.Usage,
-			StopReason: output.StopReason,
-			Thinking:   output.Thinking,
-			Steps:      output.Steps,
-			Failure:    loopErrorFailure(runCtx, runErr, budgetDriven),
+			Messages:      output.Messages,
+			Usage:         output.Usage,
+			StopReason:    output.StopReason,
+			Thinking:      output.Thinking,
+			ToolCallsUsed: output.ToolCallsUsed,
+			Steps:         output.Steps,
+			Failure:       loopErrorFailure(runCtx, runErr, budgetDriven),
 		}
 	}
 
@@ -186,14 +190,15 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 
 func resultFromLoopOutput(output LoopOutput, repairCount int) Result {
 	return Result{
-		Text:        finalAssistantTextFromMessages(output.Messages),
-		Thinking:    output.Thinking,
-		Usage:       output.Usage,
-		StopReason:  output.StopReason,
-		Messages:    output.Messages,
-		Steps:       output.Steps,
-		Valid:       true,
-		RepairCount: repairCount,
+		Text:          finalAssistantTextFromMessages(output.Messages),
+		Thinking:      output.Thinking,
+		Usage:         output.Usage,
+		StopReason:    output.StopReason,
+		Messages:      output.Messages,
+		Steps:         output.Steps,
+		ToolCallsUsed: output.ToolCallsUsed,
+		Valid:         true,
+		RepairCount:   repairCount,
 	}
 }
 
@@ -311,6 +316,11 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 		failure.Kind = FailureKindBudgetExhausted
 	case budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		failure.Kind = FailureKindBudgetExhausted
+	case stateIntegrityFailure(err):
+		failure.Kind = FailureKindEngineError
+	case provider.IsRetryableError(err):
+		failure.Kind = FailureKindEngineError
+		failure.Retryable = true
 	case errors.Is(err, ErrToolBusMissing) || errors.Is(err, tool.ErrToolNotFound):
 		failure.Kind = FailureKindToolUnavailable
 		failure.Retryable = true
@@ -329,6 +339,18 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 		failure.Kind = FailureKindEngineError
 	}
 	return failure.WithCause(err)
+}
+
+func stateIntegrityFailure(err error) bool {
+	return errors.Is(err, api.ErrTerminalState) ||
+		errors.Is(err, api.ErrStaleTaskVersion) ||
+		errors.Is(err, api.ErrLeaseHolderMismatch) ||
+		errors.Is(err, api.ErrLeaseNotActive) ||
+		errors.Is(err, api.ErrOwnerMismatch) ||
+		errors.Is(err, api.ErrActionReconcileRequired) ||
+		errors.Is(err, api.ErrIdempotencyConflict) ||
+		errors.Is(err, api.ErrInvalidTransition) ||
+		errors.Is(err, api.ErrCheckpointLimitExceeded)
 }
 
 func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {

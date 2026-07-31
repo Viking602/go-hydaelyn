@@ -171,6 +171,9 @@ func Release(ctx context.Context, uow ports.UnitOfWork, leaseID, holderID string
 	if holderID != "" && lease.HolderID != holderID {
 		return model.TaskExecutionLease{}, model.ErrLeaseHolderMismatch
 	}
+	if lease.Status == model.LeaseStatusReleased {
+		return lease, nil
+	}
 	lease.Status = model.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		return model.TaskExecutionLease{}, err

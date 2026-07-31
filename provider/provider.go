@@ -4,7 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"syscall"
+	"time"
 
 	"github.com/Viking602/venat/message"
 )
@@ -55,12 +61,30 @@ type Usage struct {
 }
 
 func (u Usage) Add(v Usage) Usage {
+	u = normalizedUsage(u)
+	v = normalizedUsage(v)
 	return Usage{
-		InputTokens:       u.InputTokens + v.InputTokens,
-		CachedInputTokens: u.CachedInputTokens + v.CachedInputTokens,
-		OutputTokens:      u.OutputTokens + v.OutputTokens,
-		TotalTokens:       u.TotalTokens + v.TotalTokens,
+		InputTokens:       saturatingTokenAdd(u.InputTokens, v.InputTokens),
+		CachedInputTokens: saturatingTokenAdd(u.CachedInputTokens, v.CachedInputTokens),
+		OutputTokens:      saturatingTokenAdd(u.OutputTokens, v.OutputTokens),
+		TotalTokens:       saturatingTokenAdd(u.TotalTokens, v.TotalTokens),
 	}
+}
+
+func normalizedUsage(usage Usage) Usage {
+	usage.InputTokens = max(0, usage.InputTokens)
+	usage.CachedInputTokens = min(max(0, usage.CachedInputTokens), usage.InputTokens)
+	usage.OutputTokens = max(0, usage.OutputTokens)
+	usage.TotalTokens = max(max(0, usage.TotalTokens), saturatingTokenAdd(usage.InputTokens, usage.OutputTokens))
+	return usage
+}
+
+func saturatingTokenAdd(left, right int) int {
+	const maxInt = int(^uint(0) >> 1)
+	if left >= maxInt-right {
+		return maxInt
+	}
+	return left + right
 }
 
 type ToolCallDelta struct {
@@ -121,6 +145,183 @@ type Driver interface {
 }
 
 var ErrNotImplemented = errors.New("provider driver not implemented")
+
+// RetryableError marks a provider failure that is safe to retry from the last
+// completed turn checkpoint.
+type RetryableError interface {
+	error
+	Retryable() bool
+}
+
+// RetryDelayError carries a provider-requested minimum delay.
+type RetryDelayError interface {
+	error
+	RetryDelay() time.Duration
+}
+
+// SuggestedRetryDelay returns a typed provider-requested retry delay.
+func SuggestedRetryDelay(err error) time.Duration {
+	var delayed RetryDelayError
+	if !errors.As(err, &delayed) {
+		return 0
+	}
+	return max(time.Duration(0), delayed.RetryDelay())
+}
+
+type ErrorKind string
+
+const (
+	ErrorUnknown        ErrorKind = "unknown"
+	ErrorAuthentication ErrorKind = "authentication"
+	ErrorPermission     ErrorKind = "permission"
+	ErrorInvalidRequest ErrorKind = "invalid_request"
+	ErrorNotFound       ErrorKind = "not_found"
+	ErrorRateLimit      ErrorKind = "rate_limit"
+	ErrorServer         ErrorKind = "server"
+	ErrorStream         ErrorKind = "stream"
+)
+
+// Error is a provider-neutral failure classification. Provider adapters map
+// wire-specific statuses and codes into Kind without string matching.
+type Error struct {
+	Provider   string
+	Kind       ErrorKind
+	Code       string
+	StatusCode int
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil provider error>"
+	}
+	label := e.Provider
+	if e.Code != "" {
+		if label != "" {
+			label += " "
+		}
+		label += e.Code
+	}
+	if label == "" {
+		label = string(e.Kind)
+	}
+	if e.StatusCode != 0 {
+		label = fmt.Sprintf("%s HTTP %d", label, e.StatusCode)
+	}
+	if e.Message == "" {
+		return label
+	}
+	return label + ": " + e.Message
+}
+
+func (e *Error) Category() ErrorKind {
+	if e == nil {
+		return ErrorUnknown
+	}
+	return e.Kind
+}
+
+func (e *Error) Retryable() bool {
+	return e != nil && (e.Kind == ErrorRateLimit || e.Kind == ErrorServer || e.Kind == ErrorStream)
+}
+
+func (e *Error) RetryDelay() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return max(time.Duration(0), e.RetryAfter)
+}
+
+// ClassifiedError exposes a provider-neutral failure category.
+type ClassifiedError interface {
+	error
+	Category() ErrorKind
+}
+
+// ErrorKindOf returns a typed provider failure category through wrapped errors.
+func ErrorKindOf(err error) ErrorKind {
+	var classified ClassifiedError
+	if !errors.As(err, &classified) {
+		return ErrorUnknown
+	}
+	return classified.Category()
+}
+
+// NewHTTPError maps a provider HTTP response to a generic failure category.
+func NewHTTPError(providerName string, statusCode int, message string) *Error {
+	return &Error{
+		Provider:   providerName,
+		Kind:       httpErrorKind(statusCode),
+		StatusCode: statusCode,
+		Message:    message,
+	}
+}
+
+func httpErrorKind(statusCode int) ErrorKind {
+	switch {
+	case statusCode == http.StatusUnauthorized:
+		return ErrorAuthentication
+	case statusCode == http.StatusForbidden:
+		return ErrorPermission
+	case statusCode == http.StatusNotFound:
+		return ErrorNotFound
+	case statusCode == http.StatusTooManyRequests:
+		return ErrorRateLimit
+	case statusCode >= 500 && statusCode <= 599:
+		return ErrorServer
+	case statusCode >= 400 && statusCode <= 499:
+		return ErrorInvalidRequest
+	default:
+		return ErrorUnknown
+	}
+}
+
+// IsRetryableError recognizes typed transient provider failures and short
+// transport interruptions. Context cancellation and deadlines are terminal.
+func IsRetryableError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var marked RetryableError
+	if errors.As(err, &marked) {
+		return marked.Retryable()
+	}
+	if isRetryableSystemError(err) {
+		return true
+	}
+	var urlError *url.Error
+	if errors.As(err, &urlError) && urlError.Err != nil {
+		return IsRetryableError(urlError.Err)
+	}
+	var operationError *net.OpError
+	if errors.As(err, &operationError) && operationError.Err != nil {
+		return IsRetryableError(operationError.Err)
+	}
+	var networkError net.Error
+	return errors.As(err, &networkError) && networkError.Timeout()
+}
+
+func isRetryableSystemError(err error) bool {
+	for _, target := range []error{
+		io.EOF,
+		io.ErrUnexpectedEOF,
+		io.ErrClosedPipe,
+		syscall.ECONNRESET,
+		syscall.ECONNREFUSED,
+		syscall.ECONNABORTED,
+		syscall.EPIPE,
+		syscall.ENETDOWN,
+		syscall.ENETUNREACH,
+		syscall.EHOSTUNREACH,
+		syscall.ETIMEDOUT,
+	} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
+}
 
 type SliceStream struct {
 	events []Event

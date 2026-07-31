@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -13,9 +14,11 @@ import (
 	"github.com/Viking602/venat"
 	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/multiagent"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
@@ -217,6 +220,7 @@ func TestRunnerExecutorEnsureTaskPreservesAuthoringFields(t *testing.T) {
 		RetryPolicy: api.RetryPolicy{
 			MaxAttempts: 3,
 			Backoff:     time.Second,
+			MaxBackoff:  30 * time.Second,
 		},
 		PolicyDecisions: []api.PolicyDecision{{
 			DecisionID: "decision-1",
@@ -716,4 +720,116 @@ func (s failSecondTeamStateLoadStore) LoadTeamState(ctx context.Context, runID s
 		return api.TeamStateRecord{}, errTeamStateLoad
 	}
 	return s.TeamStateStore.LoadTeamState(ctx, runID)
+}
+
+func TestWaitForEnvelopeReadyHonorsBackoffAndCancellation(t *testing.T) {
+	started := time.Now()
+	if err := waitForEnvelopeReady(context.Background(), api.TaskEnvelope{
+		NextRetryAt: started.Add(20 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("waitForEnvelopeReady() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 15*time.Millisecond {
+		t.Fatalf("waitForEnvelopeReady() elapsed = %v, want scheduled delay", elapsed)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitForEnvelopeReady(ctx, api.TaskEnvelope{
+		NextRetryAt: time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForEnvelopeReady(cancelled) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunnerExecutorRetriesFromLatestTurnCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-continuation-retry",
+		RootTaskID: "root",
+		Request:    "continue after a transient provider failure",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	transportErr := io.ErrUnexpectedEOF
+	driver := &sequenceProvider{
+		turns: [][]provider.Event{
+			{
+				{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{
+					ID: "lookup-1", Name: "lookup", Arguments: json.RawMessage(`{"query":"state"}`),
+				}},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+			},
+			nil,
+			{
+				{Kind: provider.EventTextDelta, Text: "continued without replay"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		},
+		failures: map[int]error{1: transportErr},
+	}
+	toolDriver := &recordingTool{definition: tool.Definition{Name: "lookup"}}
+	class := multiagent.AgentClass{
+		Name:         "retry-worker",
+		Instructions: "look up state and finish",
+		Model:        "scripted",
+	}
+	dispatch := multiagent.Dispatch{
+		To:        "agent-a",
+		ClassName: class.Name,
+		Task: api.Task{
+			ID:           "retry-task",
+			RunID:        run.ID,
+			Type:         api.TaskTypeWorker,
+			Goal:         class.Instructions,
+			WriteTargets: []string{"result"},
+		},
+	}
+	executor := RunnerExecutor{
+		Runner:      runner,
+		Classes:     map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps:   agent.BuildDeps{Providers: provider.Single(driver)},
+		RetryPolicy: api.RetryPolicy{MaxAttempts: 2, Backoff: 10 * time.Millisecond},
+		PrepareEngine: func(_ context.Context, engine agent.Engine, _ multiagent.Dispatch, _ multiagent.AgentClass) (agent.Engine, error) {
+			engine.Tools = tool.NewBus(toolDriver)
+			return engine, nil
+		},
+	}
+	started := time.Now()
+	report, err := executor.Execute(ctx, dispatch)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if report.Status != api.ReportStatusSuccess || report.Summary != "continued without replay" {
+		t.Fatalf("Execute() report = %#v, want successful continuation", report)
+	}
+	if elapsed := time.Since(started); elapsed < 8*time.Millisecond {
+		t.Fatalf("retry elapsed = %v, want configured backoff", elapsed)
+	}
+	if toolDriver.calls != 1 {
+		t.Fatalf("lookup calls = %d, want one completed tool turn", toolDriver.calls)
+	}
+	if len(driver.requests) != 3 {
+		t.Fatalf("provider requests = %d, want tool turn, failed turn, continuation", len(driver.requests))
+	}
+	var replayed bool
+	for _, msg := range driver.requests[2].Messages {
+		if msg.Role == message.RoleTool && msg.ToolResult != nil && msg.ToolResult.ToolCallID == "lookup-1" {
+			replayed = true
+			break
+		}
+	}
+	if !replayed {
+		t.Fatalf("continuation request did not replay checkpointed tool result: %#v", driver.requests[2].Messages)
+	}
+	persisted, err := runner.Task(ctx, run.ID, dispatch.Task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if persisted.Status != api.TaskStatusCompleted || persisted.Attempts != 2 {
+		t.Fatalf("persisted retry task = %#v, want completed after two attempts", persisted)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 )
 
@@ -72,6 +73,32 @@ type StepRecorderFunc func(context.Context, Step) error
 // RecordStep delegates to f.
 func (f StepRecorderFunc) RecordStep(ctx context.Context, step Step) error {
 	return f(ctx, step)
+}
+
+// TurnCheckpoint is the durable, provider-neutral state at one completed model
+// turn boundary. Messages include assistant tool calls and their tool results,
+// allowing a later execution to continue without asking the provider to repeat
+// already completed work.
+type TurnCheckpoint struct {
+	Messages          []message.Message `json:"messages"`
+	Usage             provider.Usage    `json:"usage,omitempty"`
+	Step              Step              `json:"step"`
+	ToolCallsUsed     int               `json:"toolCallsUsed,omitempty"`
+	NextOperationTurn int               `json:"nextOperationTurn,omitempty"`
+	PendingToolCalls  bool              `json:"pendingToolCalls,omitempty"`
+}
+
+// CheckpointRecorder persists a completed turn before the loop advances.
+type CheckpointRecorder interface {
+	RecordCheckpoint(context.Context, TurnCheckpoint) error
+}
+
+// CheckpointRecorderFunc adapts a function to CheckpointRecorder.
+type CheckpointRecorderFunc func(context.Context, TurnCheckpoint) error
+
+// RecordCheckpoint delegates to f.
+func (f CheckpointRecorderFunc) RecordCheckpoint(ctx context.Context, checkpoint TurnCheckpoint) error {
+	return f(ctx, checkpoint)
 }
 
 // StepPolicy lets a caller override the loop's natural next-step decision at a

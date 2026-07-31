@@ -186,6 +186,7 @@ type RequestApprovalCommand struct {
 	Reason           string
 	RiskSummary      string
 	RequestedAction  string
+	Metadata         map[string]string
 }
 
 type DecideApprovalCommand struct {
@@ -225,7 +226,29 @@ type CompleteActionAttemptCommand struct {
 	Status            ActionAttemptStatus
 	ExternalRequestID string
 	ExternalResultRef string
+	ToolResult        json.RawMessage
 	RequiresReconcile bool
+}
+
+// AppendTaskExecutionEventCommand appends an execution event only while the
+// caller still owns the current lease and task version.
+type AppendTaskExecutionEventCommand struct {
+	RunID       string
+	TaskID      string
+	LeaseID     string
+	HolderType  HolderType
+	HolderID    string
+	TaskVersion int
+	Event       Event
+}
+
+// ResolveActionAttemptCommand records the host's reconciliation decision for an
+// attempt whose outcome became unknown after an interruption.
+type ResolveActionAttemptCommand struct {
+	AttemptID         string
+	Status            ActionAttemptStatus
+	ExternalResultRef string
+	ToolResult        json.RawMessage
 }
 
 type StartTraceSpanCommand struct {

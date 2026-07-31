@@ -28,6 +28,33 @@ func TestUsageAdd(t *testing.T) {
 			wantOutput: 30,
 			wantTotal:  45,
 		},
+		{
+			name:       "negative counters cannot reduce accumulated usage",
+			u1:         Usage{InputTokens: 10, CachedInputTokens: 4, OutputTokens: 5, TotalTokens: 15},
+			u2:         Usage{InputTokens: -20, CachedInputTokens: -3, OutputTokens: -5, TotalTokens: -28},
+			wantInput:  10,
+			wantCached: 4,
+			wantOutput: 5,
+			wantTotal:  15,
+		},
+		{
+			name:       "missing total is derived from input and output",
+			u1:         Usage{},
+			u2:         Usage{InputTokens: 7, CachedInputTokens: 9, OutputTokens: 3},
+			wantInput:  7,
+			wantCached: 7,
+			wantOutput: 3,
+			wantTotal:  10,
+		},
+		{
+			name:       "near-limit counters saturate instead of wrapping",
+			u1:         Usage{InputTokens: int(^uint(0)>>1) - 2, OutputTokens: int(^uint(0)>>1) - 3},
+			u2:         Usage{InputTokens: 10, OutputTokens: 10},
+			wantInput:  int(^uint(0) >> 1),
+			wantCached: 0,
+			wantOutput: int(^uint(0) >> 1),
+			wantTotal:  int(^uint(0) >> 1),
+		},
 	}
 
 	for _, tt := range tests {
@@ -291,5 +318,30 @@ func TestDriverInterface(t *testing.T) {
 	}
 	if event.Kind != EventDone {
 		t.Errorf("Event.Kind = %v, want %v", event.Kind, EventDone)
+	}
+}
+
+func TestProviderErrorClassification(t *testing.T) {
+	tests := []struct {
+		status    int
+		kind      ErrorKind
+		retryable bool
+	}{
+		{status: 400, kind: ErrorInvalidRequest},
+		{status: 401, kind: ErrorAuthentication},
+		{status: 403, kind: ErrorPermission},
+		{status: 404, kind: ErrorNotFound},
+		{status: 429, kind: ErrorRateLimit, retryable: true},
+		{status: 503, kind: ErrorServer, retryable: true},
+	}
+	for _, test := range tests {
+		failure := NewHTTPError("test", test.status, "failed")
+		wrapped := errors.Join(errors.New("request failed"), failure)
+		if got := ErrorKindOf(wrapped); got != test.kind {
+			t.Fatalf("status %d kind = %q, want %q", test.status, got, test.kind)
+		}
+		if got := IsRetryableError(wrapped); got != test.retryable {
+			t.Fatalf("status %d retryable = %v, want %v", test.status, got, test.retryable)
+		}
 	}
 }

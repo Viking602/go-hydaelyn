@@ -139,6 +139,20 @@ reasoning items, function-call identity, encrypted fields, and phased Codex
 messages across tool turns. Applications that persist or resume message history
 should preserve `ProviderState` without interpreting or rewriting it.
 
+## Provider Failure And Retry Contract
+
+Provider adapters should return `*provider.Error` (or implement
+`provider.ClassifiedError`) and map wire-specific status/code values to
+`provider.ErrorKind`. `provider.IsRetryableError` recognizes typed rate-limit,
+server, stream, network, and short-I/O failures without parsing error strings.
+
+The built-in OpenAI and Anthropic drivers retry idempotent stream initiation
+with `provider/shared.RetryPolicy`, including exponential backoff, optional
+jitter, and `Retry-After`. Custom streaming drivers can use
+`provider.OpenRetryingStream`; it retries only before response content is
+emitted. A failure after partial output is returned to the durable task layer so
+the task can resume from its checkpoint instead of replaying a partial request.
+
 ## Agent Turn Order
 
 For an `agent.Engine` turn, Venat runs:

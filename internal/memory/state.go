@@ -78,7 +78,10 @@ func (s *State) Clone() *State {
 	clone.ActiveLeaseByTask = maps.Clone(s.ActiveLeaseByTask)
 	clone.Approvals = maps.Clone(s.Approvals)
 	clone.ResumeTokens = maps.Clone(s.ResumeTokens)
-	clone.ActionAttempts = maps.Clone(s.ActionAttempts)
+	clone.ActionAttempts = make(map[string]model.ActionAttempt, len(s.ActionAttempts))
+	for id, attempt := range s.ActionAttempts {
+		clone.ActionAttempts[id] = cloneActionAttempt(attempt)
+	}
 	clone.AgentProfiles = maps.Clone(s.AgentProfiles)
 	clone.Capabilities = maps.Clone(s.Capabilities)
 	clone.UsageRecords = maps.Clone(s.UsageRecords)
@@ -105,4 +108,9 @@ func cloneSliceMap[V any](in map[string][]V) map[string][]V {
 		out[key] = slices.Clone(value)
 	}
 	return out
+}
+
+func cloneActionAttempt(attempt model.ActionAttempt) model.ActionAttempt {
+	attempt.ToolResult = append([]byte(nil), attempt.ToolResult...)
+	return attempt
 }

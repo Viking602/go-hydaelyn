@@ -469,7 +469,7 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 		RunID:        run.ID,
 		TaskID:       "worker",
 		OwnerAgentID: "agent-a",
-		RetryPolicy:  RetryPolicy{MaxAttempts: 2},
+		RetryPolicy:  RetryPolicy{MaxAttempts: 2, Backoff: time.Minute},
 	})
 	lease := leaseTask(ctx, t, rt, run.ID, task.ID, HolderAgent, "agent-a")
 
@@ -480,19 +480,27 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 		HolderType:  HolderAgent,
 		HolderID:    "agent-a",
 		TaskVersion: task.Version,
-		Report:      TypedReport{Status: ReportStatusFailed, Summary: "temporary"},
+		Report:      TypedReport{Status: ReportStatusFailed, Summary: "temporary", Retryable: true},
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(first failure) error = %v", err)
 	}
 	retryTask := mustLoadTask(ctx, t, rt, run.ID, task.ID)
-	if retryTask.Status != TaskStatusDispatched || retryTask.Error != "temporary" {
-		t.Fatalf("first failed report should redispatch task with error, got %#v", retryTask)
+	if retryTask.Status != TaskStatusDispatched || retryTask.Error != "temporary" || retryTask.Attempts != 1 {
+		t.Fatalf("first failed report should expose dispatched retry attempt and error, got %#v", retryTask)
 	}
 	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
 		t.Fatalf("retry should release active lease, got %d", active)
 	}
 
 	retryEnvelopeID := lastDispatchedEnvelopeID(t, rt.Events(context.Background(), run.ID), task.ID)
+	retryEnvelope := mustLoadEnvelope(ctx, t, rt, retryEnvelopeID)
+	if retryEnvelope.NextRetryAt.IsZero() ||
+		retryEnvelope.NextRetryAt.Before(retryEnvelope.CreatedAt.Add(time.Minute)) {
+		t.Fatalf("retry envelope backoff not scheduled: %#v", retryEnvelope)
+	}
+	if retryEnvelope.Attempts != retryTask.Attempts {
+		t.Fatalf("retry envelope attempts = %d, want %d", retryEnvelope.Attempts, retryTask.Attempts)
+	}
 	retryLease, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
 		RunID:      run.ID,
 		TaskID:     task.ID,

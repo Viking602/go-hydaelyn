@@ -2,6 +2,8 @@ package venat
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core"
@@ -41,6 +43,15 @@ func (r *Runner) ReleaseTaskExecution(ctx context.Context, cmd api.ReleaseTaskEx
 	return adapter.ErrorToAPI(r.rt.ReleaseTaskExecution(ctx, core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID}))
 }
 
+func (r *Runner) AppendTaskExecutionEvent(ctx context.Context, cmd api.AppendTaskExecutionEventCommand) error {
+	_, err := r.rt.ExecuteCommand(ctx, core.AppendTaskExecutionEventCommand{
+		RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
+		HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
+		TaskVersion: cmd.TaskVersion, Event: adapter.EventToModel(cmd.Event),
+	})
+	return adapter.ErrorToAPI(err)
+}
+
 func (r *Runner) InvokeTool(ctx context.Context, cmd api.ToolInvocation) (api.ToolInvocationResult, error) {
 	result, err := r.rt.InvokeTool(ctx, adapter.ToolInvocationToCore(cmd))
 	if err != nil {
@@ -54,7 +65,7 @@ func (r *Runner) RequestHandoff(ctx context.Context, cmd api.HandoffCommand) err
 }
 
 func (r *Runner) RequestApproval(ctx context.Context, cmd api.RequestApprovalCommand) (api.ApprovalRequest, api.ResumeToken, error) {
-	approval, token, err := r.rt.RequestApproval(ctx, core.RequestApprovalCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, ActionID: cmd.ActionID, RequesterAgentID: cmd.RequesterAgentID, Reason: cmd.Reason, RiskSummary: cmd.RiskSummary, RequestedAction: cmd.RequestedAction})
+	approval, token, err := r.rt.RequestApproval(ctx, core.RequestApprovalCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, ActionID: cmd.ActionID, RequesterAgentID: cmd.RequesterAgentID, Reason: cmd.Reason, RiskSummary: cmd.RiskSummary, RequestedAction: cmd.RequestedAction, Metadata: maps.Clone(cmd.Metadata)})
 	if err != nil {
 		return api.ApprovalRequest{}, api.ResumeToken{}, adapter.ErrorToAPI(err)
 	}
@@ -86,11 +97,32 @@ func (r *Runner) StartActionAttempt(ctx context.Context, cmd api.StartActionAtte
 }
 
 func (r *Runner) CompleteActionAttempt(ctx context.Context, cmd api.CompleteActionAttemptCommand) (api.ActionAttempt, error) {
-	attempt, err := r.rt.CompleteActionAttempt(ctx, core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, RequiresReconcile: cmd.RequiresReconcile})
+	attempt, err := r.rt.CompleteActionAttempt(ctx, core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...), RequiresReconcile: cmd.RequiresReconcile})
 	if err != nil {
 		return api.ActionAttempt{}, adapter.ErrorToAPI(err)
 	}
 	return adapter.ActionAttemptFromModel(attempt), nil
+}
+
+func (r *Runner) ResolveActionAttempt(ctx context.Context, cmd api.ResolveActionAttemptCommand) (api.ActionAttempt, error) {
+	attempt, err := r.rt.ResolveActionAttempt(ctx, core.ResolveActionAttemptCommand{
+		AttemptID:         cmd.AttemptID,
+		Status:            model.ActionAttemptStatus(cmd.Status),
+		ExternalResultRef: cmd.ExternalResultRef,
+		ToolResult:        append(json.RawMessage(nil), cmd.ToolResult...),
+	})
+	if err != nil {
+		return api.ActionAttempt{}, adapter.ErrorToAPI(err)
+	}
+	return adapter.ActionAttemptFromModel(attempt), nil
+}
+
+func (r *Runner) ListActionAttempts(ctx context.Context, selector api.ActionAttemptSelector) ([]api.ActionAttempt, error) {
+	attempts, err := r.rt.ListActionAttempts(ctx, adapter.ActionAttemptSelectorToModel(selector))
+	if err != nil {
+		return nil, adapter.ErrorToAPI(err)
+	}
+	return adapter.ActionAttemptsFromModel(attempts), nil
 }
 
 func (r *Runner) StartTraceSpan(ctx context.Context, cmd api.StartTraceSpanCommand) (api.TraceSpan, error) {

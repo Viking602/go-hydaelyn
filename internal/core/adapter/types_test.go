@@ -46,7 +46,7 @@ func TestTaskRoundTripPreservesPublicFields(t *testing.T) {
 			Limit:       5,
 		}},
 		WriteTargets: []string{"summary"},
-		RetryPolicy:  api.RetryPolicy{MaxAttempts: 4, Backoff: 3 * time.Second},
+		RetryPolicy:  api.RetryPolicy{MaxAttempts: 4, Backoff: 3 * time.Second, MaxBackoff: time.Minute},
 		PolicyDecisions: []api.PolicyDecision{{
 			DecisionID: "dec-1",
 			Effect:     api.PolicyEffectRequireApproval,

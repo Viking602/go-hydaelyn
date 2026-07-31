@@ -77,6 +77,7 @@ type LeaseStore interface {
 	ActiveLeaseForTask(context.Context, string, string) (model.TaskExecutionLease, bool, error)
 	AcquireWithExpectedVersion(ctx context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error)
 	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
+	ReleaseExpiredLease(ctx context.Context, leaseID string, expectedVersion uint64, releasedAt time.Time) (bool, error)
 }
 
 type ApprovalStore interface {
@@ -94,6 +95,8 @@ type ActionAttemptStore interface {
 	SaveActionAttempt(context.Context, model.ActionAttempt) error
 	LoadActionAttempt(context.Context, string) (model.ActionAttempt, error)
 	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error)
+	ListActionAttempts(context.Context, model.ActionAttemptSelector) ([]model.ActionAttempt, error)
+	ResolveActionAttempt(context.Context, model.ActionAttempt) (bool, error)
 }
 
 type AgentProfileStore interface {

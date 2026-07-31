@@ -45,7 +45,10 @@ type Tool struct {
 	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
+const MaxRetryAttempts = 10
+
 type RetryPolicy struct {
 	MaxAttempts int           `json:"maxAttempts,omitempty"`
 	Backoff     time.Duration `json:"backoff,omitempty"`
+	MaxBackoff  time.Duration `json:"maxBackoff,omitempty"`
 }

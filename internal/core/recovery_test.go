@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func TestRecoverRequeuesExpiredExecutionOnce(t *testing.T) {
@@ -103,7 +105,7 @@ func TestRecoverQuarantinesUnresolvedActionAttempt(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
 	}
-	if _, err := rt.StartActionAttempt(ctx, StartActionAttemptCommand{
+	first, err := rt.StartActionAttempt(ctx, StartActionAttemptCommand{
 		RunID:       run.ID,
 		TaskID:      task.ID,
 		LeaseID:     lease.ID,
@@ -111,8 +113,21 @@ func TestRecoverQuarantinesUnresolvedActionAttempt(t *testing.T) {
 		HolderID:    "agent-a",
 		TaskVersion: task.Version,
 		ToolName:    "deploy",
-	}); err != nil {
-		t.Fatalf("StartActionAttempt() error = %v", err)
+	})
+	if err != nil {
+		t.Fatalf("StartActionAttempt(first) error = %v", err)
+	}
+	second, err := rt.StartActionAttempt(ctx, StartActionAttemptCommand{
+		RunID:       run.ID,
+		TaskID:      task.ID,
+		LeaseID:     lease.ID,
+		HolderType:  HolderAgent,
+		HolderID:    "agent-a",
+		TaskVersion: task.Version,
+		ToolName:    "notify",
+	})
+	if err != nil {
+		t.Fatalf("StartActionAttempt(second) error = %v", err)
 	}
 	time.Sleep(20 * time.Millisecond)
 	projection, err := rt.Recover(ctx, run.ID)
@@ -130,5 +145,32 @@ func TestRecoverQuarantinesUnresolvedActionAttempt(t *testing.T) {
 	}
 	if got := mustLoadEnvelope(ctx, t, rt, envelope.ID); got.Status == "pending" {
 		t.Fatalf("recovery redispatched unresolved action envelope: %#v", got)
+	}
+	attempts, err := rt.ListActionAttempts(ctx, model.ActionAttemptSelector{RunID: run.ID, TaskID: task.ID})
+	if err != nil || len(attempts) != 2 {
+		t.Fatalf("ListActionAttempts() attempts=%#v error=%v", attempts, err)
+	}
+	for _, attempt := range attempts {
+		if attempt.Status != ActionAttemptUnknown || !attempt.RequiresReconcile {
+			t.Fatalf("recovered attempt = %#v, want unknown reconciliation barrier", attempt)
+		}
+	}
+	if _, err := rt.ResolveActionAttempt(ctx, ResolveActionAttemptCommand{
+		AttemptID: first.AttemptID,
+		Status:    ActionAttemptSucceeded,
+	}); err != nil {
+		t.Fatalf("ResolveActionAttempt(first) error = %v", err)
+	}
+	if got := mustLoadTask(ctx, t, rt, run.ID, task.ID); got.Status != TaskStatusReconcileRequired {
+		t.Fatalf("task after first resolution = %q, want reconcile_required", got.Status)
+	}
+	if _, err := rt.ResolveActionAttempt(ctx, ResolveActionAttemptCommand{
+		AttemptID: second.AttemptID,
+		Status:    ActionAttemptTimeout,
+	}); err != nil {
+		t.Fatalf("ResolveActionAttempt(second) error = %v", err)
+	}
+	if got := mustLoadTask(ctx, t, rt, run.ID, task.ID); got.Status != TaskStatusDispatched {
+		t.Fatalf("task after final resolution = %q, want dispatched", got.Status)
 	}
 }

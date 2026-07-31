@@ -105,7 +105,7 @@ func cloneTaskBudget(budget *model.TaskBudget) *model.TaskBudget {
 }
 
 func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input CreateTaskInput) (model.Task, error) {
-	if err := validateTaskJSON(input); err != nil {
+	if err := validateTaskInput(input); err != nil {
 		return model.Task{}, err
 	}
 	run, err := uow.Runs().LoadRun(ctx, input.RunID)
@@ -171,7 +171,7 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 	return task, nil
 }
 
-func validateTaskJSON(input CreateTaskInput) error {
+func validateTaskInput(input CreateTaskInput) error {
 	for _, field := range []struct {
 		name  string
 		value json.RawMessage
@@ -183,6 +183,16 @@ func validateTaskJSON(input CreateTaskInput) error {
 		if len(field.value) > 0 && !json.Valid(field.value) {
 			return fmt.Errorf("run: task %s must be valid JSON", field.name)
 		}
+	}
+	if input.RetryPolicy.MaxAttempts < 0 || input.RetryPolicy.MaxAttempts > model.MaxRetryAttempts {
+		return fmt.Errorf(
+			"run: task retry max attempts must be between 0 and %d: %w",
+			model.MaxRetryAttempts,
+			model.ErrInvalidCommand,
+		)
+	}
+	if input.RetryPolicy.Backoff < 0 || input.RetryPolicy.MaxBackoff < 0 {
+		return fmt.Errorf("run: task retry delays must not be negative: %w", model.ErrInvalidCommand)
 	}
 	return nil
 }

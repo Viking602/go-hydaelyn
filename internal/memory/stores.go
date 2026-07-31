@@ -557,6 +557,28 @@ func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID str
 	return true, nil
 }
 
+func (s *leaseStore) ReleaseExpiredLease(_ context.Context, leaseID string, expectedVersion uint64, releasedAt time.Time) (bool, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return false, err
+	}
+	existing, ok := u.staged.Leases[leaseID]
+	if !ok ||
+		u.staged.ActiveLeaseByTask[activeLeaseKey(existing.RunID, existing.TaskID)] != leaseID ||
+		existing.Status != model.LeaseStatusActive ||
+		existing.Version != expectedVersion {
+		return false, nil
+	}
+	expiry := model.LeaseExpiry(existing)
+	if expiry.IsZero() || expiry.After(releasedAt) {
+		return false, nil
+	}
+	existing.Status = model.LeaseStatusReleased
+	existing.Version++
+	u.staged.Leases[leaseID] = existing
+	return true, nil
+}
+
 func (s *leaseStore) LoadLease(_ context.Context, leaseID string) (model.TaskExecutionLease, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
@@ -683,7 +705,7 @@ func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.
 			}
 		}
 	}
-	u.staged.ActionAttempts[attempt.AttemptID] = attempt
+	u.staged.ActionAttempts[attempt.AttemptID] = cloneActionAttempt(attempt)
 	return nil
 }
 
@@ -696,7 +718,7 @@ func (s *actionAttemptStore) LoadActionAttempt(_ context.Context, attemptID stri
 	if !ok {
 		return model.ActionAttempt{}, model.ErrNotFound
 	}
-	return attempt, nil
+	return cloneActionAttempt(attempt), nil
 }
 
 func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error) {
@@ -712,10 +734,78 @@ func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context
 			attempt.TaskID == taskID &&
 			attempt.ToolName == toolName &&
 			attempt.IdempotencyKey == key {
-			return attempt, nil
+			return cloneActionAttempt(attempt), nil
 		}
 	}
 	return model.ActionAttempt{}, model.ErrNotFound
+}
+
+func (s *actionAttemptStore) ListActionAttempts(_ context.Context, sel model.ActionAttemptSelector) ([]model.ActionAttempt, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	statuses := make(map[model.ActionAttemptStatus]struct{}, len(sel.Statuses))
+	for _, status := range sel.Statuses {
+		statuses[status] = struct{}{}
+	}
+	out := make([]model.ActionAttempt, 0, len(u.staged.ActionAttempts))
+	for _, attempt := range u.staged.ActionAttempts {
+		if sel.RunID != "" && attempt.RunID != sel.RunID {
+			continue
+		}
+		if sel.TaskID != "" && attempt.TaskID != sel.TaskID {
+			continue
+		}
+		if sel.ToolName != "" && attempt.ToolName != sel.ToolName {
+			continue
+		}
+		if len(statuses) > 0 {
+			if _, ok := statuses[attempt.Status]; !ok {
+				continue
+			}
+		}
+		if sel.RequiresReconcile != nil && attempt.RequiresReconcile != *sel.RequiresReconcile {
+			continue
+		}
+		out = append(out, cloneActionAttempt(attempt))
+	}
+	slices.SortFunc(out, func(a, b model.ActionAttempt) int {
+		return strings.Compare(a.AttemptID, b.AttemptID)
+	})
+	if sel.Limit > 0 && len(out) > sel.Limit {
+		out = out[:sel.Limit]
+	}
+	return out, nil
+}
+
+func (s *actionAttemptStore) ResolveActionAttempt(_ context.Context, attempt model.ActionAttempt) (bool, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return false, err
+	}
+	current, ok := u.staged.ActionAttempts[attempt.AttemptID]
+	if !ok {
+		return false, model.ErrNotFound
+	}
+	if current.Status != model.ActionAttemptUnknown || !current.RequiresReconcile {
+		return false, nil
+	}
+	if attempt.Status == model.ActionAttemptUnknown ||
+		attempt.Status == model.ActionAttemptRunning ||
+		attempt.Status == model.ActionAttemptCreated ||
+		attempt.RequiresReconcile ||
+		attempt.ActionID != current.ActionID ||
+		attempt.RunID != current.RunID ||
+		attempt.TaskID != current.TaskID ||
+		attempt.LeaseID != current.LeaseID ||
+		attempt.ToolName != current.ToolName ||
+		attempt.IdempotencyKey != current.IdempotencyKey ||
+		attempt.InputHash != current.InputHash {
+		return false, nil
+	}
+	u.staged.ActionAttempts[attempt.AttemptID] = cloneActionAttempt(attempt)
+	return true, nil
 }
 
 func cmpString(a, b string) int {

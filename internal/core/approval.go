@@ -47,6 +47,7 @@ func (r *Runtime) RecoverResumeToken(ctx context.Context, cmd RecoverResumeToken
 func registerApprovalUoWCommandHandlers(runtime *Runtime) {
 	approvalsvc.RegisterHandlers(runtime.commandBus, approvalsvc.HandlerOptions{
 		NewApproval: runtime.newApprovalForTask,
+		NewID:       runtime.newID,
 	})
 }
 

@@ -498,3 +498,135 @@ func TestReconstructStepTrace(t *testing.T) {
 		})
 	}
 }
+
+func TestLatestExecutionCheckpointFailsClosedOnCorruptReplayState(t *testing.T) {
+	base := ExecutionCheckpointRecord{
+		RunID: "run-1", TaskID: "task-1", AgentID: "agent-1", ExecutionID: "lease-1",
+		Checkpoint: TurnCheckpoint{
+			Messages: []message.Message{message.NewText(message.RoleAssistant, "done")},
+			Step:     Step{Index: 0, Decision: StepDecisionFinish},
+		},
+	}
+	eventFor := func(record ExecutionCheckpointRecord) api.Event {
+		return api.Event{
+			RunID: record.RunID, TaskID: record.TaskID, Type: EventExecutionCheckpointed,
+			Payload: map[string]any{"record": record},
+		}
+	}
+	pending := base
+	pending.Checkpoint = TurnCheckpoint{
+		Messages: []message.Message{
+			message.NewText(message.RoleUser, "run tools"),
+			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{
+				{ID: "call-1", Name: "write"},
+				{ID: "call-2", Name: "write"},
+			}},
+			message.NewToolResult(message.ToolResult{ToolCallID: "call-1", Name: "write", Content: "ok"}),
+		},
+		Step: Step{Index: 0}, ToolCallsUsed: 2, PendingToolCalls: true,
+	}
+	if got, found, err := LatestExecutionCheckpoint(
+		[]api.Event{eventFor(pending)}, StepSelector{RunID: base.RunID, TaskID: base.TaskID},
+	); err != nil || !found || !reflect.DeepEqual(got, pending) {
+		t.Fatalf("valid pending checkpoint got=%#v found=%v error=%v", got, found, err)
+	}
+
+	negativeUsage := base
+	negativeUsage.Checkpoint.Usage.InputTokens = -1
+	incompleteCompleted := base
+	incompleteCompleted.Checkpoint.Messages = pending.Checkpoint.Messages[:2]
+	fullyResolvedPending := pending
+	fullyResolvedPending.Checkpoint.Messages = append(
+		append([]message.Message(nil), pending.Checkpoint.Messages...),
+		message.NewToolResult(message.ToolResult{ToolCallID: "call-2", Name: "write", Content: "ok"}),
+	)
+	duplicatePendingResult := pending
+	duplicatePendingResult.Checkpoint.Messages = append(
+		append([]message.Message(nil), pending.Checkpoint.Messages...),
+		message.NewToolResult(message.ToolResult{ToolCallID: "call-1", Name: "write", Content: "duplicate"}),
+	)
+
+	tests := []struct {
+		name  string
+		event api.Event
+	}{
+		{name: "malformed payload", event: api.Event{RunID: base.RunID, TaskID: base.TaskID, Type: EventExecutionCheckpointed, Payload: map[string]any{"record": "bad"}}},
+		{name: "identity mismatch", event: func() api.Event {
+			event := eventFor(base)
+			event.TaskID = "other-task"
+			return event
+		}()},
+		{name: "negative usage", event: eventFor(negativeUsage)},
+		{name: "incomplete transcript marked complete", event: eventFor(incompleteCompleted)},
+		{name: "pending flag with no unresolved calls", event: eventFor(fullyResolvedPending)},
+		{name: "duplicate result in pending turn", event: eventFor(duplicatePendingResult)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, err := LatestExecutionCheckpoint(
+				[]api.Event{test.event}, StepSelector{RunID: base.RunID},
+			); !errors.Is(err, ErrInvalidCheckpointEvent) {
+				t.Fatalf("LatestExecutionCheckpoint() error = %v, want ErrInvalidCheckpointEvent", err)
+			}
+		})
+	}
+}
+
+type operationRecordingDriver struct {
+	calls []tool.Call
+}
+
+func (d *operationRecordingDriver) Definition() tool.Definition {
+	return tool.Definition{Name: "write"}
+}
+
+func (d *operationRecordingDriver) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+	d.calls = append(d.calls, call)
+	return tool.Result{ToolCallID: call.ID, Name: call.Name, Content: "ok"}, nil
+}
+
+func TestEngineAssignsStableDistinctToolOperationSlots(t *testing.T) {
+	driver := &operationRecordingDriver{}
+	engine := Engine{
+		Provider: &scriptedProvider{turns: [][]provider.Event{
+			{
+				{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "provider-a", Name: "write", Arguments: json.RawMessage(`{"same":true}`)}},
+				{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "provider-b", Name: "write", Arguments: json.RawMessage(`{"same":true}`)}},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+			},
+			{
+				{Kind: provider.EventTextDelta, Text: "done"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		}},
+		Tools:         tool.NewBus(driver),
+		LoopPolicy:    LoopPolicy{MaxIterations: 2},
+		OperationTurn: 2,
+	}
+	result := engine.Run(context.Background(), api.Task{Goal: "write twice"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Engine.Run() failure = %v", result.Failure)
+	}
+	if len(driver.calls) != 2 {
+		t.Fatalf("driver calls = %d, want 2", len(driver.calls))
+	}
+	if driver.calls[0].OperationID != "turn:2:call:0" || driver.calls[1].OperationID != "turn:2:call:1" {
+		t.Fatalf("operation IDs = %q, %q", driver.calls[0].OperationID, driver.calls[1].OperationID)
+	}
+	if next := nextToolOperationTurn(result.Messages); next != 3 {
+		t.Fatalf("next operation turn = %d, want 3", next)
+	}
+	if driver.calls[0].OperationID == driver.calls[1].OperationID {
+		t.Fatal("identical repeated calls collapsed onto one logical operation slot")
+	}
+	for _, current := range result.Messages {
+		if current.Role == message.RoleAssistant && len(current.ToolCalls) == 2 {
+			if current.ToolCalls[0].OperationID != driver.calls[0].OperationID ||
+				current.ToolCalls[1].OperationID != driver.calls[1].OperationID {
+				t.Fatalf("checkpoint transcript lost operation IDs: %#v", current.ToolCalls)
+			}
+			return
+		}
+	}
+	t.Fatal("assistant tool-call turn missing from result")
+}

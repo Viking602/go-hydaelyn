@@ -79,6 +79,7 @@ type responsesIncompleteDetails struct {
 }
 
 type responsesAPIError struct {
+	Type    string `json:"type"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
@@ -477,12 +478,37 @@ func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, st
 
 func responsesError(apiError *responsesAPIError) error {
 	if apiError == nil {
-		return fmt.Errorf("openai responses API failed")
+		return &provider.Error{Provider: "openai", Kind: provider.ErrorUnknown, Message: "responses API failed"}
 	}
-	if apiError.Code == "" {
-		return fmt.Errorf("openai responses API failed: %s", apiError.Message)
+	return &provider.Error{
+		Provider: "openai",
+		Kind:     openAIErrorKind(apiError.Type, apiError.Code),
+		Code:     apiError.Code,
+		Message:  apiError.Message,
 	}
-	return fmt.Errorf("openai responses API failed (%s): %s", apiError.Code, apiError.Message)
+}
+
+func openAIErrorKind(errorType, code string) provider.ErrorKind {
+	switch {
+	case code == "rate_limit_exceeded" || errorType == "rate_limit_error":
+		return provider.ErrorRateLimit
+	case code == "server_error" || code == "server_is_overloaded" || code == "model_error" ||
+		errorType == "api_error" || errorType == "overloaded_error":
+		return provider.ErrorServer
+	case code == "stream_error":
+		return provider.ErrorStream
+	case code == "invalid_request_error" || code == "invalid_request" ||
+		code == "unsupported_parameter" || errorType == "invalid_request_error":
+		return provider.ErrorInvalidRequest
+	case code == "invalid_api_key" || errorType == "authentication_error":
+		return provider.ErrorAuthentication
+	case errorType == "permission_error":
+		return provider.ErrorPermission
+	case errorType == "not_found_error":
+		return provider.ErrorNotFound
+	default:
+		return provider.ErrorUnknown
+	}
 }
 
 func (s *responsesStream) recordOutputItem(index int, item responsesOutputItem) {

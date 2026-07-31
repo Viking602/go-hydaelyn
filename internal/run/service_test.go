@@ -3,8 +3,10 @@ package run_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/memory"
@@ -121,5 +123,31 @@ func TestCreateTaskRejectsInvalidJSON(t *testing.T) {
 		Input: json.RawMessage(`{`),
 	}); err == nil {
 		t.Fatal("CreateTask() accepted malformed input JSON")
+	}
+}
+
+func TestCreateTaskRejectsUnsafeRetryPolicy(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	run, _, err := runsvc.Start(ctx, uow, testIDGenerator(), runsvc.StartInput{Request: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []model.RetryPolicy{
+		{MaxAttempts: model.MaxRetryAttempts + 1},
+		{MaxAttempts: -1},
+		{MaxAttempts: 2, Backoff: -time.Second},
+		{MaxAttempts: 2, MaxBackoff: -time.Second},
+	} {
+		if _, err := runsvc.CreateTask(ctx, uow, testIDGenerator(), runsvc.CreateTaskInput{
+			RunID: run.ID, RetryPolicy: policy,
+		}); !errors.Is(err, model.ErrInvalidCommand) {
+			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalidCommand", policy, err)
+		}
 	}
 }
