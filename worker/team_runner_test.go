@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -174,6 +175,81 @@ func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	}
 	if len(handoffs) != 1 || handoffs[0].From != "instance-0" || handoffs[0].To != dispatch.To {
 		t.Fatalf("persisted handoffs = %#v, want one typed handoff", handoffs)
+	}
+}
+
+func TestRunnerExecutorEnsureTaskPreservesAuthoringFields(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-authoring-fields",
+		RootTaskID: "root",
+		Request:    "preserve task authoring fields",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	authored := api.Task{
+		ID:              "task-authoring-fields",
+		RunID:           run.ID,
+		ParentTaskID:    run.RootTaskID,
+		Type:            api.TaskTypeWorker,
+		Goal:            "preserve",
+		Input:           json.RawMessage(`{"request":"preserve"}`),
+		AssignedAgentID: "assigned-agent",
+		OwnerAgentID:    "scheduler-owner",
+		OwnerComponent:  "scheduler",
+		AllowsAction:    true,
+		Tags:            []string{"governed", "durable"},
+		CompletionCriteria: []string{
+			"preserves task fields",
+		},
+		DependsOn:          []string{run.RootTaskID},
+		AwaitMode:          api.AwaitModeQuorum,
+		AwaitQuorum:        1,
+		OnDependencyFailed: api.OnDependencyFailedFail,
+		ReadSelectors: []api.BlackboardSelector{{
+			RunID: run.ID,
+			Keys:  []string{"evidence"},
+			Tags:  []string{"trusted"},
+		}},
+		WriteTargets: []string{"summary"},
+		RetryPolicy: api.RetryPolicy{
+			MaxAttempts: 3,
+			Backoff:     time.Second,
+		},
+		PolicyDecisions: []api.PolicyDecision{{
+			DecisionID: "decision-1",
+			Effect:     api.PolicyEffectAllow,
+			Reason:     "approved",
+			Metadata:   map[string]string{"source": "test"},
+		}},
+		Budget: &api.TaskBudget{
+			MaxTokens:    100,
+			MaxWallClock: time.Minute,
+			MaxToolCalls: 2,
+		},
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"string"}`),
+	}
+	dispatch := multiagent.Dispatch{To: "runtime-instance", Task: authored}
+	got, err := (RunnerExecutor{Runner: runner}).ensureTask(ctx, dispatch, multiagent.AgentClass{})
+	if err != nil {
+		t.Fatalf("ensureTask() error = %v", err)
+	}
+	want := authored
+	want.OwnerAgentID = dispatch.To
+	want.Status = got.Status
+	want.Version = got.Version
+	want.Attempts = got.Attempts
+	want.HandoffCount = got.HandoffCount
+	want.OwnerHistory = got.OwnerHistory
+	want.Result = got.Result
+	want.Error = got.Error
+	want.CreatedAt = got.CreatedAt
+	want.UpdatedAt = got.UpdatedAt
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("persisted task = %#v, want %#v", got, want)
 	}
 }
 

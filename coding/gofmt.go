@@ -44,6 +44,7 @@ func (d gofmtDriver) Definition() tool.Definition {
 			property{"path", stringSchema("Workspace-relative path of the .go file to format.")},
 		),
 		EffectType:         tool.EffectWrite,
+		Idempotent:         true,
 		RequiresActionTask: true,
 		RiskLevel:          riskLow,
 		PolicyTags:         []string{tagCoding, tagFormat},
