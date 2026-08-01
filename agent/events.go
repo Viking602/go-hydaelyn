@@ -129,12 +129,11 @@ func ReconstructStepTrace(events []api.Event, selector StepSelector) ([]StepReco
 	return records, nil
 }
 
-// LatestExecutionCheckpoint returns the last matching checkpoint in event-store
-// sequence order. It validates every matching event instead of silently
-// skipping corrupted durable state.
-func LatestExecutionCheckpoint(events []api.Event, selector StepSelector) (ExecutionCheckpointRecord, bool, error) {
-	var latest ExecutionCheckpointRecord
-	found := false
+// ReconstructExecutionCheckpoints decodes selected ExecutionCheckpointed
+// events in event-store sequence order. It validates every matching event
+// instead of silently skipping corrupted durable state.
+func ReconstructExecutionCheckpoints(events []api.Event, selector StepSelector) ([]ExecutionCheckpointRecord, error) {
+	records := make([]ExecutionCheckpointRecord, 0)
 	for eventIndex, event := range events {
 		if event.Type != EventExecutionCheckpointed {
 			continue
@@ -147,13 +146,13 @@ func LatestExecutionCheckpoint(events []api.Event, selector StepSelector) (Execu
 		}
 		record, err := executionCheckpointRecordFromPayload(event.Payload)
 		if err != nil {
-			return ExecutionCheckpointRecord{}, false, fmt.Errorf("%w: event %d record: %v", ErrInvalidCheckpointEvent, eventIndex, err)
+			return nil, fmt.Errorf("%w: event %d record: %v", ErrInvalidCheckpointEvent, eventIndex, err)
 		}
 		if err := validateExecutionCheckpointRecord(record); err != nil {
-			return ExecutionCheckpointRecord{}, false, fmt.Errorf("%w: event %d: %v", ErrInvalidCheckpointEvent, eventIndex, err)
+			return nil, fmt.Errorf("%w: event %d: %v", ErrInvalidCheckpointEvent, eventIndex, err)
 		}
 		if event.RunID != record.RunID || event.TaskID != record.TaskID {
-			return ExecutionCheckpointRecord{}, false, fmt.Errorf("%w: event %d identity mismatch", ErrInvalidCheckpointEvent, eventIndex)
+			return nil, fmt.Errorf("%w: event %d identity mismatch", ErrInvalidCheckpointEvent, eventIndex)
 		}
 		if selector.AgentID != "" && record.AgentID != selector.AgentID {
 			continue
@@ -161,10 +160,23 @@ func LatestExecutionCheckpoint(events []api.Event, selector StepSelector) (Execu
 		if selector.ExecutionID != "" && record.ExecutionID != selector.ExecutionID {
 			continue
 		}
-		latest = record
-		found = true
+		records = append(records, record)
 	}
-	return latest, found, nil
+	return records, nil
+}
+
+// LatestExecutionCheckpoint returns the last matching checkpoint in event-store
+// sequence order. It validates every matching event instead of silently
+// skipping corrupted durable state.
+func LatestExecutionCheckpoint(events []api.Event, selector StepSelector) (ExecutionCheckpointRecord, bool, error) {
+	records, err := ReconstructExecutionCheckpoints(events, selector)
+	if err != nil {
+		return ExecutionCheckpointRecord{}, false, err
+	}
+	if len(records) == 0 {
+		return ExecutionCheckpointRecord{}, false, nil
+	}
+	return records[len(records)-1], true, nil
 }
 
 func validateExecutionCheckpointRecord(record ExecutionCheckpointRecord) error {

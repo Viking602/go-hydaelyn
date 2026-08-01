@@ -499,6 +499,44 @@ func TestReconstructStepTrace(t *testing.T) {
 	}
 }
 
+func TestReconstructExecutionCheckpointsFiltersAndPreservesOrder(t *testing.T) {
+	first := ExecutionCheckpointRecord{
+		RunID: "run-1", TaskID: "task-1", AgentID: "agent-1", ExecutionID: "lease-1",
+		Checkpoint: TurnCheckpoint{
+			Messages: []message.Message{message.NewText(message.RoleAssistant, "first")},
+			Step:     Step{Index: 0, Decision: StepDecisionContinue},
+		},
+	}
+	second := first
+	second.ExecutionID = "lease-2"
+	second.Checkpoint = TurnCheckpoint{
+		Messages: []message.Message{message.NewText(message.RoleAssistant, "second")},
+		Step:     Step{Index: 0, Decision: StepDecisionFinish},
+	}
+	otherAgent := first
+	otherAgent.AgentID = "agent-2"
+
+	events := make([]api.Event, 0, 3)
+	for _, record := range []ExecutionCheckpointRecord{first, otherAgent, second} {
+		event, err := NewExecutionCheckpointedEvent(record)
+		if err != nil {
+			t.Fatalf("NewExecutionCheckpointedEvent() error = %v", err)
+		}
+		events = append(events, event)
+	}
+
+	got, err := ReconstructExecutionCheckpoints(events, StepSelector{
+		RunID: "run-1", TaskID: "task-1", AgentID: "agent-1",
+	})
+	if err != nil {
+		t.Fatalf("ReconstructExecutionCheckpoints() error = %v", err)
+	}
+	want := []ExecutionCheckpointRecord{first, second}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ReconstructExecutionCheckpoints() = %#v, want %#v", got, want)
+	}
+}
+
 func TestLatestExecutionCheckpointFailsClosedOnCorruptReplayState(t *testing.T) {
 	base := ExecutionCheckpointRecord{
 		RunID: "run-1", TaskID: "task-1", AgentID: "agent-1", ExecutionID: "lease-1",

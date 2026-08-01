@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,11 +129,6 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if err != nil {
 		return ExecutionOutcome{}, err
 	}
-	task, err = w.taskWithRemainingBudget(ctx, task)
-	if err != nil {
-		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
-		return failedExecutionOutcome(task, lease, agent.Result{}, err), err
-	}
 
 	engine := w.executionEngine(task, lease)
 	baseContextBuilder := engine.ContextBuilder
@@ -166,6 +162,12 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			result.Messages = resumeMessages
 			result.Usage = checkpoint.Checkpoint.Usage
 			result.ToolCallsUsed = checkpoint.Checkpoint.ToolCallsUsed
+		}
+		// A pending checkpoint has already charged its tool-call slots. Resume
+		// those calls before rejecting an exhausted durable budget; only fresh
+		// model/tool work is gated by the remaining balance.
+		if runErr == nil {
+			task, runErr = w.taskWithRemainingBudget(ctx, task)
 		}
 		if runErr == nil {
 			result, runErr = w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl, req.Sink)
@@ -356,6 +358,23 @@ func (w AgentWorker) durableTaskBudgetUsage(ctx context.Context, runID, taskID s
 		current.steps++
 		byExecution[record.ExecutionID] = current
 	}
+	checkpoints, err := agent.ReconstructExecutionCheckpoints(events, agent.StepSelector{RunID: runID, TaskID: taskID})
+	if err != nil {
+		return durableTaskBudgetUsage{}, err
+	}
+	for _, record := range checkpoints {
+		current := byExecution[record.ExecutionID]
+		checkpoint := record.Checkpoint
+		tokens := int64(checkpoint.Usage.TotalTokens)
+		if tokens == 0 {
+			tokens = int64(checkpoint.Usage.InputTokens + checkpoint.Usage.OutputTokens)
+		}
+		current.tokens = max(current.tokens, tokens, checkpoint.Step.BudgetUsed.Tokens)
+		current.toolCalls = max(current.toolCalls, checkpoint.ToolCallsUsed, checkpoint.Step.BudgetUsed.ToolCalls)
+		current.steps = max(current.steps, checkpoint.Step.Index+1)
+		current.wallClock = max(current.wallClock, checkpoint.Step.BudgetUsed.WallClock)
+		byExecution[record.ExecutionID] = current
+	}
 	records, err := w.Runner.QueryUsage(ctx, api.UsageSelector{RunID: runID, TaskID: taskID})
 	if err != nil {
 		return durableTaskBudgetUsage{}, err
@@ -363,7 +382,7 @@ func (w AgentWorker) durableTaskBudgetUsage(ctx context.Context, runID, taskID s
 	for index, record := range records {
 		executionID := record.Metadata["executionId"]
 		if executionID == "" {
-			if len(steps) > 0 {
+			if len(steps) > 0 || len(checkpoints) > 0 {
 				continue
 			}
 			executionID = fmt.Sprintf("legacy-usage-%d", index)
@@ -775,7 +794,8 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		}
 		report.Structured = structured
 	}
-	if err := w.Runner.WriteItem(ctx, api.BlackboardItem{
+	output := api.BlackboardItem{
+		ID:         taskOutputItemID(task),
 		RunID:      task.RunID,
 		TaskID:     task.ID,
 		Type:       api.BlackboardItemTaskOutput,
@@ -783,7 +803,8 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		Visibility: api.BlackboardVisibilityAgentVisible,
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
-	}); err != nil {
+	}
+	if err := w.writeTaskOutput(ctx, output); err != nil {
 		return w.submitFailureReportHandled(ctx, task, lease, err), err
 	}
 	reportErr := w.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
@@ -796,6 +817,34 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		Report:      report,
 	})
 	return reportErr == nil, reportErr
+}
+
+func taskOutputItemID(task api.Task) string {
+	digest := sha256.Sum256([]byte(task.RunID + "\x00" + task.ID))
+	return fmt.Sprintf("task-output-%x", digest)
+}
+
+func (w AgentWorker) writeTaskOutput(ctx context.Context, item api.BlackboardItem) error {
+	items, err := w.Runner.SelectItems(ctx, item.RunID, api.BlackboardSelector{TaskID: item.TaskID})
+	if err != nil {
+		return fmt.Errorf("worker: inspect existing task output: %w", err)
+	}
+	for _, current := range items {
+		sameSlot := current.RunID == item.RunID &&
+			current.TaskID == item.TaskID &&
+			current.Type == item.Type &&
+			current.Source == item.Source &&
+			current.Visibility == item.Visibility &&
+			current.Key == item.Key
+		if current.ID != item.ID && !sameSlot {
+			continue
+		}
+		if sameSlot && current.Payload == item.Payload {
+			return nil
+		}
+		return fmt.Errorf("worker: recovered task output %q conflicts with existing item %q", item.ID, current.ID)
+	}
+	return w.Runner.WriteItem(ctx, item)
 }
 
 func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration) error {

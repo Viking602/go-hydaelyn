@@ -1511,3 +1511,224 @@ func TestAgentWorkerRejectsExhaustedBudgetBeforeProviderAfterCrash(t *testing.T)
 		t.Fatalf("provider requests = %d, want 0 after durable budget exhaustion", len(driver.requests))
 	}
 }
+
+func TestAgentWorkerRestoresRemainingBudgetFromCheckpointOnly(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-checkpoint-budget", RootTaskID: "root", Request: "resume",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task := api.Task{
+		ID:    "task-checkpoint-budget",
+		RunID: run.ID,
+		Budget: &api.TaskBudget{
+			MaxTokens:    20,
+			MaxToolCalls: 5,
+			MaxSteps:     4,
+		},
+	}
+	checkpoints := []agent.TurnCheckpoint{
+		{
+			Messages:      []message.Message{message.NewText(message.RoleAssistant, "first")},
+			Usage:         provider.Usage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+			Step:          agent.Step{Index: 0, Decision: agent.StepDecisionContinue, BudgetUsed: agent.BudgetUsage{Tokens: 3, ToolCalls: 1}},
+			ToolCallsUsed: 1,
+		},
+		{
+			Messages:      []message.Message{message.NewText(message.RoleAssistant, "second")},
+			Usage:         provider.Usage{InputTokens: 5, OutputTokens: 2, TotalTokens: 7},
+			Step:          agent.Step{Index: 1, Decision: agent.StepDecisionContinue, BudgetUsed: agent.BudgetUsage{Tokens: 7, ToolCalls: 2}},
+			ToolCallsUsed: 2,
+		},
+	}
+	for _, checkpoint := range checkpoints {
+		event, eventErr := agent.NewExecutionCheckpointedEvent(agent.ExecutionCheckpointRecord{
+			RunID: run.ID, TaskID: task.ID, AgentID: "agent-a", ExecutionID: "lease-crashed",
+			Checkpoint: checkpoint,
+		})
+		if eventErr != nil {
+			t.Fatalf("NewExecutionCheckpointedEvent() error = %v", eventErr)
+		}
+		if appendErr := runner.AppendEvent(ctx, event); appendErr != nil {
+			t.Fatalf("AppendEvent() error = %v", appendErr)
+		}
+	}
+
+	restored, err := (AgentWorker{Runner: runner}).taskWithRemainingBudget(ctx, task)
+	if err != nil {
+		t.Fatalf("taskWithRemainingBudget() error = %v", err)
+	}
+	if got := restored.Budget; got == nil ||
+		got.MaxTokens != 13 ||
+		got.MaxToolCalls != 3 ||
+		got.MaxSteps != 2 {
+		t.Fatalf("remaining budget = %#v", got)
+	}
+}
+
+func TestAgentWorkerResumesPendingToolCallBeforeRejectingExhaustedBudget(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-pending-tool-budget", RootTaskID: "root", Request: "resume",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID:        run.ID,
+		TaskID:       "task-pending-tool-budget",
+		Goal:         "finish the reserved lookup",
+		OwnerAgentID: "agent-a",
+		Budget:       &api.TaskBudget{MaxToolCalls: 1},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	checkpoint, err := agent.NewExecutionCheckpointedEvent(agent.ExecutionCheckpointRecord{
+		RunID: run.ID, TaskID: task.ID, AgentID: "agent-a", ExecutionID: "lease-crashed",
+		Checkpoint: agent.TurnCheckpoint{
+			Messages: []message.Message{
+				message.NewText(message.RoleUser, "look it up"),
+				{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{
+					ID: "call-1", OperationID: "turn:0:call:0", Name: "lookup",
+				}}},
+			},
+			Step: agent.Step{
+				Index: 0, Decision: agent.StepDecisionContinue,
+				BudgetUsed: agent.BudgetUsage{ToolCalls: 1},
+			},
+			ToolCallsUsed:    1,
+			PendingToolCalls: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewExecutionCheckpointedEvent() error = %v", err)
+	}
+	if err := runner.AppendEvent(ctx, checkpoint); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	toolDriver := &recordingTool{definition: tool.Definition{Name: "lookup", EffectType: tool.EffectReadOnly}}
+	providerDriver := &recordingProvider{}
+	outcome, err := (AgentWorker{
+		Runner: runner,
+		Engine: agent.Engine{
+			Provider: providerDriver,
+			Tools:    tool.NewBus(toolDriver),
+		},
+		AgentID: "agent-a",
+		Model:   "recording",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	var failure *agent.AgentFailure
+	if !errors.As(err, &failure) || failure.Kind != agent.FailureKindBudgetExhausted {
+		t.Fatalf("ExecuteEnvelope() error = %v, want budget_exhausted AgentFailure", err)
+	}
+	if outcome.State != ExecutionFailed {
+		t.Fatalf("execution outcome = %#v, want failed", outcome)
+	}
+	if toolDriver.calls != 1 {
+		t.Fatalf("resumed tool calls = %d, want exactly one reserved call", toolDriver.calls)
+	}
+	if len(providerDriver.requests) != 0 {
+		t.Fatalf("provider requests = %d, want zero after tool-call budget exhaustion", len(providerDriver.requests))
+	}
+}
+
+func TestAgentWorkerDoesNotRewriteRecoveredTerminalOutput(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-terminal-output-recovery", RootTaskID: "root", Request: "finish once",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-terminal-output-recovery", Goal: "finish once",
+		OwnerAgentID: "agent-a", WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	checkpoint, err := agent.NewExecutionCheckpointedEvent(agent.ExecutionCheckpointRecord{
+		RunID: run.ID, TaskID: task.ID, AgentID: "agent-a", ExecutionID: "lease-before-crash",
+		Checkpoint: agent.TurnCheckpoint{
+			Messages: []message.Message{message.NewText(message.RoleAssistant, "completed before crash")},
+			Step: agent.Step{
+				Index: 0, Decision: agent.StepDecisionFinish,
+				ModelCall: &agent.ModelCall{Model: "recording", StopReason: provider.StopReasonComplete},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewExecutionCheckpointedEvent() error = %v", err)
+	}
+	if err := runner.AppendEvent(ctx, checkpoint); err != nil {
+		t.Fatalf("AppendEvent(checkpoint) error = %v", err)
+	}
+	if err := runner.WriteItem(ctx, api.BlackboardItem{
+		ID:         "bb-output-written-before-crash",
+		RunID:      run.ID,
+		TaskID:     task.ID,
+		Type:       api.BlackboardItemTaskOutput,
+		Source:     api.SourceIdentity{Type: api.SourceAgent, ID: "agent-a"},
+		Visibility: api.BlackboardVisibilityAgentVisible,
+		Key:        "summary",
+		Payload:    "completed before crash",
+	}); err != nil {
+		t.Fatalf("WriteItem(existing output) error = %v", err)
+	}
+	providerDriver := &recordingProvider{events: []provider.Event{{
+		Kind: provider.EventError, Err: errors.New("provider must not be replayed"),
+	}}}
+	outcome, err := (AgentWorker{
+		Runner: runner, Engine: agent.Engine{Provider: providerDriver},
+		AgentID: "agent-a", Model: "recording",
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope})
+	if err != nil || outcome.State != ExecutionCompleted {
+		t.Fatalf("ExecuteEnvelope() outcome=%#v error=%v, want completed", outcome, err)
+	}
+	if len(providerDriver.requests) != 0 {
+		t.Fatalf("provider was replayed after terminal checkpoint: %d requests", len(providerDriver.requests))
+	}
+	items, err := runner.SelectItems(ctx, run.ID, api.BlackboardSelector{
+		TaskID: task.ID, ItemTypes: []api.BlackboardItemType{api.BlackboardItemTaskOutput},
+		Keys: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("SelectItems() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "bb-output-written-before-crash" {
+		t.Fatalf("recovered terminal outputs = %#v, want original item only", items)
+	}
+	events, err := runner.ListEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	writes := 0
+	for _, event := range events {
+		if event.Type == api.EventBlackboardItemWritten {
+			writes++
+		}
+	}
+	if writes != 1 {
+		t.Fatalf("blackboard write events = %d, want exactly one", writes)
+	}
+}
