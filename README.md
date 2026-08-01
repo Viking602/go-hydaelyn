@@ -10,7 +10,7 @@ human approvals, and idempotent side effects. Its `Runner` records typed `Run`,
 configurable stores. Applications embed the runner and provide the production
 storage implementation.
 
-> **Status:** The latest release is [v0.12.1](https://github.com/Viking602/venat/releases/tag/v0.12.1).
+> **Status:** The latest release is [v0.13.0](https://github.com/Viking602/venat/releases/tag/v0.13.0).
 > The public API may still change before v1.0.
 
 ## Why Venat

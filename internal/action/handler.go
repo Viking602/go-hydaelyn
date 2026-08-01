@@ -3,7 +3,9 @@ package action
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -13,7 +15,10 @@ import (
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
 	"github.com/Viking602/venat/internal/execution"
+	"github.com/Viking602/venat/message"
 )
+
+const maxActionAttemptResultBytes = 8 << 20
 
 type IDGenerator func(string) string
 
@@ -137,8 +142,14 @@ func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOf
 	if attempt.RunID != cmd.RunID || attempt.TaskID != cmd.TaskID {
 		return nil, model.ErrNotFound
 	}
+	if attempt.LeaseID != cmd.LeaseID {
+		return nil, model.ErrLeaseNotActive
+	}
 	if !isTerminalAttemptStatus(cmd.Status) {
 		return nil, model.ErrInvalidCommand
+	}
+	if err := validateActionAttemptResult(cmd.ExternalResultRef, cmd.ToolResult); err != nil {
+		return nil, err
 	}
 	if isTerminalAttemptStatus(attempt.Status) {
 		if sameTerminalAttempt(attempt, cmd) {
@@ -173,6 +184,9 @@ func (resolveActionAttemptHandler) Name() string {
 func (h resolveActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd ResolveActionAttemptCommand) (any, error) {
 	if cmd.AttemptID == "" || !isResolutionAttemptStatus(cmd.Status) {
 		return nil, model.ErrInvalidCommand
+	}
+	if err := validateActionAttemptResult(cmd.ExternalResultRef, cmd.ToolResult); err != nil {
+		return nil, err
 	}
 	attempt, err := uow.ActionAttempts().LoadActionAttempt(ctx, cmd.AttemptID)
 	if err != nil {
@@ -371,6 +385,24 @@ func sameTerminalAttempt(attempt model.ActionAttempt, cmd CompleteActionAttemptC
 		attempt.ExternalResultRef == cmd.ExternalResultRef &&
 		bytes.Equal(attempt.ToolResult, cmd.ToolResult) &&
 		attempt.RequiresReconcile == (cmd.RequiresReconcile || cmd.Status == model.ActionAttemptUnknown)
+}
+
+func validateActionAttemptResult(externalResultRef string, toolResult json.RawMessage) error {
+	if len(externalResultRef) > maxActionAttemptResultBytes || len(toolResult) > maxActionAttemptResultBytes {
+		return fmt.Errorf(
+			"action: result exceeds %d bytes: %w",
+			maxActionAttemptResultBytes,
+			model.ErrInvalidCommand,
+		)
+	}
+	if len(toolResult) == 0 {
+		return nil
+	}
+	var result message.ToolResult
+	if err := json.Unmarshal(toolResult, &result); err != nil {
+		return fmt.Errorf("action: invalid tool result: %w: %v", model.ErrInvalidCommand, err)
+	}
+	return nil
 }
 
 func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run model.Run, task model.Task, lease model.TaskExecutionLease, attempt model.ActionAttempt) (CompleteAttemptResult, error) {

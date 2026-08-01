@@ -75,6 +75,13 @@ func (s *retryingStream) Recv() (Event, error) {
 		if event.Kind == EventError && event.Err != nil {
 			cause = event.Err
 		}
+		if event.Kind == EventDone {
+			s.emitted = true
+			return event, nil
+		}
+		if event.Kind != "" && event.Kind != EventError {
+			s.emitted = true
+		}
 		if s.emitted && errors.Is(recvErr, io.EOF) {
 			return event, recvErr
 		}

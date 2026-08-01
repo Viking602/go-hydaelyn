@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/internal/core/model"
 )
 
 func TestExecuteCommand_StartRunReturnsTypedResult(t *testing.T) {
@@ -57,6 +58,20 @@ func TestExecuteCommand_RequestApprovalReturnsTypedResult(t *testing.T) {
 	}
 	if requested.Approval.RunID != run.ID {
 		t.Fatalf("Approval.RunID %q != Run.ID %q", requested.Approval.RunID, run.ID)
+	}
+}
+
+func TestCommandResultFromCore_ResolveActionAttemptReturnsPublicType(t *testing.T) {
+	result := commandResultFromCore(
+		api.ResolveActionAttemptCommand{},
+		model.ActionAttempt{AttemptID: "attempt-1", Status: model.ActionAttemptSucceeded},
+	)
+	attempt, ok := result.(api.ActionAttempt)
+	if !ok {
+		t.Fatalf("ResolveActionAttemptCommand result type = %T, want api.ActionAttempt", result)
+	}
+	if attempt.AttemptID != "attempt-1" || attempt.Status != api.ActionAttemptSucceeded {
+		t.Fatalf("ResolveActionAttemptCommand result = %#v", attempt)
 	}
 }
 

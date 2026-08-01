@@ -31,6 +31,21 @@ func (s *eventThenFailureStream) Recv() (Event, error) {
 }
 func (*eventThenFailureStream) Close() error { return nil }
 
+type eventAndFailureStream struct {
+	event    Event
+	failure  error
+	received bool
+}
+
+func (s *eventAndFailureStream) Recv() (Event, error) {
+	if s.received {
+		return Event{}, io.EOF
+	}
+	s.received = true
+	return s.event, s.failure
+}
+func (*eventAndFailureStream) Close() error { return nil }
+
 func TestOpenRetryingStreamRetriesTransientOpenFailure(t *testing.T) {
 	attempts := 0
 	var progress []RetryProgress
@@ -70,6 +85,47 @@ func TestOpenRetryingStreamRefusesReplayAfterEmission(t *testing.T) {
 	}
 	if opens != 1 {
 		t.Fatalf("stream opens=%d, want one after partial response", opens)
+	}
+}
+
+func TestOpenRetryingStreamRefusesSameCallReplayAfterEmission(t *testing.T) {
+	opens := 0
+	stream, err := OpenRetryingStream(context.Background(), func() (Stream, error) {
+		opens++
+		return &eventAndFailureStream{
+			event: Event{Kind: EventTextDelta, Text: "partial"}, failure: io.ErrUnexpectedEOF,
+		}, nil
+	}, StreamRetryOptions{Delay: func(int) time.Duration { return 0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, recvErr := stream.Recv()
+	if recvErr == nil || !strings.Contains(recvErr.Error(), "refusing unsafe replay") {
+		t.Fatalf("Recv() error=%v, want unsafe replay refusal", recvErr)
+	}
+	if opens != 1 {
+		t.Fatalf("stream opens=%d, want one after partial response", opens)
+	}
+}
+
+func TestOpenRetryingStreamAcceptsEmptyTerminalResponse(t *testing.T) {
+	opens := 0
+	stream, err := OpenRetryingStream(context.Background(), func() (Stream, error) {
+		opens++
+		return NewSliceStream([]Event{{Kind: EventDone, StopReason: StopReasonComplete}}), nil
+	}, StreamRetryOptions{Delay: func(int) time.Duration { return 0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, recvErr := stream.Recv()
+	if recvErr != nil || event.Kind != EventDone {
+		t.Fatalf("first Recv() event=%#v error=%v", event, recvErr)
+	}
+	if _, recvErr = stream.Recv(); !errors.Is(recvErr, io.EOF) {
+		t.Fatalf("second Recv() error=%v, want io.EOF", recvErr)
+	}
+	if opens != 1 {
+		t.Fatalf("stream opens=%d, want one after terminal event", opens)
 	}
 }
 

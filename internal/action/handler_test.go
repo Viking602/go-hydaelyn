@@ -2,8 +2,10 @@ package action_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -513,6 +515,88 @@ func TestResolveActionAttemptRejectsConflictingDecision(t *testing.T) {
 	})
 	if !errors.Is(err, model.ErrIdempotencyConflict) {
 		t.Fatalf("conflicting ResolveActionAttempt error = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+func TestCompleteActionAttemptRejectsAttemptFromDifferentLease(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	saveActionFixture(ctx, t, uow, true)
+	if err := uow.ActionAttempts().SaveActionAttempt(ctx, model.ActionAttempt{
+		AttemptID: "attempt-old", RunID: "run-1", TaskID: "task-1",
+		LeaseID: "lease-old", Status: model.ActionAttemptRunning,
+	}); err != nil {
+		t.Fatalf("SaveActionAttempt() error = %v", err)
+	}
+
+	bus := commandbus.NewBus()
+	action.RegisterHandlers(bus, action.HandlerOptions{})
+	_, err = bus.Execute(ctx, uow, action.CompleteActionAttemptCommand{
+		RunID: "run-1", TaskID: "task-1", LeaseID: "lease-1",
+		HolderType: model.HolderAgent, HolderID: "agent-1", TaskVersion: 1,
+		AttemptID: "attempt-old", Status: model.ActionAttemptSucceeded,
+	})
+	if !errors.Is(err, model.ErrLeaseNotActive) {
+		t.Fatalf("CompleteActionAttempt error = %v, want ErrLeaseNotActive", err)
+	}
+	stored, err := uow.ActionAttempts().LoadActionAttempt(ctx, "attempt-old")
+	if err != nil {
+		t.Fatalf("LoadActionAttempt() error = %v", err)
+	}
+	if stored.Status != model.ActionAttemptRunning {
+		t.Fatalf("rejected completion mutated attempt to %q", stored.Status)
+	}
+}
+
+func TestCompleteActionAttemptRejectsInvalidToolResultWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name   string
+		result json.RawMessage
+	}{
+		{name: "wrong shape", result: json.RawMessage(`"not-a-tool-result"`)},
+		{name: "too large", result: json.RawMessage(`"` + strings.Repeat("x", 8<<20) + `"`)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			provider := memory.NewProvider()
+			uow, err := provider.Begin(ctx)
+			if err != nil {
+				t.Fatalf("Begin() error = %v", err)
+			}
+			defer func() { _ = uow.Rollback(ctx) }()
+			saveActionFixture(ctx, t, uow, true)
+			if err := uow.ActionAttempts().SaveActionAttempt(ctx, model.ActionAttempt{
+				AttemptID: "attempt-1", RunID: "run-1", TaskID: "task-1",
+				LeaseID: "lease-1", Status: model.ActionAttemptRunning,
+			}); err != nil {
+				t.Fatalf("SaveActionAttempt() error = %v", err)
+			}
+
+			bus := commandbus.NewBus()
+			action.RegisterHandlers(bus, action.HandlerOptions{})
+			_, err = bus.Execute(ctx, uow, action.CompleteActionAttemptCommand{
+				RunID: "run-1", TaskID: "task-1", LeaseID: "lease-1",
+				HolderType: model.HolderAgent, HolderID: "agent-1", TaskVersion: 1,
+				AttemptID: "attempt-1", Status: model.ActionAttemptSucceeded,
+				ToolResult: test.result,
+			})
+			if !errors.Is(err, model.ErrInvalidCommand) {
+				t.Fatalf("CompleteActionAttempt error = %v, want ErrInvalidCommand", err)
+			}
+			stored, err := uow.ActionAttempts().LoadActionAttempt(ctx, "attempt-1")
+			if err != nil {
+				t.Fatalf("LoadActionAttempt() error = %v", err)
+			}
+			if stored.Status != model.ActionAttemptRunning || len(stored.ToolResult) != 0 {
+				t.Fatalf("rejected completion mutated attempt: %#v", stored)
+			}
+		})
 	}
 }
 

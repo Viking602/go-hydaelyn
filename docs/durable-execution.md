@@ -92,8 +92,8 @@ first reconnect within their own bounded transport loop; a provider retry never
 replays a stream after assistant content has been observed.
 
 Execution checkpoints are accepted only from the active lease owner at the
-current task version. Each checkpoint is limited to 8 MiB and each task retains
-at most 1,024 checkpoints.
+current task version. Each checkpoint is limited to 8 MiB. A task can retain
+at most 4,096 checkpoints and 512 MiB of checkpoint events.
 
 Guarded write and external-side-effect tools use the durable action-attempt
 journal. The operation key is derived from the canonical input rather than a

@@ -65,6 +65,10 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 	if cmd.Event.RunID != cmd.RunID || cmd.Event.TaskID != cmd.TaskID {
 		return nil, model.ErrInvalidCommand
 	}
+	if !isLeasedExecutionEvent(cmd.Event.Type) {
+		return nil, model.ErrInvalidCommand
+	}
+	cmd.Event.Sequence = 0
 	if err := validateExecutionEventSubmission(ctx, uow, cmd); err != nil {
 		return nil, err
 	}
@@ -100,6 +104,11 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 		return nil, err
 	}
 	return nil, nil
+}
+
+func isLeasedExecutionEvent(eventType model.EventType) bool {
+	return eventType == model.EventType("StepCompleted") ||
+		eventType == model.EventExecutionCheckpointed
 }
 
 func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork, cmd AppendTaskExecutionEventCommand) error {

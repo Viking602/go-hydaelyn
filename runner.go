@@ -132,7 +132,7 @@ func governanceResultFromCore(command api.Command, result any) (any, bool) {
 			return adapter.ResumeTokenFromModel(token), true
 		}
 		return result, true
-	case api.StartActionAttemptCommand, api.CompleteActionAttemptCommand:
+	case api.StartActionAttemptCommand, api.CompleteActionAttemptCommand, api.ResolveActionAttemptCommand:
 		if attempt, ok := result.(model.ActionAttempt); ok {
 			return adapter.ActionAttemptFromModel(attempt), true
 		}
