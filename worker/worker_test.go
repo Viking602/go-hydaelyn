@@ -1083,6 +1083,19 @@ func TestAgentWorkerResumesApprovedActionFromCheckpoint(t *testing.T) {
 		first.Suspension.Kind != SuspensionApproval {
 		t.Fatalf("first ExecuteEnvelope() state=%q suspension=%#v error=%v", first.State, first.Suspension, err)
 	}
+	events, checkpointErr := runner.ListEvents(ctx, run.ID)
+	if checkpointErr != nil {
+		t.Fatalf("ListEvents() error = %v", checkpointErr)
+	}
+	checkpoint, found, checkpointErr := agent.LatestExecutionCheckpoint(events, agent.StepSelector{
+		RunID: run.ID, TaskID: task.ID, AgentID: "agent-a",
+	})
+	if checkpointErr != nil || !found {
+		t.Fatalf("LatestExecutionCheckpoint() found=%v error=%v", found, checkpointErr)
+	}
+	if checkpoint.Checkpoint.Step.BudgetUsed.WallClock <= 0 {
+		t.Fatalf("suspension checkpoint wall clock = %v, want positive elapsed time", checkpoint.Checkpoint.Step.BudgetUsed.WallClock)
+	}
 	if actionDriver.calls != 0 {
 		t.Fatalf("driver calls before approval = %d, want zero", actionDriver.calls)
 	}

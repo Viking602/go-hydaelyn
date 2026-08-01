@@ -23,7 +23,6 @@ type RunnerExecutor struct {
 	BeforeTask     func(context.Context, multiagent.Dispatch, multiagent.AgentClass) error
 	PrepareEngine  func(context.Context, agent.Engine, multiagent.Dispatch, multiagent.AgentClass) (agent.Engine, error)
 	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
-	RetryPolicy    api.RetryPolicy
 	TTL            time.Duration
 }
 
@@ -167,10 +166,6 @@ func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Disp
 
 func (e RunnerExecutor) createTaskCommand(dispatch multiagent.Dispatch) api.CreateTaskCommand {
 	task := dispatch.Task
-	retryPolicy := task.RetryPolicy
-	if retryPolicy.MaxAttempts <= 0 {
-		retryPolicy = e.RetryPolicy
-	}
 	return api.CreateTaskCommand{
 		RunID:              task.RunID,
 		TaskID:             task.ID,
@@ -190,7 +185,7 @@ func (e RunnerExecutor) createTaskCommand(dispatch multiagent.Dispatch) api.Crea
 		OnDependencyFailed: task.OnDependencyFailed,
 		ReadSelectors:      task.ReadSelectors,
 		WriteTargets:       task.WriteTargets,
-		RetryPolicy:        retryPolicy,
+		RetryPolicy:        task.RetryPolicy,
 		PolicyDecisions:    task.PolicyDecisions,
 		InputSchema:        task.InputSchema,
 		OutputSchema:       task.OutputSchema,

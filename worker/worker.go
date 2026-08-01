@@ -176,7 +176,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 	if runErr != nil {
 		if suspension := w.executionSuspension(ctx, task, runErr); suspension != nil {
-			checkpointErr := w.recordSuspensionCheckpoint(ctx, task, lease, result)
+			checkpointErr := w.recordSuspensionCheckpoint(ctx, task, lease, result, time.Since(started))
 			return ExecutionOutcome{
 				State:      ExecutionSuspended,
 				RunID:      task.RunID,
@@ -599,6 +599,7 @@ func (w AgentWorker) recordSuspensionCheckpoint(
 	task api.Task,
 	lease api.TaskExecutionLease,
 	result agent.Result,
+	elapsed time.Duration,
 ) error {
 	if len(result.Messages) == 0 {
 		return nil
@@ -614,6 +615,7 @@ func (w AgentWorker) recordSuspensionCheckpoint(
 		BudgetUsed: agent.BudgetUsage{
 			Tokens:    int64(result.Usage.TotalTokens),
 			ToolCalls: result.ToolCallsUsed,
+			WallClock: elapsed,
 		},
 	}
 	checkpoint := agent.TurnCheckpoint{

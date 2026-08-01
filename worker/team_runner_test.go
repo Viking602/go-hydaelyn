@@ -931,13 +931,16 @@ func TestRunnerExecutorRetriesFromLatestTurnCheckpoint(t *testing.T) {
 			Type:         api.TaskTypeWorker,
 			Goal:         class.Instructions,
 			WriteTargets: []string{"result"},
+			RetryPolicy: api.RetryPolicy{
+				MaxAttempts: 2,
+				Backoff:     10 * time.Millisecond,
+			},
 		},
 	}
 	executor := RunnerExecutor{
-		Runner:      runner,
-		Classes:     map[string]multiagent.AgentClass{class.Name: class},
-		BuildDeps:   agent.BuildDeps{Providers: provider.Single(driver)},
-		RetryPolicy: api.RetryPolicy{MaxAttempts: 2, Backoff: 10 * time.Millisecond},
+		Runner:    runner,
+		Classes:   map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
 		PrepareEngine: func(_ context.Context, engine agent.Engine, _ multiagent.Dispatch, _ multiagent.AgentClass) (agent.Engine, error) {
 			engine.Tools = tool.NewBus(toolDriver)
 			return engine, nil
@@ -976,5 +979,60 @@ func TestRunnerExecutorRetriesFromLatestTurnCheckpoint(t *testing.T) {
 	}
 	if persisted.Status != api.TaskStatusCompleted || persisted.Attempts != 2 {
 		t.Fatalf("persisted retry task = %#v, want completed after two attempts", persisted)
+	}
+}
+
+func TestRunnerExecutorPreservesDisabledTaskRetries(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-disabled-retry",
+		RootTaskID: "root",
+		Request:    "do not retry",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	transportErr := io.ErrUnexpectedEOF
+	driver := &sequenceProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "unexpected retry"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+		failures: map[int]error{0: transportErr},
+	}
+	class := multiagent.AgentClass{
+		Name:         "single-attempt-worker",
+		Instructions: "fail once",
+		Model:        "scripted",
+	}
+	dispatch := multiagent.Dispatch{
+		To:        "agent-a",
+		ClassName: class.Name,
+		Task: api.Task{
+			ID:          "single-attempt-task",
+			RunID:       run.ID,
+			Type:        api.TaskTypeWorker,
+			Goal:        class.Instructions,
+			RetryPolicy: api.RetryPolicy{MaxAttempts: 0},
+		},
+	}
+	_, err = (RunnerExecutor{
+		Runner:    runner,
+		Classes:   map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
+	}).Execute(ctx, dispatch)
+	if !errors.Is(err, transportErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, transportErr)
+	}
+	if len(driver.requests) != 1 {
+		t.Fatalf("provider requests = %d, want one attempt", len(driver.requests))
+	}
+	persisted, loadErr := runner.Task(ctx, run.ID, dispatch.Task.ID)
+	if loadErr != nil {
+		t.Fatalf("Task() error = %v", loadErr)
+	}
+	if persisted.Status != api.TaskStatusFailed || persisted.Attempts != 1 {
+		t.Fatalf("persisted task = %#v, want failed after one attempt", persisted)
 	}
 }

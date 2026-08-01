@@ -23,7 +23,6 @@ type TeamRunner struct {
 	PrepareEngine  func(context.Context, agent.Engine, multiagent.Dispatch, multiagent.AgentClass) (agent.Engine, error)
 	DecorateEngine func(agent.Engine, multiagent.Dispatch, multiagent.AgentClass) agent.Engine
 	Options        multiagent.DriveOptions
-	RetryPolicy    api.RetryPolicy
 	TTL            time.Duration
 }
 
@@ -127,7 +126,6 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 		BeforeTask:     r.BeforeTask,
 		PrepareEngine:  r.PrepareEngine,
 		DecorateEngine: r.DecorateEngine,
-		RetryPolicy:    r.RetryPolicy,
 		TTL:            r.TTL,
 	}
 	state, resumeErr := r.resumePendingInstances(runCtx, state, classes, executor)
