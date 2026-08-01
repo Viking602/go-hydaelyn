@@ -254,7 +254,16 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 		succeeded := make([]Result, 0, len(results))
 		for index := range results {
 			if errs[index] == nil {
-				succeeded = append(succeeded, results[index])
+				result := results[index]
+				// Preserve the original call slot before compacting survivors.
+				// Callers cannot recover this mapping from the compacted index.
+				if result.ToolCallID == "" {
+					result.ToolCallID = calls[index].ID
+				}
+				if result.Name == "" {
+					result.Name = calls[index].Name
+				}
+				succeeded = append(succeeded, result)
 			}
 		}
 		return succeeded, err
