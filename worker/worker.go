@@ -277,19 +277,20 @@ func (w AgentWorker) appendUsage(ctx context.Context, task api.Task, executionID
 		}
 	}
 	_ = w.Runner.AppendUsage(context.WithoutCancel(ctx), api.UsageRecord{
-		RunID:             task.RunID,
-		TaskID:            task.ID,
-		AgentID:           w.AgentID,
-		Provider:          providerName,
-		Model:             engine.Model,
-		InputTokens:       usage.InputTokens,
-		CachedInputTokens: usage.CachedInputTokens,
-		OutputTokens:      usage.OutputTokens,
-		TotalTokens:       totalTokens,
-		ToolCalls:         toolCalls,
-		Steps:             len(result.Steps),
-		DurationMS:        elapsed.Milliseconds(),
-		Metadata:          map[string]string{"executionId": executionID},
+		RunID:                 task.RunID,
+		TaskID:                task.ID,
+		AgentID:               w.AgentID,
+		Provider:              providerName,
+		Model:                 engine.Model,
+		InputTokens:           usage.InputTokens,
+		CachedInputTokens:     usage.CachedInputTokens,
+		CacheWriteInputTokens: usage.CacheWriteInputTokens,
+		OutputTokens:          usage.OutputTokens,
+		TotalTokens:           totalTokens,
+		ToolCalls:             toolCalls,
+		Steps:                 len(result.Steps),
+		DurationMS:            elapsed.Milliseconds(),
+		Metadata:              map[string]string{"executionId": executionID},
 	})
 }
 

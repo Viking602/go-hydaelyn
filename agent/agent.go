@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"reflect"
 
 	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
@@ -722,17 +723,8 @@ const compactionBudgetHeadroomDivisor = 5
 // when cumulative MaxTokens spend enters its final headroom band. A compaction
 // error or incomplete tool turn aborts rather than sending malformed history.
 func maybeCompactHistory(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage) ([]message.Message, error) {
-	var (
-		compacted []message.Message
-		err       error
-	)
 	if input.ContextTokenTarget > 0 {
-		switch {
-		case input.CompactTo != nil:
-			compacted, err = input.CompactTo(ctx, current, input.ContextTokenTarget)
-		case input.Compact != nil:
-			compacted, err = input.Compact(ctx, current)
-		default:
+		if input.CompactTo == nil && input.Compact == nil {
 			return current, nil
 		}
 	} else {
@@ -743,7 +735,17 @@ func maybeCompactHistory(ctx context.Context, input LoopInput, current []message
 		if remaining > input.MaxTokens/compactionBudgetHeadroomDivisor {
 			return current, nil
 		}
-		compacted, err = input.Compact(ctx, current)
+	}
+
+	compactionInput, err := cacheSafeCompactionInput(current)
+	if err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
+	var compacted []message.Message
+	if input.ContextTokenTarget > 0 && input.CompactTo != nil {
+		compacted, err = input.CompactTo(ctx, compactionInput, input.ContextTokenTarget)
+	} else {
+		compacted, err = input.Compact(ctx, compactionInput)
 	}
 	if err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
@@ -751,7 +753,66 @@ func maybeCompactHistory(ctx context.Context, input LoopInput, current []message
 	if err := message.ValidateCompleteTurns(compacted); err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
 	}
+	if err := validateCachePrefixPreserved(current, compacted); err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
 	return compacted, nil
+}
+
+func validateCachePrefixPreserved(before, after []message.Message) error {
+	boundary, err := message.CachePrefixBoundary(before)
+	if err != nil {
+		return err
+	}
+	if boundary == 0 {
+		return nil
+	}
+	if len(after) < boundary {
+		return errors.New("compaction removed an explicit cache prefix")
+	}
+	for index := range boundary {
+		if !reflect.DeepEqual(before[index], after[index]) {
+			return fmt.Errorf("compaction changed explicit cache prefix at message %d", index)
+		}
+	}
+	return nil
+}
+
+// cacheSafeCompactionInput isolates histories carrying an explicit cache prefix
+// before calling extension code. Without a deep copy, an in-place compactor can
+// mutate both the source and returned aliases and defeat the post-call integrity
+// comparison. Histories without a cache boundary retain the allocation-free
+// legacy path.
+func cacheSafeCompactionInput(messages []message.Message) ([]message.Message, error) {
+	boundary, err := message.CachePrefixBoundary(messages)
+	if err != nil {
+		return nil, err
+	}
+	if boundary == 0 {
+		return messages, nil
+	}
+
+	cloned := make([]message.Message, len(messages))
+	for index, current := range messages {
+		item := current
+		item.ProviderState = append(item.ProviderState[:0:0], current.ProviderState...)
+		if current.ToolCalls != nil {
+			item.ToolCalls = make([]message.ToolCall, len(current.ToolCalls))
+			copy(item.ToolCalls, current.ToolCalls)
+			for callIndex := range item.ToolCalls {
+				arguments := current.ToolCalls[callIndex].Arguments
+				item.ToolCalls[callIndex].Arguments = append(arguments[:0:0], arguments...)
+			}
+		}
+		if current.ToolResult != nil {
+			result := *current.ToolResult
+			result.Structured = append(result.Structured[:0:0], current.ToolResult.Structured...)
+			item.ToolResult = &result
+		}
+		item.Metadata = maps.Clone(current.Metadata)
+		cloned[index] = item
+	}
+	return cloned, nil
 }
 
 // dispatchExceedsToolBudget reports whether executing this turn's tool batch

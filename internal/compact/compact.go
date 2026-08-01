@@ -70,6 +70,11 @@ func compactionParts(messages []message.Message, maxMessages int) (first, droppe
 	if prefixEnd == 0 {
 		return messages, nil, nil, false, nil
 	}
+	cachePrefixEnd, err := message.CachePrefixBoundary(messages)
+	if err != nil {
+		return messages, nil, nil, false, err
+	}
+	prefixEnd = max(prefixEnd, cachePrefixEnd)
 
 	keepLast := maxMessages - prefixEnd - 1
 	if keepLast < 1 {

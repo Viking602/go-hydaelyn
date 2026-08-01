@@ -38,9 +38,19 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
+	Content    any            `json:"content,omitempty"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+type chatContentBlock struct {
+	Type                  string              `json:"type"`
+	Text                  string              `json:"text"`
+	PromptCacheBreakpoint chatCacheBreakpoint `json:"prompt_cache_breakpoint"`
+}
+
+type chatCacheBreakpoint struct {
+	Mode PromptCacheMode `json:"mode"`
 }
 
 type chatTool struct {
@@ -73,7 +83,8 @@ type chunk struct {
 		CompletionTokens    int `json:"completion_tokens"`
 		TotalTokens         int `json:"total_tokens"`
 		PromptTokensDetails struct {
-			CachedTokens int `json:"cached_tokens"`
+			CachedTokens     int `json:"cached_tokens"`
+			CacheWriteTokens int `json:"cache_write_tokens"`
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
@@ -187,9 +198,13 @@ func (d Driver) streamChatCompletions(ctx context.Context, request provider.Requ
 	if err != nil {
 		return nil, err
 	}
+	messages, err := toChatMessages(request.Messages)
+	if err != nil {
+		return nil, err
+	}
 	body, err := marshalChatCompletionRequest(chatCompletionRequest{
 		Model:          request.Model,
-		Messages:       toChatMessages(request.Messages),
+		Messages:       messages,
 		Tools:          toChatTools(request.Tools),
 		Stream:         true,
 		StreamOptions:  streamOptions{IncludeUsage: true},
@@ -391,10 +406,11 @@ func (s *openAIStream) handleDoneMarker() {
 func (s *openAIStream) consumeChunk(parsed chunk) {
 	if parsed.Usage.TotalTokens > 0 {
 		s.state.usage = provider.Usage{
-			InputTokens:       parsed.Usage.PromptTokens,
-			CachedInputTokens: parsed.Usage.PromptTokensDetails.CachedTokens,
-			OutputTokens:      parsed.Usage.CompletionTokens,
-			TotalTokens:       parsed.Usage.TotalTokens,
+			InputTokens:           parsed.Usage.PromptTokens,
+			CachedInputTokens:     parsed.Usage.PromptTokensDetails.CachedTokens,
+			CacheWriteInputTokens: parsed.Usage.PromptTokensDetails.CacheWriteTokens,
+			OutputTokens:          parsed.Usage.CompletionTokens,
+			TotalTokens:           parsed.Usage.TotalTokens,
 		}
 	}
 	for _, choice := range parsed.Choices {
@@ -451,13 +467,14 @@ func (s *openAIStream) Close() error {
 	return s.body.Close()
 }
 
-func toChatMessages(messages []message.Message) []chatMessage {
+func toChatMessages(messages []message.Message) ([]chatMessage, error) {
 	items := make([]chatMessage, 0, len(messages))
 	for _, msg := range messages {
 		item := chatMessage{Role: string(msg.Role)}
+		var err error
 		switch msg.Role {
 		case message.RoleAssistant:
-			item.Content = msg.Text
+			item.Content, err = chatMessageContent(msg.Text, msg.CacheBoundary)
 			if len(msg.ToolCalls) > 0 {
 				item.ToolCalls = make([]chatToolCall, 0, len(msg.ToolCalls))
 				for _, call := range msg.ToolCalls {
@@ -473,15 +490,39 @@ func toChatMessages(messages []message.Message) []chatMessage {
 			}
 		case message.RoleTool:
 			if msg.ToolResult != nil {
-				item.Content = msg.ToolResult.Content
+				item.Content, err = chatMessageContent(msg.ToolResult.Content, msg.CacheBoundary)
 				item.ToolCallID = msg.ToolResult.ToolCallID
+			} else if msg.CacheBoundary {
+				err = fmt.Errorf("openai chat completions cache boundary requires tool result content")
 			}
 		default:
-			item.Content = msg.Text
+			item.Content, err = chatMessageContent(msg.Text, msg.CacheBoundary)
+		}
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
-	return items
+	return items, nil
+}
+
+func chatMessageContent(text string, cacheBoundary bool) (any, error) {
+	if !cacheBoundary {
+		if text == "" {
+			return nil, nil
+		}
+		return text, nil
+	}
+	if text == "" {
+		return nil, fmt.Errorf("openai chat completions cache boundary requires non-empty text")
+	}
+	return []chatContentBlock{{
+		Type: "text",
+		Text: text,
+		PromptCacheBreakpoint: chatCacheBreakpoint{
+			Mode: PromptCacheModeExplicit,
+		},
+	}}, nil
 }
 
 func toChatTools(defs []message.ToolDefinition) []chatTool {

@@ -323,9 +323,9 @@ func TestVisibilityConstants(t *testing.T) {
 	}
 }
 
-func TestMessageProviderStateJSONRoundTrip(t *testing.T) {
+func TestMessageProviderStateAndCacheBoundaryJSONRoundTrip(t *testing.T) {
 	state := json.RawMessage(`[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"}]`)
-	encoded, err := json.Marshal(Message{Role: RoleAssistant, ProviderState: state})
+	encoded, err := json.Marshal(Message{Role: RoleAssistant, CacheBoundary: true, ProviderState: state})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
@@ -335,5 +335,8 @@ func TestMessageProviderStateJSONRoundTrip(t *testing.T) {
 	}
 	if string(decoded.ProviderState) != string(state) {
 		t.Fatalf("ProviderState = %s, want %s", decoded.ProviderState, state)
+	}
+	if !decoded.CacheBoundary {
+		t.Fatal("CacheBoundary = false, want true")
 	}
 }

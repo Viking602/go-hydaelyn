@@ -334,3 +334,47 @@ func TestTargetedCompactionMustPreserveSkillContext(t *testing.T) {
 		t.Fatalf("targeted compaction rejected preserved skill context: %v", err)
 	}
 }
+
+func TestTargetedCompactionMustPreserveCachePrefix(t *testing.T) {
+	stable := message.NewText(message.RoleSystem, "stable")
+	stable.CacheBoundary = true
+	before := []message.Message{stable, message.NewText(message.RoleUser, "task")}
+
+	if err := validateCachePrefixPreserved(before, before[1:]); err == nil {
+		t.Fatal("targeted compaction accepted history without the explicit cache prefix")
+	}
+	mutated := append([]message.Message(nil), before...)
+	mutated[0].Text = "changed"
+	if err := validateCachePrefixPreserved(before, mutated); err == nil {
+		t.Fatal("targeted compaction accepted a changed explicit cache prefix")
+	}
+	if err := validateCachePrefixPreserved(before, before); err != nil {
+		t.Fatalf("targeted compaction rejected preserved cache prefix: %v", err)
+	}
+}
+
+func TestTargetedCompactionRejectsInPlaceCachePrefixMutation(t *testing.T) {
+	stable := message.NewText(message.RoleSystem, "stable")
+	stable.CacheBoundary = true
+	stable.Metadata = map[string]string{"scope": "shared"}
+	current := []message.Message{stable, message.NewText(message.RoleUser, "task")}
+
+	returned, err := maybeCompactHistory(context.Background(), LoopInput{
+		ContextTokenTarget: 1_000,
+		CompactTo: func(_ context.Context, history []message.Message, _ int) ([]message.Message, error) {
+			history[0].Text = "changed"
+			history[0].Metadata["scope"] = "changed"
+			return history, nil
+		},
+	}, current, provider.Usage{})
+
+	if err == nil {
+		t.Fatal("targeted compaction accepted an in-place cache-prefix mutation")
+	}
+	if current[0].Text != "stable" || current[0].Metadata["scope"] != "shared" {
+		t.Fatalf("compactor mutated source cache prefix: %#v", current[0])
+	}
+	if !reflect.DeepEqual(returned, current) {
+		t.Fatalf("error path returned mutated history:\nreturned: %#v\nsource:   %#v", returned, current)
+	}
+}

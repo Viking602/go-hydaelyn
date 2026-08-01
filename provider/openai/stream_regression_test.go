@@ -20,7 +20,7 @@ func TestDriverStreamPreservesToolCallIndexAndNormalizesOpenAIStyleDeltas(t *tes
 	}))
 	defer server.Close()
 
-	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client(), WireAPI: WireChatCompletions})
 	stream, err := driver.Stream(context.Background(), provider.Request{
 		Model:    "gpt-test",
 		Messages: []message.Message{message.NewText(message.RoleUser, "hello")},
@@ -71,7 +71,7 @@ func TestDriverStreamRejectsNon2xxStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client(), WireAPI: WireChatCompletions})
 	stream, err := driver.Stream(context.Background(), provider.Request{
 		Model:    "gpt-test",
 		Messages: []message.Message{message.NewText(message.RoleUser, "hello")},
@@ -91,7 +91,7 @@ func TestDriverStreamRejectsUnexpectedContentType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
+	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client(), WireAPI: WireChatCompletions})
 	stream, err := driver.Stream(context.Background(), provider.Request{
 		Model:    "gpt-test",
 		Messages: []message.Message{message.NewText(message.RoleUser, "hello")},

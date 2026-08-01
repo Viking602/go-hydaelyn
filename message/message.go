@@ -100,12 +100,16 @@ type ToolResult struct {
 }
 
 type Message struct {
-	ID       string `json:"id,omitempty"`
-	Role     Role   `json:"role"`
-	Kind     Kind   `json:"kind,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Role Role   `json:"role"`
+	Kind Kind   `json:"kind,omitempty"`
+	Name string `json:"name,omitempty"`
+	Text string `json:"text,omitempty"`
+	// CacheBoundary marks the end of a stable prompt prefix at this text
+	// message. Providers with explicit prefix caching may map it to their
+	// native cache-control marker; unsupported providers may ignore it.
+	CacheBoundary bool   `json:"cacheBoundary,omitempty"`
+	Thinking      string `json:"thinking,omitempty"`
 	// ThinkingSignature is the opaque signature Anthropic attaches to a
 	// thinking block; it must be round-tripped verbatim on the next request
 	// when extended thinking is combined with tool use, or the API rejects

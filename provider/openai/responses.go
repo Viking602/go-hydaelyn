@@ -18,6 +18,7 @@ type responsesRequest struct {
 	Include   []string            `json:"include,omitempty"`
 	Tools     []responsesTool     `json:"tools,omitempty"`
 	Stream    bool                `json:"stream"`
+	Store     bool                `json:"store"`
 	Reasoning *responsesReasoning `json:"reasoning,omitempty"`
 	Text      *responsesText      `json:"text,omitempty"`
 }
@@ -70,7 +71,8 @@ type responsesUsage struct {
 	OutputTokens       int `json:"output_tokens"`
 	TotalTokens        int `json:"total_tokens"`
 	InputTokensDetails struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"input_tokens_details"`
 }
 
@@ -155,7 +157,51 @@ func marshalResponsesRequest(payload responsesRequest, extraBody map[string]any)
 		}
 		merged[key] = encoded
 	}
+	if err := mergeResponsesBodyObject(merged, extraBody, "reasoning", "effort"); err != nil {
+		return nil, err
+	}
+	if err := mergeResponsesBodyObject(merged, extraBody, "text", "format"); err != nil {
+		return nil, err
+	}
 	return json.Marshal(merged)
+}
+
+func mergeResponsesBodyObject(merged map[string]json.RawMessage, extraBody map[string]any, key string, protectedKeys ...string) error {
+	value, ok := extraBody[key]
+	if !ok || value == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("marshal openai responses extra body field %q: %w", key, err)
+	}
+	extra := map[string]json.RawMessage{}
+	if err := json.Unmarshal(encoded, &extra); err != nil || extra == nil {
+		return fmt.Errorf("openai responses ExtraBody %s must be an object", key)
+	}
+	current := map[string]json.RawMessage{}
+	if encodedCurrent, exists := merged[key]; exists {
+		if err := json.Unmarshal(encodedCurrent, &current); err != nil {
+			return fmt.Errorf("decode openai responses managed body field %q: %w", key, err)
+		}
+	}
+	for _, protectedKey := range protectedKeys {
+		if _, managed := current[protectedKey]; !managed {
+			continue
+		}
+		if _, supplied := extra[protectedKey]; supplied {
+			return fmt.Errorf("openai responses ExtraBody %s.%s conflicts with a managed request field", key, protectedKey)
+		}
+	}
+	for field, fieldValue := range extra {
+		current[field] = fieldValue
+	}
+	encodedCurrent, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("marshal openai responses merged body field %q: %w", key, err)
+	}
+	merged[key] = encodedCurrent
+	return nil
 }
 
 func responsesIncludes(extraBody map[string]any) ([]string, error) {
@@ -194,13 +240,17 @@ func extraResponsesBodyFields(extraBody map[string]any) map[string]any {
 }
 
 var managedResponsesBodyFields = map[string]struct{}{
-	"model":     {},
-	"include":   {},
-	"input":     {},
-	"tools":     {},
-	"stream":    {},
-	"reasoning": {},
-	"text":      {},
+	"model":                {},
+	"include":              {},
+	"input":                {},
+	"tools":                {},
+	"stream":               {},
+	"reasoning":            {},
+	"text":                 {},
+	"instructions":         {},
+	"previous_response_id": {},
+	"conversation":         {},
+	"prompt":               {},
 }
 
 func toResponsesInput(messages []message.Message) ([]json.RawMessage, error) {
@@ -211,12 +261,9 @@ func toResponsesInput(messages []message.Message) ([]json.RawMessage, error) {
 		case message.RoleAssistant:
 			items, err = appendResponsesAssistantInput(items, msg)
 		case message.RoleTool:
-			items, err = appendResponsesToolOutput(items, msg.ToolResult)
+			items, err = appendResponsesToolOutput(items, msg.ToolResult, msg.CacheBoundary)
 		default:
-			items, err = appendResponsesInputItem(items, map[string]any{
-				"role":    msg.Role,
-				"content": msg.Text,
-			})
+			items, err = appendResponsesTextMessage(items, msg.Role, msg.Text, msg.CacheBoundary)
 		}
 		if err != nil {
 			return nil, err
@@ -226,6 +273,9 @@ func toResponsesInput(messages []message.Message) ([]json.RawMessage, error) {
 }
 
 func appendResponsesAssistantInput(items []json.RawMessage, msg message.Message) ([]json.RawMessage, error) {
+	if msg.CacheBoundary && len(msg.ProviderState) > 0 {
+		return nil, fmt.Errorf("openai responses cache boundary cannot annotate opaque provider state")
+	}
 	if len(msg.ProviderState) > 0 {
 		stateItems, err := decodeResponsesProviderState(msg.ProviderState)
 		if err != nil {
@@ -234,11 +284,8 @@ func appendResponsesAssistantInput(items []json.RawMessage, msg message.Message)
 		return append(items, stateItems...), nil
 	}
 	var err error
-	if msg.Text != "" {
-		items, err = appendResponsesInputItem(items, map[string]any{
-			"role":    message.RoleAssistant,
-			"content": msg.Text,
-		})
+	if msg.Text != "" || msg.CacheBoundary {
+		items, err = appendResponsesTextMessage(items, message.RoleAssistant, msg.Text, msg.CacheBoundary)
 		if err != nil {
 			return nil, err
 		}
@@ -257,14 +304,50 @@ func appendResponsesAssistantInput(items []json.RawMessage, msg message.Message)
 	return items, nil
 }
 
-func appendResponsesToolOutput(items []json.RawMessage, result *message.ToolResult) ([]json.RawMessage, error) {
+func appendResponsesTextMessage(items []json.RawMessage, role message.Role, text string, cacheBoundary bool) ([]json.RawMessage, error) {
+	var content any = text
+	if cacheBoundary {
+		if text == "" {
+			return nil, fmt.Errorf("openai responses cache boundary requires non-empty text")
+		}
+		content = []map[string]any{{
+			"type": "input_text",
+			"text": text,
+			"prompt_cache_breakpoint": map[string]string{
+				"mode": "explicit",
+			},
+		}}
+	}
+	return appendResponsesInputItem(items, map[string]any{
+		"role":    role,
+		"content": content,
+	})
+}
+
+func appendResponsesToolOutput(items []json.RawMessage, result *message.ToolResult, cacheBoundary bool) ([]json.RawMessage, error) {
 	if result == nil {
+		if cacheBoundary {
+			return nil, fmt.Errorf("openai responses cache boundary requires a tool result")
+		}
 		return items, nil
+	}
+	var output any = result.Content
+	if cacheBoundary {
+		if result.Content == "" {
+			return nil, fmt.Errorf("openai responses cache boundary requires non-empty tool result text")
+		}
+		output = []map[string]any{{
+			"type": "input_text",
+			"text": result.Content,
+			"prompt_cache_breakpoint": map[string]string{
+				"mode": "explicit",
+			},
+		}}
 	}
 	return appendResponsesInputItem(items, map[string]any{
 		"type":    "function_call_output",
 		"call_id": result.ToolCallID,
-		"output":  result.Content,
+		"output":  output,
 	})
 }
 
@@ -466,10 +549,11 @@ func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, st
 	return provider.Event{
 		Kind: provider.EventDone,
 		Usage: provider.Usage{
-			InputTokens:       usage.InputTokens,
-			CachedInputTokens: usage.InputTokensDetails.CachedTokens,
-			OutputTokens:      usage.OutputTokens,
-			TotalTokens:       usage.TotalTokens,
+			InputTokens:           usage.InputTokens,
+			CachedInputTokens:     usage.InputTokensDetails.CachedTokens,
+			CacheWriteInputTokens: usage.InputTokensDetails.CacheWriteTokens,
+			OutputTokens:          usage.OutputTokens,
+			TotalTokens:           usage.TotalTokens,
 		},
 		StopReason:    stopReason,
 		ProviderState: state,

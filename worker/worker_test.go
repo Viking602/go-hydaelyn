@@ -1361,7 +1361,7 @@ func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
 	}
 	engine := agent.Engine{Provider: scripted.New([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: "done"},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 11, OutputTokens: 7}},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 11, CachedInputTokens: 4, CacheWriteInputTokens: 2, OutputTokens: 7}},
 	})}
 	if _, err := (AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); err != nil {
 		t.Fatalf("ExecuteEnvelope() error = %v", err)
@@ -1378,8 +1378,8 @@ func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
 	if record.TaskID != task.ID || record.AgentID != "agent-a" || record.Model != "scripted" {
 		t.Fatalf("usage record identity = %+v", record)
 	}
-	if record.InputTokens != 11 || record.OutputTokens != 7 {
-		t.Fatalf("usage tokens = %d/%d, want 11/7", record.InputTokens, record.OutputTokens)
+	if record.InputTokens != 11 || record.CachedInputTokens != 4 || record.CacheWriteInputTokens != 2 || record.OutputTokens != 7 {
+		t.Fatalf("usage tokens = %+v, want input=11 cached=4 cache-write=2 output=7", record)
 	}
 }
 

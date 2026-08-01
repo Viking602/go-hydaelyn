@@ -242,6 +242,48 @@ func TestValidateCompleteTurns(t *testing.T) {
 	}
 }
 
+func TestCachePrefixBoundary(t *testing.T) {
+	stable := NewText(RoleSystem, "stable")
+	stable.CacheBoundary = true
+	toolTurn := assistantToolMessage(ToolCall{ID: "call-1", Name: "lookup"})
+	toolTurn.Text = "checking"
+	toolTurn.CacheBoundary = true
+
+	tests := []struct {
+		name     string
+		messages []Message
+		want     int
+	}{
+		{name: "no marker", messages: []Message{NewText(RoleUser, "task")}},
+		{
+			name:     "last marker wins",
+			messages: []Message{stable, NewText(RoleUser, "task"), {Role: RoleAssistant, Text: "answer", CacheBoundary: true}},
+			want:     3,
+		},
+		{
+			name:     "tool exchange remains atomic",
+			messages: []Message{NewText(RoleSystem, "system"), toolTurn, toolResultMessage("call-1", "lookup"), NewText(RoleUser, "next")},
+			want:     3,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := CachePrefixBoundary(test.messages)
+			if err != nil {
+				t.Fatalf("CachePrefixBoundary() error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("CachePrefixBoundary() = %d, want %d", got, test.want)
+			}
+		})
+	}
+
+	if _, err := CachePrefixBoundary([]Message{assistantToolMessage(ToolCall{ID: "call-1", Name: "lookup"})}); err == nil {
+		t.Fatal("CachePrefixBoundary() accepted an incomplete tool turn")
+	}
+}
+
 func TestCompleteTurnBoundary(t *testing.T) {
 	olderGroupHistory := []Message{
 		{Role: RoleSystem, Text: "system"},

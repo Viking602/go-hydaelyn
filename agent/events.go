@@ -185,6 +185,7 @@ func validateExecutionCheckpointRecord(record ExecutionCheckpointRecord) error {
 		return fmt.Errorf("negative tool-call count %d", record.Checkpoint.ToolCallsUsed)
 	case record.Checkpoint.Usage.InputTokens < 0 ||
 		record.Checkpoint.Usage.CachedInputTokens < 0 ||
+		record.Checkpoint.Usage.CacheWriteInputTokens < 0 ||
 		record.Checkpoint.Usage.OutputTokens < 0 ||
 		record.Checkpoint.Usage.TotalTokens < 0:
 		return errors.New("negative token usage")

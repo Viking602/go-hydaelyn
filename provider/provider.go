@@ -54,26 +54,29 @@ type Metadata struct {
 }
 
 type Usage struct {
-	InputTokens       int `json:"inputTokens,omitempty"`
-	CachedInputTokens int `json:"cachedInputTokens,omitempty"`
-	OutputTokens      int `json:"outputTokens,omitempty"`
-	TotalTokens       int `json:"totalTokens,omitempty"`
+	InputTokens           int `json:"inputTokens,omitempty"`
+	CachedInputTokens     int `json:"cachedInputTokens,omitempty"`
+	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
+	OutputTokens          int `json:"outputTokens,omitempty"`
+	TotalTokens           int `json:"totalTokens,omitempty"`
 }
 
 func (u Usage) Add(v Usage) Usage {
 	u = normalizedUsage(u)
 	v = normalizedUsage(v)
 	return Usage{
-		InputTokens:       saturatingTokenAdd(u.InputTokens, v.InputTokens),
-		CachedInputTokens: saturatingTokenAdd(u.CachedInputTokens, v.CachedInputTokens),
-		OutputTokens:      saturatingTokenAdd(u.OutputTokens, v.OutputTokens),
-		TotalTokens:       saturatingTokenAdd(u.TotalTokens, v.TotalTokens),
+		InputTokens:           saturatingTokenAdd(u.InputTokens, v.InputTokens),
+		CachedInputTokens:     saturatingTokenAdd(u.CachedInputTokens, v.CachedInputTokens),
+		CacheWriteInputTokens: saturatingTokenAdd(u.CacheWriteInputTokens, v.CacheWriteInputTokens),
+		OutputTokens:          saturatingTokenAdd(u.OutputTokens, v.OutputTokens),
+		TotalTokens:           saturatingTokenAdd(u.TotalTokens, v.TotalTokens),
 	}
 }
 
 func normalizedUsage(usage Usage) Usage {
 	usage.InputTokens = max(0, usage.InputTokens)
 	usage.CachedInputTokens = min(max(0, usage.CachedInputTokens), usage.InputTokens)
+	usage.CacheWriteInputTokens = min(max(0, usage.CacheWriteInputTokens), usage.InputTokens)
 	usage.OutputTokens = max(0, usage.OutputTokens)
 	usage.TotalTokens = max(max(0, usage.TotalTokens), saturatingTokenAdd(usage.InputTokens, usage.OutputTokens))
 	return usage

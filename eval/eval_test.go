@@ -190,11 +190,11 @@ func TestEvalRunMatrix_EmptyParamsRunsEachCaseOnce(t *testing.T) {
 
 func TestSummarizeUsage_FoldsRecords(t *testing.T) {
 	records := []api.UsageRecord{
-		{InputTokens: 10, OutputTokens: 5, ToolCalls: 1, Credits: 2, DurationMS: 100},
-		{InputTokens: 3, OutputTokens: 7, ToolCalls: 2, Credits: 4, DurationMS: 50},
+		{InputTokens: 10, CachedInputTokens: 4, CacheWriteInputTokens: 2, OutputTokens: 5, ToolCalls: 1, Credits: 2, DurationMS: 100},
+		{InputTokens: 3, CachedInputTokens: 1, CacheWriteInputTokens: 1, OutputTokens: 7, ToolCalls: 2, Credits: 4, DurationMS: 50},
 	}
 	got := eval.SummarizeUsage(records)
-	want := eval.UsageSummary{Records: 2, InputTokens: 13, OutputTokens: 12, ToolCalls: 3, Credits: 6, DurationMS: 150}
+	want := eval.UsageSummary{Records: 2, InputTokens: 13, CachedInputTokens: 5, CacheWriteInputTokens: 3, OutputTokens: 12, ToolCalls: 3, Credits: 6, DurationMS: 150}
 	if got != want {
 		t.Fatalf("SummarizeUsage = %+v, want %+v", got, want)
 	}

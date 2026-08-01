@@ -701,22 +701,23 @@ type CapabilitySelector struct {
 // Spec anchor: docs/product-spec/v0.8.0/06-usage-metering.md (detailed
 // fields may be added there; this is the v0.8.0 baseline).
 type UsageRecord struct {
-	ID                string            `json:"id"`
-	RunID             string            `json:"runId"`
-	TaskID            string            `json:"taskId,omitempty"`
-	AgentID           string            `json:"agentId,omitempty"`
-	Provider          string            `json:"provider,omitempty"`
-	Model             string            `json:"model,omitempty"`
-	InputTokens       int               `json:"inputTokens,omitempty"`
-	OutputTokens      int               `json:"outputTokens,omitempty"`
-	CachedInputTokens int               `json:"cachedInputTokens,omitempty"`
-	TotalTokens       int               `json:"totalTokens,omitempty"`
-	ToolCalls         int               `json:"toolCalls,omitempty"`
-	Steps             int               `json:"steps,omitempty"`
-	DurationMS        int64             `json:"durationMs,omitempty"`
-	Credits           int64             `json:"credits,omitempty"`
-	Metadata          map[string]string `json:"metadata,omitempty"`
-	CreatedAt         time.Time         `json:"createdAt"`
+	ID                    string            `json:"id"`
+	RunID                 string            `json:"runId"`
+	TaskID                string            `json:"taskId,omitempty"`
+	AgentID               string            `json:"agentId,omitempty"`
+	Provider              string            `json:"provider,omitempty"`
+	Model                 string            `json:"model,omitempty"`
+	InputTokens           int               `json:"inputTokens,omitempty"`
+	OutputTokens          int               `json:"outputTokens,omitempty"`
+	CachedInputTokens     int               `json:"cachedInputTokens,omitempty"`
+	CacheWriteInputTokens int               `json:"cacheWriteInputTokens,omitempty"`
+	TotalTokens           int               `json:"totalTokens,omitempty"`
+	ToolCalls             int               `json:"toolCalls,omitempty"`
+	Steps                 int               `json:"steps,omitempty"`
+	DurationMS            int64             `json:"durationMs,omitempty"`
+	Credits               int64             `json:"credits,omitempty"`
+	Metadata              map[string]string `json:"metadata,omitempty"`
+	CreatedAt             time.Time         `json:"createdAt"`
 }
 
 // UsageSelector filters UsageStore.Query.

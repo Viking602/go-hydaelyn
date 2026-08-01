@@ -56,22 +56,23 @@ type CapabilitySelector struct {
 
 // UsageRecord mirrors api.UsageRecord. Append-only metering datum.
 type UsageRecord struct {
-	ID                string
-	RunID             string
-	TaskID            string
-	AgentID           string
-	Provider          string
-	Model             string
-	InputTokens       int
-	OutputTokens      int
-	CachedInputTokens int
-	TotalTokens       int
-	ToolCalls         int
-	Steps             int
-	DurationMS        int64
-	Credits           int64
-	Metadata          map[string]string
-	CreatedAt         time.Time
+	ID                    string
+	RunID                 string
+	TaskID                string
+	AgentID               string
+	Provider              string
+	Model                 string
+	InputTokens           int
+	OutputTokens          int
+	CachedInputTokens     int
+	CacheWriteInputTokens int
+	TotalTokens           int
+	ToolCalls             int
+	Steps                 int
+	DurationMS            int64
+	Credits               int64
+	Metadata              map[string]string
+	CreatedAt             time.Time
 }
 
 // UsageSelector mirrors api.UsageSelector.
