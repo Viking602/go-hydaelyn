@@ -829,6 +829,82 @@ func TestGovernedToolBusPersistsActionAttempt(t *testing.T) {
 	}
 }
 
+func TestGovernedToolBusKeepsDirectNonIdempotentCallsDistinct(t *testing.T) {
+	ctx, bus, driver := newGovernedActionBus(t, "run-direct-action-identity")
+	arguments := json.RawMessage(`{"value":1}`)
+	for _, callID := range []string{"direct-call-1", "direct-call-2"} {
+		result, err := bus.Execute(ctx, tool.Call{
+			ID: callID, Name: "write", Arguments: arguments,
+		}, nil)
+		if err != nil || result.IsError {
+			t.Fatalf("Execute(%s) result=%#v error=%v", callID, result, err)
+		}
+	}
+	if driver.calls != 2 {
+		t.Fatalf("direct driver calls = %d, want two distinct operations", driver.calls)
+	}
+}
+
+func TestGovernedToolBusRestoresCachedTerminalFailureStatus(t *testing.T) {
+	ctx, bus, driver := newGovernedActionBus(t, "run-cached-action-failure")
+	driver.err = errors.Join(tool.ErrNotExecuted, context.Canceled)
+	call := tool.Call{
+		ID: "failed-call", OperationID: "turn:0:call:0",
+		Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+	}
+	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, tool.ErrNotExecuted) {
+		t.Fatalf("initial Execute() error = %v, want ErrNotExecuted", err)
+	}
+	driver.err = nil
+	call.ID = "failed-call-retry"
+	restored, err := bus.Execute(ctx, call, nil)
+	if err != nil {
+		t.Fatalf("cached Execute() error = %v", err)
+	}
+	if !restored.IsError ||
+		restored.ToolCallID != call.ID ||
+		restored.Name != call.Name ||
+		driver.calls != 1 {
+		t.Fatalf("cached failure = %#v, driver calls=%d", restored, driver.calls)
+	}
+}
+
+func newGovernedActionBus(t *testing.T, runID string) (context.Context, GovernedToolBus, *recordingTool) {
+	t.Helper()
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "action-task", OwnerAgentID: "agent-a", AllowsAction: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: envelope.ID,
+		HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v error=%v", lease, acquired, err)
+	}
+	driver := &recordingTool{definition: tool.Definition{
+		Name: "write", EffectType: tool.EffectWrite, RequiresActionTask: true,
+	}}
+	return ctx, GovernedToolBus{
+		Runner: runner, Bus: tool.NewBus(driver), RunID: run.ID, TaskID: task.ID,
+		LeaseID: lease.ID, HolderType: lease.HolderType, HolderID: lease.HolderID, TaskVersion: task.Version,
+	}, driver
+}
+
 func TestAgentWorkerResumesReconciledActionFromCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()

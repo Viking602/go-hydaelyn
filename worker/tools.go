@@ -130,17 +130,14 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 	}
 	inputHash := fmt.Sprintf("%x", sha256.Sum256(canonicalArguments))
 	idempotencyKey := call.ID
-	if !d.definition.Idempotent {
+	if !d.definition.Idempotent && call.OperationID != "" {
 		// The agent loop assigns a stable logical slot before dispatch. A
 		// provider may regenerate its call ID after a crash, but the same turn
 		// and call position retain OperationID. InputHash then rejects a changed
-		// operation at that slot instead of replaying it under a new key.
-		if call.OperationID != "" {
-			idempotencyKey = "operation:" + call.OperationID
-		} else {
-			// Compatibility for direct callers that do not run through Engine.
-			idempotencyKey = "input:" + inputHash
-		}
+		// operation at that slot instead of replaying it under a new key. Direct
+		// callers have no durable slot, so their distinct call IDs remain
+		// distinct even when their arguments match.
+		idempotencyKey = "operation:" + call.OperationID
 	}
 	requestedAttemptID, err := newAttemptID()
 	if err != nil {
@@ -225,6 +222,10 @@ func terminalAttemptOutput(call tool.Call, attempt api.ActionAttempt) (tool.Resu
 				return tool.Result{}, false
 			}
 			result.ToolCallID = call.ID
+			if result.Name == "" {
+				result.Name = call.Name
+			}
+			result.IsError = result.IsError || attempt.Status != api.ActionAttemptSucceeded
 			return result, true
 		}
 		content := attempt.ExternalResultRef

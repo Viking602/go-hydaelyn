@@ -183,9 +183,15 @@ func (r TeamRunner) resumePendingInstances(
 		switch task.Status {
 		case api.TaskStatusCompleted:
 			instance.State = multiagent.InstanceStateFinished
+			if err := r.saveState(context.WithoutCancel(ctx), state, true); err != nil {
+				return state, err
+			}
 			continue
 		case api.TaskStatusFailed, api.TaskStatusBlocked, api.TaskStatusCancelled:
 			instance.State = multiagent.InstanceStateFailed
+			if err := r.saveState(context.WithoutCancel(ctx), state, true); err != nil {
+				return state, err
+			}
 			continue
 		case api.TaskStatusReconcileRequired:
 			return state, api.ErrActionReconcileRequired

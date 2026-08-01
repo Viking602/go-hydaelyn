@@ -160,6 +160,91 @@ func TestTeamRunnerResumesPendingInstanceWithDistinctAgentClass(t *testing.T) {
 	}
 }
 
+func TestTeamRunnerPersistsTerminalInstanceRecoveredFromChildTask(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-team-terminal-child-recovery", RootTaskID: "root", Request: "resume",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+		t.Fatalf("AdvanceRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "child", Goal: "finish",
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	state := multiagent.TeamState{
+		RunID: run.ID,
+		Tick:  1,
+		Tasks: []api.Task{task},
+		Instances: []multiagent.AgentInstance{{
+			ID: "instance-1", ClassName: "worker", AgentClassName: "worker",
+			RunID: run.ID, TaskID: task.ID, State: multiagent.InstanceStatePending,
+		}},
+	}
+	teamRunner := TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(_ context.Context, current multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			if current.Instances[0].State != multiagent.InstanceStateFinished {
+				t.Fatalf("scheduler received stale instance: %#v", current.Instances[0])
+			}
+			return nil, nil
+		})},
+	}
+	if err := teamRunner.saveState(ctx, state, false); err != nil {
+		t.Fatalf("saveState() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: envelope.ID,
+		HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v error=%v", lease, acquired, err)
+	}
+	if err := runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
+		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
+		HolderType: lease.HolderType, HolderID: lease.HolderID, TaskVersion: lease.TaskVersion,
+		Report: api.TypedReport{Status: api.ReportStatusSuccess, Summary: "done"},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport(child) error = %v", err)
+	}
+
+	result, err := teamRunner.Resume(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result.State.Instances[0].State != multiagent.InstanceStateFinished {
+		t.Fatalf("recovered result = %#v", result.State.Instances[0])
+	}
+	persisted, err := teamRunner.loadState(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if persisted.Instances[0].State != multiagent.InstanceStateFinished ||
+		persisted.Tasks[0].Status != api.TaskStatusCompleted {
+		t.Fatalf("persisted recovered state = %#v", persisted)
+	}
+	terminal, err := teamRunner.Resume(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("terminal Resume() error = %v", err)
+	}
+	if terminal.State.Instances[0].State != multiagent.InstanceStateFinished {
+		t.Fatalf("terminal Resume() returned stale state: %#v", terminal.State.Instances[0])
+	}
+}
+
 func TestRunnerExecutorPersistsTypedHandoff(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
