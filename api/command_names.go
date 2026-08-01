@@ -20,6 +20,10 @@ func (HeartbeatTaskExecutionCommand) CommandName() string { return "task_executi
 
 func (ReleaseTaskExecutionCommand) CommandName() string { return "task_execution.release" }
 
+func (AppendTaskExecutionEventCommand) CommandName() string {
+	return "task_execution.event.append"
+}
+
 func (AckEnvelopeCommand) CommandName() string { return "mailbox.ack" }
 
 func (DeadLetterCommand) CommandName() string { return "mailbox.dead_letter" }
@@ -47,6 +51,8 @@ func (RecoverResumeTokenCommand) CommandName() string { return "resume_token.rec
 func (StartActionAttemptCommand) CommandName() string { return "action_attempt.start" }
 
 func (CompleteActionAttemptCommand) CommandName() string { return "action_attempt.complete" }
+
+func (ResolveActionAttemptCommand) CommandName() string { return "action_attempt.resolve" }
 
 func (StartTraceSpanCommand) CommandName() string { return "trace.start" }
 

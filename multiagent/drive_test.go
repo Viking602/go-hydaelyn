@@ -50,6 +50,38 @@ func TestDriveRunsSequentialToCompletion(t *testing.T) {
 	}
 }
 
+func TestDrivePersistsDistinctAgentClassIdentity(t *testing.T) {
+	scheduler := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		return []Dispatch{{
+			To:             "instance-1",
+			ClassName:      "draft-slot",
+			AgentClassName: "writer",
+			Task: api.Task{
+				ID:    "run-1-draft",
+				RunID: "run-1",
+			},
+		}}, nil
+	})
+	result, err := Drive(context.Background(), "run-1", scheduler, ExecutorFunc(
+		func(context.Context, Dispatch) (api.TypedReport, error) {
+			return api.TypedReport{Status: api.ReportStatusSuccess}, nil
+		},
+	), DriveOptions{})
+	if err != nil {
+		t.Fatalf("Drive error = %v", err)
+	}
+	if len(result.State.Instances) != 1 {
+		t.Fatalf("instances = %#v, want one", result.State.Instances)
+	}
+	instance := result.State.Instances[0]
+	if instance.ClassName != "draft-slot" || instance.AgentClassName != "writer" {
+		t.Fatalf("persisted instance identity = %#v", instance)
+	}
+}
+
 func TestDriveRoutesThenTerminates(t *testing.T) {
 	scheduler := RouterScheduler{
 		Entry:              AgentClass{Name: "triage"},
@@ -105,6 +137,22 @@ func TestDriveSurfacesExecutorErrorAsFailedInstance(t *testing.T) {
 	}
 	if len(result.State.Instances) != 1 || result.State.Instances[0].State != InstanceStateFailed {
 		t.Fatalf("expected one failed instance, got %#v", result.State.Instances)
+	}
+}
+
+func TestDriveContainsExecutorPanicAsFailedInstance(t *testing.T) {
+	scheduler := SequentialScheduler{Classes: []AgentClass{{Name: "a"}}}
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		panic("provider adapter bug")
+	})
+	result, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
+	if !errors.Is(err, ErrExecutorPanic) {
+		t.Fatalf("Drive error = %v, want ErrExecutorPanic", err)
+	}
+	if len(result.State.Instances) != 1 ||
+		result.State.Instances[0].State != InstanceStateFailed ||
+		result.State.Tasks[0].Status != api.TaskStatusFailed {
+		t.Fatalf("panic result = %#v", result.State)
 	}
 }
 

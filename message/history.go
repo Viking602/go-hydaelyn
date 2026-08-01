@@ -106,6 +106,37 @@ func CompleteTurnBoundary(messages []Message, preferredStart int) (start int, er
 	return start, nil
 }
 
+// CachePrefixBoundary returns the number of leading messages protected by the
+// last CacheBoundary marker. If the marker falls inside a tool exchange, the
+// whole exchange is protected. The full history is validated first.
+func CachePrefixBoundary(messages []Message) (int, error) {
+	if err := ValidateCompleteTurns(messages); err != nil {
+		return 0, err
+	}
+	boundary := 0
+	for index, msg := range messages {
+		if msg.CacheBoundary {
+			boundary = index + 1
+		}
+	}
+	if boundary == 0 {
+		return 0, nil
+	}
+	for index := 0; index < len(messages); {
+		callCount := len(messages[index].ToolCalls)
+		if callCount == 0 {
+			index++
+			continue
+		}
+		groupEnd := index + callCount + 1
+		if boundary > index && boundary < groupEnd {
+			return groupEnd, nil
+		}
+		index = groupEnd
+	}
+	return boundary, nil
+}
+
 func unmatchedCallIndex(calls []ToolCall, matched []bool, callIndexes map[string]int, resultID string) int {
 	if resultID != "" {
 		if index, exists := callIndexes[resultID]; exists && !matched[index] {

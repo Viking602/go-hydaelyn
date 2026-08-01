@@ -105,6 +105,12 @@ type LeaseStore interface {
 	// is the task's latest active, unexpired lease and its current holder
 	// equals workerID. Returns (false, nil) otherwise.
 	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
+	// ReleaseExpiredLease atomically releases leaseID if and only if it is
+	// still the latest active lease for its task, its Version equals
+	// expectedVersion, and its expiry is not after releasedAt. A successful
+	// release increments Version. Returns (false, nil) when any condition no
+	// longer holds.
+	ReleaseExpiredLease(ctx context.Context, leaseID string, expectedVersion uint64, releasedAt time.Time) (bool, error)
 }
 
 type ApprovalStore interface {
@@ -130,6 +136,14 @@ type ActionAttemptStore interface {
 	SaveActionAttempt(context.Context, ActionAttempt) error
 	LoadActionAttempt(context.Context, string) (ActionAttempt, error)
 	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (ActionAttempt, error)
+	ListActionAttempts(context.Context, ActionAttemptSelector) ([]ActionAttempt, error)
+	// ResolveActionAttempt atomically replaces an unknown reconciliation
+	// candidate. It succeeds only when the stored attempt has the same ID,
+	// Status == ActionAttemptUnknown, and RequiresReconcile == true. The
+	// replacement must preserve identity fields, set a terminal non-unknown
+	// status, and clear RequiresReconcile. Returns false on a compare-and-swap
+	// conflict.
+	ResolveActionAttempt(context.Context, ActionAttempt) (bool, error)
 }
 
 // AgentProfileStore persists the framework-level identity of agents.

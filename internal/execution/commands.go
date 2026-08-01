@@ -26,6 +26,19 @@ type ReleaseTaskExecutionCommand struct {
 	HolderID string
 }
 
+type AppendTaskExecutionEventCommand struct {
+	RunID       string
+	TaskID      string
+	LeaseID     string
+	HolderType  model.HolderType
+	HolderID    string
+	TaskVersion int
+	Event       model.Event
+}
+
 func (AcquireTaskExecutionCommand) CommandName() string   { return "task_execution.acquire" }
 func (HeartbeatTaskExecutionCommand) CommandName() string { return "task_execution.heartbeat" }
 func (ReleaseTaskExecutionCommand) CommandName() string   { return "task_execution.release" }
+func (AppendTaskExecutionEventCommand) CommandName() string {
+	return "task_execution.event.append"
+}

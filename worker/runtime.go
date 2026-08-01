@@ -29,7 +29,7 @@ type EnvelopePoller interface {
 // engine-selection logic. AgentWorker satisfies this interface via its
 // ExecuteEnvelope method — see Runtime.NewFromAgentWorker.
 type EnvelopeExecutor interface {
-	ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) error
+	ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (ExecutionOutcome, error)
 }
 
 // PollerFunc adapts an ordinary function into an EnvelopePoller. Useful
@@ -42,10 +42,10 @@ func (f PollerFunc) Poll(ctx context.Context, batchSize int) ([]api.TaskEnvelope
 }
 
 // ExecutorFunc adapts an ordinary function into an EnvelopeExecutor.
-type ExecutorFunc func(ctx context.Context, req ExecuteEnvelopeRequest) error
+type ExecutorFunc func(ctx context.Context, req ExecuteEnvelopeRequest) (ExecutionOutcome, error)
 
 // ExecuteEnvelope satisfies EnvelopeExecutor.
-func (f ExecutorFunc) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) error {
+func (f ExecutorFunc) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (ExecutionOutcome, error) {
 	return f(ctx, req)
 }
 
@@ -213,7 +213,7 @@ func (r *Runtime) run(ctx context.Context) error {
 			go func(env api.TaskEnvelope) {
 				defer r.wg.Done()
 				defer func() { <-sem }()
-				if err := r.executor.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
+				if _, err := r.executor.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
 					Envelope: env,
 					TTL:      r.opts.PerEnvelopeTTL,
 				}); err != nil {

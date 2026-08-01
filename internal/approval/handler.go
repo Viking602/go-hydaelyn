@@ -2,19 +2,25 @@ package approval
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	commandbus "github.com/Viking602/venat/internal/command"
 	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
+	"github.com/Viking602/venat/internal/eventpayload"
 	"github.com/Viking602/venat/internal/lifecycle"
 )
 
 type Factory func(model.Task, string, string) (model.ApprovalRequest, model.ResumeToken)
 
+type IDGenerator func(string) string
+
 type HandlerOptions struct {
 	NewApproval Factory
+	NewID       IDGenerator
 }
 
 // RequestApprovalResult is the typed result returned by RequestApprovalCommand.
@@ -27,7 +33,7 @@ type RequestApprovalResult struct {
 
 func RegisterHandlers(bus *commandbus.Bus, options HandlerOptions) {
 	commandbus.Register[RequestApprovalCommand](bus, requestApprovalHandler{options: options})
-	commandbus.Register[DecideApprovalCommand](bus, decideApprovalHandler{})
+	commandbus.Register[DecideApprovalCommand](bus, decideApprovalHandler{options: options})
 	commandbus.Register[RecoverResumeTokenCommand](bus, recoverResumeTokenHandler{})
 }
 
@@ -35,6 +41,7 @@ type decideApprovalResult struct {
 	Approval      model.ApprovalRequest
 	Task          model.Task
 	Run           model.Run
+	Envelope      model.TaskEnvelope
 	TaskResumed   bool
 	RunTransition bool
 }
@@ -58,6 +65,7 @@ func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork
 	approval.ActionID = cmd.ActionID
 	approval.RiskSummary = cmd.RiskSummary
 	approval.RequestedAction = cmd.RequestedAction
+	approval.Metadata = maps.Clone(cmd.Metadata)
 	if err := uow.Approvals().SaveApproval(ctx, approval); err != nil {
 		return nil, err
 	}
@@ -73,11 +81,11 @@ func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork
 	return RequestApprovalResult{Approval: approval, Token: token}, nil
 }
 
-type decideApprovalHandler struct{}
+type decideApprovalHandler struct{ options HandlerOptions }
 
 func (decideApprovalHandler) Name() string { return DecideApprovalCommand{}.CommandName() }
 
-func (decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd DecideApprovalCommand) (any, error) {
+func (h decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd DecideApprovalCommand) (any, error) {
 	approval, err := uow.Approvals().LoadApproval(ctx, cmd.ApprovalID)
 	if err != nil {
 		return nil, err
@@ -104,6 +112,35 @@ func (decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork, c
 		if err := uow.Tasks().SaveTask(ctx, nextTask); err != nil {
 			return nil, err
 		}
+		envelopeID := "env-" + approval.ApprovalID
+		if h.options.NewID != nil {
+			envelopeID = h.options.NewID("env")
+		}
+		envelope := model.TaskEnvelope{
+			ID:              envelopeID,
+			RunID:           nextTask.RunID,
+			TaskID:          nextTask.ID,
+			TargetAgentID:   nextTask.OwnerAgentID,
+			TargetComponent: nextTask.OwnerComponent,
+			Type:            "TaskEnvelope",
+			Status:          "pending",
+			TaskVersion:     nextTask.Version,
+			ReadSelectors:   slices.Clone(nextTask.ReadSelectors),
+			WriteTargets:    slices.Clone(nextTask.WriteTargets),
+			RetryPolicy:     nextTask.RetryPolicy,
+			CreatedAt:       time.Now().UTC(),
+		}
+		if err := uow.MailboxOutbox().QueueEnvelope(ctx, envelope); err != nil {
+			return nil, err
+		}
+		if err := uow.Events().AppendEvent(ctx, model.Event{
+			RunID: envelope.RunID, TaskID: envelope.TaskID, Type: model.EventTaskDispatched,
+			Payload:    map[string]any{"reason": "approval_resolved", "task": eventpayload.Task(nextTask), "envelope": eventpayload.Envelope(envelope)},
+			RecordedAt: time.Now().UTC(),
+		}); err != nil {
+			return nil, err
+		}
+		result.Envelope = envelope
 		result.Task = nextTask
 		result.TaskResumed = true
 	} else if err != nil {

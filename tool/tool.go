@@ -10,12 +10,18 @@ import (
 	"github.com/Viking602/venat/message"
 )
 
-type Definition = message.ToolDefinition
-type Schema = message.JSONSchema
-type Call = message.ToolCall
-type Result = message.ToolResult
-type EffectType = message.ToolEffectType
-type RetryPolicy = message.ToolRetryPolicy
+type (
+	Definition  = message.ToolDefinition
+	Schema      = message.JSONSchema
+	Call        = message.ToolCall
+	Result      = message.ToolResult
+	EffectType  = message.ToolEffectType
+	RetryPolicy = message.ToolRetryPolicy
+)
+
+// ErrNotExecuted marks a tool error that occurred before the underlying
+// operation started. Durable action recovery may safely record it as failed.
+var ErrNotExecuted = errors.New("tool operation was not executed")
 
 const (
 	EffectReadOnly           = message.ToolEffectReadOnly
@@ -45,6 +51,26 @@ type UpdateSink func(Update) error
 type Driver interface {
 	Definition() Definition
 	Execute(ctx context.Context, call Call, sink UpdateSink) (Result, error)
+}
+
+// PreparedExecution is the result of a side-effecting tool's preflight phase.
+// Complete means Result is final and the underlying operation must not be
+// journaled or executed. Otherwise Execute performs the already-authorized
+// operation after the durable action attempt has started.
+type PreparedExecution struct {
+	Call     Call
+	Result   Result
+	Complete bool
+	Execute  func(context.Context) (Result, error)
+}
+
+// PreparingDriver separates interactive authorization and input preparation
+// from the actual side effect. Durable workers run Prepare before creating an
+// action attempt, so a crash while waiting for approval cannot create a false
+// unknown outcome.
+type PreparingDriver interface {
+	Driver
+	Prepare(context.Context, Call, UpdateSink) (PreparedExecution, error)
 }
 
 var ErrToolNotFound = errors.New("tool not found")
@@ -228,7 +254,16 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 		succeeded := make([]Result, 0, len(results))
 		for index := range results {
 			if errs[index] == nil {
-				succeeded = append(succeeded, results[index])
+				result := results[index]
+				// Preserve the original call slot before compacting survivors.
+				// Callers cannot recover this mapping from the compacted index.
+				if result.ToolCallID == "" {
+					result.ToolCallID = calls[index].ID
+				}
+				if result.Name == "" {
+					result.Name = calls[index].Name
+				}
+				succeeded = append(succeeded, result)
 			}
 		}
 		return succeeded, err

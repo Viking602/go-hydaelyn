@@ -198,11 +198,11 @@ func TaskEnvelopesFromModel(in []model.TaskEnvelope) []api.TaskEnvelope {
 }
 
 func RetryPolicyToModel(in api.RetryPolicy) model.RetryPolicy {
-	return model.RetryPolicy{MaxAttempts: in.MaxAttempts, Backoff: in.Backoff}
+	return model.RetryPolicy{MaxAttempts: in.MaxAttempts, Backoff: in.Backoff, MaxBackoff: in.MaxBackoff}
 }
 
 func RetryPolicyFromModel(in model.RetryPolicy) api.RetryPolicy {
-	return api.RetryPolicy{MaxAttempts: in.MaxAttempts, Backoff: in.Backoff}
+	return api.RetryPolicy{MaxAttempts: in.MaxAttempts, Backoff: in.Backoff, MaxBackoff: in.MaxBackoff}
 }
 
 func TaskBudgetPtrToModel(in *api.TaskBudget) *model.TaskBudget {

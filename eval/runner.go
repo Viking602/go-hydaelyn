@@ -261,7 +261,7 @@ func executeRun(ctx context.Context, c EvalCase, h Harness) (api.Run, error) {
 
 	engine := agent.Engine{Provider: scripted.New(script)}
 	executor := worker.AgentWorker{Runner: runner, Engine: engine, AgentID: agentID, Model: model}
-	if err := executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env}); err != nil {
+	if _, err := executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env}); err != nil {
 		return run, fmt.Errorf("ExecuteEnvelope: %w", err)
 	}
 

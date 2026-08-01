@@ -135,6 +135,10 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if client == nil {
 		client = http.DefaultClient
 	}
+	idempotencyKey, err := shared.NewIdempotencyKey()
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: generate idempotency key: %w", err)
+	}
 	// Stream initiation is retried (never mid-stream): the request body is
 	// rebuilt per attempt and transient 429/5xx responses back off per
 	// Config.Retry.
@@ -146,6 +150,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		req.Header.Set("x-api-key", apiKey)
 		req.Header.Set("anthropic-version", d.config.Version)
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", idempotencyKey)
 		if len(d.config.Betas) > 0 {
 			req.Header.Set("anthropic-beta", strings.Join(d.config.Betas, ","))
 		}
@@ -157,7 +162,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
 		payload, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic api error: %s", strings.TrimSpace(string(payload)))
+		return nil, provider.NewHTTPError("anthropic", resp.StatusCode, strings.TrimSpace(string(payload)))
 	}
 	return &anthropicStream{
 		body: resp.Body,
@@ -256,9 +261,28 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 				StopReason: s.state.stopReason,
 			}, nil
 		case "error":
-			return provider.Event{}, fmt.Errorf("anthropic stream error: %s: %s", parsed.Error.Type, parsed.Error.Message)
+			return provider.Event{}, anthropicError(parsed.Error.Type, parsed.Error.Message)
 		}
 	}
+}
+
+func anthropicError(errorType, message string) error {
+	kind := provider.ErrorUnknown
+	switch errorType {
+	case "overloaded_error", "api_error":
+		kind = provider.ErrorServer
+	case "rate_limit_error":
+		kind = provider.ErrorRateLimit
+	case "invalid_request_error":
+		kind = provider.ErrorInvalidRequest
+	case "authentication_error":
+		kind = provider.ErrorAuthentication
+	case "permission_error":
+		kind = provider.ErrorPermission
+	case "not_found_error":
+		kind = provider.ErrorNotFound
+	}
+	return &provider.Error{Provider: "anthropic", Kind: kind, Code: errorType, Message: message}
 }
 
 func (s *anthropicStream) Close() error {

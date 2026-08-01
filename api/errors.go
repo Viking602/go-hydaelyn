@@ -22,6 +22,7 @@ var (
 	ErrCompletionCriteriaUnmet = errors.New("orchestrator: completion criteria unmet")
 	ErrDependencyUnmet         = errors.New("orchestrator: dependency unmet")
 	ErrDependencyFailed        = errors.New("orchestrator: dependency failed")
+	ErrCheckpointLimitExceeded = errors.New("orchestrator: execution checkpoint limit exceeded")
 	ErrInvalidConfiguration    = errors.New("orchestrator: invalid configuration")
 	ErrInvalidAddress          = errors.New("orchestrator: invalid address")
 	ErrNoRecipients            = errors.New("orchestrator: address resolved to zero recipients")

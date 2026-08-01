@@ -1,5 +1,41 @@
 # Migration Notes
 
+## OpenAI provider default: Responses API
+
+An empty `openai.Config.WireAPI` now selects `/responses` instead of
+`/chat/completions`. The default model catalog is now `gpt-5.6-sol`,
+`gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.3-codex`.
+
+Applications that depend on an OpenAI-compatible Chat Completions endpoint must
+opt in explicitly:
+
+```go
+driver := openai.New(openai.Config{
+	APIKey:  os.Getenv("OPENAI_API_KEY"),
+	BaseURL: compatibleEndpoint,
+	WireAPI: openai.WireChatCompletions,
+})
+```
+
+For Responses requests:
+
+- remove `StopSequences`, which the Responses API does not support;
+- use `openai.ResponsesOptions.ExtraBody()` for output limits, storage,
+  prompt-cache, reasoning, and text-verbosity controls;
+- Responses requests send `store: false` by default; set
+  `ResponsesOptions.Store` to `true` only to opt into provider-side retention;
+- preserve `message.Message.ProviderState` across persistence and resume so
+  encrypted reasoning and function-call items can be replayed;
+- use `message.Message.CacheBoundary` only when an explicit cache breakpoint is
+  required; automatic OpenAI prefix caching needs no marker;
+- read `CachedInputTokens` for cache hits and `CacheWriteInputTokens` for cache
+  creation usage.
+- update column-mapped `api.UsageStore` implementations to persist the additive
+  `cacheWriteInputTokens` field.
+
+See [Runtime Extension Points](extensions.md#openai-wire-apis) for the complete
+request and prompt-caching examples.
+
 ## v0.11 → v0.12 — project rename to Venat
 
 v0.12.0 moves the project from `Hydaelyn` / `go-hydaelyn` to the canonical

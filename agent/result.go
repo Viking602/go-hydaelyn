@@ -16,14 +16,15 @@ import (
 // boundary (boundaries doc Principle 6). A bare error return is rejected
 // by the v0.8.0 spec; surface failures via Result.Failure.
 type Result struct {
-	Text        string              `json:"text,omitempty"`
-	Structured  json.RawMessage     `json:"structured,omitempty"`
-	Valid       bool                `json:"valid,omitempty"`
-	RepairCount int                 `json:"repairCount,omitempty"`
-	Failure     *AgentFailure       `json:"failure,omitempty"`
-	Steps       []Step              `json:"steps,omitempty"`
-	Usage       provider.Usage      `json:"usage,omitempty"`
-	StopReason  provider.StopReason `json:"stopReason,omitempty"`
-	Messages    []message.Message   `json:"messages,omitempty"`
-	Thinking    string              `json:"thinking,omitempty"`
+	Text          string              `json:"text,omitempty"`
+	Structured    json.RawMessage     `json:"structured,omitempty"`
+	Valid         bool                `json:"valid,omitempty"`
+	RepairCount   int                 `json:"repairCount,omitempty"`
+	Failure       *AgentFailure       `json:"failure,omitempty"`
+	Steps         []Step              `json:"steps,omitempty"`
+	Usage         provider.Usage      `json:"usage,omitempty"`
+	ToolCallsUsed int                 `json:"toolCallsUsed,omitempty"`
+	StopReason    provider.StopReason `json:"stopReason,omitempty"`
+	Messages      []message.Message   `json:"messages,omitempty"`
+	Thinking      string              `json:"thinking,omitempty"`
 }

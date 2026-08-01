@@ -1,12 +1,14 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/Viking602/venat"
 	"github.com/Viking602/venat/api"
@@ -67,6 +69,34 @@ func (d governedToolDriver) Definition() tool.Definition {
 	return d.definition
 }
 
+func (d governedToolDriver) prepare(
+	ctx context.Context,
+	call tool.Call,
+	sink tool.UpdateSink,
+) (tool.Call, func(context.Context) (tool.Result, error), tool.Result, bool, error) {
+	execute := func(runCtx context.Context) (tool.Result, error) {
+		return d.driver.Execute(runCtx, call, sink)
+	}
+	preparing, ok := d.driver.(tool.PreparingDriver)
+	if !ok {
+		return call, execute, tool.Result{}, false, nil
+	}
+	prepared, err := preparing.Prepare(ctx, call, sink)
+	if prepared.Call.ID != "" {
+		call = prepared.Call
+	}
+	if err != nil {
+		return call, nil, prepared.Result, false, err
+	}
+	if prepared.Complete {
+		return call, nil, prepared.Result, true, nil
+	}
+	if prepared.Execute == nil {
+		return call, nil, tool.Result{}, false, fmt.Errorf("worker: guarded tool %q returned an empty prepared execution", call.Name)
+	}
+	return call, prepared.Execute, tool.Result{}, false, nil
+}
+
 func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
 	if d.bus.Runner == nil {
 		return d.driver.Execute(ctx, call, sink)
@@ -90,6 +120,25 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 	if call.ID == "" {
 		return tool.Result{}, fmt.Errorf("worker: guarded tool %q requires a call ID", call.Name)
 	}
+	call, execute, preparedResult, complete, err := d.prepare(ctx, call, sink)
+	if err != nil || complete {
+		return preparedResult, err
+	}
+	canonicalArguments, err := canonicalToolArguments(call.Arguments)
+	if err != nil {
+		return tool.Result{}, fmt.Errorf("worker: canonicalize guarded tool %q arguments: %w", call.Name, err)
+	}
+	inputHash := fmt.Sprintf("%x", sha256.Sum256(canonicalArguments))
+	idempotencyKey := call.ID
+	if !d.definition.Idempotent && call.OperationID != "" {
+		// The agent loop assigns a stable logical slot before dispatch. A
+		// provider may regenerate its call ID after a crash, but the same turn
+		// and call position retain OperationID. InputHash then rejects a changed
+		// operation at that slot instead of replaying it under a new key. Direct
+		// callers have no durable slot, so their distinct call IDs remain
+		// distinct even when their arguments match.
+		idempotencyKey = "operation:" + call.OperationID
+	}
 	requestedAttemptID, err := newAttemptID()
 	if err != nil {
 		return tool.Result{}, err
@@ -104,28 +153,30 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		HolderID:       d.bus.HolderID,
 		TaskVersion:    d.bus.TaskVersion,
 		ToolName:       call.Name,
-		IdempotencyKey: call.ID,
-		InputHash:      fmt.Sprintf("%x", sha256.Sum256(call.Arguments)),
+		IdempotencyKey: idempotencyKey,
+		InputHash:      inputHash,
 	})
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if attempt.AttemptID != requestedAttemptID {
+		if result, resolved := terminalAttemptOutput(call, attempt); resolved {
+			return result, nil
+		}
+		return tool.Result{}, venat.ErrActionReconcileRequired
+	}
 	if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
 		return tool.Result{}, venat.ErrActionReconcileRequired
 	}
-	if attempt.AttemptID != requestedAttemptID && !toolDefinitionIdempotent(d.definition) {
-		return tool.Result{}, venat.ErrActionReconcileRequired
-	}
 
-	result, executeErr := d.driver.Execute(ctx, call, sink)
-	status := api.ActionAttemptSucceeded
-	requiresReconcile := false
-	switch {
-	case executeErr != nil:
-		status = api.ActionAttemptUnknown
-		requiresReconcile = true
-	case result.IsError:
-		status = api.ActionAttemptFailed
+	result, executeErr := execute(ctx)
+	encodedResult, encodeErr := json.Marshal(result)
+	if encodeErr != nil {
+		executeErr = errors.Join(executeErr, fmt.Errorf("worker: encode guarded tool %q result: %w", call.Name, encodeErr))
+	}
+	status, requiresReconcile := actionAttemptCompletion(result, executeErr)
+	if requiresReconcile {
+		encodedResult = nil
 	}
 	_, completeErr := d.bus.Runner.CompleteActionAttempt(context.WithoutCancel(ctx), api.CompleteActionAttemptCommand{
 		RunID:             d.bus.RunID,
@@ -136,6 +187,8 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		TaskVersion:       d.bus.TaskVersion,
 		AttemptID:         attempt.AttemptID,
 		Status:            status,
+		ExternalResultRef: result.Content,
+		ToolResult:        encodedResult,
 		RequiresReconcile: requiresReconcile,
 	})
 	if executeErr != nil {
@@ -147,16 +200,55 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 	return result, nil
 }
 
+func actionAttemptCompletion(result tool.Result, executeErr error) (api.ActionAttemptStatus, bool) {
+	switch {
+	case errors.Is(executeErr, tool.ErrNotExecuted):
+		return api.ActionAttemptFailed, false
+	case executeErr != nil:
+		return api.ActionAttemptUnknown, true
+	case result.IsError:
+		return api.ActionAttemptFailed, false
+	default:
+		return api.ActionAttemptSucceeded, false
+	}
+}
+
+func terminalAttemptOutput(call tool.Call, attempt api.ActionAttempt) (tool.Result, bool) {
+	switch attempt.Status {
+	case api.ActionAttemptSucceeded, api.ActionAttemptFailed, api.ActionAttemptTimeout, api.ActionAttemptCancelled:
+		if len(attempt.ToolResult) > 0 {
+			var result tool.Result
+			if err := json.Unmarshal(attempt.ToolResult, &result); err != nil {
+				return tool.Result{}, false
+			}
+			result.ToolCallID = call.ID
+			if result.Name == "" {
+				result.Name = call.Name
+			}
+			result.IsError = result.IsError || attempt.Status != api.ActionAttemptSucceeded
+			return result, true
+		}
+		content := attempt.ExternalResultRef
+		if content == "" {
+			content = "durable action " + string(attempt.Status)
+		}
+		return tool.Result{
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Content:    content,
+			IsError:    attempt.Status != api.ActionAttemptSucceeded,
+		}, true
+	default:
+		return tool.Result{}, false
+	}
+}
+
 func requiresActionAttempt(def tool.Definition) bool {
 	return def.RequiresActionTask ||
 		def.RequiresApproval ||
 		def.Security.RequiresApproval ||
 		def.EffectType == tool.EffectWrite ||
 		def.EffectType == tool.EffectExternalSideEffect
-}
-
-func toolDefinitionIdempotent(def tool.Definition) bool {
-	return def.Idempotent || def.Security.Idempotent
 }
 
 func newAttemptID() (string, error) {
@@ -187,6 +279,26 @@ func toolDefinitionToRunnerTool(def tool.Definition) api.Tool {
 		PolicyTags: def.PolicyTags,
 		Metadata:   def.Metadata,
 	}
+}
+
+func canonicalToolArguments(raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 {
+		return []byte("null"), nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values")
+		}
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 func rawToolInput(raw json.RawMessage) any {

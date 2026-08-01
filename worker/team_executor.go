@@ -53,16 +53,8 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 		}
 		return *task.Result, nil
 	}
-	if e.DecorateEngine != nil {
-		engine = e.DecorateEngine(engine, dispatch, class)
-	}
-	if e.PrepareEngine != nil {
-		engine, err = e.PrepareEngine(ctx, engine, dispatch, class)
-		if err != nil {
-			return api.TypedReport{}, err
-		}
-	}
-	if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
+	engine, err = e.prepareEngine(ctx, engine, dispatch, class)
+	if err != nil {
 		return api.TypedReport{}, err
 	}
 	envelope, ok, err := taskEnvelope(ctx, e.Runner, task.RunID, task.ID, "pending")
@@ -79,25 +71,54 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 			return api.TypedReport{}, err
 		}
 	}
-	runErr := (AgentWorker{
+	if err := waitForEnvelopeReady(ctx, envelope); err != nil {
+		return api.TypedReport{}, err
+	}
+	if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
+		return api.TypedReport{}, err
+	}
+	outcome, runErr := (AgentWorker{
 		Runner:  e.Runner,
 		Engine:  engine,
 		AgentID: dispatch.To,
 		Model:   class.Model,
 		TTL:     e.TTL,
-	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope, TTL: e.TTL})
+	}).ExecuteContinuing(ctx, ExecuteEnvelopeRequest{Envelope: envelope, TTL: e.TTL})
 	persisted, loadErr := e.Runner.Task(ctx, task.RunID, task.ID)
 	if loadErr != nil {
 		return api.TypedReport{}, errors.Join(runErr, loadErr)
 	}
 	state := multiagent.InstanceStateFinished
-	if runErr != nil {
+	eventType := multiagent.EventAgentInstanceFinished
+	switch {
+	case outcome.State == ExecutionSuspended:
+		state = multiagent.InstanceStatePending
+		eventType = multiagent.EventAgentInstanceSuspended
+	case runErr != nil:
 		state = multiagent.InstanceStateFailed
 	}
-	if err := e.persistInstance(ctx, dispatch, instanceClassName, state, multiagent.EventAgentInstanceFinished); err != nil {
+	if err := e.persistInstance(ctx, dispatch, instanceClassName, state, eventType); err != nil {
 		return reportValue(persisted.Result), errors.Join(runErr, err)
 	}
+	if outcome.State == ExecutionSuspended {
+		return reportValue(persisted.Result), &multiagent.ExecutionSuspendedError{Task: persisted, Cause: runErr}
+	}
 	return reportValue(persisted.Result), runErr
+}
+
+func (e RunnerExecutor) prepareEngine(
+	ctx context.Context,
+	engine agent.Engine,
+	dispatch multiagent.Dispatch,
+	class multiagent.AgentClass,
+) (agent.Engine, error) {
+	if e.DecorateEngine != nil {
+		engine = e.DecorateEngine(engine, dispatch, class)
+	}
+	if e.PrepareEngine == nil {
+		return engine, nil
+	}
+	return e.PrepareEngine(ctx, engine, dispatch, class)
 }
 
 func dispatchWithTaskInput(dispatch multiagent.Dispatch) multiagent.Dispatch {
@@ -140,10 +161,10 @@ func (e RunnerExecutor) ensureTask(ctx context.Context, dispatch multiagent.Disp
 			return api.Task{}, err
 		}
 	}
-	return e.Runner.CreateTask(ctx, createTaskCommand(dispatch))
+	return e.Runner.CreateTask(ctx, e.createTaskCommand(dispatch))
 }
 
-func createTaskCommand(dispatch multiagent.Dispatch) api.CreateTaskCommand {
+func (e RunnerExecutor) createTaskCommand(dispatch multiagent.Dispatch) api.CreateTaskCommand {
 	task := dispatch.Task
 	return api.CreateTaskCommand{
 		RunID:              task.RunID,
@@ -169,6 +190,24 @@ func createTaskCommand(dispatch multiagent.Dispatch) api.CreateTaskCommand {
 		InputSchema:        task.InputSchema,
 		OutputSchema:       task.OutputSchema,
 		Budget:             task.Budget,
+	}
+}
+
+func waitForEnvelopeReady(ctx context.Context, envelope api.TaskEnvelope) error {
+	if envelope.NextRetryAt.IsZero() {
+		return nil
+	}
+	delay := time.Until(envelope.NextRetryAt)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

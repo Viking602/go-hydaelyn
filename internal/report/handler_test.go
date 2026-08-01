@@ -80,6 +80,29 @@ func TestSubmitTypedReportRejectsUnmetCompletionCriteria(t *testing.T) {
 	}
 }
 
+func TestRetryBackoffIsExponentialAndOverflowSafe(t *testing.T) {
+	base := 250 * time.Millisecond
+	for _, test := range []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 1, want: base},
+		{attempt: 2, want: 2 * base},
+		{attempt: 4, want: 8 * base},
+		{attempt: 0, want: base},
+	} {
+		if got := retryBackoff(base, 0, test.attempt); got != test.want {
+			t.Fatalf("retryBackoff(%s, 0, %d) = %s, want %s", base, test.attempt, got, test.want)
+		}
+	}
+	if got := retryBackoff(time.Duration(1<<62), 0, 2); got != time.Duration(1<<63-1) {
+		t.Fatalf("overflow-safe retryBackoff = %s", got)
+	}
+	if got := retryBackoff(base, 3*base, 4); got != 3*base {
+		t.Fatalf("capped retryBackoff = %s, want %s", got, 3*base)
+	}
+}
+
 func saveReportFixture(ctx context.Context, t *testing.T, uow ports.UnitOfWork, taskOverride model.Task) {
 	t.Helper()
 	task := model.Task{

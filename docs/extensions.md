@@ -73,27 +73,30 @@ Implement `agent.TargetContextManager` to receive that target in `CompactTo`.
 When the target is positive, the engine invokes `CompactTo` before every model
 request, including the first request and requests following tool results. The
 manager owns model-appropriate token estimation, returns unchanged history when
-it already fits, and must preserve complete tool turns and framework-owned skill
-context. Existing `ContextManager` implementations remain compatible; their
-`Compact` method is used as a best-effort fallback but cannot guarantee a token
-target because it does not receive one.
+it already fits, and must preserve complete tool turns, framework-owned skill
+context, and the exact prefix through the last `message.Message.CacheBoundary`.
+Existing `ContextManager` implementations remain compatible; their `Compact`
+method is used as a best-effort fallback but cannot guarantee a token target
+because it does not receive one.
 
 ## OpenAI Wire APIs
 
-The OpenAI provider uses Chat Completions by default, including when
-`Config.WireAPI` is empty. Select the Responses API explicitly for Codex models:
+The OpenAI provider uses the Responses API when `Config.WireAPI` is empty.
+Its default catalog is `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, and
+`gpt-5.3-codex`. Select Chat Completions explicitly only for a compatible
+endpoint or model that still requires it:
 
 ```go
 providerDriver := openai.New(openai.Config{
 	APIKey:  os.Getenv("OPENAI_API_KEY"),
-	WireAPI: openai.WireResponses,
+	WireAPI: openai.WireChatCompletions,
 })
 ```
 
-`openai.WireChatCompletions` selects `/chat/completions`;
-`openai.WireResponses` selects `/responses`. Selection is driver configuration,
-not model-name inference, so a request's model can change without silently
-changing its wire protocol.
+`openai.WireResponses` selects `/responses`;
+`openai.WireChatCompletions` selects `/chat/completions`. Selection is driver
+configuration, not model-name inference, so a request's model can change
+without silently changing its wire protocol.
 
 Responses requests do not support `agent.Input.StopSequences`. A non-empty stop
 sequence list returns an error before the HTTP request is sent.
@@ -117,17 +120,82 @@ result, err := engine.Run(ctx, agent.Input{
 ```
 
 The OpenAI provider appends extra fields to the JSON body after Venat builds
-its managed request. `ExtraBody` cannot override protocol-managed fields:
+its managed request. Chat Completions extras cannot override `model`,
+`messages`, `tools`, `stream`, `stream_options`, `stop`, `reasoning`, or
+`response_format`.
 
-- Chat Completions: `model`, `messages`, `tools`, `stream`, `stream_options`,
-  `stop`, `reasoning`, and `response_format`
-- Responses: `model`, `input`, `tools`, `stream`, `include`, `reasoning`, and
-  `text`
+Responses extras cannot override `model`, `input`, `tools`, `stream`,
+`instructions`, `previous_response_id`, `conversation`, or `prompt`; Venat
+owns the complete request context and replays it statelessly. Requests send
+`store: false` by default. Set `ResponsesOptions.Store` explicitly to opt into
+provider-side response retention.
 
-Responses requests always include `reasoning.encrypted_content` so opaque
-reasoning can be replayed in stateless and zero-data-retention tool loops. An
-`include` array supplied through `ExtraBody` is merged with that required value
-and deduplicated.
+`include` values are merged and deduplicated with the required
+`reasoning.encrypted_content` value. The provider also protects
+`reasoning.effort` and `text.format`, which are derived from
+`ThinkingBudget` and `ResponseFormat`; conflicting values return an error
+instead of silently winning. Other `reasoning` and `text` members are merged.
+
+Prefer `openai.ResponsesOptions` for stable Responses controls:
+
+```go
+store := false
+extraBody, err := (openai.ResponsesOptions{
+	MaxOutputTokens: 4096,
+	Store:           &store,
+	PromptCacheKey:  "tenant:agent:prompt-v2",
+	PromptCacheOptions: &openai.PromptCacheOptions{
+		Mode: openai.PromptCacheModeExplicit,
+		TTL:  openai.PromptCacheTTL30Minutes,
+	},
+	Reasoning: &openai.ResponsesReasoningOptions{
+		Summary: openai.ReasoningSummaryDetailed,
+		Mode:    openai.ReasoningModePro,
+		Context: openai.ReasoningContextAllTurns,
+	},
+	Text: &openai.ResponsesTextOptions{Verbosity: openai.TextVerbosityLow},
+}).ExtraBody()
+if err != nil {
+	return err
+}
+
+result, err := engine.Run(ctx, agent.Input{
+	Model:     "gpt-5.3-codex",
+	Messages:  messages,
+	ExtraBody: extraBody,
+})
+```
+
+The typed builder validates enum values and prevents invalid negative output
+limits. `ExtraBody` remains available for endpoint-specific fields not modeled
+by Venat.
+
+## OpenAI Prompt Caching
+
+OpenAI automatically caches eligible repeated prefixes. Use
+`PromptCacheKey` to improve routing affinity. When an application needs a
+specific stable prefix, mark the last message carrying text in that prefix:
+
+```go
+stable := message.NewText(message.RoleSystem, systemPrompt)
+stable.CacheBoundary = true
+messages := []message.Message{stable, message.NewText(message.RoleUser, task)}
+```
+
+Both OpenAI wire protocols serialize the marker on their supported text content
+block. Configure request-wide cache keys, mode, and TTL with
+`openai.ResponsesOptions` or `openai.ChatCompletionsOptions`; older models may
+support only automatic caching and reject explicit controls. The engine rejects
+custom compaction output that deletes or changes the protected prefix, and the
+built-in compactors keep it intact.
+OpenAI may create at most four new cache writes per request; historical
+breakpoints can remain in replayed context, and cache matching considers the
+latest 80 breakpoints in the conversation.
+
+`provider.Usage.CachedInputTokens` and `api.UsageRecord.CachedInputTokens`
+report cache reads. `CacheWriteInputTokens` on the same types reports cache
+writes when the provider supplies that counter. Both values flow through
+worker persistence and `eval.SummarizeUsage`.
 
 ## Opaque Provider State
 
@@ -138,6 +206,20 @@ items exactly before the following `function_call_output`. This preserves
 reasoning items, function-call identity, encrypted fields, and phased Codex
 messages across tool turns. Applications that persist or resume message history
 should preserve `ProviderState` without interpreting or rewriting it.
+
+## Provider Failure And Retry Contract
+
+Provider adapters should return `*provider.Error` (or implement
+`provider.ClassifiedError`) and map wire-specific status/code values to
+`provider.ErrorKind`. `provider.IsRetryableError` recognizes typed rate-limit,
+server, stream, network, and short-I/O failures without parsing error strings.
+
+The built-in OpenAI and Anthropic drivers retry idempotent stream initiation
+with `provider/shared.RetryPolicy`, including exponential backoff, optional
+jitter, and `Retry-After`. Custom streaming drivers can use
+`provider.OpenRetryingStream`; it retries only before response content is
+emitted. A failure after partial output is returned to the durable task layer so
+the task can resume from its checkpoint instead of replaying a partial request.
 
 ## Agent Turn Order
 

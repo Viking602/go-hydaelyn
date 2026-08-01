@@ -119,7 +119,7 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 	for _, class := range r.Team.Agents {
 		classes[class.Name] = class
 	}
-	result, driveErr := multiagent.Drive(runCtx, state.RunID, r.Team.Scheduler, RunnerExecutor{
+	executor := RunnerExecutor{
 		Runner:         r.Runner,
 		Classes:        classes,
 		BuildDeps:      r.BuildDeps,
@@ -127,17 +127,115 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 		PrepareEngine:  r.PrepareEngine,
 		DecorateEngine: r.DecorateEngine,
 		TTL:            r.TTL,
-	}, opts)
+	}
+	state, resumeErr := r.resumePendingInstances(runCtx, state, classes, executor)
+	result := multiagent.DriveResult{State: state, Ticks: state.Tick}
+	driveErr := resumeErr
+	if driveErr == nil {
+		opts.InitialState = &state
+		result, driveErr = multiagent.Drive(runCtx, state.RunID, r.Team.Scheduler, executor, opts)
+	}
 	cancel()
 	heartbeatErr := <-heartbeatDone
 	if heartbeatErr != nil {
 		driveErr = errors.Join(driveErr, heartbeatErr)
+	}
+	if errors.Is(driveErr, multiagent.ErrExecutionSuspended) {
+		releaseErr := r.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
+			LeaseID:  lease.ID,
+			HolderID: lease.HolderID,
+		})
+		return result, errors.Join(driveErr, releaseErr)
 	}
 	if driveErr == nil {
 		driveErr = checkpointFailure(result.State)
 	}
 	finalizeErr := r.finishScheduler(context.WithoutCancel(ctx), lease, driveErr)
 	return result, errors.Join(driveErr, finalizeErr)
+}
+
+func (r TeamRunner) resumePendingInstances(
+	ctx context.Context,
+	state multiagent.TeamState,
+	classes map[string]multiagent.AgentClass,
+	executor RunnerExecutor,
+) (multiagent.TeamState, error) {
+	taskIndexes := make(map[string]int, len(state.Tasks))
+	for index := range state.Tasks {
+		taskIndexes[state.Tasks[index].ID] = index
+	}
+	for instanceIndex := range state.Instances {
+		instance := &state.Instances[instanceIndex]
+		if instance.State != multiagent.InstanceStatePending && instance.State != multiagent.InstanceStateRunning {
+			continue
+		}
+		taskIndex, found := taskIndexes[instance.TaskID]
+		if !found {
+			return state, fmt.Errorf("worker: resumed instance %s is missing task %s", instance.ID, instance.TaskID)
+		}
+		task, err := r.Runner.Task(ctx, state.RunID, instance.TaskID)
+		if err != nil {
+			return state, err
+		}
+		state.Tasks[taskIndex] = task
+		switch task.Status {
+		case api.TaskStatusCompleted:
+			instance.State = multiagent.InstanceStateFinished
+			if err := r.saveState(context.WithoutCancel(ctx), state, true); err != nil {
+				return state, err
+			}
+			continue
+		case api.TaskStatusFailed, api.TaskStatusBlocked, api.TaskStatusCancelled:
+			instance.State = multiagent.InstanceStateFailed
+			if err := r.saveState(context.WithoutCancel(ctx), state, true); err != nil {
+				return state, err
+			}
+			continue
+		case api.TaskStatusReconcileRequired:
+			return state, api.ErrActionReconcileRequired
+		}
+		agentClassName := instance.AgentClassName
+		if agentClassName == "" {
+			agentClassName = instance.ClassName
+		}
+		class, ok := classes[agentClassName]
+		if !ok {
+			return state, fmt.Errorf("worker: resumed instance %s references unknown agent class %s", instance.ID, agentClassName)
+		}
+		dispatch := multiagent.Dispatch{
+			To:             instance.ID,
+			ClassName:      instance.ClassName,
+			AgentClassName: agentClassName,
+			Task:           task,
+			Input:          append(json.RawMessage(nil), task.Input...),
+			OutputPolicy: agent.OutputPolicy{
+				Schema:   append(json.RawMessage(nil), class.OutputSchema...),
+				Validate: len(class.OutputSchema) > 0,
+			},
+		}
+		_, executeErr := executor.Execute(ctx, dispatch)
+		current, loadErr := r.Runner.Task(ctx, state.RunID, task.ID)
+		if loadErr != nil {
+			return state, errors.Join(executeErr, loadErr)
+		}
+		state.Tasks[taskIndex] = current
+		if executeErr != nil {
+			if errors.Is(executeErr, multiagent.ErrExecutionSuspended) {
+				instance.State = multiagent.InstanceStatePending
+			} else {
+				instance.State = multiagent.InstanceStateFailed
+			}
+			if saveErr := r.saveState(context.WithoutCancel(ctx), state, true); saveErr != nil {
+				return state, errors.Join(executeErr, saveErr)
+			}
+			return state, executeErr
+		}
+		instance.State = multiagent.InstanceStateFinished
+		if err := r.saveState(ctx, state, true); err != nil {
+			return state, err
+		}
+	}
+	return state, nil
 }
 
 func (r TeamRunner) releaseSchedulerLease(ctx context.Context, lease api.TaskExecutionLease, cause error) error {

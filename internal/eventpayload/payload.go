@@ -73,12 +73,13 @@ func Envelope(env model.TaskEnvelope) map[string]any {
 }
 
 func RetryPolicy(policy model.RetryPolicy) map[string]any {
-	if policy.MaxAttempts == 0 && policy.Backoff == 0 {
+	if policy.MaxAttempts == 0 && policy.Backoff == 0 && policy.MaxBackoff == 0 {
 		return nil
 	}
 	return map[string]any{
 		"maxAttempts": policy.MaxAttempts,
 		"backoff":     policy.Backoff,
+		"maxBackoff":  policy.MaxBackoff,
 	}
 }
 

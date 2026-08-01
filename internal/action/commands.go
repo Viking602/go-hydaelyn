@@ -1,6 +1,10 @@
 package action
 
-import "github.com/Viking602/venat/internal/core/model"
+import (
+	"encoding/json"
+
+	"github.com/Viking602/venat/internal/core/model"
+)
 
 type StartActionAttemptCommand struct {
 	AttemptID      string
@@ -27,8 +31,17 @@ type CompleteActionAttemptCommand struct {
 	Status            model.ActionAttemptStatus
 	ExternalRequestID string
 	ExternalResultRef string
+	ToolResult        json.RawMessage
 	RequiresReconcile bool
+}
+
+type ResolveActionAttemptCommand struct {
+	AttemptID         string
+	Status            model.ActionAttemptStatus
+	ToolResult        json.RawMessage
+	ExternalResultRef string
 }
 
 func (StartActionAttemptCommand) CommandName() string    { return "action_attempt.start" }
 func (CompleteActionAttemptCommand) CommandName() string { return "action_attempt.complete" }
+func (ResolveActionAttemptCommand) CommandName() string  { return "action_attempt.resolve" }

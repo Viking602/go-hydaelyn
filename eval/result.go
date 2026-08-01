@@ -34,6 +34,10 @@ type UsageSummary struct {
 	Records int
 	// InputTokens is the sum of UsageRecord.InputTokens.
 	InputTokens int
+	// CachedInputTokens is the sum of UsageRecord.CachedInputTokens.
+	CachedInputTokens int
+	// CacheWriteInputTokens is the sum of UsageRecord.CacheWriteInputTokens.
+	CacheWriteInputTokens int
 	// OutputTokens is the sum of UsageRecord.OutputTokens.
 	OutputTokens int
 	// ToolCalls is the sum of UsageRecord.ToolCalls.
@@ -50,6 +54,8 @@ func SummarizeUsage(records []api.UsageRecord) UsageSummary {
 	s.Records = len(records)
 	for _, r := range records {
 		s.InputTokens += r.InputTokens
+		s.CachedInputTokens += r.CachedInputTokens
+		s.CacheWriteInputTokens += r.CacheWriteInputTokens
 		s.OutputTokens += r.OutputTokens
 		s.ToolCalls += r.ToolCalls
 		s.Credits += r.Credits

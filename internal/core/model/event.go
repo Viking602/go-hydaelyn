@@ -18,6 +18,7 @@ const (
 	EventTaskExecutionAcquired       EventType = "TaskExecutionAcquired"
 	EventTaskExecutionHeartbeat      EventType = "TaskExecutionHeartbeat"
 	EventTaskExecutionReleased       EventType = "TaskExecutionReleased"
+	EventExecutionCheckpointed       EventType = "ExecutionCheckpointed"
 	EventTypedReportSubmitted        EventType = "TypedReportSubmitted"
 	EventTaskCompleted               EventType = "TaskCompleted"
 	EventTaskFailed                  EventType = "TaskFailed"

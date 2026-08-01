@@ -79,6 +79,34 @@ type DriveResult struct {
 // dispatches past DriveOptions.MaxTicks.
 var ErrMaxTicksExceeded = errors.New("multiagent: scheduler exceeded max ticks")
 
+// ErrExecutionSuspended marks a non-terminal executor interruption. Durable
+// integrations use it to checkpoint pending work without failing the team run.
+var ErrExecutionSuspended = errors.New("multiagent: execution suspended")
+
+// ErrExecutorPanic marks a panic contained at the executor boundary. Drive
+// reports the affected instance as failed instead of crashing the process.
+var ErrExecutorPanic = errors.New("multiagent: executor panic recovered")
+
+// ExecutionSuspendedError carries the durable task state captured at the
+// suspension boundary.
+type ExecutionSuspendedError struct {
+	Task  api.Task
+	Cause error
+}
+
+func (e *ExecutionSuspendedError) Error() string {
+	if e.Cause == nil {
+		return ErrExecutionSuspended.Error()
+	}
+	return fmt.Sprintf("%s: %v", ErrExecutionSuspended, e.Cause)
+}
+
+func (e *ExecutionSuspendedError) Unwrap() error { return e.Cause }
+
+func (e *ExecutionSuspendedError) Is(target error) bool {
+	return target == ErrExecutionSuspended
+}
+
 // SchedulerFailureError wraps an error returned by Scheduler.Next.
 // Drive returns it so integrations can detect scheduler-level failure
 // with errors.As, surface a typed terminal Run status, and emit an
@@ -102,8 +130,10 @@ func (e *SchedulerFailureError) Error() string {
 
 func (e *SchedulerFailureError) Unwrap() error { return e.Err }
 
-const defaultMaxTicks = 64
-const defaultMaxConcurrency = 4
+const (
+	defaultMaxTicks       = 64
+	defaultMaxConcurrency = 4
+)
 
 // Drive runs scheduler to a terminal state (Next returns no dispatches),
 // executing each Dispatch with executor and folding the result back into
@@ -229,9 +259,11 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 	sem := make(chan struct{}, limit)
 	results := make([]outcome, len(work))
 	var (
-		wg         sync.WaitGroup
-		once       sync.Once
-		triggerErr error
+		wg            sync.WaitGroup
+		once          sync.Once
+		suspensionMu  sync.Mutex
+		triggerErr    error
+		suspensionErr error
 	)
 
 	spawned := 0
@@ -250,12 +282,21 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 			defer func() { <-sem }()
 			instance, task, err := executeDispatch(cctx, runID, dispatch, executor, sink)
 			results[i] = outcome{instance: instance, task: task, err: err}
-			if err != nil {
-				once.Do(func() {
-					triggerErr = err
-					cancel()
-				})
+			if err == nil {
+				return
 			}
+			if errors.Is(err, ErrExecutionSuspended) {
+				suspensionMu.Lock()
+				if suspensionErr == nil {
+					suspensionErr = err
+				}
+				suspensionMu.Unlock()
+				return
+			}
+			once.Do(func() {
+				triggerErr = err
+				cancel()
+			})
 		}(i, dispatch)
 	}
 	wg.Wait()
@@ -274,7 +315,10 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 		state.Instances = append(state.Instances, result.instance)
 		state.Tasks = append(state.Tasks, result.task)
 	}
-	return state, triggerErr
+	if triggerErr != nil {
+		return state, triggerErr
+	}
+	return state, suspensionErr
 }
 
 func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, executor Executor, sink stream.Sink) (AgentInstance, api.Task, error) {
@@ -282,20 +326,33 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 	if className == "" {
 		className = classNameFromTaskID(runID, dispatch.Task.ID)
 	}
+	agentClassName := dispatch.AgentClassName
+	if agentClassName == "" {
+		agentClassName = className
+	}
 	var report api.TypedReport
 	execErr := ValidateDispatch(dispatch)
 	if execErr == nil {
 		report, execErr = runDispatch(ctx, dispatch, executor, sink, className)
 	}
 	instance := AgentInstance{
-		ID:        dispatch.To,
-		ClassName: className,
-		RunID:     runID,
-		TaskID:    dispatch.Task.ID,
-		State:     InstanceStateFinished,
-		CreatedAt: time.Now().UTC(),
+		ID:             dispatch.To,
+		ClassName:      className,
+		AgentClassName: agentClassName,
+		RunID:          runID,
+		TaskID:         dispatch.Task.ID,
+		State:          InstanceStateFinished,
+		CreatedAt:      time.Now().UTC(),
 	}
 	task := dispatch.Task
+	var suspension *ExecutionSuspendedError
+	if errors.As(execErr, &suspension) {
+		instance.State = InstanceStatePending
+		if suspension.Task.ID != "" {
+			task = suspension.Task
+		}
+		return instance, task, execErr
+	}
 	if execErr != nil {
 		instance.State = InstanceStateFailed
 		task.Status = api.TaskStatusFailed
@@ -312,7 +369,19 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 // is set and executor is a StreamingExecutor; otherwise it runs the plain
 // Execute path. The report and error are identical to the non-streaming path —
 // frames never affect the folded TeamState.
-func runDispatch(ctx context.Context, dispatch Dispatch, executor Executor, sink stream.Sink, label string) (api.TypedReport, error) {
+func runDispatch(
+	ctx context.Context,
+	dispatch Dispatch,
+	executor Executor,
+	sink stream.Sink,
+	label string,
+) (report api.TypedReport, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			report = api.TypedReport{}
+			err = fmt.Errorf("%w: %v", ErrExecutorPanic, recovered)
+		}
+	}()
 	if sink == nil {
 		return executor.Execute(ctx, dispatch)
 	}

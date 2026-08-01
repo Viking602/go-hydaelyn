@@ -39,9 +39,9 @@ func (r *Runtime) executeUoWCommand(ctx context.Context, command RuntimeCommand)
 func publicUoWCommandResult(command RuntimeCommand, result any) any {
 	switch command.(type) {
 	case TransitionRunCommand, TransitionTaskCommand, HeartbeatTaskExecutionCommand, ReleaseTaskExecutionCommand,
-		AckEnvelopeCommand, DeadLetterCommand, WriteBlackboardItemCommand, SubmitTypedReportCommand,
-		SubmitUserInputCommand, HandoffCommand, SubmitResponseOutputCommand, PublishResponseCommand,
-		DecideApprovalCommand, EndTraceSpanCommand:
+		AppendTaskExecutionEventCommand, AckEnvelopeCommand, DeadLetterCommand, WriteBlackboardItemCommand,
+		SubmitTypedReportCommand, SubmitUserInputCommand, HandoffCommand, SubmitResponseOutputCommand,
+		PublishResponseCommand, DecideApprovalCommand, EndTraceSpanCommand:
 		return nil
 	case AdvanceRunCommand:
 		if advanced, ok := result.(advanceRunResult); ok {
@@ -50,6 +50,10 @@ func publicUoWCommandResult(command RuntimeCommand, result any) any {
 	case CompleteActionAttemptCommand:
 		if completed, ok := result.(completeActionAttemptResult); ok {
 			return completed.Attempt
+		}
+	case ResolveActionAttemptCommand:
+		if resolved, ok := result.(resolveActionAttemptResult); ok {
+			return resolved.Attempt
 		}
 	}
 	return result

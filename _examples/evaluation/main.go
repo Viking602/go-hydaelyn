@@ -86,7 +86,8 @@ func driveRun(ctx context.Context, h eval.Harness, input api.StartRunCommand) ap
 
 	engine := agent.Engine{Provider: scripted.New(dh.Script())}
 	executor := worker.AgentWorker{Runner: runner, Engine: engine, AgentID: dh.AgentID(), Model: dh.Model()}
-	must(executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env}))
+	_, err = executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env})
+	must(err)
 
 	_, err = runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID})
 	must(err)

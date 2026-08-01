@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"reflect"
 
 	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
@@ -58,7 +59,10 @@ type LoopInput struct {
 	// UnlimitedIterations explicitly disables the model-turn ceiling. When
 	// false, an unset MaxIterations retains the conservative default of 12.
 	UnlimitedIterations bool
-	OnEvent             func(provider.Event) error
+	// OperationTurn is the next durable tool-call turn ordinal. Checkpoint
+	// recovery restores it so compaction cannot reuse a prior operation ID.
+	OperationTurn int
+	OnEvent       func(provider.Event) error
 
 	// Sink, when set, receives a live stream.Frame for every provider
 	// event and tool result as the loop runs. It is a transient
@@ -109,6 +113,11 @@ type LoopInput struct {
 	// decision is known. A recording failure aborts the loop while preserving
 	// the finalized step in the returned partial trace.
 	StepRecorder StepRecorder
+
+	// CheckpointRecorder, when set, receives the provider-neutral transcript and
+	// cumulative budget at each completed model-turn boundary. Recording failure
+	// aborts before the loop advances, so a retry never skips unpersisted work.
+	CheckpointRecorder CheckpointRecorder
 
 	// Compact is the source-compatible history compaction hook. With no
 	// ContextTokenTarget it retains the legacy trigger: the loop invokes it once
@@ -172,6 +181,9 @@ type Engine struct {
 	ToolMode       tool.Mode
 	LoopPolicy     LoopPolicy
 	ContextBuilder ContextManager
+	// OperationTurn seeds the next durable tool-call turn ordinal for resumed
+	// task executions. New executions leave it at zero.
+	OperationTurn int
 
 	// Skills are active reusable instructions Engine.Run injects into task-level
 	// context. RunMessages is the low-level message API and does not read this
@@ -215,6 +227,9 @@ type Engine struct {
 	// StepRecorder, when set, Engine.Run threads into every LoopInput so each
 	// finalized step can be persisted before the loop advances.
 	StepRecorder StepRecorder
+	// CheckpointRecorder persists provider-neutral message/tool-result state at
+	// each completed turn so another worker execution can resume from it.
+	CheckpointRecorder CheckpointRecorder
 }
 
 // RunMessages is the low-level loop that drives one LoopInput to
@@ -224,6 +239,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	if input.ToolMode == "" {
 		input.ToolMode = tool.ModeSequential
 	}
+	input.OperationTurn = max(input.OperationTurn, nextToolOperationTurn(input.Messages))
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
 	steps := make([]Step, 0, stepCapacity)
@@ -315,6 +331,10 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// above always returns or continues, so len(assistant.ToolCalls) > 0 is
 		// guaranteed and the assistant tool-call message is always recorded
 		// before dispatch.
+		for index := range assistant.ToolCalls {
+			assistant.ToolCalls[index].OperationID = fmt.Sprintf("turn:%d:call:%d", input.OperationTurn, index)
+		}
+		input.OperationTurn++
 		current = append(current, assistant)
 		// Re-check the context before dispatching this turn's tools. collect
 		// preserves a turn that completed via EventDone even when the cancellation
@@ -459,13 +479,13 @@ func (e Engine) finalizeNoToolStep(
 			Decision:   StepDecisionContinue,
 			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 		})
-		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+		current = appendRetryContext(current, assistant, retryMessages, retryPolicy)
+		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
 			return current, steps,
 				loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
 				false, recordErr
 		}
-		return appendRetryContext(current, assistant, retryMessages, retryPolicy),
-			steps, LoopOutput{}, true, nil
+		return current, steps, LoopOutput{}, true, nil
 	}
 	current = appendFinalAssistant(current, finalOutput)
 	steps = append(steps, Step{
@@ -474,7 +494,7 @@ func (e Engine) finalizeNoToolStep(
 		Decision:   StepDecisionFinish,
 		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 	})
-	if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+	if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
 		return current, steps,
 			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
 			false, recordErr
@@ -515,7 +535,7 @@ func finalizeToolStep(
 		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 	})
 	if terminal {
-		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
 			return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, recordErr
 		}
 		return steps, LoopOutput{
@@ -534,7 +554,7 @@ func finalizeToolStep(
 	policyOut, stop, policyErr := stepPolicyOverride(
 		input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed,
 	)
-	recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps)
+	recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed)
 	if policyErr != nil && recordErr != nil {
 		return steps, policyOut, true, errors.Join(policyErr, recordErr)
 	}
@@ -557,6 +577,47 @@ func recordFinalizedStep(ctx context.Context, recorder StepRecorder, steps []Ste
 	step := steps[len(steps)-1]
 	if err := recorder.RecordStep(ctx, step); err != nil {
 		return fmt.Errorf("agent: record step %d: %w", step.Index, err)
+	}
+	return nil
+}
+
+func nextToolOperationTurn(messages []message.Message) int {
+	next := 0
+	for _, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			var turn, callIndex int
+			if count, err := fmt.Sscanf(call.OperationID, "turn:%d:call:%d", &turn, &callIndex); err == nil && count == 2 && turn >= next {
+				next = turn + 1
+			}
+		}
+	}
+	return next
+}
+
+func recordTurnBoundary(
+	ctx context.Context,
+	input LoopInput,
+	messages []message.Message,
+	usage provider.Usage,
+	steps []Step,
+	toolCallsUsed int,
+) error {
+	if err := recordFinalizedStep(ctx, input.StepRecorder, steps); err != nil {
+		return err
+	}
+	if input.CheckpointRecorder == nil {
+		return nil
+	}
+	step := steps[len(steps)-1]
+	checkpoint := TurnCheckpoint{
+		Messages:          append([]message.Message(nil), messages...),
+		Usage:             usage,
+		Step:              step,
+		ToolCallsUsed:     toolCallsUsed,
+		NextOperationTurn: input.OperationTurn,
+	}
+	if err := input.CheckpointRecorder.RecordCheckpoint(ctx, checkpoint); err != nil {
+		return fmt.Errorf("agent: record checkpoint after step %d: %w", step.Index, err)
 	}
 	return nil
 }
@@ -662,17 +723,8 @@ const compactionBudgetHeadroomDivisor = 5
 // when cumulative MaxTokens spend enters its final headroom band. A compaction
 // error or incomplete tool turn aborts rather than sending malformed history.
 func maybeCompactHistory(ctx context.Context, input LoopInput, current []message.Message, usage provider.Usage) ([]message.Message, error) {
-	var (
-		compacted []message.Message
-		err       error
-	)
 	if input.ContextTokenTarget > 0 {
-		switch {
-		case input.CompactTo != nil:
-			compacted, err = input.CompactTo(ctx, current, input.ContextTokenTarget)
-		case input.Compact != nil:
-			compacted, err = input.Compact(ctx, current)
-		default:
+		if input.CompactTo == nil && input.Compact == nil {
 			return current, nil
 		}
 	} else {
@@ -683,7 +735,17 @@ func maybeCompactHistory(ctx context.Context, input LoopInput, current []message
 		if remaining > input.MaxTokens/compactionBudgetHeadroomDivisor {
 			return current, nil
 		}
-		compacted, err = input.Compact(ctx, current)
+	}
+
+	compactionInput, err := cacheSafeCompactionInput(current)
+	if err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
+	var compacted []message.Message
+	if input.ContextTokenTarget > 0 && input.CompactTo != nil {
+		compacted, err = input.CompactTo(ctx, compactionInput, input.ContextTokenTarget)
+	} else {
+		compacted, err = input.Compact(ctx, compactionInput)
 	}
 	if err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
@@ -691,7 +753,66 @@ func maybeCompactHistory(ctx context.Context, input LoopInput, current []message
 	if err := message.ValidateCompleteTurns(compacted); err != nil {
 		return current, fmt.Errorf("agent: compact history: %w", err)
 	}
+	if err := validateCachePrefixPreserved(current, compacted); err != nil {
+		return current, fmt.Errorf("agent: compact history: %w", err)
+	}
 	return compacted, nil
+}
+
+func validateCachePrefixPreserved(before, after []message.Message) error {
+	boundary, err := message.CachePrefixBoundary(before)
+	if err != nil {
+		return err
+	}
+	if boundary == 0 {
+		return nil
+	}
+	if len(after) < boundary {
+		return errors.New("compaction removed an explicit cache prefix")
+	}
+	for index := range boundary {
+		if !reflect.DeepEqual(before[index], after[index]) {
+			return fmt.Errorf("compaction changed explicit cache prefix at message %d", index)
+		}
+	}
+	return nil
+}
+
+// cacheSafeCompactionInput isolates histories carrying an explicit cache prefix
+// before calling extension code. Without a deep copy, an in-place compactor can
+// mutate both the source and returned aliases and defeat the post-call integrity
+// comparison. Histories without a cache boundary retain the allocation-free
+// legacy path.
+func cacheSafeCompactionInput(messages []message.Message) ([]message.Message, error) {
+	boundary, err := message.CachePrefixBoundary(messages)
+	if err != nil {
+		return nil, err
+	}
+	if boundary == 0 {
+		return messages, nil
+	}
+
+	cloned := make([]message.Message, len(messages))
+	for index, current := range messages {
+		item := current
+		item.ProviderState = append(item.ProviderState[:0:0], current.ProviderState...)
+		if current.ToolCalls != nil {
+			item.ToolCalls = make([]message.ToolCall, len(current.ToolCalls))
+			copy(item.ToolCalls, current.ToolCalls)
+			for callIndex := range item.ToolCalls {
+				arguments := current.ToolCalls[callIndex].Arguments
+				item.ToolCalls[callIndex].Arguments = append(arguments[:0:0], arguments...)
+			}
+		}
+		if current.ToolResult != nil {
+			result := *current.ToolResult
+			result.Structured = append(result.Structured[:0:0], current.ToolResult.Structured...)
+			item.ToolResult = &result
+		}
+		item.Metadata = maps.Clone(current.Metadata)
+		cloned[index] = item
+	}
+	return cloned, nil
 }
 
 // dispatchExceedsToolBudget reports whether executing this turn's tool batch
@@ -950,6 +1071,7 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 // documented place to map a model alias or hallucinated name onto a real tool —
 // checking the raw name would reject one a hook was about to fix. None of these
 // paths dispatches a driver, so the loop returns before charging them.
+
 func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) ([]tool.Call, bool, error) {
 	if e.Tools == nil {
 		return nil, false, ErrToolBusMissing
@@ -958,9 +1080,11 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 	terminal := false
 	for _, call := range calls {
 		item := call
+		operationID := item.OperationID
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
 			return nil, false, err
 		}
+		item.OperationID = operationID
 		driver, ok := e.Tools.Driver(item.Name)
 		if !ok {
 			return nil, false, fmt.Errorf("%w: %s", tool.ErrToolNotFound, item.Name)
@@ -971,6 +1095,17 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 		prepared = append(prepared, item)
 	}
 	return prepared, terminal, nil
+}
+
+// ResumeToolCalls executes tool calls restored from a durable checkpoint
+// through the same preparation, validation, and hook pipeline as a live turn.
+// The caller remains responsible for appending the returned results to history.
+func (e Engine) ResumeToolCalls(ctx context.Context, calls []message.ToolCall) ([]message.ToolResult, error) {
+	prepared, _, err := e.prepareToolCalls(ctx, calls)
+	if err != nil {
+		return nil, err
+	}
+	return e.dispatchPreparedTools(ctx, prepared, e.ToolMode)
 }
 
 // dispatchPreparedTools executes the hook-prepared calls on the bus and runs
@@ -1000,8 +1135,16 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 	}
 	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
 	items := make([]message.ToolResult, 0, len(results))
-	for _, current := range results {
+	for index, current := range results {
 		item := current
+		if index < len(prepared) {
+			if item.ToolCallID == "" {
+				item.ToolCallID = prepared[index].ID
+			}
+			if item.Name == "" {
+				item.Name = prepared[index].Name
+			}
+		}
 		if err := e.Hooks.AfterToolCall(ctx, &item); err != nil {
 			return items, err
 		}

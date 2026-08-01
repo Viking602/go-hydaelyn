@@ -23,11 +23,11 @@ func TestRuntime_ExecutesEnvelopesFromChannel(t *testing.T) {
 	p := worker.NewChannelPoller(4)
 	var seen []string
 	var mu sync.Mutex
-	exec := worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) error {
+	exec := worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
 		mu.Lock()
 		seen = append(seen, req.Envelope.ID)
 		mu.Unlock()
-		return nil
+		return worker.ExecutionOutcome{State: worker.ExecutionCompleted}, nil
 	})
 	rt := worker.NewRuntime(p, exec, worker.RuntimeOptions{
 		Concurrency:          2,
@@ -71,8 +71,8 @@ func TestRuntime_OnErrorReceivesExecutorErrors(t *testing.T) {
 	p := worker.NewChannelPoller(2)
 	var errCount int32
 	rt := worker.NewRuntime(p,
-		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) error {
-			return errors.New("boom")
+		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
+			return worker.ExecutionOutcome{State: worker.ExecutionFailed}, errors.New("boom")
 		}),
 		worker.RuntimeOptions{
 			Concurrency:          1,
@@ -106,10 +106,10 @@ func TestRuntime_StopDrainsInFlight(t *testing.T) {
 	release := make(chan struct{})
 	var finished int32
 	rt := worker.NewRuntime(p,
-		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) error {
+		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
 			<-release
 			atomic.AddInt32(&finished, 1)
-			return nil
+			return worker.ExecutionOutcome{State: worker.ExecutionCompleted}, nil
 		}),
 		worker.RuntimeOptions{
 			Concurrency:          1,

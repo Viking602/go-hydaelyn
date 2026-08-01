@@ -1,6 +1,9 @@
 package adapter
 
 import (
+	"encoding/json"
+	"maps"
+
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core"
 	"github.com/Viking602/venat/internal/core/model"
@@ -79,12 +82,18 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 		return core.AcquireTaskExecutionCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL}, true
 	case api.HeartbeatTaskExecutionCommand:
 		return core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID, TTL: cmd.TTL}, true
+	case api.AppendTaskExecutionEventCommand:
+		return core.AppendTaskExecutionEventCommand{
+			RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
+			HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
+			TaskVersion: cmd.TaskVersion, Event: EventToModel(cmd.Event),
+		}, true
 	case api.ReleaseTaskExecutionCommand:
 		return core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID}, true
 	case api.ToolInvocation:
 		return ToolInvocationToCore(cmd), true
 	case api.RequestApprovalCommand:
-		return core.RequestApprovalCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, ActionID: cmd.ActionID, RequesterAgentID: cmd.RequesterAgentID, Reason: cmd.Reason, RiskSummary: cmd.RiskSummary, RequestedAction: cmd.RequestedAction}, true
+		return core.RequestApprovalCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, ActionID: cmd.ActionID, RequesterAgentID: cmd.RequesterAgentID, Reason: cmd.Reason, RiskSummary: cmd.RiskSummary, RequestedAction: cmd.RequestedAction, Metadata: maps.Clone(cmd.Metadata)}, true
 	case api.DecideApprovalCommand:
 		return core.DecideApprovalCommand{RunID: cmd.RunID, ApprovalID: cmd.ApprovalID, DecidedBy: cmd.DecidedBy, Decision: cmd.Decision, Reason: cmd.Reason}, true
 	case api.RecoverResumeTokenCommand:
@@ -92,7 +101,9 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	case api.StartActionAttemptCommand:
 		return core.StartActionAttemptCommand{AttemptID: cmd.AttemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}, true
 	case api.CompleteActionAttemptCommand:
-		return core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, RequiresReconcile: cmd.RequiresReconcile}, true
+		return core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...), RequiresReconcile: cmd.RequiresReconcile}, true
+	case api.ResolveActionAttemptCommand:
+		return core.ResolveActionAttemptCommand{AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...)}, true
 	default:
 		return nil, false
 	}

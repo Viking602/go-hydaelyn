@@ -207,7 +207,7 @@ func (h submitTypedHandler) applySuccessfulReport(ctx context.Context, uow ports
 
 func (h submitTypedHandler) applyFailedReport(ctx context.Context, uow ports.UnitOfWork, m *SubmitTypedResult, task model.Task, lease model.TaskExecutionLease, report model.TypedReport) error {
 	reason := reportFailureReason(report)
-	if canRetryTask(task) {
+	if report.Retryable && canRetryTask(task) {
 		next, err := corestate.TransitionTask(task, model.TaskStatusDispatched, true)
 		if err != nil {
 			return err
@@ -220,7 +220,23 @@ func (h submitTypedHandler) applyFailedReport(ctx context.Context, uow ports.Uni
 		if _, err := h.releaseLease(ctx, uow, m, lease); err != nil {
 			return err
 		}
-		env := model.TaskEnvelope{ID: h.options.NewID("env"), RunID: next.RunID, TaskID: next.ID, TargetAgentID: next.OwnerAgentID, TargetComponent: next.OwnerComponent, Type: "TaskEnvelope", Status: "pending", TaskVersion: next.Version, RetryPolicy: next.RetryPolicy, CreatedAt: time.Now().UTC()}
+		now := time.Now().UTC()
+		env := model.TaskEnvelope{
+			ID:              h.options.NewID("env"),
+			RunID:           next.RunID,
+			TaskID:          next.ID,
+			TargetAgentID:   next.OwnerAgentID,
+			TargetComponent: next.OwnerComponent,
+			Type:            "TaskEnvelope",
+			Status:          "pending",
+			TaskVersion:     next.Version,
+			RetryPolicy:     next.RetryPolicy,
+			Attempts:        next.Attempts,
+			CreatedAt:       now,
+		}
+		if delay := retryBackoff(next.RetryPolicy.Backoff, next.RetryPolicy.MaxBackoff, next.Attempts); delay > 0 {
+			env.NextRetryAt = now.Add(delay)
+		}
 		return h.queueEnvelope(ctx, uow, m, env, model.EventTaskDispatched)
 	}
 	next, err := corestate.TransitionTask(task, model.TaskStatusFailed, true)
@@ -448,6 +464,28 @@ func completionCriteriaSatisfied(task model.Task, report model.TypedReport) bool
 func canRetryTask(task model.Task) bool {
 	maxAttempts := task.RetryPolicy.MaxAttempts
 	return maxAttempts > 0 && task.Attempts < maxAttempts
+}
+
+func retryBackoff(base, maximum time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	limit := maxDuration
+	if maximum > 0 {
+		limit = maximum
+	}
+	if base >= limit {
+		return limit
+	}
+	delay := base
+	for retry := 1; retry < attempt; retry++ {
+		if delay > limit/2 {
+			return limit
+		}
+		delay *= 2
+	}
+	return delay
 }
 
 func actionAttemptFailed(status model.ActionAttemptStatus) bool {

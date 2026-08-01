@@ -388,6 +388,14 @@ func (a coreLeaseStoreAdapter) ExtendLease(ctx context.Context, leaseID string, 
 	return ok, nil
 }
 
+func (a coreLeaseStoreAdapter) ReleaseExpiredLease(ctx context.Context, leaseID string, expectedVersion uint64, releasedAt time.Time) (bool, error) {
+	ok, err := a.inner.ReleaseExpiredLease(ctx, leaseID, expectedVersion, releasedAt)
+	if err != nil {
+		return false, ErrorToAPI(err)
+	}
+	return ok, nil
+}
+
 type coreApprovalStoreAdapter struct{ inner core.ApprovalStore }
 
 func (a coreApprovalStoreAdapter) SaveApproval(ctx context.Context, approval api.ApprovalRequest) error {
@@ -444,6 +452,19 @@ func (a coreActionAttemptStoreAdapter) LoadActionAttemptByIdempotencyKey(ctx con
 		return api.ActionAttempt{}, ErrorToAPI(err)
 	}
 	return ActionAttemptFromModel(attempt), nil
+}
+
+func (a coreActionAttemptStoreAdapter) ListActionAttempts(ctx context.Context, sel api.ActionAttemptSelector) ([]api.ActionAttempt, error) {
+	attempts, err := a.inner.ListActionAttempts(ctx, ActionAttemptSelectorToModel(sel))
+	if err != nil {
+		return nil, ErrorToAPI(err)
+	}
+	return ActionAttemptsFromModel(attempts), nil
+}
+
+func (a coreActionAttemptStoreAdapter) ResolveActionAttempt(ctx context.Context, attempt api.ActionAttempt) (bool, error) {
+	resolved, err := a.inner.ResolveActionAttempt(ctx, ActionAttemptToModel(attempt))
+	return resolved, ErrorToAPI(err)
 }
 
 type coreAgentProfileStoreAdapter struct{ inner core.AgentProfileStore }

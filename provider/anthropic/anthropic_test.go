@@ -385,12 +385,10 @@ func TestStreamRetriesTransientStatusOnInitiation(t *testing.T) {
 	}
 }
 
-// TestDriverStreamSurfacesErrorTypeAndMessage is the regression for the
-// opaque-error bug: the error case used to return fmt.Errorf("anthropic
-// stream error") with no detail, so a mid-stream overload or content-policy
-// error was unclassifiable. The fix surfaces the upstream error type and
-// message so callers can branch on the cause.
-func TestDriverStreamSurfacesErrorTypeAndMessage(t *testing.T) {
+// TestDriverStreamSurfacesTypedError is the regression for opaque mid-stream
+// overload errors: adapters must preserve details and map the wire error to the
+// provider-neutral retry contract.
+func TestDriverStreamSurfacesTypedError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/event-stream")
 		_, _ = writer.Write([]byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"))
@@ -416,5 +414,8 @@ func TestDriverStreamSurfacesErrorTypeAndMessage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Overloaded") {
 		t.Fatalf("error = %q, want it to contain the upstream message %q", err.Error(), "Overloaded")
+	}
+	if provider.ErrorKindOf(err) != provider.ErrorServer || !provider.IsRetryableError(err) {
+		t.Fatalf("error classification = %q retryable=%v", provider.ErrorKindOf(err), provider.IsRetryableError(err))
 	}
 }

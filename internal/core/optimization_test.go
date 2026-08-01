@@ -111,7 +111,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 		HolderType:  HolderAgent,
 		HolderID:    "agent-a",
 		TaskVersion: retryTask.Version,
-		Report:      TypedReport{Status: ReportStatusFailed, Summary: "transient"},
+		Report:      TypedReport{Status: ReportStatusFailed, Summary: "transient", Retryable: true},
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(failed retry) error = %v", err)
 	}
@@ -286,7 +286,7 @@ func TestRetryDispatchEventCarriesAcquirableEnvelopeID(t *testing.T) {
 		HolderType:  HolderAgent,
 		HolderID:    "agent-a",
 		TaskVersion: task.Version,
-		Report:      TypedReport{Status: ReportStatusFailed, Summary: "transient"},
+		Report:      TypedReport{Status: ReportStatusFailed, Summary: "transient", Retryable: true},
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(failed retry) error = %v", err)
 	}

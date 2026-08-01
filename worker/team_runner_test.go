@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -13,9 +14,11 @@ import (
 	"github.com/Viking602/venat"
 	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/multiagent"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/provider/scripted"
+	"github.com/Viking602/venat/tool"
 )
 
 func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
@@ -94,6 +97,151 @@ func TestTeamRunnerPersistsAndResumesSchedulerState(t *testing.T) {
 	}
 	if resumed.Ticks != 2 || len(resumed.State.Instances) != 2 {
 		t.Fatalf("Resume() result = %#v, want unchanged terminal snapshot", resumed)
+	}
+}
+
+func TestTeamRunnerResumesPendingInstanceWithDistinctAgentClass(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-team-class-identity",
+		RootTaskID: "root",
+		Request:    "resume aliased class",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "draft-task", Goal: "write",
+		OwnerAgentID: "draft-instance", WriteTargets: []string{"result"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	class := multiagent.AgentClass{Name: "writer", Instructions: "write", Model: "scripted"}
+	state := multiagent.TeamState{
+		RunID: run.ID,
+		Tasks: []api.Task{task},
+		Instances: []multiagent.AgentInstance{{
+			ID:             "draft-instance",
+			ClassName:      "draft-slot",
+			AgentClassName: class.Name,
+			RunID:          run.ID,
+			TaskID:         task.ID,
+			State:          multiagent.InstanceStatePending,
+		}},
+	}
+	teamRunner := TeamRunner{Runner: runner}
+	if err := teamRunner.saveState(ctx, state, false); err != nil {
+		t.Fatalf("saveState() error = %v", err)
+	}
+	checkpoint, err := teamRunner.loadState(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if checkpoint.Instances[0].AgentClassName != class.Name {
+		t.Fatalf("checkpoint lost agent class identity: %#v", checkpoint.Instances[0])
+	}
+	providerDriver := &recordingProvider{events: []provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}
+	classes := map[string]multiagent.AgentClass{class.Name: class}
+	resumed, err := teamRunner.resumePendingInstances(ctx, checkpoint, classes, RunnerExecutor{
+		Runner:    runner,
+		Classes:   classes,
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(providerDriver)},
+	})
+	if err != nil {
+		t.Fatalf("resumePendingInstances() error = %v", err)
+	}
+	if resumed.Instances[0].State != multiagent.InstanceStateFinished || len(providerDriver.requests) != 1 {
+		t.Fatalf("resumed state = %#v, provider requests = %d", resumed, len(providerDriver.requests))
+	}
+}
+
+func TestTeamRunnerPersistsTerminalInstanceRecoveredFromChildTask(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-team-terminal-child-recovery", RootTaskID: "root", Request: "resume",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	if _, err := runner.AdvanceRun(ctx, api.AdvanceRunCommand{RunID: run.ID}); err != nil {
+		t.Fatalf("AdvanceRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "child", Goal: "finish",
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	state := multiagent.TeamState{
+		RunID: run.ID,
+		Tick:  1,
+		Tasks: []api.Task{task},
+		Instances: []multiagent.AgentInstance{{
+			ID: "instance-1", ClassName: "worker", AgentClassName: "worker",
+			RunID: run.ID, TaskID: task.ID, State: multiagent.InstanceStatePending,
+		}},
+	}
+	teamRunner := TeamRunner{
+		Runner: runner,
+		Team: multiagent.Team{Scheduler: multiagent.SchedulerFunc(func(_ context.Context, current multiagent.TeamState) ([]multiagent.Dispatch, error) {
+			if current.Instances[0].State != multiagent.InstanceStateFinished {
+				t.Fatalf("scheduler received stale instance: %#v", current.Instances[0])
+			}
+			return nil, nil
+		})},
+	}
+	if err := teamRunner.saveState(ctx, state, false); err != nil {
+		t.Fatalf("saveState() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: envelope.ID,
+		HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v error=%v", lease, acquired, err)
+	}
+	if err := runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
+		RunID: run.ID, TaskID: task.ID, LeaseID: lease.ID,
+		HolderType: lease.HolderType, HolderID: lease.HolderID, TaskVersion: lease.TaskVersion,
+		Report: api.TypedReport{Status: api.ReportStatusSuccess, Summary: "done"},
+	}); err != nil {
+		t.Fatalf("SubmitTypedReport(child) error = %v", err)
+	}
+
+	result, err := teamRunner.Resume(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result.State.Instances[0].State != multiagent.InstanceStateFinished {
+		t.Fatalf("recovered result = %#v", result.State.Instances[0])
+	}
+	persisted, err := teamRunner.loadState(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if persisted.Instances[0].State != multiagent.InstanceStateFinished ||
+		persisted.Tasks[0].Status != api.TaskStatusCompleted {
+		t.Fatalf("persisted recovered state = %#v", persisted)
+	}
+	terminal, err := teamRunner.Resume(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("terminal Resume() error = %v", err)
+	}
+	if terminal.State.Instances[0].State != multiagent.InstanceStateFinished {
+		t.Fatalf("terminal Resume() returned stale state: %#v", terminal.State.Instances[0])
 	}
 }
 
@@ -217,6 +365,7 @@ func TestRunnerExecutorEnsureTaskPreservesAuthoringFields(t *testing.T) {
 		RetryPolicy: api.RetryPolicy{
 			MaxAttempts: 3,
 			Backoff:     time.Second,
+			MaxBackoff:  30 * time.Second,
 		},
 		PolicyDecisions: []api.PolicyDecision{{
 			DecisionID: "decision-1",
@@ -716,4 +865,174 @@ func (s failSecondTeamStateLoadStore) LoadTeamState(ctx context.Context, runID s
 		return api.TeamStateRecord{}, errTeamStateLoad
 	}
 	return s.TeamStateStore.LoadTeamState(ctx, runID)
+}
+
+func TestWaitForEnvelopeReadyHonorsBackoffAndCancellation(t *testing.T) {
+	started := time.Now()
+	if err := waitForEnvelopeReady(context.Background(), api.TaskEnvelope{
+		NextRetryAt: started.Add(20 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("waitForEnvelopeReady() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 15*time.Millisecond {
+		t.Fatalf("waitForEnvelopeReady() elapsed = %v, want scheduled delay", elapsed)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitForEnvelopeReady(ctx, api.TaskEnvelope{
+		NextRetryAt: time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForEnvelopeReady(cancelled) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunnerExecutorRetriesFromLatestTurnCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-continuation-retry",
+		RootTaskID: "root",
+		Request:    "continue after a transient provider failure",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	transportErr := io.ErrUnexpectedEOF
+	driver := &sequenceProvider{
+		turns: [][]provider.Event{
+			{
+				{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{
+					ID: "lookup-1", Name: "lookup", Arguments: json.RawMessage(`{"query":"state"}`),
+				}},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+			},
+			nil,
+			{
+				{Kind: provider.EventTextDelta, Text: "continued without replay"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			},
+		},
+		failures: map[int]error{1: transportErr},
+	}
+	toolDriver := &recordingTool{definition: tool.Definition{Name: "lookup"}}
+	class := multiagent.AgentClass{
+		Name:         "retry-worker",
+		Instructions: "look up state and finish",
+		Model:        "scripted",
+	}
+	dispatch := multiagent.Dispatch{
+		To:        "agent-a",
+		ClassName: class.Name,
+		Task: api.Task{
+			ID:           "retry-task",
+			RunID:        run.ID,
+			Type:         api.TaskTypeWorker,
+			Goal:         class.Instructions,
+			WriteTargets: []string{"result"},
+			RetryPolicy: api.RetryPolicy{
+				MaxAttempts: 2,
+				Backoff:     10 * time.Millisecond,
+			},
+		},
+	}
+	executor := RunnerExecutor{
+		Runner:    runner,
+		Classes:   map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
+		PrepareEngine: func(_ context.Context, engine agent.Engine, _ multiagent.Dispatch, _ multiagent.AgentClass) (agent.Engine, error) {
+			engine.Tools = tool.NewBus(toolDriver)
+			return engine, nil
+		},
+	}
+	started := time.Now()
+	report, err := executor.Execute(ctx, dispatch)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if report.Status != api.ReportStatusSuccess || report.Summary != "continued without replay" {
+		t.Fatalf("Execute() report = %#v, want successful continuation", report)
+	}
+	if elapsed := time.Since(started); elapsed < 8*time.Millisecond {
+		t.Fatalf("retry elapsed = %v, want configured backoff", elapsed)
+	}
+	if toolDriver.calls != 1 {
+		t.Fatalf("lookup calls = %d, want one completed tool turn", toolDriver.calls)
+	}
+	if len(driver.requests) != 3 {
+		t.Fatalf("provider requests = %d, want tool turn, failed turn, continuation", len(driver.requests))
+	}
+	var replayed bool
+	for _, msg := range driver.requests[2].Messages {
+		if msg.Role == message.RoleTool && msg.ToolResult != nil && msg.ToolResult.ToolCallID == "lookup-1" {
+			replayed = true
+			break
+		}
+	}
+	if !replayed {
+		t.Fatalf("continuation request did not replay checkpointed tool result: %#v", driver.requests[2].Messages)
+	}
+	persisted, err := runner.Task(ctx, run.ID, dispatch.Task.ID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if persisted.Status != api.TaskStatusCompleted || persisted.Attempts != 2 {
+		t.Fatalf("persisted retry task = %#v, want completed after two attempts", persisted)
+	}
+}
+
+func TestRunnerExecutorPreservesDisabledTaskRetries(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-disabled-retry",
+		RootTaskID: "root",
+		Request:    "do not retry",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	transportErr := io.ErrUnexpectedEOF
+	driver := &sequenceProvider{
+		turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "unexpected retry"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		}},
+		failures: map[int]error{0: transportErr},
+	}
+	class := multiagent.AgentClass{
+		Name:         "single-attempt-worker",
+		Instructions: "fail once",
+		Model:        "scripted",
+	}
+	dispatch := multiagent.Dispatch{
+		To:        "agent-a",
+		ClassName: class.Name,
+		Task: api.Task{
+			ID:          "single-attempt-task",
+			RunID:       run.ID,
+			Type:        api.TaskTypeWorker,
+			Goal:        class.Instructions,
+			RetryPolicy: api.RetryPolicy{MaxAttempts: 0},
+		},
+	}
+	_, err = (RunnerExecutor{
+		Runner:    runner,
+		Classes:   map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
+	}).Execute(ctx, dispatch)
+	if !errors.Is(err, transportErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, transportErr)
+	}
+	if len(driver.requests) != 1 {
+		t.Fatalf("provider requests = %d, want one attempt", len(driver.requests))
+	}
+	persisted, loadErr := runner.Task(ctx, run.ID, dispatch.Task.ID)
+	if loadErr != nil {
+		t.Fatalf("Task() error = %v", loadErr)
+	}
+	if persisted.Status != api.TaskStatusFailed || persisted.Attempts != 1 {
+		t.Fatalf("persisted task = %#v, want failed after one attempt", persisted)
+	}
 }

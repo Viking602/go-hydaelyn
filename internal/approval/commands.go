@@ -8,6 +8,7 @@ type RequestApprovalCommand struct {
 	Reason           string
 	RiskSummary      string
 	RequestedAction  string
+	Metadata         map[string]string
 }
 
 type DecideApprovalCommand struct {

@@ -41,16 +41,17 @@ type Driver struct {
 func New(config Config) Driver {
 	if len(config.Models) == 0 {
 		config.Models = []string{
-			"gpt-5.4",
-			"gpt-5.4-mini",
-			"gpt-5.2",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+			"gpt-5.3-codex",
 		}
 	}
 	if config.BaseURL == "" {
 		config.BaseURL = "https://api.openai.com/v1"
 	}
 	if config.WireAPI == "" {
-		config.WireAPI = WireChatCompletions
+		config.WireAPI = WireResponses
 	}
 	if config.Client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

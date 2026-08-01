@@ -40,7 +40,8 @@ func main() {
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 	})}
 	executor := worker.AgentWorker{Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted"}
-	must(executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env}))
+	_, err = executor.ExecuteEnvelope(ctx, worker.ExecuteEnvelopeRequest{Envelope: env})
+	must(err)
 
 	completed, err := runner.Task(ctx, run.ID, task.ID)
 	must(err)

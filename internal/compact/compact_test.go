@@ -57,6 +57,33 @@ func TestSimpleCompactorDropsMiddleMessages(t *testing.T) {
 	}
 }
 
+func TestSimpleCompactorPreservesExplicitCachePrefix(t *testing.T) {
+	stable := message.NewText(message.RoleSystem, "stable instructions")
+	stable.CacheBoundary = true
+	messages := []message.Message{
+		stable,
+		message.NewText(message.RoleUser, "old-1"),
+		message.NewText(message.RoleAssistant, "old-2"),
+		message.NewText(message.RoleUser, "old-3"),
+		message.NewText(message.RoleAssistant, "old-4"),
+		message.NewText(message.RoleUser, "new"),
+	}
+
+	result, err := (&SimpleCompactor{MaxMessages: 4}).Compact(context.Background(), messages)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if len(result) != 4 {
+		t.Fatalf("len(result) = %d, want 4", len(result))
+	}
+	if !reflect.DeepEqual(result[0], stable) {
+		t.Fatalf("cache prefix changed: %#v", result[0])
+	}
+	if result[1].Kind != message.KindCompactionSummary || result[2].Text != "old-4" || result[3].Text != "new" {
+		t.Fatalf("compacted history = %#v", result)
+	}
+}
+
 func TestLLMCompactorFallsBackToPlaceholderOnStreamError(t *testing.T) {
 	c := &LLMCompactor{
 		Provider:    &failingProvider{},

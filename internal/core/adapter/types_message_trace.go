@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"encoding/json"
+
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/model"
 )
@@ -161,12 +163,14 @@ func ActionAttemptToModel(in api.ActionAttempt) model.ActionAttempt {
 		ActionID:          in.ActionID,
 		RunID:             in.RunID,
 		TaskID:            in.TaskID,
+		LeaseID:           in.LeaseID,
 		ToolName:          in.ToolName,
 		Status:            model.ActionAttemptStatus(in.Status),
 		IdempotencyKey:    in.IdempotencyKey,
 		InputHash:         in.InputHash,
 		ExternalRequestID: in.ExternalRequestID,
 		ExternalResultRef: in.ExternalResultRef,
+		ToolResult:        append(json.RawMessage(nil), in.ToolResult...),
 		RequiresReconcile: in.RequiresReconcile,
 	}
 }
@@ -177,12 +181,14 @@ func ActionAttemptFromModel(in model.ActionAttempt) api.ActionAttempt {
 		ActionID:          in.ActionID,
 		RunID:             in.RunID,
 		TaskID:            in.TaskID,
+		LeaseID:           in.LeaseID,
 		ToolName:          in.ToolName,
 		Status:            api.ActionAttemptStatus(in.Status),
 		IdempotencyKey:    in.IdempotencyKey,
 		InputHash:         in.InputHash,
 		ExternalRequestID: in.ExternalRequestID,
 		ExternalResultRef: in.ExternalResultRef,
+		ToolResult:        append(json.RawMessage(nil), in.ToolResult...),
 		RequiresReconcile: in.RequiresReconcile,
 	}
 }
@@ -200,6 +206,80 @@ func ActionAttemptPtrFromModel(in *model.ActionAttempt) *api.ActionAttempt {
 		return nil
 	}
 	out := ActionAttemptFromModel(*in)
+	return &out
+}
+
+func ActionAttemptSelectorToModel(in api.ActionAttemptSelector) model.ActionAttemptSelector {
+	return model.ActionAttemptSelector{
+		RunID:             in.RunID,
+		TaskID:            in.TaskID,
+		ToolName:          in.ToolName,
+		Statuses:          actionAttemptStatusesToModel(in.Statuses),
+		RequiresReconcile: cloneBool(in.RequiresReconcile),
+		Limit:             in.Limit,
+	}
+}
+
+func ActionAttemptSelectorFromModel(in model.ActionAttemptSelector) api.ActionAttemptSelector {
+	return api.ActionAttemptSelector{
+		RunID:             in.RunID,
+		TaskID:            in.TaskID,
+		ToolName:          in.ToolName,
+		Statuses:          actionAttemptStatusesFromModel(in.Statuses),
+		RequiresReconcile: cloneBool(in.RequiresReconcile),
+		Limit:             in.Limit,
+	}
+}
+
+func ActionAttemptsToModel(in []api.ActionAttempt) []model.ActionAttempt {
+	if in == nil {
+		return nil
+	}
+	out := make([]model.ActionAttempt, len(in))
+	for i := range in {
+		out[i] = ActionAttemptToModel(in[i])
+	}
+	return out
+}
+
+func ActionAttemptsFromModel(in []model.ActionAttempt) []api.ActionAttempt {
+	if in == nil {
+		return nil
+	}
+	out := make([]api.ActionAttempt, len(in))
+	for i := range in {
+		out[i] = ActionAttemptFromModel(in[i])
+	}
+	return out
+}
+
+func actionAttemptStatusesToModel(in []api.ActionAttemptStatus) []model.ActionAttemptStatus {
+	if in == nil {
+		return nil
+	}
+	out := make([]model.ActionAttemptStatus, len(in))
+	for i := range in {
+		out[i] = model.ActionAttemptStatus(in[i])
+	}
+	return out
+}
+
+func actionAttemptStatusesFromModel(in []model.ActionAttemptStatus) []api.ActionAttemptStatus {
+	if in == nil {
+		return nil
+	}
+	out := make([]api.ActionAttemptStatus, len(in))
+	for i := range in {
+		out[i] = api.ActionAttemptStatus(in[i])
+	}
+	return out
+}
+
+func cloneBool(in *bool) *bool {
+	if in == nil {
+		return nil
+	}
+	out := *in
 	return &out
 }
 
