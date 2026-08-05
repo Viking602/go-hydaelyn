@@ -22,6 +22,9 @@ func resolveConfig(configs ...Config) Config {
 		if override.PolicyEngine != nil {
 			out.PolicyEngine = override.PolicyEngine
 		}
+		if override.PolicyEnforcer != nil {
+			out.PolicyEnforcer = override.PolicyEnforcer
+		}
 		if override.OutputGateway != nil {
 			out.OutputGateway = override.OutputGateway
 		}

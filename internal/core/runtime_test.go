@@ -468,8 +468,8 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 			DecisionID: "decision-1",
 			Effect:     PolicyEffectAllow,
 			Obligations: []PolicyObligation{
-				{Kind: ObligationRedactFields, Target: "payload"},
-				{Kind: ObligationHideInternalTrace, Target: "trace"},
+				{Kind: ObligationRedactFields, Target: PolicyTargetResponse},
+				{Kind: ObligationHideInternalTrace, Target: PolicyTargetResponse},
 			},
 			Redactions: []string{"email"},
 		}
@@ -587,7 +587,7 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 			DecisionID: "decision-fail",
 			Effect:     PolicyEffectAllow,
 			Obligations: []PolicyObligation{
-				{Kind: "unsupported_obligation", Target: "payload"},
+				{Kind: "unsupported_obligation", Target: PolicyTargetResponse},
 			},
 		}
 	})

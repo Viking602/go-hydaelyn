@@ -141,7 +141,10 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 		Client:  server.Client(),
 	})
 	stream, err := driver.Stream(context.Background(), provider.Request{
-		Model: "gpt-5.3-codex",
+		Model:       "gpt-5.3-codex",
+		Temperature: 0.4,
+		TopP:        0.6,
+		MaxTokens:   2048,
 		Messages: []message.Message{
 			stablePrefix,
 			message.NewText(message.RoleUser, "look it up"),
@@ -198,8 +201,9 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 	}
 	requireCapturedField(t, captured, "model", "gpt-5.3-codex")
 	requireCapturedField(t, captured, "stream", true)
-	requireCapturedField(t, captured, "temperature", 0.2)
-	requireCapturedField(t, captured, "max_output_tokens", 4096.0)
+	requireCapturedField(t, captured, "temperature", 0.4)
+	requireCapturedField(t, captured, "top_p", 0.6)
+	requireCapturedField(t, captured, "max_output_tokens", 2048.0)
 	requireCapturedField(t, captured, "store", false)
 	requireCapturedField(t, captured, "prompt_cache_key", "tenant:agent:prompt-v2")
 	cacheOptions, _ := captured["prompt_cache_options"].(map[string]any)

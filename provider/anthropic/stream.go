@@ -18,6 +18,8 @@ import (
 type requestBody struct {
 	Model         string             `json:"model"`
 	MaxTokens     int                `json:"max_tokens"`
+	Temperature   float64            `json:"temperature,omitempty"`
+	TopP          float64            `json:"top_p,omitempty"`
 	System        string             `json:"system,omitempty"`
 	Messages      []anthropicMessage `json:"messages"`
 	Tools         []anthropicTool    `json:"tools,omitempty"`
@@ -116,10 +118,15 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if maxTokens <= 0 {
 		maxTokens = 1024
 	}
+	if request.MaxTokens > 0 {
+		maxTokens = request.MaxTokens
+	}
 	system, messages := toAnthropicRequest(request.Messages)
 	body, err := json.Marshal(requestBody{
 		Model:         request.Model,
 		MaxTokens:     maxTokens,
+		Temperature:   request.Temperature,
+		TopP:          request.TopP,
 		System:        system,
 		Messages:      messages,
 		Tools:         toAnthropicTools(request.Tools),

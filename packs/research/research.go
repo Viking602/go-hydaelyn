@@ -83,6 +83,7 @@ var planner = api.AgentDefinition{
 	Description:  "Decomposes a high-level research question into ordered subqueries.",
 	Instructions: "You are the planner. Read the user's question and emit 3-5 focused subqueries.",
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.2},
+	Tools:        []string{"web_search"},
 	Capabilities: []string{"web_search"},
 	Triggers: []api.Trigger{
 		{ID: "manual", Type: api.TriggerManual, Enabled: true},
@@ -99,6 +100,7 @@ var researcher = api.AgentDefinition{
 	Description:  "Runs one subquery against the configured search/fetch tools and writes findings to the blackboard.",
 	Instructions: "Take a single subquery, gather sources, and post evidence items.",
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.3},
+	Tools:        []string{"web_search", "fetch_document", "extract_citations"},
 	Capabilities: []string{"web_search", "fetch_document", "extract_citations"},
 	Triggers: []api.Trigger{
 		{ID: "manual", Type: api.TriggerManual, Enabled: true},

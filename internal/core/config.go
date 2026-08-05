@@ -22,21 +22,24 @@ type Runtime struct {
 	commandBus    *commandbus.Bus
 	*storedel.Delegates
 
-	tools      map[string]model.Tool
-	agents     map[string]AgentProfile
-	agentOrder []string
-	flows      map[string]model.Flow
+	tools       map[string]model.Tool
+	scopedTools map[toolHolderKey]map[string]model.Tool
+	agents      map[string]AgentProfile
+	agentOrder  []string
+	flows       map[string]model.Flow
 
-	policy        PolicyEngine
-	outputGateway OutputGateway
-	pipeline      PipelineComponents
+	policy         PolicyEngine
+	policyEnforcer PolicyObligationEnforcer
+	outputGateway  OutputGateway
+	pipeline       PipelineComponents
 }
 
 type Config struct {
-	StoreProvider StoreProvider
-	PolicyEngine  PolicyEngine
-	OutputGateway OutputGateway
-	Pipeline      PipelineComponents
+	StoreProvider  StoreProvider
+	PolicyEngine   PolicyEngine
+	PolicyEnforcer PolicyObligationEnforcer
+	OutputGateway  OutputGateway
+	Pipeline       PipelineComponents
 }
 
 func NewMemoryRuntime() *Runtime {
@@ -45,20 +48,25 @@ func NewMemoryRuntime() *Runtime {
 
 func NewRuntime(config Config) *Runtime {
 	rt := &Runtime{
-		tools:         map[string]model.Tool{},
-		agents:        map[string]AgentProfile{},
-		agentOrder:    []string{},
-		flows:         map[string]model.Flow{},
-		policy:        allowPolicyEngine{},
-		outputGateway: memoryOutputGateway{},
-		memProvider:   memory.NewProvider(),
-		commandBus:    commandbus.NewBus(),
+		tools:          map[string]model.Tool{},
+		scopedTools:    map[toolHolderKey]map[string]model.Tool{},
+		agents:         map[string]AgentProfile{},
+		agentOrder:     []string{},
+		flows:          map[string]model.Flow{},
+		policy:         allowPolicyEngine{},
+		policyEnforcer: defaultPolicyObligationEnforcer{},
+		outputGateway:  memoryOutputGateway{},
+		memProvider:    memory.NewProvider(),
+		commandBus:     commandbus.NewBus(),
 	}
 	if config.StoreProvider != nil {
 		rt.storeProvider = config.StoreProvider
 	}
 	if config.PolicyEngine != nil {
 		rt.policy = config.PolicyEngine
+	}
+	if config.PolicyEnforcer != nil {
+		rt.policyEnforcer = config.PolicyEnforcer
 	}
 	if config.OutputGateway != nil {
 		rt.outputGateway = config.OutputGateway

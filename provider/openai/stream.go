@@ -20,6 +20,9 @@ import (
 type chatCompletionRequest struct {
 	Model          string            `json:"model"`
 	Messages       []chatMessage     `json:"messages"`
+	Temperature    float64           `json:"temperature,omitempty"`
+	TopP           float64           `json:"top_p,omitempty"`
+	MaxTokens      int               `json:"max_tokens,omitempty"`
 	Tools          []chatTool        `json:"tools,omitempty"`
 	Stream         bool              `json:"stream"`
 	StreamOptions  streamOptions     `json:"stream_options,omitempty"`
@@ -205,6 +208,9 @@ func (d Driver) streamChatCompletions(ctx context.Context, request provider.Requ
 	body, err := marshalChatCompletionRequest(chatCompletionRequest{
 		Model:          request.Model,
 		Messages:       messages,
+		Temperature:    request.Temperature,
+		TopP:           request.TopP,
+		MaxTokens:      request.MaxTokens,
 		Tools:          toChatTools(request.Tools),
 		Stream:         true,
 		StreamOptions:  streamOptions{IncludeUsage: true},
@@ -288,7 +294,14 @@ func marshalChatCompletionRequestBody(body []byte, extraFields map[string]any) (
 	if err := json.Unmarshal(body, &merged); err != nil {
 		return nil, err
 	}
-	maps.Copy(merged, extraFields)
+	for key, value := range extraFields {
+		if _, protected := protectedChatModelFields[key]; protected {
+			if _, set := merged[key]; set {
+				continue
+			}
+		}
+		merged[key] = value
+	}
 	return json.Marshal(merged)
 }
 
@@ -310,6 +323,12 @@ var managedChatCompletionBodyFields = map[string]struct{}{
 	"stop":            {},
 	"reasoning":       {},
 	"response_format": {},
+}
+
+var protectedChatModelFields = map[string]struct{}{
+	"temperature": {},
+	"top_p":       {},
+	"max_tokens":  {},
 }
 
 func responseFormatFromRequest(format *provider.ResponseFormat) any {

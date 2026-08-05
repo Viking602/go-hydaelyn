@@ -225,6 +225,22 @@ type AgentInstanceStore interface {
 	ListAgentInstances(context.Context, AgentInstanceSelector) ([]AgentInstanceRecord, error)
 }
 
+// AgentDefinitionStore persists immutable, version-addressed definition
+// snapshots. Re-saving byte-equivalent content is idempotent; changing the
+// content bound to an existing (definition ID, version) returns
+// ErrDefinitionVersionConflict.
+type AgentDefinitionStore interface {
+	SaveAgentDefinitionSnapshot(context.Context, AgentDefinitionSnapshot) error
+	LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (AgentDefinitionSnapshot, error)
+	ListAgentDefinitionSnapshots(context.Context, AgentDefinitionSnapshotSelector) ([]AgentDefinitionSnapshot, error)
+}
+
+// AgentDefinitionUnitOfWork exposes immutable definition snapshots when
+// StoreCapabilities.SupportsDefinitionSnapshots is true.
+type AgentDefinitionUnitOfWork interface {
+	AgentDefinitions() AgentDefinitionStore
+}
+
 type UnitOfWork interface {
 	Runs() RunStore
 	Tasks() TaskStore
@@ -255,32 +271,40 @@ type StoreProvider interface {
 }
 
 // StoreCapabilities is the provider's self-declaration of optional features.
-// The runtime branches on these flags rather than probing the provider.
-// A provider that returns false for an optional capability is valid; the
-// runtime falls back to a polling / single-writer / non-requeue path.
+// The runtime branches on these flags rather than probing the provider. A
+// provider that returns false for an optional capability is valid. Polling,
+// single-writer, and non-requeue fallbacks cover the corresponding operational
+// features; definition snapshots, admission reservations, and resource claims
+// instead reject calls that require their disabled contract.
 //
-// Providers expose this struct via the optional CapabilityReporter
-// interface. Providers that do not implement CapabilityReporter are treated
-// as having DefaultStoreCapabilities (the conservative profile).
+// Providers expose this struct via the optional CapabilityReporter interface.
+// Providers that do not implement CapabilityReporter are treated as having
+// DefaultStoreCapabilities (the conservative profile).
 type StoreCapabilities struct {
-	SupportsTransactions        bool `json:"supportsTransactions"`        // UoW commit/rollback are atomic
-	SupportsBlackboardSubscribe bool `json:"supportsBlackboardSubscribe"` // can push Blackboard items without polling
-	SupportsListPending         bool `json:"supportsListPending"`         // ResumeTokens / Outbox enumeration
-	SupportsConcurrentWriters   bool `json:"supportsConcurrentWriters"`   // safe under N>1 worker processes
-	SupportsDeadLetterRequeue   bool `json:"supportsDeadLetterRequeue"`   // dead-lettered envelopes can be re-queued
+	SupportsTransactions          bool `json:"supportsTransactions"`          // UoW commit/rollback are atomic
+	SupportsBlackboardSubscribe   bool `json:"supportsBlackboardSubscribe"`   // can push Blackboard items without polling
+	SupportsListPending           bool `json:"supportsListPending"`           // ResumeTokens / Outbox enumeration
+	SupportsConcurrentWriters     bool `json:"supportsConcurrentWriters"`     // safe under N>1 worker processes
+	SupportsDeadLetterRequeue     bool `json:"supportsDeadLetterRequeue"`     // dead-lettered envelopes can be re-queued
+	SupportsDefinitionSnapshots   bool `json:"supportsDefinitionSnapshots"`   // immutable AgentDefinition revisions
+	SupportsAdmissionReservations bool `json:"supportsAdmissionReservations"` // atomic aggregate-capacity reservations
+	SupportsResourceClaims        bool `json:"supportsResourceClaims"`        // atomic shared/exclusive coordination claims
 }
 
 // DefaultStoreCapabilities is the conservative profile applied to providers
-// that do not implement CapabilityReporter. Single-writer, polling-only, no
-// dead-letter requeue. Safe for any provider — the runtime falls back to
-// polling and serializes worker access.
+// that do not implement CapabilityReporter. It enables polling and serialized
+// worker fallbacks while rejecting definition, admission, or resource-claim
+// features that require an unadvertised durable contract.
 func DefaultStoreCapabilities() StoreCapabilities {
 	return StoreCapabilities{
-		SupportsTransactions:        false,
-		SupportsBlackboardSubscribe: false,
-		SupportsListPending:         false,
-		SupportsConcurrentWriters:   false,
-		SupportsDeadLetterRequeue:   false,
+		SupportsTransactions:          false,
+		SupportsBlackboardSubscribe:   false,
+		SupportsListPending:           false,
+		SupportsConcurrentWriters:     false,
+		SupportsDeadLetterRequeue:     false,
+		SupportsDefinitionSnapshots:   false,
+		SupportsAdmissionReservations: false,
+		SupportsResourceClaims:        false,
 	}
 }
 

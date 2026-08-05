@@ -34,7 +34,8 @@ func newLoopToolEngine(t *testing.T, prov provider.Driver) Engine {
 	t.Helper()
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
@@ -85,7 +86,8 @@ func TestRunMessagesMaxToolCallsBudgetGatesParallelBatchBeforeDispatch(t *testin
 	executed := 0
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		executed++
 		return "result", nil
 	})
@@ -128,7 +130,8 @@ func TestRunMessagesMaxToolCallsBudgetAllowsBatchThatExactlyFills(t *testing.T) 
 	executed := 0
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		executed++
 		return "result", nil
 	})
@@ -159,7 +162,8 @@ func TestRunMessagesMaxTokensBudgetGatesToolDispatchAfterOverspend(t *testing.T)
 	executed := 0
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		executed++
 		return "result", nil
 	})
@@ -224,24 +228,48 @@ func TestRunMessagesMaxStepsBudgetIsHardFailure(t *testing.T) {
 	}
 }
 
-func TestRunMessagesMaxTokensBudgetFailsOpenOnZeroUsageProvider(t *testing.T) {
-	// alwaysToolProvider reports no usage; a token ceiling must never trip on
-	// it, so the loop runs to its soft iteration ceiling instead of failing.
-	engine := newLoopToolEngine(t, &alwaysToolProvider{})
+func TestRunMessagesMaxTokensBudgetRejectsMissingUsageBeforeTools(t *testing.T) {
+	executed := 0
+	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
+		Query string `json:"query"`
+	},
+	) (string, error) {
+		executed++
+		return "unexpected", nil
+	})
+	if err != nil {
+		t.Fatalf("tool setup: %v", err)
+	}
+	engine := Engine{Provider: &alwaysToolProvider{}, Tools: tool.NewBus(driver)}
 	output, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "loop")},
 		MaxTokens:     5,
 		MaxIterations: 3,
 	})
+	if !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("err = %v, want ErrBudgetExhausted", err)
+	}
+	if executed != 0 {
+		t.Fatalf("tool executed %d times after missing usage, want zero", executed)
+	}
+	if len(output.Steps) != 1 || output.Steps[0].Decision != StepDecisionFail {
+		t.Fatalf("steps = %#v, want one failed step", output.Steps)
+	}
+}
+
+func TestRunMessagesMaxTokensZeroAcceptsMissingUsage(t *testing.T) {
+	engine := Engine{Provider: singleTurnProvider("done")}
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:     "test-model",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "hi")},
+		MaxTokens: 0,
+	})
 	if err != nil {
-		t.Fatalf("token budget must fail open on a zero-usage provider, got %v", err)
+		t.Fatalf("unlimited token run error = %v", err)
 	}
-	if output.StopReason != provider.StopReasonMaxTurns {
-		t.Fatalf("StopReason = %q, want max-turns (soft ceiling, not a budget failure)", output.StopReason)
-	}
-	if len(output.Steps) != 3 {
-		t.Fatalf("len(Steps) = %d, want 3", len(output.Steps))
+	if output.StopReason != provider.StopReasonComplete {
+		t.Fatalf("StopReason = %q, want complete", output.StopReason)
 	}
 }
 
@@ -326,7 +354,7 @@ func TestEngineRunPerTaskBudgetOverridesLoopPolicy(t *testing.T) {
 }
 
 func TestEngineRunTaskBudgetIsAuthoritativeAndDoesNotInheritEngineCaps(t *testing.T) {
-	engine := newLoopToolEngine(t, &alwaysToolProvider{})
+	engine := newLoopToolEngine(t, &alwaysToolProvider{usage: provider.Usage{InputTokens: 1, TotalTokens: 1}})
 	// The engine default caps tool calls at 2 and allows up to 5 iterations.
 	// The task supplies its own Budget that bounds only tokens, leaving
 	// MaxToolCalls zero — which the api.TaskBudget contract defines as unbounded.
@@ -340,8 +368,8 @@ func TestEngineRunTaskBudgetIsAuthoritativeAndDoesNotInheritEngineCaps(t *testin
 	// A present task budget is authoritative: its zero MaxToolCalls means
 	// unbounded, so the engine's cap of 2 must NOT be inherited (under the old
 	// per-dimension merge this run failed with budget_exhausted after 2 calls).
-	// The token ceiling fails open on the zero-usage provider, so the run
-	// reaches the soft iteration ceiling instead of a budget failure.
+	// The provider reports one token per turn, so the token ceiling stays well
+	// above this run and it reaches the soft iteration ceiling.
 	if result.Failure != nil {
 		t.Fatalf("task budget must not inherit the engine tool-call cap; got failure %#v", result.Failure)
 	}

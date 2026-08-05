@@ -103,14 +103,15 @@ func TestCodingEvalRegressions(t *testing.T) {
 // ---------------------------------------------------------------------------
 func staleEditRegression(t *testing.T) eval.EvalCase {
 	const runID = "coding-stale-edit"
+	const request = "edit calc.go"
 	const path = "calc.go"
 	return eval.EvalCase{
 		Name:        "stale-edit-conflict-rejected",
 		Description: "a conflicting stale edit is rejected and the file is not mutated",
 		Timeout:     30 * time.Second,
-		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "edit calc.go"},
+		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request},
 		Setup: func() eval.Harness {
-			h := newCodingHarness(t, runID, map[string]string{
+			h := newCodingHarness(t, runID, request, map[string]string{
 				path: "alpha\nbeta\ngamma\n",
 			})
 			set := h.toolSet()
@@ -167,13 +168,14 @@ func staleEditRegression(t *testing.T) eval.EvalCase {
 // ---------------------------------------------------------------------------
 func pathEscapeRegression(t *testing.T) eval.EvalCase {
 	const runID = "coding-path-escape"
+	const request = "read ../secret"
 	return eval.EvalCase{
 		Name:        "path-escape-rejected",
 		Description: "a read/edit targeting outside the workspace is rejected",
 		Timeout:     30 * time.Second,
-		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "read ../secret"},
+		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request},
 		Setup: func() eval.Harness {
-			h := newCodingHarness(t, runID, map[string]string{
+			h := newCodingHarness(t, runID, request, map[string]string{
 				"inside.go": "package inside\n",
 			})
 			set := h.toolSet()
@@ -234,16 +236,17 @@ func pathEscapeRegression(t *testing.T) eval.EvalCase {
 // ---------------------------------------------------------------------------
 func policyBypassRegression(t *testing.T) eval.EvalCase {
 	const runID = "coding-policy-bypass"
+	const request = "edit without allowance"
 	const path = "calc.go"
 	const policyName = "coding-default-deny"
 	return eval.EvalCase{
 		Name:        "policy-edit-denied-without-allowance",
 		Description: "coding.edit_hashline is denied without an explicit allowance and nothing is written",
 		Timeout:     30 * time.Second,
-		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "edit without allowance"},
+		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request},
 		Setup: func() eval.Harness {
 			// No host allowance: the bare coding.PolicyEngine() denies writes.
-			h := newCodingHarnessWithPolicy(t, runID, coding.PolicyEngine(), map[string]string{
+			h := newCodingHarnessWithPolicy(t, runID, request, coding.PolicyEngine(), map[string]string{
 				path: "package calc\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n",
 			})
 			set := h.toolSet()
@@ -290,13 +293,14 @@ func policyBypassRegression(t *testing.T) eval.EvalCase {
 // ---------------------------------------------------------------------------
 func allOrNothingRegression(t *testing.T) eval.EvalCase {
 	const runID = "coding-all-or-nothing"
+	const request = "edit a.txt and b.txt"
 	return eval.EvalCase{
 		Name:        "multi-file-one-bad-section-writes-none",
 		Description: "a multi-file patch with one bad section writes none",
 		Timeout:     30 * time.Second,
-		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "edit a.txt and b.txt"},
+		Input:       api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request},
 		Setup: func() eval.Harness {
-			h := newCodingHarness(t, runID, map[string]string{
+			h := newCodingHarness(t, runID, request, map[string]string{
 				"a.txt": "alpha\n",
 				"b.txt": "beta\n",
 			})
@@ -374,15 +378,15 @@ const codingHarnessAgentID = "code-editor"
 // newCodingHarness seeds a workspace and builds a harness whose policy engine is
 // coding.PolicyEngine() composed with the host's workspace-write allowance for
 // edit/gofmt — the composition spec §7.1 requires to clear the default deny.
-func newCodingHarness(t *testing.T, runID string, files map[string]string) *codingHarness {
+func newCodingHarness(t *testing.T, runID, request string, files map[string]string) *codingHarness {
 	t.Helper()
-	return newCodingHarnessWithPolicy(t, runID, hostAllowancePolicy(), files)
+	return newCodingHarnessWithPolicy(t, runID, request, hostAllowancePolicy(), files)
 }
 
 // newCodingHarnessWithPolicy is like newCodingHarness but takes the policy
 // engine explicitly, so the policy-bypass case can attach the bare
 // coding.PolicyEngine() (no host allowance) to prove the default deny.
-func newCodingHarnessWithPolicy(t *testing.T, runID string, engine api.PolicyEngine, files map[string]string) *codingHarness {
+func newCodingHarnessWithPolicy(t *testing.T, runID, request string, engine api.PolicyEngine, files map[string]string) *codingHarness {
 	t.Helper()
 	root := t.TempDir()
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
@@ -402,7 +406,7 @@ func newCodingHarnessWithPolicy(t *testing.T, runID string, engine api.PolicyEng
 	runner.RegisterAgent(api.AgentProfile{ID: codingHarnessAgentID})
 
 	ctx := context.Background()
-	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: "coding regression"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}

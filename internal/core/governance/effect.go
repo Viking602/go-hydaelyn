@@ -7,10 +7,12 @@ package governance
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
+	"github.com/Viking602/venat/internal/execution"
 )
 
 // EffectTaskFromRequest loads the task identified by request if both RunID
@@ -50,6 +52,9 @@ func PauseTaskForPolicy(ctx context.Context, uow ports.UnitOfWork, task model.Ta
 	} else if ok {
 		lease.Status = model.LeaseStatusReleased
 		if err := uow.Leases().SaveLease(ctx, lease); err != nil {
+			return err
+		}
+		if err := execution.ReleaseResourceClaims(ctx, uow, lease.ID, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

@@ -79,7 +79,10 @@ func responseCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	switch cmd := command.(type) {
 	case api.AcquireTaskExecutionCommand:
-		return core.AcquireTaskExecutionCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL}, true
+		return core.AcquireTaskExecutionCommand{
+			RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID,
+			HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL,
+		}, true
 	case api.HeartbeatTaskExecutionCommand:
 		return core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID, TTL: cmd.TTL}, true
 	case api.AppendTaskExecutionEventCommand:
@@ -87,6 +90,7 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 			RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
 			HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
 			TaskVersion: cmd.TaskVersion, Event: EventToModel(cmd.Event),
+			UsageRecords: UsageRecordsToModel(cmd.UsageRecords),
 		}, true
 	case api.ReleaseTaskExecutionCommand:
 		return core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID}, true
@@ -101,12 +105,27 @@ func governanceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 	case api.StartActionAttemptCommand:
 		return core.StartActionAttemptCommand{AttemptID: cmd.AttemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, ToolName: cmd.ToolName, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}, true
 	case api.CompleteActionAttemptCommand:
-		return core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...), RequiresReconcile: cmd.RequiresReconcile}, true
+		return core.CompleteActionAttemptCommand{
+			RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
+			HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
+			TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID,
+			Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID,
+			ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...),
+			RequiresReconcile: cmd.RequiresReconcile, UsageRecord: usageRecordToModelPointer(cmd.UsageRecord),
+		}, true
 	case api.ResolveActionAttemptCommand:
 		return core.ResolveActionAttemptCommand{AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...)}, true
 	default:
 		return nil, false
 	}
+}
+
+func usageRecordToModelPointer(record *api.UsageRecord) *model.UsageRecord {
+	if record == nil {
+		return nil
+	}
+	converted := UsageRecordToModel(*record)
+	return &converted
 }
 
 func traceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
@@ -149,6 +168,7 @@ func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {
 		InputSchema:        cloneBytes(cmd.InputSchema),
 		OutputSchema:       cloneBytes(cmd.OutputSchema),
 		Budget:             TaskBudgetPtrToModel(cmd.Budget),
+		ResourceClaims:     ResourceClaimSpecsToModel(cmd.ResourceClaims),
 	}
 }
 
@@ -169,5 +189,9 @@ func ToolInvocationToCore(cmd api.ToolInvocation) core.ToolInvocation {
 }
 
 func ToolInvocationResultFromCore(in core.ToolInvocationResult) api.ToolInvocationResult {
-	return api.ToolInvocationResult{ToolName: in.ToolName, Output: in.Output}
+	return api.ToolInvocationResult{
+		ToolName: in.ToolName,
+		Output:   in.Output,
+		Decision: PolicyDecisionFromModel(in.Decision),
+	}
 }

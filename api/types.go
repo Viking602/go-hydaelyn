@@ -213,6 +213,7 @@ const (
 	EventApprovalDecided             EventType = "ApprovalDecided"
 	EventTaskOwnerChanged            EventType = "TaskOwnerChanged"
 	EventPolicyObligationFailed      EventType = "PolicyObligationFailed"
+	EventPolicyDecisionRecorded      EventType = "PolicyDecisionRecorded"
 	EventResponseTaskCreated         EventType = "ResponseTaskCreated"
 	EventSystemResponseBypassAudited EventType = "SystemResponseBypassAudited"
 	EventUserMessageComposed         EventType = "UserMessageComposed"
@@ -257,6 +258,9 @@ type Flow struct {
 type StartRunResult struct {
 	Run      Run  `json:"run"`
 	RootTask Task `json:"rootTask"`
+	// Created reports whether this command created the durable run. It is false
+	// when an idempotent retry returned the matching existing run.
+	Created bool `json:"created"`
 }
 
 // RequestApprovalResult is the typed result of RequestApprovalCommand.
@@ -270,8 +274,9 @@ type RequestApprovalResult struct {
 // Acquired is false when the lease was not granted (already held by another
 // holder); in that case Lease is the zero value.
 type AcquireTaskExecutionResult struct {
-	Lease    TaskExecutionLease `json:"lease"`
-	Acquired bool               `json:"acquired"`
+	Lease          TaskExecutionLease    `json:"lease"`
+	Acquired       bool                  `json:"acquired"`
+	ResourceClaims ResourceClaimDecision `json:"resourceClaims,omitempty"`
 }
 
 type TaskExecutionLease struct {
@@ -387,6 +392,8 @@ const (
 
 type ObligationKind string
 
+type PolicyObligationTarget string
+
 const (
 	ObligationRedactFields           ObligationKind = "redact_fields"
 	ObligationSelectorOnly           ObligationKind = "selector_only"
@@ -394,6 +401,15 @@ const (
 	ObligationHideInternalTrace      ObligationKind = "hide_internal_trace"
 	ObligationMaskToolOutput         ObligationKind = "mask_tool_output"
 	ObligationRestrictHandoffContext ObligationKind = "restrict_handoff_context"
+)
+
+const (
+	PolicyTargetBlackboardRead  PolicyObligationTarget = "blackboard_read"
+	PolicyTargetBlackboardWrite PolicyObligationTarget = "blackboard_write"
+	PolicyTargetToolResult      PolicyObligationTarget = "tool_result"
+	PolicyTargetHandoff         PolicyObligationTarget = "handoff"
+	PolicyTargetResponse        PolicyObligationTarget = "response"
+	PolicyTargetTrace           PolicyObligationTarget = "trace"
 )
 
 type PolicyDecision struct {
@@ -408,8 +424,9 @@ type PolicyDecision struct {
 }
 
 type PolicyObligation struct {
-	Kind   ObligationKind `json:"kind"`
-	Target string         `json:"target,omitempty"`
+	Kind     ObligationKind         `json:"kind"`
+	Target   PolicyObligationTarget `json:"target,omitempty"`
+	Selector *BlackboardSelector    `json:"selector,omitempty"`
 }
 
 type MessagePolicyChecker func(UserMessage) PolicyDecision
@@ -425,6 +442,7 @@ const (
 	PolicyOperationAction          PolicyOperation = "action"
 	PolicyOperationResponseCompose PolicyOperation = "response_compose"
 	PolicyOperationResponsePublish PolicyOperation = "response_publish"
+	PolicyOperationTraceRead       PolicyOperation = "trace_read"
 )
 
 type PolicyRequest struct {
@@ -576,9 +594,10 @@ type Task struct {
 	// budget agent.Engine consumes; InputSchema / OutputSchema are the
 	// typed-handoff contract multiagent.Scheduler enforces. Spec anchor:
 	// docs/product-spec/v0.8.0/01-public-api.md §Change 4.
-	Budget       *TaskBudget     `json:"budget,omitempty"`
-	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
-	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	Budget         *TaskBudget         `json:"budget,omitempty"`
+	InputSchema    json.RawMessage     `json:"inputSchema,omitempty"`
+	OutputSchema   json.RawMessage     `json:"outputSchema,omitempty"`
+	ResourceClaims []ResourceClaimSpec `json:"resourceClaims,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -695,18 +714,39 @@ type CapabilitySelector struct {
 	Limit    int      `json:"limit,omitempty"`
 }
 
-// UsageRecord is an append-only metering datum captured per task execution.
-// The runtime emits one per LLM call, tool call, or other billable unit.
-//
-// Spec anchor: docs/product-spec/v0.8.0/06-usage-metering.md (detailed
-// fields may be added there; this is the v0.8.0 baseline).
+// UsageKind identifies one independently replayable metering unit.
+type UsageKind string
+
+const (
+	UsageKindModelCall       UsageKind = "model_call"
+	UsageKindToolCall        UsageKind = "tool_call"
+	UsageKindActionCall      UsageKind = "action_call"
+	UsageKindContext         UsageKind = "context"
+	UsageKindLegacyExecution UsageKind = "legacy_execution"
+)
+
+// UsagePricingState records whether a usage datum has been assigned credits.
+// Empty is treated as unknown and blocks admission settlement.
+type UsagePricingState string
+
+const (
+	UsagePricingStatePriced   UsagePricingState = "priced"
+	UsagePricingStateUnpriced UsagePricingState = "unpriced"
+)
+
+// UsageRecord is one append-only, independently replayable metering datum.
+// ID is its idempotency key. An empty Kind is interpreted as
+// UsageKindLegacyExecution for records written before granular metering.
 type UsageRecord struct {
+	PricingState          UsagePricingState `json:"pricingState,omitempty"`
 	ID                    string            `json:"id"`
 	RunID                 string            `json:"runId"`
 	TaskID                string            `json:"taskId,omitempty"`
 	AgentID               string            `json:"agentId,omitempty"`
+	Kind                  UsageKind         `json:"kind,omitempty"`
 	Provider              string            `json:"provider,omitempty"`
 	Model                 string            `json:"model,omitempty"`
+	ToolName              string            `json:"toolName,omitempty"`
 	InputTokens           int               `json:"inputTokens,omitempty"`
 	OutputTokens          int               `json:"outputTokens,omitempty"`
 	CachedInputTokens     int               `json:"cachedInputTokens,omitempty"`
@@ -716,6 +756,7 @@ type UsageRecord struct {
 	Steps                 int               `json:"steps,omitempty"`
 	DurationMS            int64             `json:"durationMs,omitempty"`
 	Credits               int64             `json:"credits,omitempty"`
+	CreditsKind           string            `json:"creditsKind,omitempty"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
 	CreatedAt             time.Time         `json:"createdAt"`
 }
@@ -725,7 +766,9 @@ type UsageSelector struct {
 	RunID    string    `json:"runId,omitempty"`
 	TaskID   string    `json:"taskId,omitempty"`
 	AgentID  string    `json:"agentId,omitempty"`
+	Kind     UsageKind `json:"kind,omitempty"`
 	Provider string    `json:"provider,omitempty"`
+	ToolName string    `json:"toolName,omitempty"`
 	Since    time.Time `json:"since,omitempty"`
 	Until    time.Time `json:"until,omitempty"`
 	Limit    int       `json:"limit,omitempty"`

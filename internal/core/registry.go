@@ -7,6 +7,43 @@ import (
 	"github.com/Viking602/venat/internal/core/model"
 )
 
+type toolHolderKey struct {
+	runID      string
+	taskID     string
+	holderType model.HolderType
+	holderID   string
+}
+
+func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType model.HolderType, holderID string, tool model.Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if runID == "" || taskID == "" || holderType == "" || holderID == "" || tool.Name == "" {
+		return
+	}
+	if tool.EffectType == "" {
+		tool.EffectType = model.ToolEffectReadOnly
+	}
+	key := toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID}
+	if r.scopedTools[key] == nil {
+		r.scopedTools[key] = make(map[string]model.Tool)
+	}
+	r.scopedTools[key][tool.Name] = cloneTool(tool)
+}
+
+func (r *Runtime) RemoveToolsForInvocation(runID, taskID string, holderType model.HolderType, holderID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.scopedTools, toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID})
+}
+
+func (r *Runtime) toolForInvocation(runID, taskID string, holderType model.HolderType, holderID, name string) (model.Tool, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tools := r.scopedTools[toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID}]
+	tool, ok := tools[name]
+	return cloneTool(tool), ok
+}
+
 func (r *Runtime) RegisterAgent(profile AgentProfile) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

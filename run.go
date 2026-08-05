@@ -17,12 +17,26 @@ func (r *Runner) QueueRun(ctx context.Context, cmd api.StartRunCommand) (api.Run
 	return adapter.RunFromModel(run), nil
 }
 
-func (r *Runner) StartRun(ctx context.Context, cmd api.StartRunCommand) (api.Run, api.Task, error) {
-	run, task, err := r.rt.StartRun(ctx, adapter.StartRunCommandToCore(cmd))
+// StartRunWithResult starts a run and reports whether this call created it.
+// Created is false for an idempotent retry that returned the existing run.
+func (r *Runner) StartRunWithResult(ctx context.Context, cmd api.StartRunCommand) (api.StartRunResult, error) {
+	started, err := r.rt.StartRunWithResult(ctx, adapter.StartRunCommandToCore(cmd))
 	if err != nil {
-		return api.Run{}, api.Task{}, adapter.ErrorToAPI(err)
+		return api.StartRunResult{}, adapter.ErrorToAPI(err)
 	}
-	return adapter.RunFromModel(run), adapter.TaskFromModel(task), nil
+	return api.StartRunResult{
+		Run:      adapter.RunFromModel(started.Run),
+		RootTask: adapter.TaskFromModel(started.Root),
+		Created:  started.Created,
+	}, nil
+}
+
+func (r *Runner) StartRun(ctx context.Context, cmd api.StartRunCommand) (api.Run, api.Task, error) {
+	started, err := r.StartRunWithResult(ctx, cmd)
+	if err != nil {
+		return api.Run{}, api.Task{}, err
+	}
+	return started.Run, started.RootTask, nil
 }
 
 func (r *Runner) AdvanceRun(ctx context.Context, cmd api.AdvanceRunCommand) (api.Run, error) {

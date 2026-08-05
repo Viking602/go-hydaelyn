@@ -33,6 +33,7 @@ type CompleteActionAttemptCommand struct {
 	ExternalResultRef string
 	ToolResult        json.RawMessage
 	RequiresReconcile bool
+	UsageRecord       *model.UsageRecord
 }
 
 type ResolveActionAttemptCommand struct {

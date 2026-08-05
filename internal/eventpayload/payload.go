@@ -39,6 +39,7 @@ func Task(task model.Task) map[string]any {
 		"budget":             task.Budget,
 		"inputSchema":        slices.Clone(task.InputSchema),
 		"outputSchema":       slices.Clone(task.OutputSchema),
+		"resourceClaims":     slices.Clone(task.ResourceClaims),
 		"createdAt":          task.CreatedAt,
 		"updatedAt":          task.UpdatedAt,
 	}

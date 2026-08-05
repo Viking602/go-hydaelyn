@@ -396,12 +396,16 @@ func (h submitTypedHandler) saveRun(ctx context.Context, uow ports.UnitOfWork, m
 }
 
 func (h submitTypedHandler) releaseLease(ctx context.Context, uow ports.UnitOfWork, m *SubmitTypedResult, lease model.TaskExecutionLease) (model.TaskExecutionLease, error) {
+	now := time.Now().UTC()
 	lease.Status = model.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		return model.TaskExecutionLease{}, err
 	}
+	if err := execution.ReleaseResourceClaims(ctx, uow, lease.ID, now); err != nil {
+		return model.TaskExecutionLease{}, err
+	}
 	m.Leases = append(m.Leases, lease)
-	if err := h.emit(ctx, uow, m, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := h.emit(ctx, uow, m, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: now}); err != nil {
 		return model.TaskExecutionLease{}, err
 	}
 	return lease, nil

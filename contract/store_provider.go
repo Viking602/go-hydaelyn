@@ -2,9 +2,11 @@ package contract
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,12 +24,12 @@ type ProviderFactory func(t *testing.T) (provider api.StoreProvider, cleanup fun
 // their own _test.go to verify their provider satisfies the framework
 // contract.
 //
-// v0.8.0 scope: 42 named subtests across CRUD, transactions, lease CAS,
-// event ordering, resume tokens + outbox, replay determinism, capability
-// self-consistency, and the multi-agent stores (HandoffStore /
-// TeamStateStore / AgentInstanceStore — spec 07 §"New store contracts").
-// See docs/product-spec/v0.8.0/07-storage.md §"Contract test suite" for
-// the authoritative list. See ADR-012 for the Position D stance.
+// v0.14.0 scope: named subtests across CRUD, transactions, lease CAS, event
+// ordering, resume tokens + outbox, replay determinism, capability
+// self-consistency, multi-agent stores, immutable AgentDefinition snapshots,
+// atomic admission reservations, and atomic shared/exclusive resource claims.
+// See docs/product-spec/v0.14.0/03-storage.md for the v0.14.0 extensions.
+// See ADR-012 for the Position D stance.
 // Application-owned StoreProvider implementations should run this suite. The
 // framework ships no reference StoreProvider implementations.
 //
@@ -48,6 +50,9 @@ func RunStoreProviderContractTests(t *testing.T, factory ProviderFactory) {
 	t.Run("ReplayDeterminism", func(t *testing.T) { runReplayDeterminismSuite(t, factory) })
 	t.Run("CapabilitySelfConsistency", func(t *testing.T) { runCapabilitySelfConsistencySuite(t, factory) })
 	t.Run("MultiAgentStores", func(t *testing.T) { runMultiAgentStoreSuite(t, factory) })
+	t.Run("AgentDefinitionSnapshots", func(t *testing.T) { runAgentDefinitionSnapshotSuite(t, factory) })
+	t.Run("AdmissionReservations", func(t *testing.T) { runAdmissionReservationSuite(t, factory) })
+	t.Run("ResourceClaims", func(t *testing.T) { runResourceClaimSuite(t, factory) })
 }
 
 // suiteCase pairs a contract test name (locked surface — never rename
@@ -130,6 +135,9 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 		{"TestSaveAndList_AgentProfiles", testSaveAndListAgentProfiles},
 		{"TestSaveAndList_Capabilities", testSaveAndListCapabilities},
 		{"TestSaveAndList_UsageRecords", testSaveAndListUsageRecords},
+		{"TestUsageRecord_IdempotentAppend", testUsageRecordIdempotentAppend},
+		{"TestUsageRecord_KindAndLegacySelection", testUsageRecordKindAndLegacySelection},
+		{"TestUsageRecord_SumIgnoresQueryLimit", testUsageRecordSumIgnoresQueryLimit},
 		{"TestSaveAndList_DeadLetters", testSaveAndListDeadLetters},
 		{"TestSaveAndList_ActionAttempts", testSaveAndListActionAttempts},
 		{"TestActionAttempt_ResolveCAS", testActionAttemptResolveCAS},
@@ -395,6 +403,133 @@ func testSaveAndListAgentProfiles(t *testing.T, factory ProviderFactory) {
 	})
 }
 
+func runAgentDefinitionSnapshotSuite(t *testing.T, factory ProviderFactory) {
+	t.Helper()
+	probe := newProvider(t, factory)
+	if !capabilities(t, probe).SupportsDefinitionSnapshots {
+		t.Skip("provider does not advertise agent definition snapshots")
+	}
+	runSuite(t, factory, []suiteCase{
+		{"TestSaveLoadList_AgentDefinitionSnapshots", testSaveLoadListAgentDefinitionSnapshots},
+		{"TestAgentDefinitionSnapshot_ImmutableVersion", testAgentDefinitionSnapshotImmutableVersion},
+	})
+}
+
+func contractAgentDefinitionStore(uow api.UnitOfWork) (api.AgentDefinitionStore, error) {
+	extension, ok := uow.(api.AgentDefinitionUnitOfWork)
+	if !ok {
+		return nil, fmt.Errorf("provider advertises agent definition snapshots without exposing api.AgentDefinitionUnitOfWork")
+	}
+	store := extension.AgentDefinitions()
+	if store == nil {
+		return nil, fmt.Errorf("provider advertises agent definition snapshots with a nil store")
+	}
+	return store, nil
+}
+
+func agentDefinitionSnapshot(t *testing.T, id, version, instructions string) api.AgentDefinitionSnapshot {
+	t.Helper()
+	definition := api.AgentDefinition{
+		ID:           id,
+		Name:         "contract agent",
+		Version:      version,
+		Instructions: instructions,
+		Model:        api.ModelPolicy{Model: "contract-model"},
+		Metadata:     map[string]string{"suite": "store-contract"},
+	}
+	encoded, err := json.Marshal(definition)
+	if err != nil {
+		t.Fatalf("marshal AgentDefinition: %v", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return api.AgentDefinitionSnapshot{
+		Definition: definition,
+		Digest:     fmt.Sprintf("%x", sum),
+		CreatedAt:  time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+	}
+}
+
+func testSaveLoadListAgentDefinitionSnapshots(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	want := agentDefinitionSnapshot(t, "definition-contract", "1.0.0", "follow the contract")
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		store, err := contractAgentDefinitionStore(uow)
+		if err != nil {
+			return err
+		}
+		return store.SaveAgentDefinitionSnapshot(context.Background(), want)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		store, err := contractAgentDefinitionStore(uow)
+		if err != nil {
+			return err
+		}
+		got, err := store.LoadAgentDefinitionSnapshot(
+			context.Background(),
+			want.Definition.ID,
+			want.Definition.Version,
+		)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("definition snapshot mismatch:\n got: %#v\nwant: %#v", got, want)
+		}
+		listed, err := store.ListAgentDefinitionSnapshots(
+			context.Background(),
+			api.AgentDefinitionSnapshotSelector{
+				DefinitionIDs: []string{want.Definition.ID},
+				Versions:      []string{want.Definition.Version},
+			},
+		)
+		if err != nil {
+			return err
+		}
+		if len(listed) != 1 || !reflect.DeepEqual(listed[0], want) {
+			t.Fatalf("definition snapshot list mismatch: %#v", listed)
+		}
+		return nil
+	})
+}
+
+func testAgentDefinitionSnapshotImmutableVersion(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	original := agentDefinitionSnapshot(t, "definition-immutable", "2.0.0", "original")
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		store, err := contractAgentDefinitionStore(uow)
+		if err != nil {
+			return err
+		}
+		return store.SaveAgentDefinitionSnapshot(context.Background(), original)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		store, err := contractAgentDefinitionStore(uow)
+		if err != nil {
+			return err
+		}
+		if err := store.SaveAgentDefinitionSnapshot(context.Background(), original); err != nil {
+			t.Fatalf("idempotent definition snapshot save: %v", err)
+		}
+		conflict := agentDefinitionSnapshot(t, original.Definition.ID, original.Definition.Version, "changed")
+		err = store.SaveAgentDefinitionSnapshot(context.Background(), conflict)
+		if !errors.Is(err, api.ErrDefinitionVersionConflict) {
+			t.Fatalf("definition version conflict error = %v, want ErrDefinitionVersionConflict", err)
+		}
+		got, err := store.LoadAgentDefinitionSnapshot(
+			context.Background(),
+			original.Definition.ID,
+			original.Definition.Version,
+		)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, original) {
+			t.Fatalf("conflicting save mutated definition snapshot: %#v", got)
+		}
+		return nil
+	})
+}
+
 func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
 	capability := api.Capability{Name: "summarize", AgentID: "agent-1", Description: "summarize text"}
@@ -433,6 +568,95 @@ func testSaveAndListUsageRecords(t *testing.T, factory ProviderFactory) {
 		}
 		if sum != 42 {
 			t.Fatalf("SumCredits = %d, want 42", sum)
+		}
+		return nil
+	})
+}
+
+func testUsageRecordIdempotentAppend(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	record := api.UsageRecord{
+		ID: "usage-idempotent", RunID: "run-usage-idempotent",
+		Kind: api.UsageKindModelCall, Credits: 7,
+		CreatedAt: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		return uow.UsageRecords().AppendUsage(context.Background(), record)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		return uow.UsageRecords().AppendUsage(context.Background(), record)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		records, err := uow.UsageRecords().QueryUsage(context.Background(), api.UsageSelector{RunID: record.RunID})
+		if err != nil {
+			return err
+		}
+		if len(records) != 1 {
+			t.Fatalf("idempotent usage append stored %d records, want 1", len(records))
+		}
+		conflict := record
+		conflict.Credits++
+		err = uow.UsageRecords().AppendUsage(context.Background(), conflict)
+		if !errors.Is(err, api.ErrIdempotencyConflict) {
+			t.Fatalf("conflicting usage append error = %v, want ErrIdempotencyConflict", err)
+		}
+		return nil
+	})
+}
+
+func testUsageRecordKindAndLegacySelection(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	records := []api.UsageRecord{
+		{ID: "usage-legacy", RunID: "run-usage-kinds", Credits: 1},
+		{ID: "usage-tool", RunID: "run-usage-kinds", Kind: api.UsageKindToolCall, ToolName: "read", Credits: 2},
+	}
+	for _, record := range records {
+		withUoW(t, p, func(uow api.UnitOfWork) error {
+			return uow.UsageRecords().AppendUsage(context.Background(), record)
+		})
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		legacy, err := uow.UsageRecords().QueryUsage(context.Background(), api.UsageSelector{
+			RunID: "run-usage-kinds", Kind: api.UsageKindLegacyExecution,
+		})
+		if err != nil {
+			return err
+		}
+		if len(legacy) != 1 || legacy[0].Kind != api.UsageKindLegacyExecution {
+			t.Fatalf("legacy usage selection = %#v, want one normalized legacy record", legacy)
+		}
+		tools, err := uow.UsageRecords().QueryUsage(context.Background(), api.UsageSelector{
+			RunID: "run-usage-kinds", Kind: api.UsageKindToolCall, ToolName: "read",
+		})
+		if err != nil {
+			return err
+		}
+		if len(tools) != 1 || tools[0].ID != "usage-tool" {
+			t.Fatalf("tool usage selection = %#v", tools)
+		}
+		return nil
+	})
+}
+
+func testUsageRecordSumIgnoresQueryLimit(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	for _, record := range []api.UsageRecord{
+		{ID: "usage-sum-a", RunID: "run-usage-sum", Credits: 2},
+		{ID: "usage-sum-b", RunID: "run-usage-sum", Credits: 3},
+	} {
+		withUoW(t, p, func(uow api.UnitOfWork) error {
+			return uow.UsageRecords().AppendUsage(context.Background(), record)
+		})
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		sum, err := uow.UsageRecords().SumCredits(context.Background(), api.UsageSelector{
+			RunID: "run-usage-sum", Limit: 1,
+		})
+		if err != nil {
+			return err
+		}
+		if sum != 5 {
+			t.Fatalf("SumCredits with query limit = %d, want 5", sum)
 		}
 		return nil
 	})

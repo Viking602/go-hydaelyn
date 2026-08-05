@@ -13,8 +13,9 @@ func (r *Runtime) SubmitResponseOutput(ctx context.Context, cmd SubmitResponseOu
 
 func registerResponseUoWCommandHandlers(runtime *Runtime) {
 	responsesvc.RegisterSubmitHandler(runtime.commandBus, responsesvc.HandlerOptions{
-		NewID:       runtime.newID,
-		Authorize:   runtime.authorizeUoW,
-		RecordTrace: runtime.recordEndedTraceUoW,
+		NewID:              runtime.newID,
+		Authorize:          runtime.authorizeUoW,
+		EnforceObligations: runtime.enforceResponseUoW,
+		RecordTrace:        runtime.recordEndedTraceUoW,
 	})
 }

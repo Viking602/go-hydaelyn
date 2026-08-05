@@ -70,6 +70,7 @@ func runTaskResultFromCore(command api.Command, result any) (any, bool) {
 		return api.StartRunResult{
 			Run:      adapter.RunFromModel(started.Run),
 			RootTask: adapter.TaskFromModel(started.Root),
+			Created:  started.Created,
 		}, true
 	case api.CreateTaskCommand:
 		if task, ok := result.(model.Task); ok {
@@ -108,8 +109,9 @@ func governanceResultFromCore(command api.Command, result any) (any, bool) {
 	case api.AcquireTaskExecutionCommand:
 		if acquired, ok := result.(core.AcquireTaskExecutionResult); ok {
 			return api.AcquireTaskExecutionResult{
-				Lease:    adapter.TaskExecutionLeaseFromModel(acquired.Lease),
-				Acquired: acquired.Acquired,
+				Lease:          adapter.TaskExecutionLeaseFromModel(acquired.Lease),
+				Acquired:       acquired.Acquired,
+				ResourceClaims: adapter.ResourceClaimDecisionFromModel(acquired.ResourceClaims),
 			}, true
 		}
 		return result, true

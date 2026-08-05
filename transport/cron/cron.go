@@ -137,9 +137,10 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if err != nil {
 		return trigger.Registration{}, fmt.Errorf("scheduler: trigger %q %w", t.ID, err)
 	}
-	reg := trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}
+	reg := (trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}).Clone()
+	registeredTrigger := reg.Trigger
 	id, err := d.cron.AddFunc(scheduledSpec, func() {
-		d.fire(t, agentID, spec, h)
+		d.fire(registeredTrigger, agentID, spec, h)
 	})
 	if err != nil {
 		return trigger.Registration{}, fmt.Errorf("scheduler: cron parse %q: %w", scheduledSpec, err)
@@ -147,7 +148,7 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	d.jobs[t.ID] = id
 	d.regs[t.ID] = reg
 	d.logger("scheduler: registered %s with spec %q", t.ID, scheduledSpec)
-	return reg, nil
+	return reg.Clone(), nil
 }
 
 func scheduleSpec(spec string, config map[string]string) (string, error) {
@@ -167,6 +168,7 @@ func scheduleSpec(spec string, config map[string]string) (string, error) {
 // handler crashes the cron worker goroutine (and the process). The
 // recover logs the panic and lets the cron loop keep scheduling.
 func (d *Driver) fire(t api.Trigger, agentID, spec string, h trigger.Handler) {
+	t = (trigger.Registration{Trigger: t}).Clone().Trigger
 	defer func() {
 		if r := recover(); r != nil {
 			d.logger("scheduler: trigger %s panicked: %v", t.ID, r)
@@ -213,7 +215,7 @@ func (d *Driver) List() []trigger.Registration {
 	defer d.mu.Unlock()
 	out := make([]trigger.Registration, 0, len(d.regs))
 	for _, r := range d.regs {
-		out = append(out, r)
+		out = append(out, r.Clone())
 	}
 	return out
 }

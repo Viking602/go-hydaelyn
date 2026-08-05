@@ -40,82 +40,108 @@ Append-only records, one per billable unit of work:
 
 `UsageStore` is part of `api.StoreProvider` (Layer 1 contract from ADR-012) with `SaveUsageRecord`, `ListUsageRecords(UsageSelector)`, and `SumUsageCredits(UsageSelector)`.
 
-### Component 2 — `Budget` + `BudgetPolicy` (enforcement)
+### Component 2 — `TaskBudget` + `AdmissionReservation` (enforcement)
 
-A `Budget` declares thresholds (`MaxCredits`, `MaxTokens`, `MaxToolCalls`, `MaxDuration`, `MaxIterations`) and an `OnExceeded` action:
+Per-task limits and aggregate deployment limits have different consistency
+requirements and therefore use different mechanisms.
 
-- `BudgetActionAbort` — cancel the run with `ErrBudgetExceeded`.
-- `BudgetActionPause` — pause and request approval to continue.
-- `BudgetActionWarn` — emit `EventBudgetWarn`, allow execution.
+`api.TaskBudget` bounds one task execution. `agent.Engine` enforces its token,
+tool-call, wall-clock, and step limits before the next operation and returns a
+typed budget-exhausted failure. Runner persists the task and result; it does not
+reinterpret the limit.
 
-A `Quota` binds a Budget to a `SubjectID` (`user:alice`, `tenant:acme`) over a rolling time `Window`.
+`api.AdmissionReservation` protects aggregate limits across runs:
 
-**`BudgetPolicy` is a `PolicyEngine`.** That is the composition law: budget enforcement is policy enforcement; it does not get its own enforcement code path. `BudgetPolicy.Authorize` sums recent `UsageRecord` credits via `UsageStore` and returns:
+- concurrent runs,
+- runs started in a time window,
+- credits committed or reserved in a time window, and
+- a trailing failure circuit breaker.
 
-- `PolicyEffectAllow` if under threshold,
-- `PolicyEffectDeny` (`OnExceeded=Abort`),
-- `PolicyEffectRequireApproval` (`OnExceeded=Pause`),
-- `PolicyEffectAllow` with a `warn_budget` obligation (`OnExceeded=Warn`).
+Admission is a compare-and-reserve operation, not a read-only policy query. A
+conforming store checks the aggregate state and creates the reservation in one
+atomic transaction. `PreviewAdmission` is read-only and is intended for status
+surfaces; only `ReserveAdmission` grants capacity.
 
-PolicyEngines compose by chain; **first DENY wins**. A run is authorized when every chained engine allows.
+The application supplies governance values. The framework owns reservation
+lifecycle and consistency. A configuration that enables aggregate governance
+MUST use a provider that advertises admission-reservation support; production
+startup fails rather than falling back to an in-process mutex.
 
-`AgentProfile.Governance.MaxCreditsPerRun` is materialized into a run-scoped `BudgetPolicy` automatically by `Runner.RunFromProfile`. Users do not wire it manually.
+`PolicyEngine` remains the authorization surface for dispatch, provider, tool,
+action, handoff, and publication decisions. It may deny an operation for a
+quota-related reason, but it cannot grant aggregate capacity. Capacity is
+granted only by a successful reservation.
 
-### Component 3 — `PolicyEnforcer` (conditional authorization)
+### Component 3 — typed obligation enforcement (conditional authorization)
 
-`PolicyDecision.Obligations []PolicyObligation` existed in v0.7 as a slice no one read. v0.8.0 introduces `PolicyEnforcer` to apply obligations to the target data:
+`PolicyDecision.Obligations` is executable policy output. Each governed target
+uses a typed enforcement method rather than passing an untyped value through a
+generic mutator. The built-in target families are:
 
-```go
-type PolicyEnforcer interface {
-    Enforce(ctx context.Context, req PolicyRequest, decision PolicyDecision, target any) (any, error)
-}
-```
+- Blackboard selections and items,
+- tool result payloads,
+- handoff context,
+- trace exports, and
+- user-visible messages.
 
-Built-in obligation kinds:
+Built-in obligation kinds are:
 
-- `redact_fields` (drop listed JSON paths from target)
-- `selector_only` (restrict BlackboardSelector results)
-- `require_human_approval` (escalate to approval flow)
-- `hide_internal_trace` (strip `InternalNotes`, `RawProviderRequest`)
-- `mask_tool_output` (replace ToolInvocationResult body, preserve metadata)
-- `restrict_handoff_context` (filter handoff payload fields by allowlist)
+- `redact_fields`,
+- `selector_only`,
+- `require_human_approval`,
+- `hide_internal_trace`,
+- `mask_tool_output`, and
+- `restrict_handoff_context`.
 
-The Runner threads `PolicyEnforcer` into five call sites (Blackboard read, Tool invocation result, Trace export, Handoff transfer, User message). Each site is bounded by the obligation kinds it understands; unknown kinds pass through with `EventPolicyObligationSkipped` logged — not a hard error, because obligations are an open extension surface.
+Every known obligation applicable to a target MUST be applied before the value
+crosses its boundary. An obligation that is unknown or cannot be applied fails
+closed and records `EventPolicyObligationFailed`. Successful enforcement records
+`EventPolicyObligationApplied`. The framework never records an obligation and
+then returns the original ungoverned value.
 
 ## Composition law
 
 ```
-Measurement  →  UsageRecord (Store layer)
-                     ↓
-Enforcement  →  BudgetPolicy implements PolicyEngine
-                     ↓
-Authorization →  PolicyEngine chain (first DENY wins)
-                     ↓
-Conditional  →  PolicyEnforcer applies Obligations to target data
-                     ↓
-Observable   →  Events: UsageRecorded / BudgetWarn / BudgetExceeded /
-                        PolicyObligationApplied / PolicyObligationSkipped
+Measurement   → granular UsageRecord (append-only Store layer)
+                       ↓
+Task limit    → agent.Engine enforces TaskBudget
+                       ↓
+Aggregate cap → atomic AdmissionReservation
+                       ↓
+Authorization → deterministic PolicyEngine chain
+                       ↓
+Conditional   → typed obligation enforcement
+                       ↓
+Observable    → durable usage, admission, and policy events
 ```
 
-The single law: **enforcement is policy; measurement feeds policy; conditional authorization is the obligations on a policy decision**. There is no parallel "budget enforcer" or "usage gate" outside `PolicyEngine`.
+The law is: **measurement supplies durable facts; task budgets bound one loop;
+admission atomically reserves aggregate capacity; policy authorizes operations;
+obligations transform or block governed outputs**. None of these surfaces may
+claim the consistency guarantee owned by another.
 
 ## Anti-patterns rejected by this ADR
 
 | Anti-pattern | Why it is wrong |
 | ------------ | --------------- |
-| Reading `MaxTokens` directly in the Runner and aborting outside PolicyEngine | Bypasses the policy chain; if a tenant policy says "allow with warning", direct abort overrides it |
-| Storing budget remaining as a field on `Run` | Stateful budget bookkeeping in Run conflicts with replay; the source of truth is the sum over `UsageRecord` |
-| Skipping `UsageRecord` for "internal" tool calls | Every billable unit is a record; the runtime cannot decide what counts as "billable" — adapters do, via `Credits` value (zero credits = recorded but free) |
-| Treating `Credits` as a currency in framework code | Framework records it as `int64`; meaning is adapter-defined; no FX, no rounding, no localization |
-| A custom enforcer that mutates `target` in place when `PolicyEffectDeny` is returned | If access is denied the target should not leak through; enforcer is only invoked for `Allow`+obligations |
-| Adding a new obligation kind without registering it in the default enforcer's dispatch | Unknown kinds pass through with `EventPolicyObligationSkipped` — acceptable as an open extension, but pack-defined obligations should declare their kind in pack code with a custom enforcer wrapper |
+| Reading `MaxTokens` directly in Runner and aborting outside `agent.Engine` | Gives two owners to the same task limit and makes replay ambiguous |
+| Checking aggregate quota with `SumCredits` followed by `Allow` | Two workers can observe the same remaining capacity and both enter; use an atomic reservation |
+| Storing budget remaining as a field on `Run` | Stateful budget bookkeeping in Run conflicts with replay; usage and reservations are the sources of truth |
+| Skipping `UsageRecord` for "internal" calls | Every measured unit is a record; zero credits represents a recorded but free unit |
+| Treating `Credits` as currency in framework code | Framework records an `int64`; meaning and conversion remain adapter-defined |
+| Passing obligation targets as `any` | It permits mismatched handlers and silent data leakage; enforcement is target-specific and typed |
+| Ignoring an unknown or failed obligation | Authorization conditions were not satisfied, so the governed operation must fail closed |
 
 ## Impact
 
-- Agent runs are auditable (`UsageStore` query yields cost), bounded (`BudgetPolicy` in the chain), and conditionally authorized (`PolicyEnforcer` applies obligations).
-- Adding a new cost dimension (e.g., GPU minutes) is a new `UsageRecord` field + adapter-defined `Credits` conversion — no Runner or PolicyEngine changes.
-- Adding a new obligation kind is a new constant + a new branch in the default enforcer — no Runner changes.
-- The shape of `UsageRecord` is the public surface external billing systems integrate against; downstream teams can build dashboards / pricing models on top of it without touching framework code.
+- Task execution, aggregate admission, operation authorization, and output
+  transformation have distinct owners and durable facts.
+- Admission remains correct with multiple processes when the StoreProvider
+  satisfies the atomic reservation contract.
+- Usage retries are safe only when records carry deterministic identities and
+  append is idempotent.
+- Applications keep control of limits and policy values; framework code owns
+  the lifecycle and replay rules needed to enforce them consistently.
 
 ## References
 

@@ -250,7 +250,10 @@ func TestDriverStreamSendsSystemAndBlocks(t *testing.T) {
 
 	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client()})
 	stream, err := driver.Stream(context.Background(), provider.Request{
-		Model: "claude-test",
+		Model:       "claude-test",
+		Temperature: 0.5,
+		TopP:        0.75,
+		MaxTokens:   2048,
 		Messages: []message.Message{
 			{Role: message.RoleSystem, Text: "be terse"},
 			message.NewText(message.RoleUser, "hi"),
@@ -270,6 +273,9 @@ func TestDriverStreamSendsSystemAndBlocks(t *testing.T) {
 	content := captured.Messages[0].Content
 	if len(content) != 1 || content[0].Type != "text" || content[0].Text != "hi" {
 		t.Fatalf("expected text block content, got %#v", content)
+	}
+	if captured.Temperature != 0.5 || captured.TopP != 0.75 || captured.MaxTokens != 2048 {
+		t.Fatalf("model policy not forwarded: %#v", captured)
 	}
 }
 

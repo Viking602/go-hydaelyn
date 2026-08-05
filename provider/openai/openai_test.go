@@ -165,6 +165,9 @@ func TestDriverStreamForwardsStopAndReasoning(t *testing.T) {
 	stream, err := driver.Stream(context.Background(), provider.Request{
 		Model:          "gpt-5.4",
 		Messages:       []message.Message{message.NewText(message.RoleUser, "hi")},
+		Temperature:    0.3,
+		TopP:           0.7,
+		MaxTokens:      456,
 		StopSequences:  []string{"Wait,", "Actually,"},
 		ThinkingBudget: 5000,
 	})
@@ -180,6 +183,9 @@ func TestDriverStreamForwardsStopAndReasoning(t *testing.T) {
 	reasoning, _ := captured["reasoning"].(map[string]any)
 	if reasoning["effort"] != "medium" {
 		t.Fatalf("expected reasoning effort medium for budget=5000, got %#v", reasoning)
+	}
+	if captured["temperature"] != 0.3 || captured["top_p"] != 0.7 || captured["max_tokens"] != 456.0 {
+		t.Fatalf("expected model policy forwarded, got %#v", captured)
 	}
 }
 

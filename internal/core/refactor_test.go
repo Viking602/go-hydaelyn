@@ -226,10 +226,10 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 
 	toolPolicy := &recordingPolicy{effects: map[PolicyOperation]PolicyEffect{PolicyOperationToolCall: PolicyEffectPause}}
 	toolRT := NewRuntime(Config{PolicyEngine: toolPolicy})
-	toolRT.RegisterTool(Tool{Name: "deploy", EffectType: ToolEffectWrite})
 	toolRun := mustStartRun(ctx, t, toolRT, "run-policy-tool")
 	toolTask := mustCreateTask(ctx, t, toolRT, CreateTaskCommand{RunID: toolRun.ID, TaskID: "tool", Type: TaskTypeWorker, AllowsAction: true, OwnerAgentID: "agent-a"})
 	toolLease := leaseTask(ctx, t, toolRT, toolRun.ID, toolTask.ID, HolderAgent, "agent-a")
+	toolRT.RegisterToolForInvocation(toolRun.ID, toolTask.ID, HolderAgent, "agent-a", Tool{Name: "deploy", EffectType: ToolEffectWrite})
 	if _, err := toolRT.InvokeTool(ctx, ToolInvocation{RunID: toolRun.ID, TaskID: toolTask.ID, LeaseID: toolLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: toolTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("tool_call pause should block command, got %v", err)
 	}

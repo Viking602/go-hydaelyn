@@ -67,6 +67,7 @@ var triage = api.AgentDefinition{
 	Description:  "Classifies an incoming ticket and drafts a reply for human approval.",
 	Instructions: "Read the ticket, pick the most likely category, search the KB, and draft a reply.",
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.2},
+	Tools:        []string{"lookup_ticket", "search_kb", "draft_reply"},
 	Capabilities: []string{"lookup_ticket", "search_kb", "draft_reply"},
 	Triggers: []api.Trigger{
 		{ID: "manual", Type: api.TriggerManual, Enabled: true},

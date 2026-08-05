@@ -12,8 +12,9 @@ import (
 // previous []any tuple keeps multi-value returns type-safe across the
 // command-bus boundary.
 type StartRunResult struct {
-	Run  model.Run
-	Root model.Task
+	Run     model.Run
+	Root    model.Task
+	Created bool
 }
 
 func RegisterHandlers(bus *commandbus.Bus, newID IDGenerator) {
@@ -28,11 +29,11 @@ type startRunHandler struct {
 func (h startRunHandler) Name() string { return StartRunCommand{}.CommandName() }
 
 func (h startRunHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd StartRunCommand) (any, error) {
-	run, root, err := Start(ctx, uow, h.newID, StartInput(cmd))
+	run, root, created, err := start(ctx, uow, h.newID, StartInput(cmd))
 	if err != nil {
 		return nil, err
 	}
-	return StartRunResult{Run: run, Root: root}, nil
+	return StartRunResult{Run: run, Root: root, Created: created}, nil
 }
 
 type createTaskHandler struct {

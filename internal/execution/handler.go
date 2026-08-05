@@ -18,19 +18,28 @@ const (
 	maxExecutionCheckpointCount      = 4096
 )
 
-func RegisterHandlers(bus *commandbus.Bus, newID IDGenerator) {
-	commandbus.Register[AcquireTaskExecutionCommand](bus, acquireTaskExecutionHandler{newID: newID})
+func RegisterHandlers(bus *commandbus.Bus, newID IDGenerator, resourceClaimsAvailable CapabilityCheck) {
+	commandbus.Register[AcquireTaskExecutionCommand](bus, acquireTaskExecutionHandler{
+		newID: newID, resourceClaimsAvailable: resourceClaimsAvailable,
+	})
 	commandbus.Register[HeartbeatTaskExecutionCommand](bus, heartbeatTaskExecutionHandler{})
 	commandbus.Register[ReleaseTaskExecutionCommand](bus, releaseTaskExecutionHandler{})
 	commandbus.Register[AppendTaskExecutionEventCommand](bus, appendTaskExecutionEventHandler{})
 }
 
-type acquireTaskExecutionHandler struct{ newID IDGenerator }
+type acquireTaskExecutionHandler struct {
+	newID                   IDGenerator
+	resourceClaimsAvailable CapabilityCheck
+}
 
 func (acquireTaskExecutionHandler) Name() string { return AcquireTaskExecutionCommand{}.CommandName() }
 
 func (h acquireTaskExecutionHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd AcquireTaskExecutionCommand) (any, error) {
-	result, err := Acquire(ctx, uow, h.newID, AcquireInput(cmd))
+	result, err := Acquire(ctx, uow, h.newID, AcquireInput{
+		RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID,
+		HolderType: cmd.HolderType, HolderID: cmd.HolderID, TTL: cmd.TTL,
+		ResourceClaimsAvailable: h.resourceClaimsAvailable,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +107,14 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 		}
 		if count >= maxExecutionCheckpointCount || total > maxExecutionCheckpointTotalBytes {
 			return nil, fmt.Errorf("%w: task has %d checkpoints using %d bytes", model.ErrCheckpointLimitExceeded, count, total)
+		}
+	}
+	for _, record := range cmd.UsageRecords {
+		if record.RunID != cmd.RunID || record.TaskID != cmd.TaskID {
+			return nil, model.ErrInvalidCommand
+		}
+		if err := uow.UsageRecords().AppendUsage(ctx, record); err != nil {
+			return nil, err
 		}
 	}
 	if err := uow.Events().AppendEvent(ctx, cmd.Event); err != nil {

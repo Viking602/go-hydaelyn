@@ -18,11 +18,6 @@ func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
 	runner.RegisterAgent(api.AgentProfile{ID: "researcher"})
-	runner.RegisterTool(api.Tool{
-		Name:       "web.search",
-		EffectType: api.ToolEffectReadOnly,
-		RiskLevel:  "low",
-	})
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "search the web"})
 	must(err)
@@ -30,6 +25,11 @@ func main() {
 		RunID: run.ID, TaskID: "lookup", OwnerAgentID: "researcher",
 	})
 	must(err)
+	runner.RegisterToolForInvocation(run.ID, task.ID, api.HolderAgent, "researcher", api.Tool{
+		Name:       "web.search",
+		EffectType: api.ToolEffectReadOnly,
+		RiskLevel:  "low",
+	})
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "researcher",
 	})

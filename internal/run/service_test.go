@@ -59,6 +59,43 @@ func TestStartCreatesRunRootTaskAndEvents(t *testing.T) {
 	}
 }
 
+func TestStartIsIdempotentForExplicitRunIdentity(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	input := runsvc.StartInput{
+		RunID: "run-idempotent", RootTaskID: "root-idempotent",
+		Request: "ship once", Metadata: map[string]string{"owner": "runtime"},
+	}
+	firstRun, firstRoot, err := runsvc.Start(ctx, uow, testIDGenerator(), input)
+	if err != nil {
+		t.Fatalf("Start(first) error = %v", err)
+	}
+	secondRun, secondRoot, err := runsvc.Start(ctx, uow, testIDGenerator(), input)
+	if err != nil {
+		t.Fatalf("Start(retry) error = %v", err)
+	}
+	if !secondRun.CreatedAt.Equal(firstRun.CreatedAt) || !secondRoot.CreatedAt.Equal(firstRoot.CreatedAt) {
+		t.Fatalf("retry replaced durable records: first=%#v/%#v second=%#v/%#v", firstRun, firstRoot, secondRun, secondRoot)
+	}
+	events, err := uow.Events().ListEvents(ctx, input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("retry events = %d, want original two", len(events))
+	}
+	conflict := input
+	conflict.Request = "replace existing run"
+	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), conflict); !errors.Is(err, model.ErrIdempotencyConflict) {
+		t.Fatalf("Start(conflict) error = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
 func TestCreateTaskDefaultsAndCopiesMutableInput(t *testing.T) {
 	ctx := context.Background()
 	provider := memory.NewProvider()

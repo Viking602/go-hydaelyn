@@ -30,16 +30,56 @@ func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) err
 }
 
 func (r *Runtime) TraceSpans(ctx context.Context, runID string) []model.TraceSpan {
-	uow, done, err := r.beginReadUoW(ctx)
+	spans, err := r.ListTraceSpans(ctx, runID)
 	if err != nil {
 		return nil
 	}
-	defer done()
+	return spans
+}
+
+func (r *Runtime) ListTraceSpans(ctx context.Context, runID string) ([]model.TraceSpan, error) {
+	uow, err := r.beginWriteUoW(ctx)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = uow.Rollback(ctx)
+		}
+	}()
+	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
+		Operation: model.PolicyOperationTraceRead,
+		RunID:     runID,
+	})
+	if err != nil {
+		if isCommitCommandError(err) {
+			if commitErr := uow.Commit(ctx); commitErr != nil {
+				return nil, commitErr
+			}
+			committed = true
+		}
+		return nil, err
+	}
 	spans, err := uow.Trace().ListTraceSpans(ctx, runID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return append([]model.TraceSpan{}, spans...)
+	spans, err = r.enforceTraceSpansUoW(ctx, uow, runID, decision, spans)
+	if err != nil {
+		if isCommitCommandError(err) {
+			if commitErr := uow.Commit(ctx); commitErr != nil {
+				return nil, commitErr
+			}
+			committed = true
+		}
+		return nil, err
+	}
+	if err := uow.Commit(ctx); err != nil {
+		return nil, err
+	}
+	committed = true
+	return spans, nil
 }
 
 func registerTraceUoWCommandHandlers(runtime *Runtime) {

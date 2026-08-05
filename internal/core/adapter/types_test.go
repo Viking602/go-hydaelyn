@@ -53,7 +53,7 @@ func TestTaskRoundTripPreservesPublicFields(t *testing.T) {
 			Reason:     "high-risk tool",
 			Obligations: []api.PolicyObligation{{
 				Kind:   api.ObligationRequireHumanApproval,
-				Target: "tool",
+				Target: api.PolicyTargetToolResult,
 			}},
 			ApprovalRequired: true,
 			ExpiresAt:        now.Add(5 * time.Minute),

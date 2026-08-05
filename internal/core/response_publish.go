@@ -53,18 +53,30 @@ func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishRespons
 	if message.Status != model.UserMessageQueued {
 		return model.UserMessage{}, ErrInvalidCommand
 	}
-	if _, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
+	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
 		Operation: model.PolicyOperationResponsePublish,
 		RunID:     cmd.RunID,
 		TaskID:    message.TaskID,
 		Message:   &message,
-	}); err != nil {
+	})
+	if err != nil {
 		if isCommitCommandError(err) {
 			if commitErr := uow.Commit(ctx); commitErr != nil {
 				return model.UserMessage{}, commitErr
 			}
 			committed = true
 		}
+		return model.UserMessage{}, err
+	}
+	message, err = r.enforceResponseUoW(ctx, uow, decision, message)
+	if err != nil {
+		if commitErr := uow.Commit(ctx); commitErr != nil {
+			return model.UserMessage{}, commitErr
+		}
+		committed = true
+		return model.UserMessage{}, err
+	}
+	if err := uow.UserMessages().UpdateMessage(ctx, message); err != nil {
 		return model.UserMessage{}, err
 	}
 	if err := uow.Commit(ctx); err != nil {

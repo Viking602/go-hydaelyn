@@ -17,12 +17,15 @@ type IDGenerator func(string) string
 
 type Authorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
 
+type ObligationEnforcer func(context.Context, ports.UnitOfWork, model.PolicyDecision, model.UserMessage) (model.UserMessage, error)
+
 type TraceRecorder func(context.Context, ports.UnitOfWork, string, string, string, string) error
 
 type HandlerOptions struct {
-	NewID       IDGenerator
-	Authorize   Authorizer
-	RecordTrace TraceRecorder
+	NewID              IDGenerator
+	Authorize          Authorizer
+	EnforceObligations ObligationEnforcer
+	RecordTrace        TraceRecorder
 }
 
 func RegisterSubmitHandler(bus *commandbus.Bus, options HandlerOptions) {
@@ -100,12 +103,15 @@ func (h submitOutputHandler) composeAndQueue(ctx context.Context, uow ports.Unit
 			return model.UserMessage{}, model.UserMessage{}, model.BlackboardItem{}, model.PolicyDecision{}, err
 		}
 	}
-	sanitized, err := ApplyObligations(ctx, uow, message, decision)
-	if err != nil {
-		if errors.Is(err, model.ErrPolicyObligationFailed) {
-			return model.UserMessage{}, model.UserMessage{}, model.BlackboardItem{}, model.PolicyDecision{}, commandbus.CommitWithError(err)
+	sanitized := message
+	if h.options.EnforceObligations != nil {
+		sanitized, err = h.options.EnforceObligations(ctx, uow, decision, message)
+		if err != nil {
+			if errors.Is(err, model.ErrPolicyObligationFailed) {
+				return model.UserMessage{}, model.UserMessage{}, model.BlackboardItem{}, model.PolicyDecision{}, commandbus.CommitWithError(err)
+			}
+			return model.UserMessage{}, model.UserMessage{}, model.BlackboardItem{}, model.PolicyDecision{}, err
 		}
-		return model.UserMessage{}, model.UserMessage{}, model.BlackboardItem{}, model.PolicyDecision{}, err
 	}
 	if h.options.RecordTrace != nil {
 		if err := h.options.RecordTrace(ctx, uow, cmd.RunID, cmd.TaskID, "response.compose", "response"); err != nil {
@@ -150,6 +156,9 @@ func (h submitOutputHandler) completeSubmission(ctx context.Context, uow ports.U
 	}
 	lease.Status = model.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
+		return model.Task{}, model.TaskExecutionLease{}, err
+	}
+	if err := execution.ReleaseResourceClaims(ctx, uow, lease.ID, time.Now().UTC()); err != nil {
 		return model.Task{}, model.TaskExecutionLease{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {

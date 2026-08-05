@@ -100,6 +100,9 @@ type ToolCallDelta struct {
 type Request struct {
 	Model          string                   `json:"model"`
 	Messages       []message.Message        `json:"messages"`
+	Temperature    float64                  `json:"temperature,omitempty"`
+	TopP           float64                  `json:"topP,omitempty"`
+	MaxTokens      int                      `json:"maxTokens,omitempty"`
 	Tools          []message.ToolDefinition `json:"tools,omitempty"`
 	Metadata       map[string]string        `json:"metadata,omitempty"`
 	StopSequences  []string                 `json:"stopSequences,omitempty"`
@@ -140,6 +143,40 @@ type Event struct {
 type Stream interface {
 	Recv() (Event, error)
 	Close() error
+}
+
+// StreamIdentity identifies the provider and model that opened a stream.
+// Composite drivers attach this to the returned stream so callers can
+// attribute the actual selected backend rather than the wrapper's metadata.
+type StreamIdentity struct {
+	Provider Metadata
+	Model    string
+}
+
+// IdentifiedStream is optionally implemented by streams returned from
+// composite drivers such as failover wrappers.
+type IdentifiedStream interface {
+	Stream
+	Identity() StreamIdentity
+}
+
+type identifiedStream struct {
+	Stream
+	identity StreamIdentity
+}
+
+func (s identifiedStream) Identity() StreamIdentity {
+	return s.identity
+}
+
+func identifyStream(stream Stream, identity StreamIdentity) Stream {
+	if identified, ok := stream.(IdentifiedStream); ok {
+		current := identified.Identity()
+		if current.Provider.Name != "" || current.Model != "" {
+			return stream
+		}
+	}
+	return identifiedStream{Stream: stream, identity: identity}
 }
 
 type Driver interface {

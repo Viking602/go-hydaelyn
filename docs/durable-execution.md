@@ -32,26 +32,30 @@ runner, err := venat.NewProduction(api.Config{
 
 ## Store Contract
 
-The public storage contracts are:
+The required public storage boundary is `api.StoreProvider ->
+api.UnitOfWork`. A unit of work exposes:
 
-- `api.StoreProvider`
-- `api.UnitOfWork`
-- `api.RunStore`
-- `api.TaskStore`
-- `api.EventStore`
-- `api.BlackboardReadWriter`
-- `api.MailboxOutboxStore`
-- `api.UserMessageStore`
-- `api.TraceStore`
-- `api.ActionAttemptStore`
-- `api.ApprovalStore`
-- `api.ResumeTokenStore`
-- `api.HandoffStore`
-- `api.TeamStateStore`
-- `api.AgentInstanceStore`
-State-changing commands run behind the `UnitOfWork` boundary so run, task,
-event, mailbox, blackboard, user-message, and trace updates can be committed
-atomically by a durable driver.
+- run, task, event, blackboard, mailbox, user-message, and trace stores
+- lease, approval, resume-token, and action-attempt stores
+- agent profile, capability, usage, and dead-letter stores
+- handoff, team-state, and agent-instance stores
+
+Definition snapshots, admission reservations, and resource claims are optional,
+capability-gated extensions:
+
+- `api.AgentDefinitionUnitOfWork`
+- `api.AdmissionReservationUnitOfWork`
+- `api.ResourceClaimUnitOfWork`
+
+A provider advertises each extension through `api.StoreCapabilities` and must
+return the corresponding non-nil store when enabled. The runtime rejects an
+enabled capability whose unit of work does not expose its contract; it never
+silently degrades durable definition resume, aggregate admission, or resource
+coordination.
+
+State-changing commands run behind the `UnitOfWork` boundary so related run,
+task, event, mailbox, blackboard, user-message, trace, governance, and claim
+updates commit atomically in a durable driver.
 
 ## Lease Contract
 
@@ -69,6 +73,30 @@ Task execution leases model a concrete execution attempt:
 
 A task can only complete through `SubmitTypedReport` accepted under an active,
 matching, version-aware lease.
+
+## Definition, Admission, And Resource Coordination
+
+An executable `api.AgentDefinition` is published as an immutable
+`api.AgentDefinitionSnapshot`. The `(definitionId, version)` pair is stable:
+re-saving byte-equivalent content is idempotent, while binding different
+content to the same pair fails with `api.ErrDefinitionVersionConflict`.
+
+`worker.DefinitionDeployment` deep-copies the declaration, resolves
+`ToolMode`, `MaxIterations`, and `TTL` defaults, and persists that effective
+definition before returning a live worker. `Tools` is the executable tool
+allow-list; `Capabilities` is descriptive metadata and does not select tools.
+Input/output schemas become single-run task defaults. Persisted hook names are
+resolved through the host-owned `HookRegistry`; an unnamed `BuildDeps.Hooks`
+chain is rejected because it cannot be reconstructed from a snapshot.
+
+Admission reservations atomically enforce aggregate run, credit, token, and
+failure-breaker limits. Preview is read-only; reserve and lifecycle transitions
+use expected versions so concurrent hosts cannot over-admit.
+
+Resource claims are acquired with the task execution lease. Shared claims may
+coexist; an exclusive claim conflicts with every live holder for the same key.
+Claim acquisition is all-or-nothing, and expiry recovery releases abandoned
+claims without stealing a newer lease.
 
 ## Retry And Action Recovery
 

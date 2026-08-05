@@ -47,24 +47,59 @@ func (r *Runtime) WriteItem(ctx context.Context, item model.BlackboardItem) erro
 
 func registerBlackboardUoWCommandHandlers(runtime *Runtime) {
 	blackboardsvc.RegisterHandlers(runtime.commandBus, blackboardsvc.HandlerOptions{
-		NewID:     runtime.newID,
-		Authorize: runtime.authorizeUoW,
+		NewID:              runtime.newID,
+		Authorize:          runtime.authorizeUoW,
+		EnforceObligations: runtime.enforceBlackboardWriteUoW,
 	})
 }
 
 // SelectItems is the public BlackboardStore read API backed by the configured store provider.
 func (r *Runtime) SelectItems(ctx context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
-	uow, done, err := r.beginReadUoW(ctx)
+	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer done()
-	decision, err := r.currentPolicyEngine().Authorize(ctx, model.PolicyRequest{Operation: model.PolicyOperationBlackboardRead, RunID: runID, Selector: &selector})
+	committed := false
+	defer func() {
+		if !committed {
+			_ = uow.Rollback(ctx)
+		}
+	}()
+	policySelector := selector
+	if policySelector.RunID == "" {
+		policySelector.RunID = runID
+	}
+	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
+		Operation: model.PolicyOperationBlackboardRead,
+		RunID:     runID,
+		Selector:  &policySelector,
+	})
+	if err != nil {
+		if isCommitCommandError(err) {
+			if commitErr := uow.Commit(ctx); commitErr != nil {
+				return nil, commitErr
+			}
+			committed = true
+		}
+		return nil, err
+	}
+	items, err := uow.Blackboard().SelectItems(ctx, runID, selector)
 	if err != nil {
 		return nil, err
 	}
-	if decision.Effect == model.PolicyEffectDeny || decision.Effect == model.PolicyEffectAbort || decision.Effect == model.PolicyEffectRequireApproval || decision.Effect == model.PolicyEffectPause {
-		return nil, ErrPolicyDenied
+	_, items, err = r.enforceBlackboardReadUoW(ctx, uow, decision, policySelector, items)
+	if err != nil {
+		if isCommitCommandError(err) {
+			if commitErr := uow.Commit(ctx); commitErr != nil {
+				return nil, commitErr
+			}
+			committed = true
+		}
+		return nil, err
 	}
-	return uow.Blackboard().SelectItems(ctx, runID, selector)
+	if err := uow.Commit(ctx); err != nil {
+		return nil, err
+	}
+	committed = true
+	return items, nil
 }

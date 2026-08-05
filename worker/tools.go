@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Viking602/venat"
 	"github.com/Viking602/venat/api"
@@ -24,6 +25,19 @@ type GovernedToolBus struct {
 	HolderType  api.HolderType
 	HolderID    string
 	TaskVersion int
+	UsagePricer UsagePricer
+}
+
+func (b GovernedToolBus) registerTool(def tool.Definition) {
+	if b.Runner == nil {
+		return
+	}
+	registered := toolDefinitionToRunnerTool(def)
+	if b.HolderType == api.HolderAgent || (b.HolderType != "" && b.HolderID != "") {
+		b.Runner.RegisterToolForInvocation(b.RunID, b.TaskID, b.HolderType, b.HolderID, registered)
+		return
+	}
+	b.Runner.RegisterTool(registered)
 }
 
 func (b GovernedToolBus) ToolBus() *tool.Bus {
@@ -36,9 +50,7 @@ func (b GovernedToolBus) ToolBus() *tool.Bus {
 		if !ok {
 			continue
 		}
-		if b.Runner != nil {
-			b.Runner.RegisterTool(toolDefinitionToRunnerTool(def))
-		}
+		b.registerTool(def)
 		drivers = append(drivers, governedToolDriver{bus: b, driver: driver, definition: def})
 	}
 	return tool.NewBus(drivers...)
@@ -53,9 +65,7 @@ func (b GovernedToolBus) Execute(ctx context.Context, call tool.Call, sink tool.
 		return tool.Result{}, tool.ErrToolNotFound
 	}
 	def := driver.Definition()
-	if b.Runner != nil {
-		b.Runner.RegisterTool(toolDefinitionToRunnerTool(def))
-	}
+	b.registerTool(def)
 	return governedToolDriver{bus: b, driver: driver, definition: def}.Execute(ctx, call, sink)
 }
 
@@ -101,7 +111,7 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 	if d.bus.Runner == nil {
 		return d.driver.Execute(ctx, call, sink)
 	}
-	_, err := d.bus.Runner.InvokeTool(ctx, api.ToolInvocation{
+	authorization, err := d.bus.Runner.InvokeTool(ctx, api.ToolInvocation{
 		RunID:       d.bus.RunID,
 		TaskID:      d.bus.TaskID,
 		LeaseID:     d.bus.LeaseID,
@@ -112,36 +122,64 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		Input:       rawToolInput(call.Arguments),
 	})
 	if err != nil {
+		if replayErr := d.actionReplayError(ctx, call); replayErr != nil {
+			return tool.Result{}, errors.Join(err, replayErr)
+		}
 		return tool.Result{}, err
 	}
 	if !requiresActionAttempt(d.definition) {
-		return d.driver.Execute(ctx, call, sink)
+		result, executeErr := d.driver.Execute(ctx, call, sink)
+		enforced, _, enforcementErr := d.enforceResult(ctx, authorization.Decision, result)
+		return enforced, errors.Join(executeErr, enforcementErr)
 	}
+	return d.executeAction(ctx, call, sink, authorization.Decision)
+}
+
+func (d governedToolDriver) executeAction(
+	ctx context.Context,
+	call tool.Call,
+	sink tool.UpdateSink,
+	decision api.PolicyDecision,
+) (tool.Result, error) {
 	if call.ID == "" {
 		return tool.Result{}, fmt.Errorf("worker: guarded tool %q requires a call ID", call.Name)
 	}
 	call, execute, preparedResult, complete, err := d.prepare(ctx, call, sink)
-	if err != nil || complete {
-		return preparedResult, err
-	}
-	canonicalArguments, err := canonicalToolArguments(call.Arguments)
 	if err != nil {
-		return tool.Result{}, fmt.Errorf("worker: canonicalize guarded tool %q arguments: %w", call.Name, err)
+		return tool.Result{}, err
 	}
-	inputHash := fmt.Sprintf("%x", sha256.Sum256(canonicalArguments))
-	idempotencyKey := call.ID
-	if !d.definition.Idempotent && call.OperationID != "" {
-		// The agent loop assigns a stable logical slot before dispatch. A
-		// provider may regenerate its call ID after a crash, but the same turn
-		// and call position retain OperationID. InputHash then rejects a changed
-		// operation at that slot instead of replaying it under a new key. Direct
-		// callers have no durable slot, so their distinct call IDs remain
-		// distinct even when their arguments match.
-		idempotencyKey = "operation:" + call.OperationID
+	if complete {
+		enforced, _, enforcementErr := d.enforceResult(ctx, decision, preparedResult)
+		return enforced, enforcementErr
+	}
+	attempt, requestedAttemptID, idempotencyKey, err := d.startActionAttempt(ctx, call)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if attempt.AttemptID != requestedAttemptID {
+		if result, resolved := terminalAttemptOutput(call, attempt); resolved {
+			enforced, _, enforcementErr := d.enforceResult(ctx, decision, result)
+			return enforced, enforcementErr
+		}
+		return tool.Result{}, venat.ErrActionReconcileRequired
+	}
+	if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
+		return tool.Result{}, venat.ErrActionReconcileRequired
+	}
+	return d.completeActionAttempt(ctx, call, execute, decision, attempt, idempotencyKey)
+}
+
+func (d governedToolDriver) startActionAttempt(
+	ctx context.Context,
+	call tool.Call,
+) (api.ActionAttempt, string, string, error) {
+	idempotencyKey, inputHash, err := actionAttemptIdentity(call, d.definition)
+	if err != nil {
+		return api.ActionAttempt{}, "", "", fmt.Errorf("worker: canonicalize guarded tool %q arguments: %w", call.Name, err)
 	}
 	requestedAttemptID, err := newAttemptID()
 	if err != nil {
-		return tool.Result{}, err
+		return api.ActionAttempt{}, "", "", err
 	}
 	attempt, err := d.bus.Runner.StartActionAttempt(ctx, api.StartActionAttemptCommand{
 		AttemptID:      requestedAttemptID,
@@ -156,27 +194,84 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		IdempotencyKey: idempotencyKey,
 		InputHash:      inputHash,
 	})
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if attempt.AttemptID != requestedAttemptID {
-		if result, resolved := terminalAttemptOutput(call, attempt); resolved {
-			return result, nil
-		}
-		return tool.Result{}, venat.ErrActionReconcileRequired
-	}
-	if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
-		return tool.Result{}, venat.ErrActionReconcileRequired
-	}
+	return attempt, requestedAttemptID, idempotencyKey, err
+}
 
-	result, executeErr := execute(ctx)
-	encodedResult, encodeErr := json.Marshal(result)
-	if encodeErr != nil {
-		executeErr = errors.Join(executeErr, fmt.Errorf("worker: encode guarded tool %q result: %w", call.Name, encodeErr))
+func (d governedToolDriver) actionReplayError(ctx context.Context, call tool.Call) error {
+	if !requiresActionAttempt(d.definition) {
+		return nil
 	}
+	idempotencyKey, inputHash, err := actionAttemptIdentity(call, d.definition)
+	if err != nil || idempotencyKey == "" {
+		return nil
+	}
+	attempts, err := d.bus.Runner.ListActionAttempts(ctx, api.ActionAttemptSelector{
+		RunID: d.bus.RunID, TaskID: d.bus.TaskID, ToolName: call.Name,
+	})
+	if err != nil {
+		return nil
+	}
+	for _, attempt := range attempts {
+		if attempt.IdempotencyKey != idempotencyKey {
+			continue
+		}
+		if attempt.InputHash != inputHash {
+			return venat.ErrIdempotencyConflict
+		}
+		if attempt.RequiresReconcile || attempt.Status == api.ActionAttemptUnknown {
+			return venat.ErrActionReconcileRequired
+		}
+	}
+	return nil
+}
+
+func actionAttemptIdentity(call tool.Call, definition tool.Definition) (string, string, error) {
+	canonicalArguments, err := canonicalToolArguments(call.Arguments)
+	if err != nil {
+		return "", "", err
+	}
+	idempotencyKey := call.ID
+	if !definition.Idempotent && call.OperationID != "" {
+		// The agent loop assigns a stable logical slot before dispatch. A
+		// provider may regenerate its call ID after a crash, but the same turn
+		// and call position retain OperationID. InputHash then rejects a changed
+		// operation at that slot instead of replaying it under a new key. Direct
+		// callers have no durable slot, so their distinct call IDs remain
+		// distinct even when their arguments match.
+		idempotencyKey = "operation:" + call.OperationID
+	}
+	return idempotencyKey, fmt.Sprintf("%x", sha256.Sum256(canonicalArguments)), nil
+}
+
+func (d governedToolDriver) completeActionAttempt(
+	ctx context.Context,
+	call tool.Call,
+	execute func(context.Context) (tool.Result, error),
+	decision api.PolicyDecision,
+	attempt api.ActionAttempt,
+	idempotencyKey string,
+) (tool.Result, error) {
+	startedAt := time.Now()
+	result, executeErr := execute(ctx)
 	status, requiresReconcile := actionAttemptCompletion(result, executeErr)
-	if requiresReconcile {
+	enforcedResult, encodedResult, enforcementErr := d.enforceResult(ctx, decision, result)
+	if enforcementErr != nil && status == api.ActionAttemptSucceeded {
+		status = api.ActionAttemptUnknown
+		requiresReconcile = true
+	}
+	if requiresReconcile || enforcementErr != nil {
 		encodedResult = nil
+	}
+	usageRecord := d.actionUsageRecord(ctx, call, attempt, idempotencyKey, status, startedAt)
+	pricedUsage, priceErr := priceUsageRecord(ctx, d.bus.UsagePricer, usageRecord)
+	if priceErr != nil {
+		status = api.ActionAttemptUnknown
+		requiresReconcile = true
+		encodedResult = nil
+		usageRecord = pricedUsage
+		usageRecord.Metadata["status"] = string(status)
+	} else {
+		usageRecord = pricedUsage
 	}
 	_, completeErr := d.bus.Runner.CompleteActionAttempt(context.WithoutCancel(ctx), api.CompleteActionAttemptCommand{
 		RunID:             d.bus.RunID,
@@ -187,17 +282,71 @@ func (d governedToolDriver) Execute(ctx context.Context, call tool.Call, sink to
 		TaskVersion:       d.bus.TaskVersion,
 		AttemptID:         attempt.AttemptID,
 		Status:            status,
-		ExternalResultRef: result.Content,
+		ExternalResultRef: enforcedResult.Content,
 		ToolResult:        encodedResult,
 		RequiresReconcile: requiresReconcile,
+		UsageRecord:       &usageRecord,
 	})
 	if executeErr != nil {
-		return result, errors.Join(executeErr, completeErr)
+		return enforcedResult, errors.Join(executeErr, enforcementErr, priceErr, completeErr)
 	}
-	if completeErr != nil {
-		return result, completeErr
+	if enforcementErr != nil {
+		return tool.Result{}, errors.Join(enforcementErr, priceErr, completeErr)
 	}
-	return result, nil
+	if completeErr != nil || priceErr != nil {
+		return enforcedResult, errors.Join(completeErr, priceErr)
+	}
+	return enforcedResult, nil
+}
+
+func (d governedToolDriver) actionUsageRecord(
+	_ context.Context,
+	call tool.Call,
+	attempt api.ActionAttempt,
+	idempotencyKey string,
+	status api.ActionAttemptStatus,
+	startedAt time.Time,
+) api.UsageRecord {
+	usageKey := idempotencyKey
+	if usageKey == "" {
+		usageKey = attempt.AttemptID
+	}
+	agentID := ""
+	if d.bus.HolderType == api.HolderAgent {
+		agentID = d.bus.HolderID
+	}
+	return api.UsageRecord{
+		ID:    stableUsageID(d.bus.RunID, d.bus.TaskID, d.bus.HolderID, string(api.UsageKindActionCall), usageKey),
+		RunID: d.bus.RunID, TaskID: d.bus.TaskID, AgentID: agentID,
+		Kind: api.UsageKindActionCall, ToolName: call.Name,
+		DurationMS: time.Since(startedAt).Milliseconds(),
+		Metadata:   map[string]string{"attemptId": attempt.AttemptID, "status": string(status)},
+	}
+}
+
+func (d governedToolDriver) enforceResult(
+	ctx context.Context,
+	decision api.PolicyDecision,
+	result tool.Result,
+) (tool.Result, json.RawMessage, error) {
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return tool.Result{}, nil, fmt.Errorf("worker: encode guarded tool %q result: %w", d.definition.Name, err)
+	}
+	enforced, err := d.bus.Runner.EnforceToolResult(ctx, api.ToolResultEnforcementRequest{
+		RunID:      d.bus.RunID,
+		TaskID:     d.bus.TaskID,
+		Decision:   decision,
+		ToolResult: encoded,
+	})
+	if err != nil {
+		return tool.Result{}, nil, err
+	}
+	var out tool.Result
+	if err := json.Unmarshal(enforced.ToolResult, &out); err != nil {
+		return tool.Result{}, nil, fmt.Errorf("worker: decode enforced tool %q result: %w", d.definition.Name, err)
+	}
+	return out, enforced.ToolResult, nil
 }
 
 func actionAttemptCompletion(result tool.Result, executeErr error) (api.ActionAttemptStatus, bool) {

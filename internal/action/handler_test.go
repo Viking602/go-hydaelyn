@@ -136,6 +136,49 @@ func TestStartActionAttemptReturnsExistingForSameIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestStartActionAttemptReauthorizesIdempotentReplay(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	saveActionFixture(ctx, t, uow, true)
+
+	denied := errors.New("current action policy denied replay")
+	authorizations := 0
+	bus := commandbus.NewBus()
+	action.RegisterHandlers(bus, action.HandlerOptions{
+		NewID: func(string) string { return "attempt-1" },
+		Authorize: func(
+			context.Context,
+			ports.UnitOfWork,
+			model.PolicyRequest,
+		) (model.PolicyDecision, error) {
+			authorizations++
+			if authorizations == 2 {
+				return model.PolicyDecision{}, denied
+			}
+			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+		},
+	})
+	cmd := action.StartActionAttemptCommand{
+		ActionID: "action-1", RunID: "run-1", TaskID: "task-1", LeaseID: "lease-1",
+		HolderType: model.HolderAgent, HolderID: "agent-1", TaskVersion: 1,
+		ToolName: "deploy", IdempotencyKey: "idem-1", InputHash: "hash-1",
+	}
+	if _, err := bus.Execute(ctx, uow, cmd); err != nil {
+		t.Fatalf("first StartActionAttempt error = %v", err)
+	}
+	if _, err := bus.Execute(ctx, uow, cmd); !errors.Is(err, denied) {
+		t.Fatalf("replayed StartActionAttempt error = %v, want current policy denial", err)
+	}
+	if authorizations != 2 {
+		t.Fatalf("action authorizations = %d, want one per start attempt", authorizations)
+	}
+}
+
 func TestStartActionAttemptUnderReplacementLeaseRequiresReconciliation(t *testing.T) {
 	ctx := context.Background()
 	provider := memory.NewProvider()

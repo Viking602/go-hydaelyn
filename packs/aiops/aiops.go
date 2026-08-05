@@ -72,6 +72,7 @@ var alertTriage = api.AgentDefinition{
 	Description:  "Triages a production alert and recommends a runbook step.",
 	Instructions: "Read the alert, correlate metrics and logs, propose a runbook step, and request approval.",
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.2},
+	Tools:        []string{"fetch_alert", "query_metrics", "search_logs", "execute_runbook_step"},
 	Capabilities: []string{"fetch_alert", "query_metrics", "search_logs", "execute_runbook_step"},
 	Triggers: []api.Trigger{
 		{ID: "manual", Type: api.TriggerManual, Enabled: true},

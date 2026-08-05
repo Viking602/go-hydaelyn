@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Viking602/venat/api"
@@ -72,11 +73,133 @@ func TestEngineRunsToolLoop(t *testing.T) {
 	}
 }
 
+func TestEngineModelCallUsesSelectedFallbackIdentity(t *testing.T) {
+	engine := Engine{
+		Provider: provider.Fallback(
+			failingProvider{},
+			&scriptedProvider{turns: [][]provider.Event{{
+				{Kind: provider.EventTextDelta, Text: "fallback answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			}}},
+		),
+	}
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "fallback-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if len(output.Steps) != 1 || output.Steps[0].ModelCall == nil {
+		t.Fatalf("steps = %#v, want one model call", output.Steps)
+	}
+	call := output.Steps[0].ModelCall
+	if call.Provider != "scripted" || call.Model != "fallback-model" {
+		t.Fatalf("model call identity = %#v, want scripted/fallback-model", call)
+	}
+}
+
+type partialErrorProvider struct{}
+
+func (partialErrorProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "selected-partial"}
+}
+
+func (partialErrorProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
+	return &partialErrorStream{}, nil
+}
+
+type partialErrorStream struct {
+	sent bool
+}
+
+func (s *partialErrorStream) Recv() (provider.Event, error) {
+	if !s.sent {
+		s.sent = true
+		return provider.Event{
+			Kind: provider.EventTextDelta, Text: "partial",
+			Usage: provider.Usage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+		}, nil
+	}
+	return provider.Event{}, errors.New("partial stream failure")
+}
+
+func (*partialErrorStream) Close() error { return nil }
+
+func TestEnginePreservesFallbackIdentityOnPartialStreamError(t *testing.T) {
+	engine := Engine{Provider: provider.Fallback(failingProvider{}, partialErrorProvider{})}
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "selected-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "partial stream failure") {
+		t.Fatalf("RunMessages() error = %v, want partial stream failure", err)
+	}
+	if len(output.Steps) != 1 || output.Steps[0].ModelCall == nil {
+		t.Fatalf("steps = %#v, want one failed model call", output.Steps)
+	}
+	call := output.Steps[0].ModelCall
+	if call.Provider != "selected-partial" || call.Model != "selected-model" || call.TotalTokens != 3 {
+		t.Fatalf("partial model call = %#v, want selected-partial/selected-model/3", call)
+	}
+}
+
+func TestEnginePartialStreamErrorJoinsStepRecorderFailure(t *testing.T) {
+	recordErr := errors.New("step persistence failed")
+	engine := Engine{Provider: provider.Fallback(failingProvider{}, partialErrorProvider{})}
+	_, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "selected-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+		StepRecorder: StepRecorderFunc(func(context.Context, Step) error {
+			return recordErr
+		}),
+	})
+	if !errors.Is(err, recordErr) || !strings.Contains(err.Error(), "partial stream failure") {
+		t.Fatalf("RunMessages() error = %v, want stream and recorder causes", err)
+	}
+}
+
+func TestEngineGuardrailPanicPreservesFallbackUsageIdentity(t *testing.T) {
+	var recorded []Step
+	engine := Engine{
+		Provider: provider.Fallback(
+			failingProvider{},
+			&scriptedProvider{turns: [][]provider.Event{{
+				{Kind: provider.EventTextDelta, Text: "answer"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{TotalTokens: 3}},
+			}}},
+		),
+	}
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "selected-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+		OutputGuardrails: []OutputGuardrail{
+			NewOutputGuardrail("panic", func(context.Context, OutputGuardrailInput) (OutputGuardrailResult, error) {
+				panic("guardrail panic")
+			}),
+		},
+		StepRecorder: StepRecorderFunc(func(_ context.Context, step Step) error {
+			recorded = append(recorded, step)
+			return nil
+		}),
+	})
+	if err == nil || !errors.Is(err, ErrPanicRecovered) {
+		t.Fatalf("RunMessages() error = %v, want ErrPanicRecovered", err)
+	}
+	if len(output.Steps) != 1 || output.Steps[0].ModelCall == nil || len(recorded) != 1 {
+		t.Fatalf("output steps=%#v recorded=%#v, want one recovered step", output.Steps, recorded)
+	}
+	if output.Steps[0].ModelCall.Provider != "scripted" || recorded[0].ModelCall.Provider != "scripted" {
+		t.Fatalf("recovered model identity output=%#v recorded=%#v, want scripted", output.Steps[0].ModelCall, recorded[0].ModelCall)
+	}
+}
+
 // alwaysToolProvider emits a non-terminal tool call on every turn unless
 // completeAfter is positive and that many tool turns have completed.
 type alwaysToolProvider struct {
 	calls         int
 	completeAfter int
+	usage         provider.Usage
 }
 
 func (*alwaysToolProvider) Metadata() provider.Metadata {
@@ -88,7 +211,7 @@ func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (prov
 	if p.completeAfter > 0 && p.calls > p.completeAfter {
 		return provider.NewSliceStream([]provider.Event{
 			{Kind: provider.EventTextDelta, Text: "done"},
-			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: p.usage},
 		}), nil
 	}
 	return provider.NewSliceStream([]provider.Event{
@@ -100,7 +223,7 @@ func (p *alwaysToolProvider) Stream(_ context.Context, _ provider.Request) (prov
 				Arguments: json.RawMessage(`{"query":"x"}`),
 			},
 		},
-		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse, Usage: p.usage},
 	}), nil
 }
 

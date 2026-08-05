@@ -8,15 +8,23 @@ import (
 )
 
 func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (model.TaskExecutionLease, bool, error) {
-	result, err := r.ExecuteCommand(ctx, cmd)
+	result, err := r.AcquireTaskExecutionWithClaims(ctx, cmd)
 	if err != nil {
 		return model.TaskExecutionLease{}, false, err
 	}
+	return result.Lease, result.Acquired, nil
+}
+
+func (r *Runtime) AcquireTaskExecutionWithClaims(ctx context.Context, cmd AcquireTaskExecutionCommand) (AcquireTaskExecutionResult, error) {
+	result, err := r.ExecuteCommand(ctx, cmd)
+	if err != nil {
+		return AcquireTaskExecutionResult{}, err
+	}
 	acquired, ok := result.(AcquireTaskExecutionResult)
 	if !ok {
-		return model.TaskExecutionLease{}, false, ErrInvalidCommand
+		return AcquireTaskExecutionResult{}, ErrInvalidCommand
 	}
-	return acquired.Lease, acquired.Acquired, nil
+	return acquired, nil
 }
 
 func (r *Runtime) HeartbeatTaskExecution(ctx context.Context, cmd HeartbeatTaskExecutionCommand) error {
@@ -30,5 +38,11 @@ func (r *Runtime) ReleaseTaskExecution(ctx context.Context, cmd ReleaseTaskExecu
 }
 
 func registerExecutionUoWCommandHandlers(runtime *Runtime) {
-	executionsvc.RegisterHandlers(runtime.commandBus, runtime.newID)
+	executionsvc.RegisterHandlers(runtime.commandBus, runtime.newID, func(ctx context.Context) (bool, error) {
+		capabilities, err := runtime.StoreCapabilities(ctx)
+		if err != nil {
+			return false, err
+		}
+		return capabilities.SupportsResourceClaims && capabilities.SupportsTransactions, nil
+	})
 }

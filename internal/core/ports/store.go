@@ -143,6 +143,39 @@ type AgentInstanceStore interface {
 	ListAgentInstances(context.Context, model.AgentInstanceSelector) ([]model.AgentInstanceRecord, error)
 }
 
+type AgentDefinitionStore interface {
+	SaveAgentDefinitionSnapshot(context.Context, model.AgentDefinitionSnapshot) error
+	LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error)
+	ListAgentDefinitionSnapshots(context.Context, model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error)
+}
+
+type AdmissionReservationStore interface {
+	PreviewAdmission(context.Context, model.AdmissionRequest) (model.AdmissionDecision, error)
+	ReserveAdmission(context.Context, model.AdmissionRequest) (model.AdmissionDecision, error)
+	TransitionAdmission(context.Context, model.AdmissionTransition) (model.AdmissionDecision, error)
+	LoadAdmissionReservation(context.Context, string) (model.AdmissionReservation, error)
+	ListAdmissionReservations(context.Context, model.AdmissionReservationSelector) ([]model.AdmissionReservation, error)
+}
+
+type AdmissionReservationUnitOfWork interface {
+	AdmissionReservations() AdmissionReservationStore
+}
+
+type ResourceClaimStore interface {
+	AcquireResourceClaims(context.Context, model.ResourceClaimRequest) (model.ResourceClaimDecision, error)
+	TransitionResourceClaims(context.Context, model.ResourceClaimTransitionRequest) (model.ResourceClaimDecision, error)
+	LoadResourceClaim(context.Context, string) (model.ResourceClaim, error)
+	ListResourceClaims(context.Context, model.ResourceClaimSelector) ([]model.ResourceClaim, error)
+}
+
+type ResourceClaimUnitOfWork interface {
+	ResourceClaims() ResourceClaimStore
+}
+
+type AgentDefinitionUnitOfWork interface {
+	AgentDefinitions() AgentDefinitionStore
+}
+
 type UnitOfWork interface {
 	Runs() RunStore
 	Tasks() TaskStore
@@ -175,22 +208,28 @@ type StoreProvider interface {
 // Kept in lockstep with the public type — see api/store.go for the
 // authoritative godoc.
 type StoreCapabilities struct {
-	SupportsTransactions        bool
-	SupportsBlackboardSubscribe bool
-	SupportsListPending         bool
-	SupportsConcurrentWriters   bool
-	SupportsDeadLetterRequeue   bool
+	SupportsTransactions          bool
+	SupportsBlackboardSubscribe   bool
+	SupportsListPending           bool
+	SupportsConcurrentWriters     bool
+	SupportsDeadLetterRequeue     bool
+	SupportsDefinitionSnapshots   bool
+	SupportsAdmissionReservations bool
+	SupportsResourceClaims        bool
 }
 
 // DefaultStoreCapabilities returns the conservative profile applied to
 // providers that do not implement CapabilityReporter.
 func DefaultStoreCapabilities() StoreCapabilities {
 	return StoreCapabilities{
-		SupportsTransactions:        false,
-		SupportsBlackboardSubscribe: false,
-		SupportsListPending:         false,
-		SupportsConcurrentWriters:   false,
-		SupportsDeadLetterRequeue:   false,
+		SupportsTransactions:          false,
+		SupportsBlackboardSubscribe:   false,
+		SupportsListPending:           false,
+		SupportsConcurrentWriters:     false,
+		SupportsDeadLetterRequeue:     false,
+		SupportsDefinitionSnapshots:   false,
+		SupportsAdmissionReservations: false,
+		SupportsResourceClaims:        false,
 	}
 }
 

@@ -34,6 +34,11 @@ func NewChain(handlers ...Handler) Chain {
 	return Chain{handlers: handlers}
 }
 
+// Len reports the number of handlers in the chain. Deployments use it to
+// reject caller-supplied unversioned chains when a definition snapshot is
+// required to be the complete runtime behavior.
+func (c Chain) Len() int { return len(c.handlers) }
+
 func (c Chain) Append(handler Handler) Chain {
 	next := append([]Handler{}, c.handlers...)
 	next = append(next, handler)
