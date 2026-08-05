@@ -86,9 +86,12 @@ v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Mos
 | --- | --- |
 | `api.Flow{BypassTaskStore, BypassPolicyEngine, BypassTaskExecutionLease, BypassHandoff, BypassResponseLayer, BypassOutputGateway}` | removed — recipes do not bypass runtime invariants |
 | `api.ErrFlowBypass` | removed |
-| `runner.ExecuteCommand(StartRunCommand)` returning `[]any{Run, RootTask}` | returns `api.StartRunResult{Run, RootTask}` |
+| `runner.ExecuteCommand(StartRunCommand)` returning `[]any{Run, RootTask}` | returns `api.StartRunResult{Run, RootTask, Created}` |
 | `runner.ExecuteCommand(RequestApprovalCommand)` returning `[]any{Approval, Token}` | returns `api.RequestApprovalResult{Approval, Token}` |
 | `runner.ExecuteCommand(AcquireTaskExecutionCommand)` returning `[]any{Lease, bool}` | returns `api.AcquireTaskExecutionResult{Lease, Acquired}` |
+
+Use `Runner.StartRunWithResult` instead of the deprecated generic command path
+when a coordinator must distinguish first creation from an idempotent retry.
 
 `api.AgentProfile` itself is unchanged; new declarative fields land on the new `api.AgentDefinition` type instead.
 
@@ -96,7 +99,7 @@ v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Mos
 
 | Need | Reach for |
 | --- | --- |
-| Declare an agent (instructions, model, capabilities, triggers, governance) ahead of time | `api.AgentDefinition` (then `.AsProfile()` for runtime attribution) |
+| Declare an agent (instructions, model, tools, schemas, named hooks, triggers, governance) ahead of time | `api.AgentDefinition` (then `.AsProfile()` for runtime attribution) |
 | Publish a system's callable surface to MCP / future renderers | `api.Capability` + `api.CapabilityManifest` |
 | Cron / webhook / event / manual entrypoints | `transport/cron`, `transport/webhook`, `transport/event`, `api.Trigger` |
 | Background worker that polls envelopes, leases, heartbeats, drains | `worker.Runtime` (plug your own `EnvelopePoller`) |
@@ -104,6 +107,12 @@ v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Mos
 | Local durable store for development | Implement `api.StoreProvider` against your own data stack — see `docs/product-spec/v0.8.0/12-migration-guide.md` for the ent-based template. The framework no longer ships reference storage backends; see ADR-012 (revised, Position D). |
 | Bundle a vertical "research / support / devops / aiops" preset | `packs.Pack` + `packs.Registry` |
 | Grade an agent run in CI | `eval.Eval` / `eval.Run` with assertions from `eval/assert` |
+
+`AgentDefinition.Tools` now selects the exact executable tool subset.
+`AgentDefinition.Capabilities` remains discovery/authorization metadata; it no
+longer doubles as a tool list. Definition deployments persist resolved
+`ToolMode`, `MaxIterations`, and `TTL` values so a resumed revision does not
+inherit newer deployment defaults.
 
 > Schedule-based triggers now live in `transport/cron`. The old
 > `transport/scheduler` import path remains as a deprecated compatibility shim

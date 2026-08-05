@@ -34,9 +34,9 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ provider.Driver
 	var _ mcp.Gateway
 	var _ tool.Mode
-	var _ = skill.Skill{Name: "code-review", Description: "Review code"}
-	var _ = skill.DiscoveryOptions{TrustProject: true}
-	var _ = agent.Spec{AvailableSkills: []string{"code-review"}}
+	_ = skill.Skill{Name: "code-review", Description: "Review code"}
+	_ = skill.DiscoveryOptions{TrustProject: true}
+	_ = agent.Spec{AvailableSkills: []string{"code-review"}}
 	if agent.SkillActivationToolName == "" || agent.SkillResourceToolName == "" {
 		t.Fatal("skill runtime tool names must be exported")
 	}
@@ -96,6 +96,54 @@ func TestRunnerConstructionModes(t *testing.T) {
 	}
 	_ = DefaultConfig()
 }
+
+func TestDefinitionSnapshotStorageRequiresAdvertisedExtension(t *testing.T) {
+	tests := []struct {
+		name       string
+		advertised bool
+	}{
+		{name: "capability disabled"},
+		{name: "store missing", advertised: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provider := definitionCapabilityProvider{
+				StoreProvider: NewDevelopment().StoreProvider(),
+				advertised:    test.advertised,
+			}
+			runner, err := NewProduction(api.Config{StoreProvider: provider, PolicyEngine: allowAPIEngine{}})
+			if err != nil {
+				t.Fatalf("NewProduction() error = %v", err)
+			}
+			err = runner.SaveAgentDefinitionSnapshot(context.Background(), api.AgentDefinitionSnapshot{})
+			if !errors.Is(err, api.ErrInvalidConfiguration) {
+				t.Fatalf("SaveAgentDefinitionSnapshot() error = %v, want ErrInvalidConfiguration", err)
+			}
+		})
+	}
+}
+
+type definitionCapabilityProvider struct {
+	api.StoreProvider
+	advertised bool
+}
+
+func (p definitionCapabilityProvider) Begin(ctx context.Context) (api.UnitOfWork, error) {
+	uow, err := p.StoreProvider.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return definitionCoreUnitOfWork{UnitOfWork: uow}, nil
+}
+
+func (p definitionCapabilityProvider) Capabilities(context.Context) (api.StoreCapabilities, error) {
+	return api.StoreCapabilities{
+		SupportsTransactions:        true,
+		SupportsDefinitionSnapshots: p.advertised,
+	}, nil
+}
+
+type definitionCoreUnitOfWork struct{ api.UnitOfWork }
 
 type stubStoreProvider struct{}
 

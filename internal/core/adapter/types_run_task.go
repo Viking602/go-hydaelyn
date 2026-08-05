@@ -61,6 +61,7 @@ func TaskToModel(in api.Task) model.Task {
 		Budget:             TaskBudgetPtrToModel(in.Budget),
 		InputSchema:        cloneBytes(in.InputSchema),
 		OutputSchema:       cloneBytes(in.OutputSchema),
+		ResourceClaims:     ResourceClaimSpecsToModel(in.ResourceClaims),
 		CreatedAt:          in.CreatedAt,
 		UpdatedAt:          in.UpdatedAt,
 	}
@@ -98,6 +99,7 @@ func TaskFromModel(in model.Task) api.Task {
 		Budget:             TaskBudgetPtrFromModel(in.Budget),
 		InputSchema:        cloneBytes(in.InputSchema),
 		OutputSchema:       cloneBytes(in.OutputSchema),
+		ResourceClaims:     ResourceClaimSpecsFromModel(in.ResourceClaims),
 		CreatedAt:          in.CreatedAt,
 		UpdatedAt:          in.UpdatedAt,
 	}

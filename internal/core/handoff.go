@@ -15,9 +15,10 @@ func (r *Runtime) RequestHandoff(ctx context.Context, cmd HandoffCommand) error 
 
 func registerHandoffUoWCommandHandlers(runtime *Runtime) {
 	handoffsvc.RegisterHandlers(runtime.commandBus, handoffsvc.HandlerOptions{
-		NewID:       runtime.newID,
-		Authorize:   runtime.authorizeUoW,
-		RecordTrace: runtime.recordEndedTraceUoW,
-		MaxDepth:    maxHandoffDepth,
+		NewID:              runtime.newID,
+		Authorize:          runtime.authorizeUoW,
+		EnforceObligations: runtime.enforceHandoffUoW,
+		RecordTrace:        runtime.recordEndedTraceUoW,
+		MaxDepth:           maxHandoffDepth,
 	})
 }

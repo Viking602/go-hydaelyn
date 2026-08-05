@@ -55,13 +55,33 @@ type CapabilitySelector struct {
 }
 
 // UsageRecord mirrors api.UsageRecord. Append-only metering datum.
+type UsageKind string
+
+const (
+	UsageKindModelCall       UsageKind = "model_call"
+	UsageKindToolCall        UsageKind = "tool_call"
+	UsageKindActionCall      UsageKind = "action_call"
+	UsageKindContext         UsageKind = "context"
+	UsageKindLegacyExecution UsageKind = "legacy_execution"
+)
+
+type UsagePricingState string
+
+const (
+	UsagePricingStatePriced   UsagePricingState = "priced"
+	UsagePricingStateUnpriced UsagePricingState = "unpriced"
+)
+
 type UsageRecord struct {
+	PricingState          UsagePricingState
 	ID                    string
 	RunID                 string
 	TaskID                string
 	AgentID               string
+	Kind                  UsageKind
 	Provider              string
 	Model                 string
+	ToolName              string
 	InputTokens           int
 	OutputTokens          int
 	CachedInputTokens     int
@@ -71,6 +91,7 @@ type UsageRecord struct {
 	Steps                 int
 	DurationMS            int64
 	Credits               int64
+	CreditsKind           string
 	Metadata              map[string]string
 	CreatedAt             time.Time
 }
@@ -80,7 +101,9 @@ type UsageSelector struct {
 	RunID    string
 	TaskID   string
 	AgentID  string
+	Kind     UsageKind
 	Provider string
+	ToolName string
 	Since    time.Time
 	Until    time.Time
 	Limit    int

@@ -79,11 +79,14 @@ func (p *Provider) Capabilities(ctx context.Context) (api.StoreCapabilities, err
 		return api.StoreCapabilities{}, err
 	}
 	return api.StoreCapabilities{
-		SupportsTransactions:        caps.SupportsTransactions,
-		SupportsBlackboardSubscribe: caps.SupportsBlackboardSubscribe,
-		SupportsListPending:         caps.SupportsListPending,
-		SupportsConcurrentWriters:   caps.SupportsConcurrentWriters,
-		SupportsDeadLetterRequeue:   caps.SupportsDeadLetterRequeue,
+		SupportsTransactions:          caps.SupportsTransactions,
+		SupportsBlackboardSubscribe:   caps.SupportsBlackboardSubscribe,
+		SupportsListPending:           caps.SupportsListPending,
+		SupportsConcurrentWriters:     caps.SupportsConcurrentWriters,
+		SupportsDeadLetterRequeue:     caps.SupportsDeadLetterRequeue,
+		SupportsDefinitionSnapshots:   caps.SupportsDefinitionSnapshots,
+		SupportsAdmissionReservations: caps.SupportsAdmissionReservations,
+		SupportsResourceClaims:        caps.SupportsResourceClaims,
 	}, nil
 }
 

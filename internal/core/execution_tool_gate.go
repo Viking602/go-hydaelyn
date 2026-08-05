@@ -26,6 +26,7 @@ func (r *Runtime) InvokeTool(ctx context.Context, cmd ToolInvocation) (ToolInvoc
 func registerToolUoWCommandHandlers(runtime *Runtime) {
 	toolgatesvc.RegisterHandlers(runtime.commandBus, toolgatesvc.HandlerOptions{
 		Tool:        runtime.tool,
+		ScopedTool:  runtime.toolForInvocation,
 		Authorize:   runtime.authorizeUoW,
 		RecordTrace: runtime.recordEndedTraceUoW,
 	})

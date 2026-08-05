@@ -71,6 +71,9 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 			if existing.InputHash != cmd.InputHash {
 				return nil, model.ErrIdempotencyConflict
 			}
+			if err := h.authorize(ctx, uow, cmd, existing); err != nil {
+				return nil, err
+			}
 			if existing.Status == model.ActionAttemptRunning && existing.LeaseID != cmd.LeaseID {
 				existing.Status = model.ActionAttemptUnknown
 				existing.RequiresReconcile = true
@@ -104,10 +107,8 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 		attemptID = h.options.NewID("attempt")
 	}
 	attempt := model.ActionAttempt{AttemptID: attemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, ToolName: cmd.ToolName, Status: model.ActionAttemptRunning, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}
-	if h.options.Authorize != nil {
-		if _, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationAction, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: actorFromHolder(cmd.HolderType, cmd.HolderID), Action: &attempt}); err != nil {
-			return nil, err
-		}
+	if err := h.authorize(ctx, uow, cmd, attempt); err != nil {
+		return nil, err
 	}
 	if err := uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
 		return nil, err
@@ -116,6 +117,25 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 		return nil, err
 	}
 	return attempt, nil
+}
+
+func (h startActionAttemptHandler) authorize(
+	ctx context.Context,
+	uow ports.UnitOfWork,
+	cmd StartActionAttemptCommand,
+	attempt model.ActionAttempt,
+) error {
+	if h.options.Authorize == nil {
+		return nil
+	}
+	_, err := h.options.Authorize(ctx, uow, model.PolicyRequest{
+		Operation: model.PolicyOperationAction,
+		RunID:     cmd.RunID,
+		TaskID:    cmd.TaskID,
+		Actor:     actorFromHolder(cmd.HolderType, cmd.HolderID),
+		Action:    &attempt,
+	})
+	return err
 }
 
 type completeActionAttemptHandler struct{}
@@ -162,6 +182,14 @@ func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOf
 	attempt.ExternalResultRef = cmd.ExternalResultRef
 	attempt.ToolResult = append(attempt.ToolResult[:0], cmd.ToolResult...)
 	attempt.RequiresReconcile = cmd.RequiresReconcile || cmd.Status == model.ActionAttemptUnknown
+	if cmd.UsageRecord != nil {
+		if cmd.UsageRecord.RunID != cmd.RunID || cmd.UsageRecord.TaskID != cmd.TaskID {
+			return nil, model.ErrInvalidCommand
+		}
+		if err := uow.UsageRecords().AppendUsage(ctx, *cmd.UsageRecord); err != nil {
+			return nil, err
+		}
+	}
 	if err := uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
 		return nil, err
 	}
@@ -416,6 +444,9 @@ func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run model.Run, 
 	}
 	lease.Status = model.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
+		return CompleteAttemptResult{}, err
+	}
+	if err := execution.ReleaseResourceClaims(ctx, uow, lease.ID, time.Now().UTC()); err != nil {
 		return CompleteAttemptResult{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {

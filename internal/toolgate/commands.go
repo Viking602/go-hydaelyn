@@ -16,6 +16,7 @@ type Invocation struct {
 type InvocationResult struct {
 	ToolName string
 	Output   any
+	Decision model.PolicyDecision
 }
 
 func (Invocation) CommandName() string { return "tool.invoke" }

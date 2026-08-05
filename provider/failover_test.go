@@ -37,6 +37,62 @@ func TestFallback_UsesSecondaryWhenPrimaryFails(t *testing.T) {
 	}
 }
 
+func TestFallback_StreamIdentityReportsSelectedProviderAndModel(t *testing.T) {
+	primary := errorprovider.New(errorprovider.KindUpstreamError)
+	secondary := scripted.New([]provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}})
+	stream, err := provider.Fallback(primary, secondary).Stream(context.Background(), provider.Request{Model: "fallback-model"})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	identified, ok := stream.(provider.IdentifiedStream)
+	if !ok {
+		t.Fatal("fallback stream does not expose selected identity")
+	}
+	identity := identified.Identity()
+	if identity.Provider.Name != secondary.Metadata().Name || identity.Model != "fallback-model" {
+		t.Fatalf("stream identity = %#v, want secondary/fallback-model", identity)
+	}
+}
+
+func TestFallback_StreamIdentityKeepsPrimaryOnSuccess(t *testing.T) {
+	primary := scripted.New([]provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}})
+	secondary := scripted.New([]provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}})
+	stream, err := provider.Fallback(primary, secondary).Stream(context.Background(), provider.Request{Model: "primary-model"})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	identified, ok := stream.(provider.IdentifiedStream)
+	if !ok {
+		t.Fatal("fallback stream does not expose selected identity")
+	}
+	identity := identified.Identity()
+	if identity.Provider.Name != primary.Metadata().Name || identity.Model != "primary-model" {
+		t.Fatalf("stream identity = %#v, want primary/primary-model", identity)
+	}
+}
+
+func TestModelFallback_StreamIdentityReportsFallbackSelection(t *testing.T) {
+	primary := errorprovider.New(errorprovider.KindUpstreamError)
+	fallback := scripted.New([]provider.Event{{Kind: provider.EventDone, StopReason: provider.StopReasonComplete}})
+	stream, err := provider.ModelFallback(primary, fallback, "configured-fallback-model").Stream(
+		context.Background(), provider.Request{Model: "primary-model"},
+	)
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	identified, ok := stream.(provider.IdentifiedStream)
+	if !ok {
+		t.Fatal("model fallback stream does not expose selected identity")
+	}
+	identity := identified.Identity()
+	if identity.Provider.Name != fallback.Metadata().Name || identity.Model != "configured-fallback-model" {
+		t.Fatalf("stream identity = %#v, want fallback/configured-fallback-model", identity)
+	}
+}
+
 func TestFallback_AllFailingJoinsEveryCause(t *testing.T) {
 	primary := errorprovider.New(errorprovider.KindUpstreamError)
 	secondary := errorprovider.New(errorprovider.KindUpstreamError)

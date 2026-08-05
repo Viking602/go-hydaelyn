@@ -3,9 +3,11 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Viking602/venat/internal/core/model"
@@ -47,9 +49,15 @@ type CreateTaskInput struct {
 	InputSchema        json.RawMessage
 	OutputSchema       json.RawMessage
 	Budget             *model.TaskBudget
+	ResourceClaims     []model.ResourceClaimSpec
 }
 
 func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, error) {
+	run, root, _, err := start(ctx, uow, newID, input)
+	return run, root, err
+}
+
+func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, bool, error) {
 	now := time.Now().UTC()
 	runID := input.RunID
 	if runID == "" {
@@ -58,6 +66,25 @@ func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 	rootID := input.RootTaskID
 	if rootID == "" {
 		rootID = newID("task")
+	}
+	existing, err := uow.Runs().LoadRun(ctx, runID)
+	if err == nil {
+		if existing.RootTaskID != rootID || existing.Request != input.Request ||
+			!maps.Equal(existing.Metadata, input.Metadata) {
+			return model.Run{}, model.Task{}, false, fmt.Errorf(
+				"run: start input conflicts with existing run %q: %w",
+				runID,
+				model.ErrIdempotencyConflict,
+			)
+		}
+		root, loadErr := uow.Tasks().LoadTask(ctx, runID, rootID)
+		if loadErr != nil {
+			return model.Run{}, model.Task{}, false, loadErr
+		}
+		return existing, root, false, nil
+	}
+	if !errors.Is(err, model.ErrNotFound) {
+		return model.Run{}, model.Task{}, false, err
 	}
 	run := model.Run{
 		ID:         runID,
@@ -79,18 +106,18 @@ func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 		UpdatedAt:      now,
 	}
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
-		return model.Run{}, model.Task{}, err
+		return model.Run{}, model.Task{}, false, err
 	}
 	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
-		return model.Run{}, model.Task{}, err
+		return model.Run{}, model.Task{}, false, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: runID, TaskID: rootID, Type: model.EventRunStarted, Payload: map[string]any{"request": input.Request, "run": eventpayload.Run(run)}, RecordedAt: now}); err != nil {
-		return model.Run{}, model.Task{}, err
+		return model.Run{}, model.Task{}, false, err
 	}
 	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: runID, TaskID: rootID, Type: model.EventTaskCreated, Payload: eventpayload.Task(root), RecordedAt: now}); err != nil {
-		return model.Run{}, model.Task{}, err
+		return model.Run{}, model.Task{}, false, err
 	}
-	return run, root, nil
+	return run, root, true, nil
 }
 
 // cloneTaskBudget deep-copies the per-task budget so the stored task does not
@@ -150,6 +177,7 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		InputSchema:        slices.Clone(input.InputSchema),
 		OutputSchema:       slices.Clone(input.OutputSchema),
 		Budget:             cloneTaskBudget(input.Budget),
+		ResourceClaims:     slices.Clone(input.ResourceClaims),
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -193,6 +221,19 @@ func validateTaskInput(input CreateTaskInput) error {
 	}
 	if input.RetryPolicy.Backoff < 0 || input.RetryPolicy.MaxBackoff < 0 {
 		return fmt.Errorf("run: task retry delays must not be negative: %w", model.ErrInvalidCommand)
+	}
+	claimKeys := make(map[string]struct{}, len(input.ResourceClaims))
+	for _, claim := range input.ResourceClaims {
+		if claim.ID != "" || strings.TrimSpace(claim.Key) == "" {
+			return fmt.Errorf("run: task resource claims require a key and cannot preassign an ID: %w", model.ErrInvalidCommand)
+		}
+		if claim.Mode != model.ResourceClaimShared && claim.Mode != model.ResourceClaimExclusive {
+			return fmt.Errorf("run: task resource claim %q has invalid mode %q: %w", claim.Key, claim.Mode, model.ErrInvalidCommand)
+		}
+		if _, duplicate := claimKeys[claim.Key]; duplicate {
+			return fmt.Errorf("run: duplicate task resource claim key %q: %w", claim.Key, model.ErrInvalidCommand)
+		}
+		claimKeys[claim.Key] = struct{}{}
 	}
 	return nil
 }

@@ -66,6 +66,9 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 	compact, compactTo := e.compactors(runtime)
 	input := LoopInput{
 		Model:               e.Model,
+		Temperature:         e.Temperature,
+		TopP:                e.TopP,
+		ModelMaxTokens:      e.ModelMaxTokens,
 		Messages:            messages,
 		ToolMode:            e.ToolMode,
 		MaxIterations:       e.LoopPolicy.MaxIterations,

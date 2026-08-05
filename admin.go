@@ -20,6 +20,19 @@ func (r *Runner) RegisterTool(tool api.Tool) {
 	r.rt.RegisterTool(adapter.ToolToModel(tool))
 }
 
+// RegisterToolForInvocation scopes governed tool metadata to one run, task,
+// holder, and tool name. RegisterTool remains the legacy global registration
+// API for direct non-agent callers.
+func (r *Runner) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) {
+	r.rt.RegisterToolForInvocation(runID, taskID, model.HolderType(holderType), holderID, adapter.ToolToModel(tool))
+}
+
+// RemoveToolsForInvocation releases all scoped tool metadata for one exact
+// invocation identity.
+func (r *Runner) RemoveToolsForInvocation(runID, taskID string, holderType api.HolderType, holderID string) {
+	r.rt.RemoveToolsForInvocation(runID, taskID, model.HolderType(holderType), holderID)
+}
+
 func (r *Runner) RegisterFlow(flow api.Flow) error {
 	return adapter.ErrorToAPI(r.rt.RegisterFlow(adapter.FlowToModel(flow)))
 }
@@ -56,11 +69,14 @@ func (r *Runner) StoreCapabilities(ctx context.Context) (api.StoreCapabilities, 
 		return api.StoreCapabilities{}, adapter.ErrorToAPI(err)
 	}
 	return api.StoreCapabilities{
-		SupportsTransactions:        capabilities.SupportsTransactions,
-		SupportsBlackboardSubscribe: capabilities.SupportsBlackboardSubscribe,
-		SupportsListPending:         capabilities.SupportsListPending,
-		SupportsConcurrentWriters:   capabilities.SupportsConcurrentWriters,
-		SupportsDeadLetterRequeue:   capabilities.SupportsDeadLetterRequeue,
+		SupportsTransactions:          capabilities.SupportsTransactions,
+		SupportsBlackboardSubscribe:   capabilities.SupportsBlackboardSubscribe,
+		SupportsListPending:           capabilities.SupportsListPending,
+		SupportsConcurrentWriters:     capabilities.SupportsConcurrentWriters,
+		SupportsDeadLetterRequeue:     capabilities.SupportsDeadLetterRequeue,
+		SupportsDefinitionSnapshots:   capabilities.SupportsDefinitionSnapshots,
+		SupportsAdmissionReservations: capabilities.SupportsAdmissionReservations,
+		SupportsResourceClaims:        capabilities.SupportsResourceClaims,
 	}, nil
 }
 

@@ -58,6 +58,39 @@ func TestDriver_FilterRequiresAllAttributes(t *testing.T) {
 	}
 }
 
+func TestDriver_RegistrationAndDispatchOwnMutableTriggerMaps(t *testing.T) {
+	d := event.New(event.Options{})
+	configured := api.Trigger{
+		ID: "owned", Type: api.TriggerEvent,
+		Config: map[string]string{"topic": "incident.created"},
+		Filter: map[string]string{"severity": "high"},
+	}
+	fired := 0
+	registered, err := d.Register(configured, "agent", trigger.HandlerFunc(func(_ context.Context, tc trigger.TriggerContext) error {
+		fired++
+		tc.Trigger.Config["topic"] = "mutated"
+		tc.Trigger.Filter["severity"] = "mutated"
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured.Config["topic"] = "caller-mutated"
+	registered.Trigger.Filter["severity"] = "caller-mutated"
+	listed := d.List()
+	listed[0].Trigger.Filter["severity"] = "list-mutated"
+	for range 2 {
+		if err := d.Publish(context.Background(), event.Event{
+			Topic: "incident.created", Attributes: map[string]string{"severity": "high"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fired != 2 {
+		t.Fatalf("handler fired %d times, want 2 independent dispatches", fired)
+	}
+}
+
 func TestDriver_Deregister(t *testing.T) {
 	d := event.New(event.Options{})
 	_, _ = d.Register(

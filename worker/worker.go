@@ -21,11 +21,34 @@ import (
 )
 
 var (
-	ErrRunnerMissing    = errors.New("worker: runner missing")
-	ErrProviderMissing  = errors.New("worker: provider missing")
-	ErrAgentIDMissing   = errors.New("worker: agent id missing")
-	ErrFailedCheckpoint = errors.New("worker: checkpoint contains failed instance")
+	ErrRunnerMissing            = errors.New("worker: runner missing")
+	ErrProviderMissing          = errors.New("worker: provider missing")
+	ErrAgentIDMissing           = errors.New("worker: agent id missing")
+	ErrFailedCheckpoint         = errors.New("worker: checkpoint contains failed instance")
+	ErrTaskExecutionUnavailable = errors.New("worker: task execution unavailable")
+	ErrUsageUnpriced            = api.ErrUsageUnpriced
 )
+
+// TaskExecutionUnavailableError reports a transient lease or resource-claim
+// denial. The task remains dispatched and may be retried after the conflicting
+// owner releases its lease.
+type TaskExecutionUnavailableError struct {
+	TaskID         string
+	ResourceClaims api.ResourceClaimDecision
+}
+
+func (e *TaskExecutionUnavailableError) Error() string {
+	if e.ResourceClaims.Reason != "" {
+		return fmt.Sprintf("%v: task %s resource claims denied: %s", ErrTaskExecutionUnavailable, e.TaskID, e.ResourceClaims.Reason)
+	}
+	return fmt.Sprintf("%v: task %s already has an active lease", ErrTaskExecutionUnavailable, e.TaskID)
+}
+
+func (e *TaskExecutionUnavailableError) Unwrap() error { return ErrTaskExecutionUnavailable }
+
+// UsagePricer assigns deployment-defined abstract credits to one granular
+// usage record. A nil pricer leaves Credits at zero.
+type UsagePricer func(context.Context, api.UsageRecord) (credits int64, creditsKind string, err error)
 
 type AgentWorker struct {
 	Runner        *venat.Runner
@@ -35,6 +58,7 @@ type AgentWorker struct {
 	ToolMode      tool.Mode
 	MaxIterations int
 	TTL           time.Duration
+	UsagePricer   UsagePricer
 }
 
 type ExecuteEnvelopeRequest struct {
@@ -43,6 +67,10 @@ type ExecuteEnvelopeRequest struct {
 	Messages []message.Message
 	Lease    api.TaskExecutionLease
 	Sink     stream.Sink
+	// OnLeaseAcquired runs after the execution lease and resource claims are
+	// committed but before the envelope is acknowledged or the agent starts.
+	// Hosts may use it to bind lease-scoped tool authorization state.
+	OnLeaseAcquired func(api.TaskExecutionLease) error
 }
 
 type ExecutionState string
@@ -51,6 +79,7 @@ const (
 	ExecutionCompleted ExecutionState = "completed"
 	ExecutionFailed    ExecutionState = "failed"
 	ExecutionSuspended ExecutionState = "suspended"
+	ExecutionCancelled ExecutionState = "cancelled"
 )
 
 type SuspensionKind string
@@ -59,6 +88,7 @@ const (
 	SuspensionApproval       SuspensionKind = "approval"
 	SuspensionReconciliation SuspensionKind = "reconciliation"
 	SuspensionUserInput      SuspensionKind = "user_input"
+	SuspensionRequested      SuspensionKind = "requested"
 )
 
 type Suspension struct {
@@ -87,6 +117,9 @@ func (w AgentWorker) ExecuteContinuing(ctx context.Context, req ExecuteEnvelopeR
 		if runErr == nil || outcome.State == ExecutionSuspended {
 			return outcome, runErr
 		}
+		if errors.Is(runErr, ErrTaskExecutionUnavailable) {
+			return outcome, runErr
+		}
 		envelope, ok, loadErr := taskEnvelope(ctx, w.Runner, req.Envelope.RunID, req.Envelope.TaskID, "pending")
 		if loadErr != nil {
 			return outcome, errors.Join(runErr, loadErr)
@@ -111,6 +144,11 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if err != nil {
 		return ExecutionOutcome{}, err
 	}
+	if req.OnLeaseAcquired != nil {
+		if err := req.OnLeaseAcquired(lease); err != nil {
+			return ExecutionOutcome{}, fmt.Errorf("worker: observe acquired execution lease: %w", err)
+		}
+	}
 	leaseHandled := false
 	defer func() {
 		if leaseHandled {
@@ -131,63 +169,23 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 
 	engine := w.executionEngine(task, lease)
-	baseContextBuilder := engine.ContextBuilder
+	defer w.Runner.RemoveToolsForInvocation(task.RunID, task.ID, api.HolderAgent, w.AgentID)
 	checkpoint, hasCheckpoint, err := w.latestExecutionCheckpoint(ctx, task)
 	if err != nil {
 		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
 		return failedExecutionOutcome(task, lease, agent.Result{}, err), err
 	}
-	if hasCheckpoint {
-		engine.OperationTurn = max(engine.OperationTurn, checkpoint.Checkpoint.NextOperationTurn)
-	}
-	resumeMessages := checkpoint.Checkpoint.Messages
-	engine.ContextBuilder = workerContextBuilder{worker: w, run: run, inner: baseContextBuilder, extra: req.Messages, resume: resumeMessages}
 	started := time.Now()
-	engine.StepRecorder = w.stepRecorder(task, lease, started, engine.StepRecorder)
-	engine.CheckpointRecorder = w.checkpointRecorder(task, lease, engine.CheckpointRecorder)
-
-	var result agent.Result
-	var runErr error
-	recoveredTerminal := hasCheckpoint &&
-		!checkpoint.Checkpoint.PendingToolCalls &&
-		checkpoint.Checkpoint.Step.Decision == agent.StepDecisionFinish
-	if recoveredTerminal {
-		result, runErr = resultFromTerminalCheckpoint(checkpoint.Checkpoint, task.OutputSchema)
-	} else {
-		if hasCheckpoint && checkpoint.Checkpoint.PendingToolCalls {
-			resumeMessages, runErr = withLeaseHeartbeat(ctx, w, lease.ID, ttl, func(runCtx context.Context) ([]message.Message, error) {
-				return w.resumePendingToolCalls(runCtx, engine, checkpoint.Checkpoint)
-			})
-			engine.ContextBuilder = workerContextBuilder{worker: w, run: run, inner: baseContextBuilder, extra: req.Messages, resume: resumeMessages}
-			result.Messages = resumeMessages
-			result.Usage = checkpoint.Checkpoint.Usage
-			result.ToolCallsUsed = checkpoint.Checkpoint.ToolCallsUsed
-		}
-		// A pending checkpoint has already charged its tool-call slots. Resume
-		// those calls before rejecting an exhausted durable budget; only fresh
-		// model/tool work is gated by the remaining balance.
-		if runErr == nil {
-			task, runErr = w.taskWithRemainingBudget(ctx, task)
-		}
-		if runErr == nil {
-			result, runErr = w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl, req.Sink)
-			w.appendUsage(ctx, task, lease.ID, engine, result, time.Since(started))
-		}
-	}
+	result, runErr := w.runCheckpointedTask(
+		ctx, task, run, lease, engine, checkpoint, hasCheckpoint,
+		req.Messages, req.Sink, ttl, started,
+	)
 	if runErr != nil {
-		if suspension := w.executionSuspension(ctx, task, runErr); suspension != nil {
-			checkpointErr := w.recordSuspensionCheckpoint(ctx, task, lease, result, time.Since(started))
-			return ExecutionOutcome{
-				State:      ExecutionSuspended,
-				RunID:      task.RunID,
-				TaskID:     task.ID,
-				LeaseID:    lease.ID,
-				Result:     result,
-				Suspension: suspension,
-			}, errors.Join(runErr, checkpointErr)
-		}
-		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, runErr)
-		return failedExecutionOutcome(task, lease, result, runErr), runErr
+		outcome, handled, outcomeErr := w.executionErrorOutcome(
+			ctx, task, lease, result, runErr, started,
+		)
+		leaseHandled = handled
+		return outcome, outcomeErr
 	}
 
 	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
@@ -201,6 +199,90 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		LeaseID: lease.ID,
 		Result:  result,
 	}, nil
+}
+
+func (w AgentWorker) runCheckpointedTask(
+	ctx context.Context,
+	task api.Task,
+	run api.Run,
+	lease api.TaskExecutionLease,
+	engine agent.Engine,
+	checkpoint agent.ExecutionCheckpointRecord,
+	hasCheckpoint bool,
+	messages []message.Message,
+	sink stream.Sink,
+	ttl time.Duration,
+	started time.Time,
+) (agent.Result, error) {
+	baseContextBuilder := engine.ContextBuilder
+	if hasCheckpoint {
+		engine.OperationTurn = max(engine.OperationTurn, checkpoint.Checkpoint.NextOperationTurn)
+	}
+	resumeMessages := checkpoint.Checkpoint.Messages
+	engine.ContextBuilder = workerContextBuilder{
+		worker: w, run: run, inner: baseContextBuilder, extra: messages, resume: resumeMessages,
+	}
+	engine.StepRecorder = w.stepRecorder(task, lease, started, engine, engine.StepRecorder)
+	engine.CheckpointRecorder = w.checkpointRecorder(task, lease, engine.CheckpointRecorder)
+	recoveredTerminal := hasCheckpoint &&
+		!checkpoint.Checkpoint.PendingToolCalls &&
+		checkpoint.Checkpoint.Step.Decision == agent.StepDecisionFinish
+	if recoveredTerminal {
+		return resultFromTerminalCheckpoint(checkpoint.Checkpoint, task.OutputSchema)
+	}
+
+	var result agent.Result
+	var runErr error
+	if hasCheckpoint && checkpoint.Checkpoint.PendingToolCalls {
+		resumeMessages, runErr = withLeaseHeartbeat(ctx, w, lease.ID, ttl, func(runCtx context.Context) ([]message.Message, error) {
+			return w.resumePendingToolCalls(runCtx, engine, checkpoint.Checkpoint)
+		})
+		engine.ContextBuilder = workerContextBuilder{
+			worker: w, run: run, inner: baseContextBuilder, extra: messages, resume: resumeMessages,
+		}
+		result.Messages = resumeMessages
+		result.Usage = checkpoint.Checkpoint.Usage
+		result.ToolCallsUsed = checkpoint.Checkpoint.ToolCallsUsed
+	}
+	// A pending checkpoint has already charged its tool-call slots. Resume
+	// those calls before rejecting an exhausted durable budget; only fresh
+	// model/tool work is gated by the remaining balance.
+	if runErr == nil {
+		task, runErr = w.taskWithRemainingBudget(ctx, task)
+	}
+	if runErr != nil {
+		return result, runErr
+	}
+	result, runErr = w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl, sink)
+	if usageErr := w.appendPartialModelUsage(ctx, task, lease, engine, result); usageErr != nil {
+		runErr = errors.Join(runErr, usageErr)
+	}
+	return result, runErr
+}
+
+func (w AgentWorker) executionErrorOutcome(
+	ctx context.Context,
+	task api.Task,
+	lease api.TaskExecutionLease,
+	result agent.Result,
+	runErr error,
+	started time.Time,
+) (ExecutionOutcome, bool, error) {
+	if cause := context.Cause(ctx); errors.Is(cause, ErrSingleRunCancelled) {
+		return ExecutionOutcome{
+			State: ExecutionCancelled, RunID: task.RunID, TaskID: task.ID,
+			LeaseID: lease.ID, Result: result,
+		}, false, errors.Join(runErr, cause)
+	}
+	if suspension := w.executionSuspension(ctx, task, runErr); suspension != nil {
+		checkpointErr := w.recordSuspensionCheckpoint(context.WithoutCancel(ctx), task, lease, result, time.Since(started))
+		return ExecutionOutcome{
+			State: ExecutionSuspended, RunID: task.RunID, TaskID: task.ID,
+			LeaseID: lease.ID, Result: result, Suspension: suspension,
+		}, false, errors.Join(runErr, checkpointErr, context.Cause(ctx))
+	}
+	handled := w.submitFailureReportHandled(ctx, task, lease, runErr)
+	return failedExecutionOutcome(task, lease, result, runErr), handled, runErr
 }
 
 func (w AgentWorker) executionEngine(task api.Task, lease api.TaskExecutionLease) agent.Engine {
@@ -233,6 +315,9 @@ func failedExecutionOutcome(task api.Task, lease api.TaskExecutionLease, result 
 }
 
 func (w AgentWorker) executionSuspension(ctx context.Context, task api.Task, cause error) *Suspension {
+	if cause := context.Cause(ctx); errors.Is(cause, ErrSingleRunSuspended) {
+		return &Suspension{Kind: SuspensionRequested, Reason: cause.Error()}
+	}
 	if errors.Is(cause, api.ErrActionReconcileRequired) {
 		return &Suspension{Kind: SuspensionReconciliation, Reason: cause.Error()}
 	}
@@ -259,41 +344,138 @@ func (w AgentWorker) executionSuspension(ctx context.Context, task api.Task, cau
 	return nil
 }
 
-// appendUsage best-effort persists one execution's cumulative budget spend.
-// Finalized step events are the crash-safe source used during resume; this
-// record also covers executions that fail before producing their first step.
-func (w AgentWorker) appendUsage(ctx context.Context, task api.Task, executionID string, engine agent.Engine, result agent.Result, elapsed time.Duration) {
-	usage := result.Usage
-	totalTokens := usage.TotalTokens
-	if totalTokens == 0 {
-		totalTokens = usage.InputTokens + usage.OutputTokens
+func stableUsageID(parts ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("usage-%x", digest[:16])
+}
+
+func priceUsageRecord(ctx context.Context, pricer UsagePricer, record api.UsageRecord) (api.UsageRecord, error) {
+	if pricer == nil {
+		record.PricingState = api.UsagePricingStatePriced
+		return record, nil
+	}
+	credits, creditsKind, err := pricer(ctx, record)
+	if err != nil {
+		record.PricingState = api.UsagePricingStateUnpriced
+		if record.Metadata == nil {
+			record.Metadata = make(map[string]string)
+		}
+		record.Metadata["pricingError"] = err.Error()
+		return record, fmt.Errorf("%w: price %s usage: %w", ErrUsageUnpriced, record.Kind, err)
+	}
+	if credits < 0 {
+		record.PricingState = api.UsagePricingStateUnpriced
+		if record.Metadata == nil {
+			record.Metadata = make(map[string]string)
+		}
+		record.Metadata["pricingError"] = "negative credits"
+		return record, fmt.Errorf("%w: price %s usage: negative credits", ErrUsageUnpriced, record.Kind)
+	}
+	record.Credits = credits
+	record.CreditsKind = creditsKind
+	record.PricingState = api.UsagePricingStatePriced
+	return record, nil
+}
+
+func (w AgentWorker) usageRecordsForStep(
+	ctx context.Context,
+	task api.Task,
+	executionID string,
+	engine agent.Engine,
+	step agent.Step,
+) ([]api.UsageRecord, error) {
+	providerName := ""
+	if engine.Provider != nil {
+		providerName = engine.Provider.Metadata().Name
+	}
+	if call := step.ModelCall; call != nil && call.Provider != "" {
+		providerName = call.Provider
+	}
+	records := make([]api.UsageRecord, 0, 1+len(step.ToolCalls))
+	var pricingErr error
+	if call := step.ModelCall; call != nil {
+		totalTokens := call.TotalTokens
+		if totalTokens == 0 {
+			totalTokens = call.InputTokens + call.OutputTokens
+		}
+		record, err := priceUsageRecord(ctx, w.UsagePricer, api.UsageRecord{
+			ID: stableUsageID(
+				task.RunID, task.ID, w.AgentID, executionID,
+				string(api.UsageKindModelCall), fmt.Sprint(step.Index),
+			),
+			RunID: task.RunID, TaskID: task.ID, AgentID: w.AgentID,
+			Kind: api.UsageKindModelCall, Provider: providerName, Model: call.Model,
+			InputTokens: call.InputTokens, CachedInputTokens: call.CachedInputTokens,
+			CacheWriteInputTokens: call.CacheWriteInputTokens, OutputTokens: call.OutputTokens,
+			TotalTokens: totalTokens, Steps: 1,
+			Metadata: map[string]string{
+				"executionId": executionID,
+				"stepIndex":   fmt.Sprint(step.Index),
+			},
+		})
+		if err != nil {
+			pricingErr = errors.Join(pricingErr, err)
+		}
+		records = append(records, record)
+	}
+	for index, call := range step.ToolCalls {
+		inputHash := sha256.Sum256(call.Arguments)
+		record, err := priceUsageRecord(ctx, w.UsagePricer, api.UsageRecord{
+			ID: stableUsageID(
+				task.RunID, task.ID, w.AgentID, executionID,
+				string(api.UsageKindToolCall), fmt.Sprint(step.Index), fmt.Sprint(index),
+			),
+			RunID: task.RunID, TaskID: task.ID, AgentID: w.AgentID,
+			Kind: api.UsageKindToolCall, ToolName: call.Name, ToolCalls: 1,
+			Metadata: map[string]string{
+				"executionId": executionID,
+				"stepIndex":   fmt.Sprint(step.Index),
+				"ordinal":     fmt.Sprint(index),
+				"inputHash":   fmt.Sprintf("%x", inputHash[:]),
+			},
+		})
+		if err != nil {
+			pricingErr = errors.Join(pricingErr, err)
+		}
+		records = append(records, record)
+	}
+	return records, pricingErr
+}
+
+func (w AgentWorker) appendPartialModelUsage(ctx context.Context, task api.Task, lease api.TaskExecutionLease, engine agent.Engine, result agent.Result) error {
+	recorded := provider.Usage{}
+	for _, step := range result.Steps {
+		if step.ModelCall == nil {
+			continue
+		}
+		recorded = recorded.Add(provider.Usage{
+			InputTokens: step.ModelCall.InputTokens, CachedInputTokens: step.ModelCall.CachedInputTokens,
+			CacheWriteInputTokens: step.ModelCall.CacheWriteInputTokens,
+			OutputTokens:          step.ModelCall.OutputTokens, TotalTokens: step.ModelCall.TotalTokens,
+		})
+	}
+	inputTokens := max(0, result.Usage.InputTokens-recorded.InputTokens)
+	cachedInputTokens := max(0, result.Usage.CachedInputTokens-recorded.CachedInputTokens)
+	cacheWriteInputTokens := max(0, result.Usage.CacheWriteInputTokens-recorded.CacheWriteInputTokens)
+	outputTokens := max(0, result.Usage.OutputTokens-recorded.OutputTokens)
+	totalTokens := max(0, result.Usage.TotalTokens-recorded.TotalTokens)
+	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
+		return nil
 	}
 	providerName := ""
 	if engine.Provider != nil {
 		providerName = engine.Provider.Metadata().Name
 	}
-	toolCalls := result.ToolCallsUsed
-	for _, step := range result.Steps {
-		if step.BudgetUsed.ToolCalls > toolCalls {
-			toolCalls = step.BudgetUsed.ToolCalls
-		}
-	}
-	_ = w.Runner.AppendUsage(context.WithoutCancel(ctx), api.UsageRecord{
-		RunID:                 task.RunID,
-		TaskID:                task.ID,
-		AgentID:               w.AgentID,
-		Provider:              providerName,
-		Model:                 engine.Model,
-		InputTokens:           usage.InputTokens,
-		CachedInputTokens:     usage.CachedInputTokens,
-		CacheWriteInputTokens: usage.CacheWriteInputTokens,
-		OutputTokens:          usage.OutputTokens,
-		TotalTokens:           totalTokens,
-		ToolCalls:             toolCalls,
-		Steps:                 len(result.Steps),
-		DurationMS:            elapsed.Milliseconds(),
-		Metadata:              map[string]string{"executionId": executionID},
+	record, pricingErr := priceUsageRecord(ctx, w.UsagePricer, api.UsageRecord{
+		ID:    stableUsageID(task.RunID, task.ID, w.AgentID, string(api.UsageKindModelCall), "partial", lease.ID),
+		RunID: task.RunID, TaskID: task.ID, AgentID: w.AgentID,
+		Kind: api.UsageKindModelCall, Provider: providerName, Model: engine.Model,
+		InputTokens: inputTokens, CachedInputTokens: cachedInputTokens,
+		CacheWriteInputTokens: cacheWriteInputTokens, OutputTokens: outputTokens,
+		TotalTokens: totalTokens, Metadata: map[string]string{"partial": "true"},
 	})
+	appendErr := w.Runner.AppendUsage(context.WithoutCancel(ctx), record)
+	return errors.Join(appendErr, pricingErr)
 }
 
 type durableTaskBudgetUsage struct {
@@ -469,7 +651,7 @@ func (w AgentWorker) envelopeLease(ctx context.Context, req ExecuteEnvelopeReque
 }
 
 func (w AgentWorker) acquireEnvelopeLease(ctx context.Context, req ExecuteEnvelopeRequest, ttl time.Duration) (api.TaskExecutionLease, error) {
-	lease, acquired, err := w.Runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+	result, err := w.Runner.AcquireTaskExecutionWithClaims(ctx, api.AcquireTaskExecutionCommand{
 		RunID:      req.Envelope.RunID,
 		TaskID:     req.Envelope.TaskID,
 		EnvelopeID: req.Envelope.ID,
@@ -480,10 +662,12 @@ func (w AgentWorker) acquireEnvelopeLease(ctx context.Context, req ExecuteEnvelo
 	if err != nil {
 		return api.TaskExecutionLease{}, err
 	}
-	if !acquired {
-		return api.TaskExecutionLease{}, fmt.Errorf("worker: task %s already has an active lease", req.Envelope.TaskID)
+	if !result.Acquired {
+		return api.TaskExecutionLease{}, &TaskExecutionUnavailableError{
+			TaskID: req.Envelope.TaskID, ResourceClaims: result.ResourceClaims,
+		}
 	}
-	return lease, nil
+	return result.Lease, nil
 }
 
 func (w AgentWorker) ackEnvelope(ctx context.Context, envelope api.TaskEnvelope) error {
@@ -519,11 +703,12 @@ func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease)
 		HolderType:  api.HolderAgent,
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
+		UsagePricer: w.UsagePricer,
 	}.ToolBus()
 	return engine
 }
 
-func (w AgentWorker) stepRecorder(task api.Task, lease api.TaskExecutionLease, started time.Time, caller agent.StepRecorder) agent.StepRecorder {
+func (w AgentWorker) stepRecorder(task api.Task, lease api.TaskExecutionLease, started time.Time, engine agent.Engine, caller agent.StepRecorder) agent.StepRecorder {
 	durable := agent.StepRecorderFunc(func(ctx context.Context, step agent.Step) error {
 		step.BudgetUsed.WallClock = time.Since(started)
 		event, err := agent.NewStepCompletedEvent(agent.StepRecord{
@@ -536,11 +721,13 @@ func (w AgentWorker) stepRecorder(task api.Task, lease api.TaskExecutionLease, s
 		if err != nil {
 			return err
 		}
-		return w.Runner.AppendTaskExecutionEvent(context.WithoutCancel(ctx), api.AppendTaskExecutionEventCommand{
+		usageRecords, pricingErr := w.usageRecordsForStep(ctx, task, lease.ID, engine, step)
+		appendErr := w.Runner.AppendTaskExecutionEvent(context.WithoutCancel(ctx), api.AppendTaskExecutionEventCommand{
 			RunID: task.RunID, TaskID: task.ID, LeaseID: lease.ID,
 			HolderType: lease.HolderType, HolderID: lease.HolderID,
-			TaskVersion: task.Version, Event: event,
+			TaskVersion: task.Version, Event: event, UsageRecords: usageRecords,
 		})
+		return errors.Join(appendErr, pricingErr)
 	})
 	if caller == nil {
 		return durable

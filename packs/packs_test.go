@@ -2,6 +2,7 @@ package packs_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/Viking602/venat/packs"
@@ -69,6 +70,9 @@ func TestPacks_ShapeInvariants(t *testing.T) {
 		for _, a := range p.Agents {
 			if a.ID == "" || a.Name == "" {
 				t.Fatalf("pack %s agent missing id/name: %+v", p.Name, a)
+			}
+			if !slices.Equal(a.Tools, a.Capabilities) {
+				t.Fatalf("pack %s agent %s tools/capability metadata diverged: %v / %v", p.Name, a.ID, a.Tools, a.Capabilities)
 			}
 		}
 		for _, m := range p.Capabilities {

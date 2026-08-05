@@ -21,18 +21,24 @@ func (r *Runner) ActiveLeaseCountContext(ctx context.Context, runID, taskID stri
 }
 
 func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd api.AcquireTaskExecutionCommand) (api.TaskExecutionLease, bool, error) {
-	lease, acquired, err := r.rt.AcquireTaskExecution(ctx, core.AcquireTaskExecutionCommand{
-		RunID:      cmd.RunID,
-		TaskID:     cmd.TaskID,
-		EnvelopeID: cmd.EnvelopeID,
-		HolderType: model.HolderType(cmd.HolderType),
-		HolderID:   cmd.HolderID,
-		TTL:        cmd.TTL,
+	result, err := r.AcquireTaskExecutionWithClaims(ctx, cmd)
+	return result.Lease, result.Acquired, err
+}
+
+// AcquireTaskExecutionWithClaims atomically acquires a task lease and every
+// requested shared/exclusive resource claim.
+func (r *Runner) AcquireTaskExecutionWithClaims(ctx context.Context, cmd api.AcquireTaskExecutionCommand) (api.AcquireTaskExecutionResult, error) {
+	acquired, err := r.rt.AcquireTaskExecutionWithClaims(ctx, core.AcquireTaskExecutionCommand{
+		RunID: cmd.RunID, TaskID: cmd.TaskID, EnvelopeID: cmd.EnvelopeID,
+		HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TTL: cmd.TTL,
 	})
 	if err != nil {
-		return api.TaskExecutionLease{}, false, adapter.ErrorToAPI(err)
+		return api.AcquireTaskExecutionResult{}, adapter.ErrorToAPI(err)
 	}
-	return adapter.TaskExecutionLeaseFromModel(lease), acquired, nil
+	return api.AcquireTaskExecutionResult{
+		Lease: adapter.TaskExecutionLeaseFromModel(acquired.Lease), Acquired: acquired.Acquired,
+		ResourceClaims: adapter.ResourceClaimDecisionFromModel(acquired.ResourceClaims),
+	}, nil
 }
 
 func (r *Runner) HeartbeatTaskExecution(ctx context.Context, cmd api.HeartbeatTaskExecutionCommand) error {
@@ -43,11 +49,20 @@ func (r *Runner) ReleaseTaskExecution(ctx context.Context, cmd api.ReleaseTaskEx
 	return adapter.ErrorToAPI(r.rt.ReleaseTaskExecution(ctx, core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID}))
 }
 
+func usageRecordToModelPointer(record *api.UsageRecord) *model.UsageRecord {
+	if record == nil {
+		return nil
+	}
+	converted := adapter.UsageRecordToModel(*record)
+	return &converted
+}
+
 func (r *Runner) AppendTaskExecutionEvent(ctx context.Context, cmd api.AppendTaskExecutionEventCommand) error {
 	_, err := r.rt.ExecuteCommand(ctx, core.AppendTaskExecutionEventCommand{
 		RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
 		HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
 		TaskVersion: cmd.TaskVersion, Event: adapter.EventToModel(cmd.Event),
+		UsageRecords: adapter.UsageRecordsToModel(cmd.UsageRecords),
 	})
 	return adapter.ErrorToAPI(err)
 }
@@ -58,6 +73,20 @@ func (r *Runner) InvokeTool(ctx context.Context, cmd api.ToolInvocation) (api.To
 		return api.ToolInvocationResult{}, adapter.ErrorToAPI(err)
 	}
 	return adapter.ToolInvocationResultFromCore(result), nil
+}
+
+func (r *Runner) EnforceToolResult(ctx context.Context, request api.ToolResultEnforcementRequest) (api.ToolResultEnforcementResult, error) {
+	result, err := r.rt.EnforceToolResult(
+		ctx,
+		request.RunID,
+		request.TaskID,
+		adapter.PolicyDecisionToModel(request.Decision),
+		append(json.RawMessage(nil), request.ToolResult...),
+	)
+	if err != nil {
+		return api.ToolResultEnforcementResult{}, adapter.ErrorToAPI(err)
+	}
+	return api.ToolResultEnforcementResult{ToolResult: append(json.RawMessage(nil), result...)}, nil
 }
 
 func (r *Runner) RequestHandoff(ctx context.Context, cmd api.HandoffCommand) error {
@@ -97,7 +126,14 @@ func (r *Runner) StartActionAttempt(ctx context.Context, cmd api.StartActionAtte
 }
 
 func (r *Runner) CompleteActionAttempt(ctx context.Context, cmd api.CompleteActionAttemptCommand) (api.ActionAttempt, error) {
-	attempt, err := r.rt.CompleteActionAttempt(ctx, core.CompleteActionAttemptCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID, TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID, Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID, ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...), RequiresReconcile: cmd.RequiresReconcile})
+	attempt, err := r.rt.CompleteActionAttempt(ctx, core.CompleteActionAttemptCommand{
+		RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID,
+		HolderType: model.HolderType(cmd.HolderType), HolderID: cmd.HolderID,
+		TaskVersion: cmd.TaskVersion, AttemptID: cmd.AttemptID,
+		Status: model.ActionAttemptStatus(cmd.Status), ExternalRequestID: cmd.ExternalRequestID,
+		ExternalResultRef: cmd.ExternalResultRef, ToolResult: append(json.RawMessage(nil), cmd.ToolResult...),
+		RequiresReconcile: cmd.RequiresReconcile, UsageRecord: usageRecordToModelPointer(cmd.UsageRecord),
+	})
 	if err != nil {
 		return api.ActionAttempt{}, adapter.ErrorToAPI(err)
 	}

@@ -49,11 +49,18 @@ type Spec struct {
 	// are not injected before activation.
 	AvailableSkills []string
 
-	// Model is the model name passed to the provider on every turn and the key
-	// BuildDeps.Providers resolves to a concrete driver. Two Specs with
-	// different Model values can therefore run on different models — and, when
-	// the resolver is a multi-vendor Registry, different providers.
-	Model string
+	// Provider optionally pins resolution to a driver Metadata().Name. Model is
+	// the model name sent to that driver. FallbackModel is resolved separately
+	// and tried only when the primary stream cannot be opened.
+	Provider      string
+	Model         string
+	FallbackModel string
+
+	// Temperature, TopP, and MaxTokens are forwarded to every provider request.
+	// Zero leaves the selected provider's default in place.
+	Temperature float64
+	TopP        float64
+	MaxTokens   int
 
 	// Tools names the tools this agent may call. Build selects exactly this
 	// subset from BuildDeps.Tools; an empty slice yields a tool-less agent.
@@ -119,9 +126,16 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 	if deps.Providers == nil {
 		return Engine{}, ErrProviderResolverMissing
 	}
-	driver, err := deps.Providers.Driver(spec.Model)
+	driver, err := provider.Resolve(deps.Providers, spec.Provider, spec.Model)
 	if err != nil {
-		return Engine{}, fmt.Errorf("agent: resolve provider for model %q: %w", spec.Model, err)
+		return Engine{}, fmt.Errorf("agent: resolve provider %q for model %q: %w", spec.Provider, spec.Model, err)
+	}
+	if spec.FallbackModel != "" {
+		fallback, fallbackErr := provider.Resolve(deps.Providers, "", spec.FallbackModel)
+		if fallbackErr != nil {
+			return Engine{}, fmt.Errorf("agent: resolve fallback model %q: %w", spec.FallbackModel, fallbackErr)
+		}
+		driver = provider.ModelFallback(driver, fallback, spec.FallbackModel)
 	}
 
 	var bus *tool.Bus
@@ -177,6 +191,9 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		Tools:           bus,
 		Hooks:           deps.Hooks,
 		Model:           spec.Model,
+		Temperature:     spec.Temperature,
+		TopP:            spec.TopP,
+		ModelMaxTokens:  spec.MaxTokens,
 		LoopPolicy:      spec.LoopPolicy,
 		ContextBuilder:  contextManager,
 		Skills:          activeSkills,

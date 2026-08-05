@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core"
@@ -10,10 +11,11 @@ import (
 
 func ConfigToCore(config api.Config) core.Config {
 	return core.Config{
-		StoreProvider: StoreProviderToCore(config.StoreProvider),
-		PolicyEngine:  PolicyEngineToCore(config.PolicyEngine),
-		OutputGateway: OutputGatewayToCore(config.OutputGateway),
-		Pipeline:      PipelineToCore(config.Pipeline),
+		StoreProvider:  StoreProviderToCore(config.StoreProvider),
+		PolicyEngine:   PolicyEngineToCore(config.PolicyEngine),
+		PolicyEnforcer: PolicyObligationEnforcerToCore(config.PolicyEnforcer),
+		OutputGateway:  OutputGatewayToCore(config.OutputGateway),
+		Pipeline:       PipelineToCore(config.Pipeline),
 	}
 }
 
@@ -32,6 +34,92 @@ func (a apiPolicyEngineAdapter) Authorize(ctx context.Context, request model.Pol
 		return model.PolicyDecision{}, ErrorToCore(err)
 	}
 	return PolicyDecisionToModel(decision), nil
+}
+
+func PolicyObligationEnforcerToCore(inner api.PolicyObligationEnforcer) core.PolicyObligationEnforcer {
+	if inner == nil {
+		return nil
+	}
+	return apiPolicyObligationEnforcerAdapter{inner: inner}
+}
+
+type apiPolicyObligationEnforcerAdapter struct {
+	inner api.PolicyObligationEnforcer
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceBlackboardRead(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	selector model.BlackboardSelector,
+	items []model.BlackboardItem,
+) (model.BlackboardSelector, []model.BlackboardItem, error) {
+	enforcedSelector, enforcedItems, err := a.inner.EnforceBlackboardRead(
+		ctx,
+		PolicyDecisionFromModel(decision),
+		BlackboardSelectorFromModel(selector),
+		BlackboardItemsFromModel(items),
+	)
+	if err != nil {
+		return model.BlackboardSelector{}, nil, ErrorToCore(err)
+	}
+	return BlackboardSelectorToModel(enforcedSelector), BlackboardItemsToModel(enforcedItems), nil
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceBlackboardWrite(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	item model.BlackboardItem,
+) (model.BlackboardItem, error) {
+	enforced, err := a.inner.EnforceBlackboardWrite(ctx, PolicyDecisionFromModel(decision), BlackboardItemFromModel(item))
+	if err != nil {
+		return model.BlackboardItem{}, ErrorToCore(err)
+	}
+	return BlackboardItemToModel(enforced), nil
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceToolResult(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	result json.RawMessage,
+) (json.RawMessage, error) {
+	enforced, err := a.inner.EnforceToolResult(ctx, PolicyDecisionFromModel(decision), result)
+	return enforced, ErrorToCore(err)
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceHandoff(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	handoff model.HandoffRequest,
+) (model.HandoffRequest, error) {
+	enforced, err := a.inner.EnforceHandoff(ctx, PolicyDecisionFromModel(decision), HandoffRequestFromModel(handoff))
+	if err != nil {
+		return model.HandoffRequest{}, ErrorToCore(err)
+	}
+	return HandoffRequestToModel(enforced), nil
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceResponse(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	message model.UserMessage,
+) (model.UserMessage, error) {
+	enforced, err := a.inner.EnforceResponse(ctx, PolicyDecisionFromModel(decision), UserMessageFromModel(message))
+	if err != nil {
+		return model.UserMessage{}, ErrorToCore(err)
+	}
+	return UserMessageToModel(enforced), nil
+}
+
+func (a apiPolicyObligationEnforcerAdapter) EnforceTrace(
+	ctx context.Context,
+	decision model.PolicyDecision,
+	span model.TraceSpan,
+) (model.TraceSpan, bool, error) {
+	enforced, visible, err := a.inner.EnforceTrace(ctx, PolicyDecisionFromModel(decision), TraceSpanFromModel(span))
+	if err != nil {
+		return model.TraceSpan{}, false, ErrorToCore(err)
+	}
+	return TraceSpanToModel(enforced), visible, nil
 }
 
 func OutputGatewayToCore(inner api.OutputGateway) core.OutputGateway {

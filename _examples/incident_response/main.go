@@ -57,13 +57,6 @@ func main() {
 	runner.RegisterAgent(api.AgentProfile{ID: "reviewer", Role: roleReviewer})
 	runner.RegisterAgent(api.AgentProfile{ID: "actuator", Role: roleActuator})
 
-	runner.RegisterTool(api.Tool{
-		Name:               toolRollback,
-		EffectType:         api.ToolEffectWrite,
-		RequiresActionTask: true,
-		RiskLevel:          "high",
-	})
-
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "deploy regression — investigate"})
 	must(err)
 
@@ -138,6 +131,12 @@ func main() {
 		DependsOn: []string{reviewTask.ID}, AllowsAction: true,
 	})
 	must(err)
+	runner.RegisterToolForInvocation(run.ID, actionTask.ID, api.HolderAgent, "actuator", api.Tool{
+		Name:               toolRollback,
+		EffectType:         api.ToolEffectWrite,
+		RequiresActionTask: true,
+		RiskLevel:          "high",
+	})
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: actionTask.ID, TargetAgentID: "actuator",
 	})

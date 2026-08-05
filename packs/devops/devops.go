@@ -65,6 +65,7 @@ var releaseNotes = api.AgentDefinition{
 	Description:  "Reads merged PRs between two tags and drafts release notes.",
 	Instructions: "Collect merged PRs in range, group by area, and draft release notes.",
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.3},
+	Tools:        []string{"list_merged_prs", "read_ci_status"},
 	Capabilities: []string{"list_merged_prs", "read_ci_status"},
 	Triggers: []api.Trigger{
 		{ID: "manual", Type: api.TriggerManual, Enabled: true},

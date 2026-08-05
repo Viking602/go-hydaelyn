@@ -70,12 +70,12 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if topic == "" {
 		return trigger.Registration{}, fmt.Errorf("event: trigger %q missing config[\"topic\"]", t.ID)
 	}
-	reg := trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}
+	reg := (trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}).Clone()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.byTopic[topic] = append(d.byTopic[topic], reg)
 	d.logger("event: registered %s on topic %q", t.ID, topic)
-	return reg, nil
+	return reg.Clone(), nil
 }
 
 // Deregister removes a previously-registered trigger by ID. Returns
@@ -104,7 +104,9 @@ func (d *Driver) List() []trigger.Registration {
 	defer d.mu.RUnlock()
 	var out []trigger.Registration
 	for _, regs := range d.byTopic {
-		out = append(out, regs...)
+		for _, registration := range regs {
+			out = append(out, registration.Clone())
+		}
 	}
 	return out
 }
@@ -119,6 +121,7 @@ func (d *Driver) Publish(ctx context.Context, e Event) error {
 	regs := append([]trigger.Registration(nil), d.byTopic[e.Topic]...)
 	d.mu.RUnlock()
 	for _, r := range regs {
+		r = r.Clone()
 		if !matchFilter(r.Trigger.Filter, e.Attributes) {
 			continue
 		}

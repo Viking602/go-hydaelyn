@@ -76,6 +76,55 @@ func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	}
 }
 
+func TestAgentWorkerReportsResourceClaimConflictAsRetryable(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-b"})
+	claim := api.ResourceClaimSpec{Key: "workspace:test", Mode: api.ResourceClaimExclusive}
+	create := func(runID, taskID, agentID string) api.TaskEnvelope {
+		t.Helper()
+		run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+			RunID: runID, RootTaskID: runID + "-root", Request: "edit workspace",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+			RunID: run.ID, TaskID: taskID, Goal: "edit workspace",
+			OwnerAgentID: agentID, ResourceClaims: []api.ResourceClaimSpec{claim},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+			RunID: run.ID, TaskID: task.ID, TargetAgentID: agentID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return envelope
+	}
+	first := create("claim-owner", "owner-task", "agent-a")
+	acquired, err := runner.AcquireTaskExecutionWithClaims(ctx, api.AcquireTaskExecutionCommand{
+		RunID: first.RunID, TaskID: first.TaskID, EnvelopeID: first.ID,
+		HolderType: api.HolderAgent, HolderID: "agent-a", TTL: time.Minute,
+	})
+	if err != nil || !acquired.Acquired {
+		t.Fatalf("first acquisition=%#v error=%v", acquired, err)
+	}
+	second := create("claim-waiter", "waiter-task", "agent-b")
+	_, err = (AgentWorker{Runner: runner, AgentID: "agent-b"}).acquireEnvelopeLease(
+		ctx, ExecuteEnvelopeRequest{Envelope: second}, time.Minute,
+	)
+	var unavailable *TaskExecutionUnavailableError
+	if !errors.As(err, &unavailable) || !errors.Is(err, ErrTaskExecutionUnavailable) ||
+		unavailable.ResourceClaims.Reason != api.ResourceClaimDeniedConflict ||
+		len(unavailable.ResourceClaims.Conflicts) != 1 {
+		t.Fatalf("second acquisition error=%v", err)
+	}
+}
+
 func TestAgentWorkerContinuesFromCompletedTurnCheckpointWithoutReplayingProvider(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
@@ -827,6 +876,170 @@ func TestGovernedToolBusPersistsActionAttempt(t *testing.T) {
 	if notExecuted.AttemptID == "" || notExecuted.RequiresReconcile {
 		t.Fatalf("not-executed action attempts=%#v, want failed without reconciliation", attempts)
 	}
+	usage, usageErr := runner.QueryUsage(ctx, api.UsageSelector{
+		RunID: run.ID, TaskID: task.ID, Kind: api.UsageKindActionCall, ToolName: call.Name,
+	})
+	if usageErr != nil {
+		t.Fatalf("QueryUsage() error = %v", usageErr)
+	}
+	if len(usage) != 3 {
+		t.Fatalf("action usage records = %#v, want one per executed action attempt", usage)
+	}
+}
+
+func TestGovernedToolBusPricingFailureQuarantinesActionAndReplay(t *testing.T) {
+	ctx, bus, driver := newGovernedActionBus(t, "run-action-unpriced")
+	bus.UsagePricer = func(context.Context, api.UsageRecord) (int64, string, error) {
+		return 0, "", errors.New("pricing unavailable")
+	}
+	call := tool.Call{
+		ID: "unpriced-call", OperationID: "turn:0:call:0",
+		Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+	}
+	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, ErrUsageUnpriced) {
+		t.Fatalf("pricing failure error = %v, want ErrUsageUnpriced", err)
+	}
+	attempts, err := bus.Runner.ListActionAttempts(ctx, api.ActionAttemptSelector{
+		RunID: bus.RunID, TaskID: bus.TaskID, ToolName: call.Name,
+	})
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("action attempts = %#v, error=%v", attempts, err)
+	}
+	if attempts[0].Status != api.ActionAttemptUnknown || !attempts[0].RequiresReconcile {
+		t.Fatalf("action attempt = %#v, want unknown/reconcile", attempts[0])
+	}
+	usage, err := bus.Runner.QueryUsage(ctx, api.UsageSelector{
+		RunID: bus.RunID, TaskID: bus.TaskID, Kind: api.UsageKindActionCall,
+	})
+	if err != nil || len(usage) != 1 {
+		t.Fatalf("action usage = %#v, error=%v", usage, err)
+	}
+	if usage[0].PricingState != api.UsagePricingStateUnpriced || usage[0].Credits != 0 {
+		t.Fatalf("action usage = %#v, want unpriced zero-credit marker", usage[0])
+	}
+	if _, err := bus.Execute(ctx, tool.Call{
+		ID: "unpriced-call-replay", OperationID: call.OperationID,
+		Name: call.Name, Arguments: call.Arguments,
+	}, nil); !errors.Is(err, venat.ErrActionReconcileRequired) {
+		t.Fatalf("replayed action error = %v, want reconcile required", err)
+	}
+	if _, err := bus.Execute(ctx, tool.Call{
+		ID: "unpriced-call-conflict", OperationID: call.OperationID,
+		Name: call.Name, Arguments: json.RawMessage(`{"value":2}`),
+	}, nil); !errors.Is(err, venat.ErrIdempotencyConflict) {
+		t.Fatalf("changed replay error = %v, want idempotency conflict", err)
+	}
+	if driver.calls != 1 {
+		t.Fatalf("driver calls = %d, want one side effect", driver.calls)
+	}
+}
+
+func TestGovernedToolBusMasksReturnedAndPersistedToolResult(t *testing.T) {
+	ctx, bus, _ := newGovernedActionBus(t, "run-masked-action-result")
+	bus.Runner.SetPolicyEngine(maskToolResultPolicy{})
+
+	result, err := bus.Execute(ctx, tool.Call{
+		ID: "masked-call", Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Content != "[masked]" || len(result.Structured) != 0 {
+		t.Fatalf("enforced result = %#v, want masked content without structured payload", result)
+	}
+	attempts, err := bus.Runner.ListActionAttempts(ctx, api.ActionAttemptSelector{
+		RunID: bus.RunID, TaskID: bus.TaskID,
+	})
+	if err != nil {
+		t.Fatalf("ListActionAttempts() error = %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("action attempts = %#v, want one", attempts)
+	}
+	var persisted tool.Result
+	if err := json.Unmarshal(attempts[0].ToolResult, &persisted); err != nil {
+		t.Fatalf("decode persisted ToolResult: %v", err)
+	}
+	if persisted.Content != "[masked]" || len(persisted.Structured) != 0 || strings.Contains(attempts[0].ExternalResultRef, "ok") {
+		t.Fatalf("persisted enforced result = %#v, attempt = %#v", persisted, attempts[0])
+	}
+}
+
+func TestGovernedToolBusReenforcesCachedTerminalResultWithCurrentPolicy(t *testing.T) {
+	ctx, bus, driver := newGovernedActionBus(t, "run-cached-action-current-policy")
+	call := tool.Call{
+		ID: "cached-policy-call", OperationID: "turn:0:call:0",
+		Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+	}
+	first, err := bus.Execute(ctx, call, nil)
+	if err != nil {
+		t.Fatalf("initial Execute() error = %v", err)
+	}
+	if first.Content != "ok" || len(first.Structured) == 0 {
+		t.Fatalf("initial result = %#v, want unmasked tool output", first)
+	}
+
+	bus.Runner.SetPolicyEngine(maskToolResultPolicy{})
+	call.ID = "cached-policy-call-retry"
+	replayed, err := bus.Execute(ctx, call, nil)
+	if err != nil {
+		t.Fatalf("replayed Execute() error = %v", err)
+	}
+	if replayed.Content != "[masked]" || len(replayed.Structured) != 0 {
+		t.Fatalf("replayed result = %#v, want current policy masking", replayed)
+	}
+	if driver.calls != 1 {
+		t.Fatalf("driver calls = %d, want cached action without side-effect replay", driver.calls)
+	}
+}
+
+func TestGovernedToolBusQuarantinesSuccessfulActionWhenResultEnforcementFails(t *testing.T) {
+	enforcementErr := errors.New("result enforcement unavailable")
+	ctx, bus, driver := newGovernedActionBus(
+		t,
+		"run-action-result-enforcement-failure",
+		api.Config{PolicyEnforcer: failingToolResultEnforcer{err: enforcementErr}},
+	)
+	call := tool.Call{
+		ID: "enforcement-call", OperationID: "turn:0:call:0",
+		Name: "write", Arguments: json.RawMessage(`{"value":1}`),
+	}
+	if _, err := bus.Execute(ctx, call, nil); !errors.Is(err, enforcementErr) {
+		t.Fatalf("Execute() error = %v, want enforcement failure", err)
+	}
+	attempts, err := bus.Runner.ListActionAttempts(ctx, api.ActionAttemptSelector{
+		RunID: bus.RunID, TaskID: bus.TaskID,
+	})
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("ListActionAttempts() attempts=%#v error=%v", attempts, err)
+	}
+	if attempts[0].Status != api.ActionAttemptUnknown || !attempts[0].RequiresReconcile ||
+		len(attempts[0].ToolResult) != 0 {
+		t.Fatalf("action attempt = %#v, want unknown reconciliation state without a cached result", attempts[0])
+	}
+	task, err := bus.Runner.Task(ctx, bus.RunID, bus.TaskID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	if task.Status != api.TaskStatusReconcileRequired {
+		t.Fatalf("task status = %q, want reconcile_required", task.Status)
+	}
+	if driver.calls != 1 {
+		t.Fatalf("driver calls = %d, want no side-effect replay", driver.calls)
+	}
+}
+
+type failingToolResultEnforcer struct {
+	api.PolicyObligationEnforcer
+	err error
+}
+
+func (e failingToolResultEnforcer) EnforceToolResult(
+	context.Context,
+	api.PolicyDecision,
+	json.RawMessage,
+) (json.RawMessage, error) {
+	return nil, e.err
 }
 
 func TestGovernedToolBusKeepsDirectNonIdempotentCallsDistinct(t *testing.T) {
@@ -869,10 +1082,14 @@ func TestGovernedToolBusRestoresCachedTerminalFailureStatus(t *testing.T) {
 	}
 }
 
-func newGovernedActionBus(t *testing.T, runID string) (context.Context, GovernedToolBus, *recordingTool) {
+func newGovernedActionBus(
+	t *testing.T,
+	runID string,
+	configs ...api.Config,
+) (context.Context, GovernedToolBus, *recordingTool) {
 	t.Helper()
 	ctx := context.Background()
-	runner := venat.NewDevelopment()
+	runner := venat.NewDevelopment(configs...)
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
@@ -1341,6 +1558,22 @@ func (p *approvalPolicy) Authorize(_ context.Context, request api.PolicyRequest)
 	return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 }
 
+type maskToolResultPolicy struct{}
+
+func (maskToolResultPolicy) Authorize(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+	if request.Operation == api.PolicyOperationToolCall {
+		return api.PolicyDecision{
+			DecisionID: "decision-mask-tool-result",
+			Effect:     api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{
+				Kind:   api.ObligationMaskToolOutput,
+				Target: api.PolicyTargetToolResult,
+			}},
+		}, nil
+	}
+	return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
+}
+
 type failingProvider struct {
 	err error
 }
@@ -1467,8 +1700,174 @@ func TestAgentWorkerPersistsUsageRecord(t *testing.T) {
 	if record.TaskID != task.ID || record.AgentID != "agent-a" || record.Model != "scripted" {
 		t.Fatalf("usage record identity = %+v", record)
 	}
+	if record.Kind != api.UsageKindModelCall {
+		t.Fatalf("usage kind = %q, want model_call", record.Kind)
+	}
 	if record.InputTokens != 11 || record.CachedInputTokens != 4 || record.CacheWriteInputTokens != 2 || record.OutputTokens != 7 {
 		t.Fatalf("usage tokens = %+v, want input=11 cached=4 cache-write=2 output=7", record)
+	}
+	if record.PricingState != api.UsagePricingStatePriced {
+		t.Fatalf("usage pricing state = %q, want priced", record.PricingState)
+	}
+}
+
+func TestAgentWorkerPersistsUnpricedModelUsage(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-model-unpriced", RootTaskID: "root", Request: "meter me"})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-model-unpriced", Goal: "summarize", OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18}},
+	})}
+	worker := AgentWorker{
+		Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted",
+		UsagePricer: func(context.Context, api.UsageRecord) (int64, string, error) {
+			return 0, "", errors.New("pricing unavailable")
+		},
+	}
+	if _, err := worker.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: env}); !errors.Is(err, ErrUsageUnpriced) {
+		t.Fatalf("ExecuteEnvelope() error = %v, want ErrUsageUnpriced", err)
+	}
+	records, err := runner.QueryUsage(ctx, api.UsageSelector{RunID: run.ID})
+	if err != nil || len(records) == 0 {
+		t.Fatalf("usage records = %#v, error=%v", records, err)
+	}
+	foundUnpriced := false
+	for _, record := range records {
+		if record.Kind == api.UsageKindModelCall && record.PricingState == api.UsagePricingStateUnpriced {
+			foundUnpriced = true
+			break
+		}
+	}
+	if !foundUnpriced {
+		t.Fatalf("usage records = %#v, want unpriced model call", records)
+	}
+}
+
+func TestAgentWorkerPersistsGranularModelAndToolUsage(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-granular-usage", RootTaskID: "root", Request: "read once",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-granular-usage", Goal: "read",
+		OwnerAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerDriver := &sequenceProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{
+				ID: "read-call", Name: "read", Arguments: json.RawMessage(`{"path":"a.txt"}`),
+			}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse, Usage: provider.Usage{InputTokens: 3, OutputTokens: 1}},
+		},
+		{
+			{Kind: provider.EventTextDelta, Text: "done"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 4, OutputTokens: 2}},
+		},
+	}}
+	driver := &recordingTool{definition: tool.Definition{Name: "read", EffectType: tool.EffectReadOnly}}
+	pricer := UsagePricer(func(_ context.Context, record api.UsageRecord) (int64, string, error) {
+		if record.Kind == api.UsageKindModelCall {
+			return int64(record.TotalTokens), "tokens", nil
+		}
+		return 1, "tool", nil
+	})
+	if _, err := (AgentWorker{
+		Runner: runner, Engine: agent.Engine{Provider: providerDriver, Tools: tool.NewBus(driver)},
+		AgentID: "agent-a", Model: "scripted", UsagePricer: pricer,
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope}); err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	modelRecords, err := runner.QueryUsage(ctx, api.UsageSelector{RunID: run.ID, Kind: api.UsageKindModelCall})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolRecords, err := runner.QueryUsage(ctx, api.UsageSelector{
+		RunID: run.ID, Kind: api.UsageKindToolCall, ToolName: "read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(modelRecords) != 2 || len(toolRecords) != 1 {
+		t.Fatalf("granular usage model=%#v tool=%#v", modelRecords, toolRecords)
+	}
+	if modelRecords[0].Credits != 4 || modelRecords[1].Credits != 6 ||
+		toolRecords[0].Credits != 1 || toolRecords[0].ToolCalls != 1 {
+		t.Fatalf("priced usage model=%#v tool=%#v", modelRecords, toolRecords)
+	}
+	if modelRecords[0].ID == "" || modelRecords[0].ID == modelRecords[1].ID ||
+		toolRecords[0].ID == "" {
+		t.Fatalf("usage IDs are not stable and distinct: model=%#v tool=%#v", modelRecords, toolRecords)
+	}
+}
+
+func TestUsageRecordsForStepIncludeExecutionIdentity(t *testing.T) {
+	worker := AgentWorker{AgentID: "agent-a"}
+	task := api.Task{RunID: "run-retry-usage", ID: "task-retry-usage"}
+	step := agent.Step{
+		Index:     0,
+		ModelCall: &agent.ModelCall{Provider: "selected-provider", Model: "model", InputTokens: 2, OutputTokens: 1},
+		ToolCalls: []agent.ToolCallTrace{{
+			ID: "call", Name: "read", Arguments: json.RawMessage(`{"path":"a"}`),
+		}},
+	}
+	first, err := worker.usageRecordsForStep(context.Background(), task, "lease-first", agent.Engine{}, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := worker.usageRecordsForStep(context.Background(), task, "lease-retry", agent.Engine{}, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := worker.usageRecordsForStep(context.Background(), task, "lease-first", agent.Engine{}, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || len(retry) != 2 || len(replayed) != 2 {
+		t.Fatalf("usage records first=%#v retry=%#v replayed=%#v", first, retry, replayed)
+	}
+	for index := range first {
+		if first[index].ID == retry[index].ID {
+			t.Fatalf("execution %d usage IDs collided: %q", index, first[index].ID)
+		}
+		if first[index].ID != replayed[index].ID {
+			t.Fatalf("same-execution replay ID changed: %q != %q", first[index].ID, replayed[index].ID)
+		}
+		if first[index].Metadata["executionId"] != "lease-first" ||
+			retry[index].Metadata["executionId"] != "lease-retry" {
+			t.Fatalf("execution metadata first=%#v retry=%#v", first[index], retry[index])
+		}
+	}
+	if first[0].Provider != "selected-provider" {
+		t.Fatalf("model usage provider = %q, want selected-provider", first[0].Provider)
 	}
 }
 

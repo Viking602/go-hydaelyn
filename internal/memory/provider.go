@@ -87,11 +87,14 @@ func (p *Provider) CommittedSnapshot() *State {
 // dead-letter requeue. Satisfies ports.CapabilityReporter.
 func (p *Provider) Capabilities(context.Context) (ports.StoreCapabilities, error) {
 	return ports.StoreCapabilities{
-		SupportsTransactions:        true,
-		SupportsBlackboardSubscribe: true,
-		SupportsListPending:         true,
-		SupportsConcurrentWriters:   false,
-		SupportsDeadLetterRequeue:   false,
+		SupportsTransactions:          true,
+		SupportsBlackboardSubscribe:   true,
+		SupportsListPending:           true,
+		SupportsConcurrentWriters:     false,
+		SupportsDeadLetterRequeue:     false,
+		SupportsDefinitionSnapshots:   true,
+		SupportsAdmissionReservations: true,
+		SupportsResourceClaims:        true,
 	}, nil
 }
 
@@ -127,6 +130,18 @@ func (u *UnitOfWork) DeadLetters() ports.DeadLetterStore       { return (*deadLe
 func (u *UnitOfWork) Handoffs() ports.HandoffStore             { return (*handoffStore)(u) }
 func (u *UnitOfWork) TeamStates() ports.TeamStateStore         { return (*teamStateStore)(u) }
 func (u *UnitOfWork) AgentInstances() ports.AgentInstanceStore { return (*agentInstanceStore)(u) }
+func (u *UnitOfWork) AgentDefinitions() ports.AgentDefinitionStore {
+	return (*agentDefinitionStore)(u)
+}
+
+func (u *UnitOfWork) AdmissionReservations() ports.AdmissionReservationStore {
+	return (*admissionReservationStore)(u)
+}
+
+func (u *UnitOfWork) ResourceClaims() ports.ResourceClaimStore {
+	return (*resourceClaimStore)(u)
+}
+
 func (u *UnitOfWork) ensureOpen() error {
 	if u.closed {
 		return fmt.Errorf("memory unit of work closed: %w", model.ErrInvalidCommand)

@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // TriggerType discriminates how a Trigger is dispatched at runtime.
 // Each value corresponds to a transport driver under transport/*.
@@ -24,6 +27,16 @@ const (
 	TriggerEvent TriggerType = "event"
 )
 
+// ToolMode controls how an agent dispatches a batch of tool calls.
+// It is defined in api so persisted definitions do not depend on worker or
+// agent implementation packages.
+type ToolMode string
+
+const (
+	ToolModeSequential ToolMode = "sequential"
+	ToolModeParallel   ToolMode = "parallel"
+)
+
 // Trigger is the declarative description of how an AgentDefinition is
 // invoked. Each trigger type carries a small, type-specific config
 // payload in Config — the transport driver that owns the type is
@@ -44,11 +57,10 @@ type Trigger struct {
 	Enabled bool              `json:"enabled"`
 }
 
-// ModelPolicy declares which model an AgentDefinition prefers and what
-// constraints surround that choice. The fields are intentionally narrow:
-// model selection in v0.8.0 is delegated to the agent.Engine, with the
-// declarative spec carried here so the registry can show humans what an
-// agent will actually call.
+// ModelPolicy declares the provider/model request that an AgentDefinition
+// executes. worker.DefinitionDeployment carries these values into agent.Spec
+// and provider.Request. A non-zero field that the selected driver cannot honor
+// is a deployment error rather than inert registry metadata.
 type ModelPolicy struct {
 	Provider      string  `json:"provider,omitempty"`
 	Model         string  `json:"model"`
@@ -138,16 +150,15 @@ type ContextSource struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// AgentDefinition is the declarative, version-controlled description of
-// an agent: what it does, what model it prefers, what capabilities it
-// may call, how it is triggered, and the governance envelope around it.
+// AgentDefinition is the executable, version-controlled deployment contract for
+// one agent: what it does, which model and capabilities it may use, how context
+// is resolved, how it is triggered, and the governance envelope around it.
 //
-// Unlike AgentProfile (runtime identity used to attribute writes during
-// a run), AgentDefinition is the *config* an operator publishes ahead of
-// time. The registry stores AgentDefinitions; transport drivers and the
-// runner consume them.
-//
-// Spec anchor: docs/product-spec/v0.8.0/03-agent-ontology.md §"AgentDefinition".
+// AgentProfile remains the runtime write-attribution identity.
+// AgentDefinition is published ahead of time and materialized by
+// worker.DefinitionDeployment. A deployment MUST reject any configured field it
+// cannot execute; it must not silently treat executable fields as display-only
+// metadata.
 type AgentDefinition struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -159,15 +170,45 @@ type AgentDefinition struct {
 	AvailableSkills []string    `json:"availableSkills,omitempty"`
 	Model           ModelPolicy `json:"model,omitempty"`
 
+	// Tools is the explicit executable tool allow-list. Capabilities remains
+	// capability metadata and is never interpreted as tool selection.
+	Tools        []string        `json:"tools,omitempty"`
+	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	Hooks        []string        `json:"hooks,omitempty"`
+
+	// These values are resolved from DefinitionDeployment defaults before this
+	// definition is validated, built, and persisted.
+	ToolMode      ToolMode      `json:"toolMode,omitempty"`
+	MaxIterations int           `json:"maxIterations,omitempty"`
+	TTL           time.Duration `json:"ttl,omitempty"`
+
 	Capabilities []string         `json:"capabilities,omitempty"`
 	Context      []ContextSource  `json:"context,omitempty"`
 	Triggers     []Trigger        `json:"triggers,omitempty"`
 	Governance   GovernancePolicy `json:"governance,omitempty"`
 
-	Status            string `json:"status,omitempty"`
-	PreviousVersionID string `json:"previousVersionId,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	PreviousVersionID string            `json:"previousVersionId,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+}
 
-	Metadata map[string]string `json:"metadata,omitempty"`
+// AgentDefinitionSnapshot is the immutable stored form of one published
+// AgentDefinition version. Digest is the lowercase SHA-256 digest of the
+// canonical JSON representation of Definition.
+type AgentDefinitionSnapshot struct {
+	Definition AgentDefinition `json:"definition"`
+	Digest     string          `json:"digest"`
+	CreatedAt  time.Time       `json:"createdAt"`
+}
+
+// AgentDefinitionSnapshotSelector filters AgentDefinitionStore listings.
+// All populated fields AND-combine.
+type AgentDefinitionSnapshotSelector struct {
+	DefinitionIDs []string  `json:"definitionIds,omitempty"`
+	Versions      []string  `json:"versions,omitempty"`
+	Since         time.Time `json:"since,omitempty"`
+	Limit         int       `json:"limit,omitempty"`
 }
 
 // AsProfile derives the runtime AgentProfile from a declarative

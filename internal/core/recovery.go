@@ -9,6 +9,7 @@ import (
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
+	"github.com/Viking602/venat/internal/execution"
 )
 
 func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string) error {
@@ -99,6 +100,9 @@ func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.T
 		}
 		if !released {
 			return false, nil
+		}
+		if err := execution.ExpireResourceClaims(ctx, recovery.uow, lease.ID, recovery.now); err != nil {
+			return false, err
 		}
 		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
 			RunID:      recovery.runID,

@@ -42,6 +42,27 @@ func TestStartRun_ReturnsRunAndTask(t *testing.T) {
 	}
 }
 
+func TestStartRunWithResult_DistinguishesIdempotentRetry(t *testing.T) {
+	r := newTestRunner(t)
+	command := api.StartRunCommand{
+		RunID: "start-with-result", RootTaskID: "start-with-result-root", Request: "hello",
+	}
+	first, err := r.StartRunWithResult(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Created || first.Run.ID != command.RunID || first.RootTask.ID != command.RootTaskID {
+		t.Fatalf("first StartRunWithResult() = %#v", first)
+	}
+	second, err := r.StartRunWithResult(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created || second.Run.ID != first.Run.ID || second.RootTask.ID != first.RootTask.ID {
+		t.Fatalf("retry StartRunWithResult() = %#v, want existing %#v", second, first)
+	}
+}
+
 func TestRun_LoadsExistingRun(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()

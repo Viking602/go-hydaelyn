@@ -65,6 +65,15 @@ type retryingStream struct {
 	closed  bool
 }
 
+// Identity follows the currently active stream so a pre-emission retry can
+// report the provider/model that ultimately completed the turn.
+func (s *retryingStream) Identity() StreamIdentity {
+	if identified, ok := s.current.(IdentifiedStream); ok {
+		return identified.Identity()
+	}
+	return StreamIdentity{}
+}
+
 func (s *retryingStream) Recv() (Event, error) {
 	for {
 		if s.closed {

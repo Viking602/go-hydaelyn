@@ -1,8 +1,12 @@
 package memory
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -14,14 +18,18 @@ type agentProfileStore UnitOfWork
 
 type capabilityStore UnitOfWork
 
-type usageStore UnitOfWork
+type (
+	agentDefinitionStore UnitOfWork
+	usageStore           UnitOfWork
+)
 
 type deadLetterStore UnitOfWork
 
-func (s *agentProfileStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
-func (s *capabilityStore) uow() *UnitOfWork   { return (*UnitOfWork)(s) }
-func (s *usageStore) uow() *UnitOfWork        { return (*UnitOfWork)(s) }
-func (s *deadLetterStore) uow() *UnitOfWork   { return (*UnitOfWork)(s) }
+func (s *agentProfileStore) uow() *UnitOfWork    { return (*UnitOfWork)(s) }
+func (s *capabilityStore) uow() *UnitOfWork      { return (*UnitOfWork)(s) }
+func (s *usageStore) uow() *UnitOfWork           { return (*UnitOfWork)(s) }
+func (s *agentDefinitionStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
+func (s *deadLetterStore) uow() *UnitOfWork      { return (*UnitOfWork)(s) }
 
 // AgentProfileStore
 
@@ -166,6 +174,86 @@ func matchCapabilitySelector(c model.Capability, sel model.CapabilitySelector) b
 	return true
 }
 
+// AgentDefinitionStore
+
+func agentDefinitionKey(definitionID, version string) string {
+	return definitionID + "\x00" + version
+}
+
+func (s *agentDefinitionStore) SaveAgentDefinitionSnapshot(_ context.Context, snapshot model.AgentDefinitionSnapshot) error {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(snapshot.DefinitionID) == "" || strings.TrimSpace(snapshot.Version) == "" {
+		return fmt.Errorf("agent definition ID and version required: %w", model.ErrInvalidCommand)
+	}
+	if len(snapshot.Definition) == 0 {
+		return fmt.Errorf("agent definition payload required: %w", model.ErrInvalidCommand)
+	}
+	sum := sha256.Sum256(snapshot.Definition)
+	if snapshot.Digest != hex.EncodeToString(sum[:]) {
+		return fmt.Errorf("agent definition digest mismatch: %w", model.ErrInvalidCommand)
+	}
+	key := agentDefinitionKey(snapshot.DefinitionID, snapshot.Version)
+	if existing, ok := u.staged.AgentDefinitions[key]; ok {
+		if existing.Digest == snapshot.Digest && bytes.Equal(existing.Definition, snapshot.Definition) {
+			return nil
+		}
+		return model.ErrDefinitionVersionConflict
+	}
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = time.Now().UTC()
+	}
+	snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+	u.staged.AgentDefinitions[key] = snapshot
+	return nil
+}
+
+func (s *agentDefinitionStore) LoadAgentDefinitionSnapshot(_ context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return model.AgentDefinitionSnapshot{}, err
+	}
+	snapshot, ok := u.staged.AgentDefinitions[agentDefinitionKey(definitionID, version)]
+	if !ok {
+		return model.AgentDefinitionSnapshot{}, model.ErrNotFound
+	}
+	snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+	return snapshot, nil
+}
+
+func (s *agentDefinitionStore) ListAgentDefinitionSnapshots(_ context.Context, selector model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error) {
+	u := s.uow()
+	if err := u.ensureOpen(); err != nil {
+		return nil, err
+	}
+	out := make([]model.AgentDefinitionSnapshot, 0, len(u.staged.AgentDefinitions))
+	for _, snapshot := range u.staged.AgentDefinitions {
+		if len(selector.DefinitionIDs) > 0 && !slices.Contains(selector.DefinitionIDs, snapshot.DefinitionID) {
+			continue
+		}
+		if len(selector.Versions) > 0 && !slices.Contains(selector.Versions, snapshot.Version) {
+			continue
+		}
+		if !selector.Since.IsZero() && snapshot.CreatedAt.Before(selector.Since) {
+			continue
+		}
+		snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+		out = append(out, snapshot)
+	}
+	slices.SortFunc(out, func(a, b model.AgentDefinitionSnapshot) int {
+		if byID := strings.Compare(a.DefinitionID, b.DefinitionID); byID != 0 {
+			return byID
+		}
+		return strings.Compare(a.Version, b.Version)
+	})
+	if selector.Limit > 0 && len(out) > selector.Limit {
+		out = out[:selector.Limit]
+	}
+	return out, nil
+}
+
 // UsageStore
 
 func (s *usageStore) AppendUsage(_ context.Context, rec model.UsageRecord) error {
@@ -176,11 +264,29 @@ func (s *usageStore) AppendUsage(_ context.Context, rec model.UsageRecord) error
 	if rec.ID == "" {
 		rec.ID = u.nextID("usage")
 	}
+	rec = normalizeUsageRecord(rec)
+	if existing, ok := u.staged.UsageRecords[rec.ID]; ok {
+		existing = normalizeUsageRecord(existing)
+		if rec.CreatedAt.IsZero() {
+			rec.CreatedAt = existing.CreatedAt
+		}
+		if reflect.DeepEqual(existing, rec) {
+			return nil
+		}
+		return model.ErrIdempotencyConflict
+	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
 	u.staged.UsageRecords[rec.ID] = rec
 	return nil
+}
+
+func normalizeUsageRecord(rec model.UsageRecord) model.UsageRecord {
+	if rec.Kind == "" {
+		rec.Kind = model.UsageKindLegacyExecution
+	}
+	return rec
 }
 
 func (s *usageStore) QueryUsage(_ context.Context, sel model.UsageSelector) ([]model.UsageRecord, error) {
@@ -211,6 +317,7 @@ func (s *usageStore) QueryUsage(_ context.Context, sel model.UsageSelector) ([]m
 }
 
 func (s *usageStore) SumCredits(ctx context.Context, sel model.UsageSelector) (int64, error) {
+	sel.Limit = 0
 	records, err := s.QueryUsage(ctx, sel)
 	if err != nil {
 		return 0, err
@@ -232,7 +339,13 @@ func matchUsageSelector(r model.UsageRecord, sel model.UsageSelector) bool {
 	if sel.AgentID != "" && r.AgentID != sel.AgentID {
 		return false
 	}
+	if sel.Kind != "" && normalizeUsageRecord(r).Kind != sel.Kind {
+		return false
+	}
 	if sel.Provider != "" && r.Provider != sel.Provider {
+		return false
+	}
+	if sel.ToolName != "" && r.ToolName != sel.ToolName {
 		return false
 	}
 	if !sel.Since.IsZero() && r.CreatedAt.Before(sel.Since) {

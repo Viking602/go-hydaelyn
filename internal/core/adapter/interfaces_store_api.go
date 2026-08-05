@@ -42,11 +42,14 @@ func (a apiStoreProviderAdapter) Capabilities(ctx context.Context) (ports.StoreC
 		return ports.StoreCapabilities{}, ErrorToCore(err)
 	}
 	return ports.StoreCapabilities{
-		SupportsTransactions:        capabilities.SupportsTransactions,
-		SupportsBlackboardSubscribe: capabilities.SupportsBlackboardSubscribe,
-		SupportsListPending:         capabilities.SupportsListPending,
-		SupportsConcurrentWriters:   capabilities.SupportsConcurrentWriters,
-		SupportsDeadLetterRequeue:   capabilities.SupportsDeadLetterRequeue,
+		SupportsTransactions:          capabilities.SupportsTransactions,
+		SupportsBlackboardSubscribe:   capabilities.SupportsBlackboardSubscribe,
+		SupportsListPending:           capabilities.SupportsListPending,
+		SupportsConcurrentWriters:     capabilities.SupportsConcurrentWriters,
+		SupportsDeadLetterRequeue:     capabilities.SupportsDeadLetterRequeue,
+		SupportsDefinitionSnapshots:   capabilities.SupportsDefinitionSnapshots,
+		SupportsAdmissionReservations: capabilities.SupportsAdmissionReservations,
+		SupportsResourceClaims:        capabilities.SupportsResourceClaims,
 	}, nil
 }
 
@@ -82,10 +85,125 @@ func UnitOfWorkToCore(inner api.UnitOfWork) ports.UnitOfWork {
 	if inner == nil {
 		return nil
 	}
-	return apiUnitOfWorkAdapter{inner: inner}
+	base := apiUnitOfWorkAdapter{inner: inner}
+	definitions, hasDefinitions := inner.(api.AgentDefinitionUnitOfWork)
+	admission, hasAdmission := inner.(api.AdmissionReservationUnitOfWork)
+	claims, hasClaims := inner.(api.ResourceClaimUnitOfWork)
+	switch {
+	case hasDefinitions && hasAdmission && hasClaims:
+		return apiDefinitionGovernanceUnitOfWorkAdapter{
+			apiUnitOfWorkAdapter: base, definitions: definitions, admission: admission, claims: claims,
+		}
+	case hasDefinitions && hasAdmission:
+		return apiDefinitionAdmissionUnitOfWorkAdapter{
+			apiUnitOfWorkAdapter: base, definitions: definitions, admission: admission,
+		}
+	case hasDefinitions && hasClaims:
+		return apiDefinitionResourceClaimUnitOfWorkAdapter{
+			apiUnitOfWorkAdapter: base, definitions: definitions, claims: claims,
+		}
+	case hasAdmission && hasClaims:
+		return apiGovernanceUnitOfWorkAdapter{apiUnitOfWorkAdapter: base, admission: admission, claims: claims}
+	case hasDefinitions:
+		return apiDefinitionUnitOfWorkAdapter{apiUnitOfWorkAdapter: base, definitions: definitions}
+	case hasAdmission:
+		return apiAdmissionUnitOfWorkAdapter{apiUnitOfWorkAdapter: base, admission: admission}
+	case hasClaims:
+		return apiResourceClaimUnitOfWorkAdapter{apiUnitOfWorkAdapter: base, claims: claims}
+	default:
+		return base
+	}
 }
 
 type apiUnitOfWorkAdapter struct{ inner api.UnitOfWork }
+
+type apiDefinitionUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	definitions api.AgentDefinitionUnitOfWork
+}
+
+func (a apiDefinitionUnitOfWorkAdapter) AgentDefinitions() ports.AgentDefinitionStore {
+	return apiAgentDefinitionStoreAdapter{inner: a.definitions.AgentDefinitions()}
+}
+
+type apiDefinitionAdmissionUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	definitions api.AgentDefinitionUnitOfWork
+	admission   api.AdmissionReservationUnitOfWork
+}
+
+func (a apiDefinitionAdmissionUnitOfWorkAdapter) AgentDefinitions() ports.AgentDefinitionStore {
+	return apiAgentDefinitionStoreAdapter{inner: a.definitions.AgentDefinitions()}
+}
+
+func (a apiDefinitionAdmissionUnitOfWorkAdapter) AdmissionReservations() ports.AdmissionReservationStore {
+	return apiAdmissionReservationStoreAdapter{inner: a.admission.AdmissionReservations()}
+}
+
+type apiDefinitionResourceClaimUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	definitions api.AgentDefinitionUnitOfWork
+	claims      api.ResourceClaimUnitOfWork
+}
+
+func (a apiDefinitionResourceClaimUnitOfWorkAdapter) AgentDefinitions() ports.AgentDefinitionStore {
+	return apiAgentDefinitionStoreAdapter{inner: a.definitions.AgentDefinitions()}
+}
+
+func (a apiDefinitionResourceClaimUnitOfWorkAdapter) ResourceClaims() ports.ResourceClaimStore {
+	return apiResourceClaimStoreAdapter{inner: a.claims.ResourceClaims()}
+}
+
+type apiDefinitionGovernanceUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	definitions api.AgentDefinitionUnitOfWork
+	admission   api.AdmissionReservationUnitOfWork
+	claims      api.ResourceClaimUnitOfWork
+}
+
+func (a apiDefinitionGovernanceUnitOfWorkAdapter) AgentDefinitions() ports.AgentDefinitionStore {
+	return apiAgentDefinitionStoreAdapter{inner: a.definitions.AgentDefinitions()}
+}
+
+func (a apiDefinitionGovernanceUnitOfWorkAdapter) AdmissionReservations() ports.AdmissionReservationStore {
+	return apiAdmissionReservationStoreAdapter{inner: a.admission.AdmissionReservations()}
+}
+
+func (a apiDefinitionGovernanceUnitOfWorkAdapter) ResourceClaims() ports.ResourceClaimStore {
+	return apiResourceClaimStoreAdapter{inner: a.claims.ResourceClaims()}
+}
+
+type apiAdmissionUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	admission api.AdmissionReservationUnitOfWork
+}
+
+func (a apiAdmissionUnitOfWorkAdapter) AdmissionReservations() ports.AdmissionReservationStore {
+	return apiAdmissionReservationStoreAdapter{inner: a.admission.AdmissionReservations()}
+}
+
+type apiResourceClaimUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	claims api.ResourceClaimUnitOfWork
+}
+
+func (a apiResourceClaimUnitOfWorkAdapter) ResourceClaims() ports.ResourceClaimStore {
+	return apiResourceClaimStoreAdapter{inner: a.claims.ResourceClaims()}
+}
+
+type apiGovernanceUnitOfWorkAdapter struct {
+	apiUnitOfWorkAdapter
+	admission api.AdmissionReservationUnitOfWork
+	claims    api.ResourceClaimUnitOfWork
+}
+
+func (a apiGovernanceUnitOfWorkAdapter) AdmissionReservations() ports.AdmissionReservationStore {
+	return apiAdmissionReservationStoreAdapter{inner: a.admission.AdmissionReservations()}
+}
+
+func (a apiGovernanceUnitOfWorkAdapter) ResourceClaims() ports.ResourceClaimStore {
+	return apiResourceClaimStoreAdapter{inner: a.claims.ResourceClaims()}
+}
 
 func (a apiUnitOfWorkAdapter) Runs() ports.RunStore { return apiRunStoreAdapter{inner: a.inner.Runs()} }
 func (a apiUnitOfWorkAdapter) Tasks() ports.TaskStore {
@@ -607,4 +725,105 @@ func (a apiAgentInstanceStoreAdapter) ListAgentInstances(ctx context.Context, se
 		return nil, ErrorToCore(err)
 	}
 	return AgentInstanceRecordsToModel(records), nil
+}
+
+type apiAgentDefinitionStoreAdapter struct{ inner api.AgentDefinitionStore }
+
+func (a apiAgentDefinitionStoreAdapter) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot model.AgentDefinitionSnapshot) error {
+	converted, err := AgentDefinitionSnapshotFromModel(snapshot)
+	if err != nil {
+		return ErrorToCore(err)
+	}
+	return ErrorToCore(a.inner.SaveAgentDefinitionSnapshot(ctx, converted))
+}
+
+func (a apiAgentDefinitionStoreAdapter) LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error) {
+	snapshot, err := a.inner.LoadAgentDefinitionSnapshot(ctx, definitionID, version)
+	if err != nil {
+		return model.AgentDefinitionSnapshot{}, ErrorToCore(err)
+	}
+	converted, err := AgentDefinitionSnapshotToModel(snapshot)
+	if err != nil {
+		return model.AgentDefinitionSnapshot{}, ErrorToCore(err)
+	}
+	return converted, nil
+}
+
+func (a apiAgentDefinitionStoreAdapter) ListAgentDefinitionSnapshots(ctx context.Context, selector model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error) {
+	snapshots, err := a.inner.ListAgentDefinitionSnapshots(ctx, AgentDefinitionSnapshotSelectorFromModel(selector))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	out := make([]model.AgentDefinitionSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		converted, convertErr := AgentDefinitionSnapshotToModel(snapshot)
+		if convertErr != nil {
+			return nil, ErrorToCore(convertErr)
+		}
+		out = append(out, converted)
+	}
+	return out, nil
+}
+
+type apiAdmissionReservationStoreAdapter struct {
+	inner api.AdmissionReservationStore
+}
+
+func (a apiAdmissionReservationStoreAdapter) PreviewAdmission(ctx context.Context, request model.AdmissionRequest) (model.AdmissionDecision, error) {
+	decision, err := a.inner.PreviewAdmission(ctx, AdmissionRequestFromModel(request))
+	return AdmissionDecisionToModel(decision), ErrorToCore(err)
+}
+
+func (a apiAdmissionReservationStoreAdapter) ReserveAdmission(ctx context.Context, request model.AdmissionRequest) (model.AdmissionDecision, error) {
+	decision, err := a.inner.ReserveAdmission(ctx, AdmissionRequestFromModel(request))
+	return AdmissionDecisionToModel(decision), ErrorToCore(err)
+}
+
+func (a apiAdmissionReservationStoreAdapter) TransitionAdmission(ctx context.Context, transition model.AdmissionTransition) (model.AdmissionDecision, error) {
+	decision, err := a.inner.TransitionAdmission(ctx, AdmissionTransitionFromModel(transition))
+	return AdmissionDecisionToModel(decision), ErrorToCore(err)
+}
+
+func (a apiAdmissionReservationStoreAdapter) LoadAdmissionReservation(ctx context.Context, id string) (model.AdmissionReservation, error) {
+	reservation, err := a.inner.LoadAdmissionReservation(ctx, id)
+	return AdmissionReservationToModel(reservation), ErrorToCore(err)
+}
+
+func (a apiAdmissionReservationStoreAdapter) ListAdmissionReservations(ctx context.Context, selector model.AdmissionReservationSelector) ([]model.AdmissionReservation, error) {
+	reservations, err := a.inner.ListAdmissionReservations(ctx, AdmissionReservationSelectorFromModel(selector))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	out := make([]model.AdmissionReservation, 0, len(reservations))
+	for _, reservation := range reservations {
+		out = append(out, AdmissionReservationToModel(reservation))
+	}
+	return out, nil
+}
+
+type apiResourceClaimStoreAdapter struct {
+	inner api.ResourceClaimStore
+}
+
+func (a apiResourceClaimStoreAdapter) AcquireResourceClaims(ctx context.Context, request model.ResourceClaimRequest) (model.ResourceClaimDecision, error) {
+	decision, err := a.inner.AcquireResourceClaims(ctx, ResourceClaimRequestFromModel(request))
+	return ResourceClaimDecisionToModel(decision), ErrorToCore(err)
+}
+
+func (a apiResourceClaimStoreAdapter) TransitionResourceClaims(ctx context.Context, request model.ResourceClaimTransitionRequest) (model.ResourceClaimDecision, error) {
+	decision, err := a.inner.TransitionResourceClaims(ctx, ResourceClaimTransitionRequestFromModel(request))
+	return ResourceClaimDecisionToModel(decision), ErrorToCore(err)
+}
+
+func (a apiResourceClaimStoreAdapter) LoadResourceClaim(ctx context.Context, id string) (model.ResourceClaim, error) {
+	claim, err := a.inner.LoadResourceClaim(ctx, id)
+	return ResourceClaimToModel(claim), ErrorToCore(err)
+}
+
+func (a apiResourceClaimStoreAdapter) ListResourceClaims(ctx context.Context, selector model.ResourceClaimSelector) ([]model.ResourceClaim, error) {
+	claims, err := a.inner.ListResourceClaims(ctx, ResourceClaimSelectorFromModel(selector))
+	if err != nil {
+		return nil, ErrorToCore(err)
+	}
+	return ResourceClaimsToModel(claims), nil
 }

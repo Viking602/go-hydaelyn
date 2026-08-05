@@ -190,6 +190,7 @@ func (e RunnerExecutor) createTaskCommand(dispatch multiagent.Dispatch) api.Crea
 		InputSchema:        task.InputSchema,
 		OutputSchema:       task.OutputSchema,
 		Budget:             task.Budget,
+		ResourceClaims:     task.ResourceClaims,
 	}
 }
 

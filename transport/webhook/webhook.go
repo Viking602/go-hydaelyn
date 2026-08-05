@@ -123,10 +123,10 @@ func (d *Driver) Register(t api.Trigger, agentID string, h trigger.Handler) (tri
 	if _, dup := d.routes[key]; dup {
 		return trigger.Registration{}, fmt.Errorf("webhook: %s %s already registered", method, path)
 	}
-	reg := trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}
+	reg := (trigger.Registration{Trigger: t, AgentID: agentID, Handler: h}).Clone()
 	d.routes[key] = reg
 	d.logger("webhook: registered %s %s -> %s", method, path, t.ID)
-	return reg, nil
+	return reg.Clone(), nil
 }
 
 // Deregister removes a webhook trigger. Returns false when no matching
@@ -150,7 +150,7 @@ func (d *Driver) List() []trigger.Registration {
 	defer d.mu.RUnlock()
 	out := make([]trigger.Registration, 0, len(d.routes))
 	for _, r := range d.routes {
-		out = append(out, r)
+		out = append(out, r.Clone())
 	}
 	return out
 }
@@ -166,6 +166,7 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	d.mu.RLock()
 	reg, ok := d.routes[routeKey{Method: r.Method, Path: r.URL.Path}]
 	d.mu.RUnlock()
+	reg = reg.Clone()
 	if !ok {
 		http.NotFound(w, r)
 		return

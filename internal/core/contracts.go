@@ -9,33 +9,39 @@ import (
 )
 
 type (
-	RunStore                  = ports.RunStore
-	TaskStore                 = ports.TaskStore
-	EventStore                = ports.EventStore
-	TraceStore                = ports.TraceStore
-	BlackboardReadWriter      = ports.BlackboardReadWriter
-	BlackboardCommittedReader = ports.BlackboardCommittedReader
-	BlackboardSubscriber      = ports.BlackboardSubscriber
-	BlackboardWaiter          = ports.BlackboardWaiter
-	UserMessageStore          = ports.UserMessageStore
-	UserMessageOutboxScanner  = ports.UserMessageOutboxScanner
-	MailboxOutboxStore        = ports.MailboxOutboxStore
-	LeaseStore                = ports.LeaseStore
-	ApprovalStore             = ports.ApprovalStore
-	ResumeTokenStore          = ports.ResumeTokenStore
-	ActionAttemptStore        = ports.ActionAttemptStore
-	AgentProfileStore         = ports.AgentProfileStore
-	CapabilityStore           = ports.CapabilityStore
-	UsageStore                = ports.UsageStore
-	DeadLetterStore           = ports.DeadLetterStore
-	HandoffStore              = ports.HandoffStore
-	TeamStateStore            = ports.TeamStateStore
-	AgentInstanceStore        = ports.AgentInstanceStore
-	BlackboardStore           = ports.BlackboardReadWriter
-	UnitOfWork                = ports.UnitOfWork
-	StoreProvider             = ports.StoreProvider
-	CapabilityReporter        = ports.CapabilityReporter
-	ProviderCloser            = ports.ProviderCloser
+	RunStore                       = ports.RunStore
+	TaskStore                      = ports.TaskStore
+	EventStore                     = ports.EventStore
+	TraceStore                     = ports.TraceStore
+	BlackboardReadWriter           = ports.BlackboardReadWriter
+	BlackboardCommittedReader      = ports.BlackboardCommittedReader
+	BlackboardSubscriber           = ports.BlackboardSubscriber
+	BlackboardWaiter               = ports.BlackboardWaiter
+	UserMessageStore               = ports.UserMessageStore
+	UserMessageOutboxScanner       = ports.UserMessageOutboxScanner
+	MailboxOutboxStore             = ports.MailboxOutboxStore
+	LeaseStore                     = ports.LeaseStore
+	ApprovalStore                  = ports.ApprovalStore
+	ResumeTokenStore               = ports.ResumeTokenStore
+	ActionAttemptStore             = ports.ActionAttemptStore
+	AgentProfileStore              = ports.AgentProfileStore
+	CapabilityStore                = ports.CapabilityStore
+	UsageStore                     = ports.UsageStore
+	DeadLetterStore                = ports.DeadLetterStore
+	HandoffStore                   = ports.HandoffStore
+	TeamStateStore                 = ports.TeamStateStore
+	AgentInstanceStore             = ports.AgentInstanceStore
+	AgentDefinitionStore           = ports.AgentDefinitionStore
+	AgentDefinitionUnitOfWork      = ports.AgentDefinitionUnitOfWork
+	AdmissionReservationStore      = ports.AdmissionReservationStore
+	AdmissionReservationUnitOfWork = ports.AdmissionReservationUnitOfWork
+	ResourceClaimStore             = ports.ResourceClaimStore
+	ResourceClaimUnitOfWork        = ports.ResourceClaimUnitOfWork
+	BlackboardStore                = ports.BlackboardReadWriter
+	UnitOfWork                     = ports.UnitOfWork
+	StoreProvider                  = ports.StoreProvider
+	CapabilityReporter             = ports.CapabilityReporter
+	ProviderCloser                 = ports.ProviderCloser
 )
 
 type RuntimeCommand interface {
@@ -45,8 +51,9 @@ type RuntimeCommand interface {
 type WriteBlackboardItemCommand = blackboardsvc.WriteItemCommand
 
 type (
-	PolicyEngine  = ports.PolicyEngine
-	OutputGateway = ports.OutputGateway
+	PolicyEngine             = ports.PolicyEngine
+	PolicyObligationEnforcer = ports.PolicyObligationEnforcer
+	OutputGateway            = ports.OutputGateway
 )
 
 type UserTimelineProjector interface {

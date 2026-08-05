@@ -15,6 +15,7 @@ package trigger
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/Viking602/venat/api"
@@ -74,4 +75,12 @@ type Registration struct {
 	Trigger api.Trigger
 	AgentID string
 	Handler Handler
+}
+
+// Clone returns a registration whose mutable trigger maps do not alias the
+// live registration or its caller.
+func (r Registration) Clone() Registration {
+	r.Trigger.Config = maps.Clone(r.Trigger.Config)
+	r.Trigger.Filter = maps.Clone(r.Trigger.Filter)
+	return r
 }

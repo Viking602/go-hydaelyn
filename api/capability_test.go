@@ -8,6 +8,15 @@ func TestDefaultStoreCapabilitiesFailClosed(t *testing.T) {
 	}
 }
 
+func TestDefinitionSnapshotsAreOptionalUnitOfWorkExtension(t *testing.T) {
+	var required UnitOfWork = coreOnlyUnitOfWork{}
+	if _, ok := required.(AgentDefinitionUnitOfWork); ok {
+		t.Fatal("UnitOfWork unexpectedly requires AgentDefinitionUnitOfWork")
+	}
+}
+
+type coreOnlyUnitOfWork struct{ UnitOfWork }
+
 func TestToolCapabilityProjectionCopiesMutableMetadata(t *testing.T) {
 	tool := Tool{
 		Name:               "write_report",

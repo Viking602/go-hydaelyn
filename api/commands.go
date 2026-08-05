@@ -48,7 +48,8 @@ type CreateTaskCommand struct {
 	// Budget is the per-task loop budget. Like the schemas above it travels
 	// with the created task so the durable worker path can enforce the
 	// token, tool-call, and step ceilings the agent loop reads off the task.
-	Budget *TaskBudget
+	Budget         *TaskBudget
+	ResourceClaims []ResourceClaimSpec
 }
 
 type TransitionRunCommand struct {
@@ -148,7 +149,8 @@ type ToolInvocation struct {
 type ToolInvocationResult struct {
 	ToolName string
 	// godoc-allow-any: tool output is defined by the selected tool schema.
-	Output any
+	Output   any
+	Decision PolicyDecision
 }
 
 type HandoffCommand struct {
@@ -228,18 +230,20 @@ type CompleteActionAttemptCommand struct {
 	ExternalResultRef string
 	ToolResult        json.RawMessage
 	RequiresReconcile bool
+	UsageRecord       *UsageRecord
 }
 
 // AppendTaskExecutionEventCommand appends an execution event only while the
 // caller still owns the current lease and task version.
 type AppendTaskExecutionEventCommand struct {
-	RunID       string
-	TaskID      string
-	LeaseID     string
-	HolderType  HolderType
-	HolderID    string
-	TaskVersion int
-	Event       Event
+	RunID        string
+	TaskID       string
+	LeaseID      string
+	HolderType   HolderType
+	HolderID     string
+	TaskVersion  int
+	Event        Event
+	UsageRecords []UsageRecord
 }
 
 // ResolveActionAttemptCommand records the host's reconciliation decision for an

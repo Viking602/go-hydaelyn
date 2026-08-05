@@ -51,11 +51,16 @@ var ErrStepAborted = errors.New("agent loop aborted by step policy")
 // Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
 // task-level entry the v0.8.0 multi-agent layer schedules against.
 type LoopInput struct {
-	Model         string
-	Messages      []message.Message
-	Metadata      map[string]string
-	ToolMode      tool.Mode
-	MaxIterations int
+	Model       string
+	Messages    []message.Message
+	Temperature float64
+	TopP        float64
+	// ModelMaxTokens caps output tokens for each provider request. MaxTokens
+	// below remains the cumulative loop-spend budget.
+	ModelMaxTokens int
+	Metadata       map[string]string
+	ToolMode       tool.Mode
+	MaxIterations  int
 	// UnlimitedIterations explicitly disables the model-turn ceiling. When
 	// false, an unset MaxIterations retains the conservative default of 12.
 	UnlimitedIterations bool
@@ -89,8 +94,8 @@ type LoopInput struct {
 	// finish is never failed for a budget it has not yet exceeded. MaxSteps
 	// is a hard ceiling (exhausting it fails the run with ErrBudgetExhausted),
 	// distinct from MaxIterations, whose soft ceiling yields StopReasonMaxTurns.
-	// The token ceiling fails open against providers that report zero usage:
-	// a never-incrementing token count can never cross a positive ceiling.
+	// A successful turn that reports no usage fails closed under a positive
+	// token ceiling before a final answer is accepted or tools are dispatched.
 	MaxTokens    int64
 	MaxToolCalls int
 	MaxSteps     int
@@ -178,6 +183,9 @@ type Engine struct {
 	Hooks    hook.Chain
 
 	Model          string
+	Temperature    float64
+	TopP           float64
+	ModelMaxTokens int
 	ToolMode       tool.Mode
 	LoopPolicy     LoopPolicy
 	ContextBuilder ContextManager
@@ -243,6 +251,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	current := append([]message.Message{}, input.Messages...)
 	totalUsage := provider.Usage{}
 	steps := make([]Step, 0, stepCapacity)
+	lastModelCall := (*ModelCall)(nil)
 	toolCallsUsed := 0
 	// turnsRun counts the model turns that have actually run (their usage folded
 	// into totalUsage). It is set once a turn completes, before the per-turn Step
@@ -264,12 +273,18 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	// which panic inside collect — it recovers them itself and returns the partial
 	// turn as an ErrPanicRecovered error rather than unwinding here, so the streamed
 	// response survives. errors.Is(err, ErrPanicRecovered) holds for all of these.
-	defer func() {
-		if r := recover(); r != nil {
-			out = loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed)
-			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
-		}
-	}()
+	defer recoverRunMessagesPanic(
+		ctx,
+		input,
+		&out,
+		&err,
+		&current,
+		&totalUsage,
+		&steps,
+		&lastModelCall,
+		&turnsRun,
+		&toolCallsUsed,
+	)
 	for iteration := 0; iterationAllowed(input, iteration); iteration++ {
 		// A cancelled or expired context ends the loop promptly rather than
 		// issuing another model turn; the cause (context.Canceled or
@@ -295,14 +310,33 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			}
 			current = prepared
 		}
-		assistant, usage, stopReason, turnErr := e.runTurn(ctx, current, input)
+		assistant, usage, stopReason, identity, opened, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
-			// A turn can fail after the model already produced content: a per-event
-			// callback erroring or panicking mid-stream, which collect surfaces as an
-			// error carrying the partial assistant turn. Record that turn so the
-			// partial trace keeps the produced response and its usage rather than
-			// discarding the completed work along with the failure.
+			// A turn can fail after its stream opens: preserve a failed ModelCall
+			// with the selected stream identity so durable usage cannot fall back
+			// to the wrapper's primary metadata.
 			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+			if opened {
+				turnsRun = max(turnsRun, iteration+1)
+				steps = append(steps, Step{
+					Index: iteration,
+					ModelCall: &ModelCall{
+						Provider:              identity.Provider.Name,
+						Model:                 identity.Model,
+						InputTokens:           usage.InputTokens,
+						CachedInputTokens:     usage.CachedInputTokens,
+						CacheWriteInputTokens: usage.CacheWriteInputTokens,
+						OutputTokens:          usage.OutputTokens,
+						TotalTokens:           usage.TotalTokens,
+						StopReason:            stopReason,
+					},
+					Decision:   StepDecisionFail,
+					BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+				})
+				if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+					return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), errors.Join(turnErr, recordErr)
+				}
+			}
 			return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), turnErr
 		}
 		totalUsage = totalUsage.Add(usage)
@@ -311,10 +345,28 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// turn in Iterations rather than only the turns whose Step already exists.
 		turnsRun = iteration + 1
 		modelCall := &ModelCall{
-			Model:        input.Model,
-			InputTokens:  usage.InputTokens,
-			OutputTokens: usage.OutputTokens,
-			StopReason:   stopReason,
+			Provider:              identity.Provider.Name,
+			Model:                 identity.Model,
+			InputTokens:           usage.InputTokens,
+			CachedInputTokens:     usage.CachedInputTokens,
+			CacheWriteInputTokens: usage.CacheWriteInputTokens,
+			OutputTokens:          usage.OutputTokens,
+			TotalTokens:           usage.TotalTokens,
+			StopReason:            stopReason,
+		}
+		lastModelCall = modelCall
+		if input.MaxTokens > 0 && usage.TotalTokens == 0 {
+			current = append(current, assistant)
+			steps = append(steps, Step{
+				Index:      iteration,
+				ModelCall:  modelCall,
+				Decision:   StepDecisionFail,
+				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+			})
+			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), recordErr
+			}
+			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, "max tokens")
 		}
 		if len(assistant.ToolCalls) == 0 {
 			var retry bool
@@ -327,100 +379,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			}
 			return out, err
 		}
-		// Reaching here means this turn has tool calls: the no-tool-call branch
-		// above always returns or continues, so len(assistant.ToolCalls) > 0 is
-		// guaranteed and the assistant tool-call message is always recorded
-		// before dispatch.
-		for index := range assistant.ToolCalls {
-			assistant.ToolCalls[index].OperationID = fmt.Sprintf("turn:%d:call:%d", input.OperationTurn, index)
-		}
-		input.OperationTurn++
-		current = append(current, assistant)
-		// Re-check the context before dispatching this turn's tools. collect
-		// preserves a turn that completed via EventDone even when the cancellation
-		// lands after the terminal event (a context-aware stream can return the
-		// context error from Recv), so a tool-use turn can arrive here under an
-		// already-cancelled context. A completed final-answer turn is a finished
-		// response and was already returned above; a tool-use turn is a request to
-		// perform side-effecting work that cancellation must forbid — and the bus
-		// dispatches to drivers without a pre-flight context check, so without this
-		// guard the work would run on a dead context, relying on every driver to
-		// notice. The assistant tool-call message is already appended, so the trace
-		// records the request that was deliberately not run.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), ctxErr
-		}
-		// Gate the batch against every budget dimension BEFORE preparing or
-		// dispatching it. The model turn just ran, so its token spend is now folded
-		// into totalUsage: a turn that alone exhausts MaxTokens, or a batch that
-		// overflows MaxToolCalls, must abort here — otherwise the whole batch,
-		// including side-effecting calls the budget never authorized, executes
-		// and the overrun is only caught by the next turn's pre-turn check, one
-		// turn too late. The model turn already ran, so it is recorded as a
-		// failed step before aborting.
-		if dimension := preDispatchBudgetBlock(input, totalUsage, toolCallsUsed, len(steps), len(assistant.ToolCalls)); dimension != "" {
-			steps = append(steps, Step{
-				Index:      iteration,
-				ModelCall:  modelCall,
-				Decision:   StepDecisionFail,
-				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-			})
-			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), recordErr
-			}
-			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, dimension)
-		}
-		// Prepare the batch before charging or dispatching it. prepareToolCalls runs
-		// each call's BeforeToolCall hook — the documented place to rewrite a tool
-		// name, mapping a model-emitted alias or hallucinated name onto a real tool —
-		// and only then checks the prepared name is registered. The bus dispatches
-		// the prepared calls, so availability must be judged on them, not the raw
-		// model-emitted names: validating the raw names here would reject a name a
-		// hook was about to fix. A missing bus or an unregistered prepared tool is
-		// FailureKindToolUnavailable; none of these paths runs a driver, so they
-		// return before the charge below, leaving ToolCallsUsed untouched for a
-		// caller that registers the tool and resumes.
-		prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
-		if prepErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), prepErr
-		}
-		// Charge this turn's tool batch BEFORE dispatching it, so the count
-		// survives every way dispatch can end. A sequential driver runs inline on
-		// this goroutine: a panic unwinds straight to the RunMessages recover defer
-		// without ever returning here, so a charge placed after dispatch would be
-		// skipped and the recovered partial output would under-report. Charging
-		// first also covers the returns below — a tool error or recovered parallel
-		// panic (dispErr), or a sink Emit failure on a result frame (appendErr).
-		// This mirrors the batch-level accounting of the pre-dispatch gate above,
-		// which reserves the whole batch against MaxToolCalls, so a caller that
-		// persists or resumes from any partial LoopOutput does not under-count and
-		// let later work exceed the budget. On the success path the count is
-		// unchanged. prepareToolCalls above already rejected any unregistered tool
-		// and ran the BeforeToolCall hooks, so this no longer counts a not-found
-		// call or a hook rejection; a registered batch that fails partway (a later
-		// sequential call left unrun after an earlier driver error) can still be
-		// over-counted, but for an upper-bound budget over-counting is the safe
-		// direction — it can only stop a resumed run sooner, never let it overrun.
-		toolCallsUsed += len(assistant.ToolCalls)
-		results, dispErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
-		// Append before surfacing a dispatch error: whether a tool driver failed
-		// mid-batch or an AfterToolCall rejected a result, dispatchPreparedTools still
-		// returns the results that ran and side-effected, so recording that prefix
-		// keeps the partial trace from dropping tool results a resuming caller would
-		// otherwise replay or leave as a dangling assistant tool call. dispErr is the
-		// root cause and is reported ahead of any secondary sink-emit failure on the
-		// prefix.
-		appendErr := appendToolResults(ctx, &current, results, input.Sink)
-		if dispErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), dispErr
-		}
-		if appendErr != nil {
-			return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), appendErr
-		}
 		var stop bool
-		steps, out, stop, err = finalizeToolStep(
-			ctx, input, current, totalUsage, steps, assistant, modelCall,
-			results, terminal, iteration, toolCallsUsed,
+		out, stop, err = e.runToolStep(
+			ctx, &input, &current, assistant, modelCall, totalUsage, &steps, iteration, &toolCallsUsed,
 		)
 		if stop {
 			return out, err
@@ -434,6 +395,104 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+func recoverRunMessagesPanic(
+	ctx context.Context,
+	input LoopInput,
+	out *LoopOutput,
+	runErr *error,
+	current *[]message.Message,
+	totalUsage *provider.Usage,
+	steps *[]Step,
+	lastModelCall **ModelCall,
+	turnsRun *int,
+	toolCallsUsed *int,
+) {
+	panicValue := recover()
+	if panicValue == nil {
+		return
+	}
+	last := *lastModelCall
+	if last != nil && (len(*steps) == 0 || (*steps)[len(*steps)-1].ModelCall != last) {
+		*steps = append(*steps, Step{
+			Index:      *turnsRun - 1,
+			ModelCall:  last,
+			Decision:   StepDecisionFail,
+			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
+		})
+		if recordErr := recordRecoveredStep(ctx, input.StepRecorder, *steps); recordErr != nil {
+			*runErr = errors.Join(*runErr, recordErr)
+		}
+	}
+	*out = loopErrorOutput(*current, *totalUsage, *steps, *turnsRun, *toolCallsUsed)
+	*runErr = errors.Join(*runErr, fmt.Errorf("%w: %v", ErrPanicRecovered, panicValue))
+}
+
+func (e Engine) runToolStep(
+	ctx context.Context,
+	input *LoopInput,
+	current *[]message.Message,
+	assistant message.Message,
+	modelCall *ModelCall,
+	totalUsage provider.Usage,
+	steps *[]Step,
+	iteration int,
+	toolCallsUsed *int,
+) (LoopOutput, bool, error) {
+	for index := range assistant.ToolCalls {
+		assistant.ToolCalls[index].OperationID = fmt.Sprintf("turn:%d:call:%d", input.OperationTurn, index)
+	}
+	input.OperationTurn++
+	*current = append(*current, assistant)
+
+	// A completed tool-use turn is only a request for side effects. Refuse to
+	// dispatch it when cancellation landed after the provider's terminal event.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, ctxErr
+	}
+
+	// Reserve the whole batch before hooks or drivers run. This prevents one
+	// side-effecting batch from crossing a token or tool-call ceiling.
+	if dimension := preDispatchBudgetBlock(*input, totalUsage, *toolCallsUsed, len(*steps), len(assistant.ToolCalls)); dimension != "" {
+		*steps = append(*steps, Step{
+			Index:      iteration,
+			ModelCall:  modelCall,
+			Decision:   StepDecisionFail,
+			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
+		})
+		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, *steps); recordErr != nil {
+			return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, recordErr
+		}
+		out, err := budgetAbort(*current, totalUsage, *steps, iteration+1, *toolCallsUsed, dimension)
+		return out, true, err
+	}
+
+	// Hooks may rewrite tool names, so validate the prepared calls. Charge the
+	// registered batch before dispatch so panics and partial failures cannot
+	// under-report usage.
+	prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
+	if prepErr != nil {
+		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, prepErr
+	}
+	*toolCallsUsed += len(assistant.ToolCalls)
+	results, dispatchErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
+
+	// Preserve every result that ran before reporting the dispatch error. This
+	// keeps resume from replaying a side effect whose result was already emitted.
+	appendErr := appendToolResults(ctx, current, results, input.Sink)
+	if dispatchErr != nil {
+		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, dispatchErr
+	}
+	if appendErr != nil {
+		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, appendErr
+	}
+	nextSteps, out, stop, err := finalizeToolStep(
+		ctx, *input, *current, totalUsage, *steps, assistant, modelCall,
+		results, terminal, iteration, *toolCallsUsed,
+	)
+	*steps = nextSteps
+	return out, stop, err
 }
 
 func normalizeIterationPolicy(input LoopInput) (LoopInput, int) {
@@ -581,6 +640,15 @@ func recordFinalizedStep(ctx context.Context, recorder StepRecorder, steps []Ste
 	return nil
 }
 
+func recordRecoveredStep(ctx context.Context, recorder StepRecorder, steps []Step) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
+		}
+	}()
+	return recordFinalizedStep(ctx, recorder, steps)
+}
+
 func nextToolOperationTurn(messages []message.Message) int {
 	next := 0
 	for _, msg := range messages {
@@ -683,9 +751,9 @@ func stepPolicyOverride(input LoopInput, current []message.Message, usage provid
 // budgetRemaining returns a copy of input whose budget ceilings are reduced by
 // the usage already spent, and reports the first exhausted dimension (empty
 // when the loop may still spend). It is the single source of truth for both
-// the in-loop "will continue" check and the cross-call repair check. The token
-// ceiling fails open: a provider that reports zero usage keeps TotalTokens at
-// zero, so the remaining budget never drops to or below zero on that dimension.
+// the in-loop "will continue" check and the cross-call repair check. A
+// positive token ceiling also rejects a successful zero-usage turn in
+// RunMessages before it can continue.
 func budgetRemaining(input LoopInput, usage provider.Usage, toolCallsUsed, steps int) (LoopInput, string) {
 	next := input
 	if input.MaxTokens > 0 {
@@ -881,13 +949,13 @@ func loopErrorOutput(current []message.Message, usage provider.Usage, steps []St
 // recordIncompleteTurn folds a failed turn's partial work into the running trace.
 // A turn can fail after the model already streamed content — a per-event callback
 // erroring or panicking, which collect surfaces as an error carrying the
-// normalized partial assistant turn. When that turn carries content, append it and
-// fold its usage so the partial LoopOutput keeps the produced response and its
-// token spend, and count the turn in Iterations; an empty turn leaves the trace,
-// usage, and turn count untouched so a failure before any content reports nothing
-// extra.
+// normalized partial assistant turn. When that turn carries content or usage,
+// append it and fold its usage so the partial LoopOutput keeps the produced
+// response and its token spend, and count the turn in Iterations; an empty turn
+// leaves the trace, usage, and turn count untouched so a failure before any
+// content or usage reports nothing extra.
 func recordIncompleteTurn(current []message.Message, assistant message.Message, totalUsage, usage provider.Usage, iteration, turnsRun int) ([]message.Message, provider.Usage, int) {
-	if assistant.Text == "" && assistant.Thinking == "" && assistant.RedactedThinking == "" && len(assistant.ToolCalls) == 0 {
+	if assistant.Text == "" && assistant.Thinking == "" && assistant.RedactedThinking == "" && len(assistant.ToolCalls) == 0 && usage == (provider.Usage{}) {
 		return current, totalUsage, turnsRun
 	}
 	return append(current, assistant), totalUsage.Add(usage), iteration + 1
@@ -929,6 +997,7 @@ func toolCallTraces(calls []message.ToolCall, results []message.ToolResult) []To
 	traces := make([]ToolCallTrace, 0, len(calls))
 	for i, call := range calls {
 		trace := ToolCallTrace{
+			ID:        call.ID,
 			Name:      call.Name,
 			Arguments: call.Arguments,
 		}
@@ -1035,14 +1104,17 @@ func cloneAnyMap(values map[string]any) map[string]any {
 
 // runTurn executes a single model turn: context transform, request assembly,
 // provider stream and event collection.
-func (e Engine) runTurn(ctx context.Context, current []message.Message, input LoopInput) (message.Message, provider.Usage, provider.StopReason, error) {
+func (e Engine) runTurn(ctx context.Context, current []message.Message, input LoopInput) (message.Message, provider.Usage, provider.StopReason, provider.StreamIdentity, bool, error) {
 	transformed, err := e.Hooks.TransformContext(ctx, current)
 	if err != nil {
-		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
 	request := provider.Request{
 		Model:          input.Model,
 		Messages:       transformed,
+		Temperature:    input.Temperature,
+		TopP:           input.TopP,
+		MaxTokens:      input.ModelMaxTokens,
 		Metadata:       input.Metadata,
 		StopSequences:  input.StopSequences,
 		ThinkingBudget: input.ThinkingBudget,
@@ -1053,13 +1125,24 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 		request.Tools = e.Tools.Definitions()
 	}
 	if err := e.Hooks.BeforeModelCall(ctx, &request); err != nil {
-		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
 	providerStream, err := e.Provider.Stream(ctx, request)
 	if err != nil {
-		return message.Message{}, provider.Usage{}, provider.StopReasonError, err
+		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
-	return e.collect(ctx, providerStream, input.OnEvent, input.Sink)
+	assistant, usage, stop, collectErr := e.collect(ctx, providerStream, input.OnEvent, input.Sink)
+	identity := provider.StreamIdentity{
+		Provider: e.Provider.Metadata(),
+		Model:    request.Model,
+	}
+	if identified, ok := providerStream.(provider.IdentifiedStream); ok {
+		identity = identified.Identity()
+		if identity.Model == "" {
+			identity.Model = request.Model
+		}
+	}
+	return assistant, usage, stop, identity, true, collectErr
 }
 
 // prepareToolCalls runs each call's BeforeToolCall hook — which may rewrite the
@@ -1217,7 +1300,11 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 		// and normalize the events already collected rather than failing the turn.
 		if !sawTerminal {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return assistant, provider.Usage{}, provider.StopReasonError, ctxErr
+				partialUsage, partialStop, _ := applyNormalized(&assistant, events)
+				if partialStop == "" {
+					partialStop = provider.StopReasonError
+				}
+				return assistant, partialUsage, partialStop, ctxErr
 			}
 		}
 		event, recvErr := providerStream.Recv()
@@ -1235,7 +1322,11 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 			if sawTerminal && (errors.Is(recvErr, context.Canceled) || errors.Is(recvErr, context.DeadlineExceeded)) {
 				break
 			}
-			return assistant, provider.Usage{}, provider.StopReasonError, recvErr
+			partialUsage, partialStop, _ := applyNormalized(&assistant, events)
+			if partialStop == "" {
+				partialStop = provider.StopReasonError
+			}
+			return assistant, partialUsage, partialStop, recvErr
 		}
 		if event.Kind == provider.EventDone {
 			sawTerminal = true

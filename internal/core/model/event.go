@@ -37,6 +37,7 @@ const (
 	EventApprovalDecided             EventType = "ApprovalDecided"
 	EventTaskOwnerChanged            EventType = "TaskOwnerChanged"
 	EventPolicyObligationFailed      EventType = "PolicyObligationFailed"
+	EventPolicyDecisionRecorded      EventType = "PolicyDecisionRecorded"
 	EventResponseTaskCreated         EventType = "ResponseTaskCreated"
 	EventSystemResponseBypassAudited EventType = "SystemResponseBypassAudited"
 	EventUserMessageComposed         EventType = "UserMessageComposed"

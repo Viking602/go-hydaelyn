@@ -150,9 +150,9 @@ var Pack = packs.Pack{
 	EvalCases: SmokeCases,
 }
 
-// codeEditor is the single coding agent (spec §8). The instructions are the
-// hashline editing protocol verbatim; the Capabilities list the read/edit
-// tools the agent is allowed to call. Model is a default the host may override.
+// codeEditor is the single coding agent (spec §8). Tools list the executable
+// read/edit tools; Capabilities remains descriptive metadata. Model is a
+// default the host may override.
 var codeEditor = api.AgentDefinition{
 	ID:           "coding.code-editor",
 	Name:         "Code Editor",
@@ -160,6 +160,15 @@ var codeEditor = api.AgentDefinition{
 	Description:  "A careful coding agent that edits a sandboxed workspace via the hashline line-anchored protocol.",
 	Instructions: instructions,
 	Model:        api.ModelPolicy{Model: "claude-sonnet-4-6", Temperature: 0.2},
+	Tools: []string{
+		toolListFiles,
+		toolReadFile,
+		toolSearch,
+		toolEditHashline,
+		toolGofmt,
+		toolGoTest,
+		toolGitDiff,
+	},
 	Capabilities: []string{
 		toolListFiles,
 		toolReadFile,

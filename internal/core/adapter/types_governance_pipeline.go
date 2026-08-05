@@ -182,11 +182,27 @@ func PolicyDecisionsFromModel(in []model.PolicyDecision) []api.PolicyDecision {
 }
 
 func PolicyObligationToModel(in api.PolicyObligation) model.PolicyObligation {
-	return model.PolicyObligation{Kind: model.ObligationKind(in.Kind), Target: in.Target}
+	out := model.PolicyObligation{
+		Kind:   model.ObligationKind(in.Kind),
+		Target: model.PolicyObligationTarget(in.Target),
+	}
+	if in.Selector != nil {
+		selector := BlackboardSelectorToModel(*in.Selector)
+		out.Selector = &selector
+	}
+	return out
 }
 
 func PolicyObligationFromModel(in model.PolicyObligation) api.PolicyObligation {
-	return api.PolicyObligation{Kind: api.ObligationKind(in.Kind), Target: in.Target}
+	out := api.PolicyObligation{
+		Kind:   api.ObligationKind(in.Kind),
+		Target: api.PolicyObligationTarget(in.Target),
+	}
+	if in.Selector != nil {
+		selector := BlackboardSelectorFromModel(*in.Selector)
+		out.Selector = &selector
+	}
+	return out
 }
 
 func PolicyObligationsToModel(in []api.PolicyObligation) []model.PolicyObligation {

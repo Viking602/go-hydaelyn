@@ -18,16 +18,22 @@ import (
 // and model list, so Build's resolver tests can route by model and assert which
 // driver a Spec resolved to.
 type modeledProvider struct {
-	name   string
-	models []string
-	answer string
+	name     string
+	models   []string
+	answer   string
+	requests []provider.Request
+	err      error
 }
 
 func (p *modeledProvider) Metadata() provider.Metadata {
 	return provider.Metadata{Name: p.name, Models: p.models}
 }
 
-func (p *modeledProvider) Stream(_ context.Context, _ provider.Request) (provider.Stream, error) {
+func (p *modeledProvider) Stream(_ context.Context, request provider.Request) (provider.Stream, error) {
+	p.requests = append(p.requests, request)
+	if p.err != nil {
+		return nil, p.err
+	}
 	return provider.NewSliceStream([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: p.answer},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
@@ -76,6 +82,76 @@ func TestBuild_CrossVendorSwitchSelectsPerModelDriver(t *testing.T) {
 		if engine.Provider != want {
 			t.Fatalf("Build(%q) resolved %v, want %s driver", model, engine.Provider, want.name)
 		}
+	}
+}
+
+func TestBuild_ExplicitProviderDisambiguatesSharedModel(t *testing.T) {
+	first := &modeledProvider{name: "first", models: []string{"shared"}}
+	second := &modeledProvider{name: "second", models: []string{"shared"}}
+	engine, err := Build(
+		Spec{Provider: "first", Model: "shared"},
+		BuildDeps{Providers: provider.NewRegistry(first, second)},
+	)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if engine.Provider != first {
+		t.Fatalf("Engine.Provider = %v, want explicitly selected first driver", engine.Provider)
+	}
+}
+
+func TestBuild_CarriesModelPolicyToEveryRequest(t *testing.T) {
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "ok"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	}}}
+	engine, err := Build(
+		Spec{Model: "m", Temperature: 0.4, TopP: 0.8, MaxTokens: 321},
+		BuildDeps{Providers: provider.Single(driver)},
+	)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	result := engine.Run(context.Background(), api.Task{Goal: "answer"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Run failed: %v", result.Failure)
+	}
+	if len(driver.requests) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(driver.requests))
+	}
+	request := driver.requests[0]
+	if request.Temperature != 0.4 || request.TopP != 0.8 || request.MaxTokens != 321 {
+		t.Fatalf("provider model policy = temperature %v, topP %v, maxTokens %d", request.Temperature, request.TopP, request.MaxTokens)
+	}
+}
+
+func TestBuild_FallbackModelSwitchesDriverAndRequestModel(t *testing.T) {
+	primary := &modeledProvider{
+		name:   "primary",
+		models: []string{"primary-model"},
+		err:    errors.New("primary unavailable"),
+	}
+	fallback := &modeledProvider{
+		name:   "fallback",
+		models: []string{"fallback-model"},
+		answer: "fallback answer",
+	}
+	engine, err := Build(
+		Spec{Model: "primary-model", FallbackModel: "fallback-model"},
+		BuildDeps{Providers: provider.NewRegistry(primary, fallback)},
+	)
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	result := engine.Run(context.Background(), api.Task{Goal: "answer"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("Run failed: %v", result.Failure)
+	}
+	if len(primary.requests) != 1 || primary.requests[0].Model != "primary-model" {
+		t.Fatalf("primary requests = %#v", primary.requests)
+	}
+	if len(fallback.requests) != 1 || fallback.requests[0].Model != "fallback-model" {
+		t.Fatalf("fallback requests = %#v", fallback.requests)
 	}
 }
 
@@ -377,7 +453,8 @@ func mustTool(t *testing.T, name string) tool.Driver {
 	t.Helper()
 	driver, err := kit.Tool(name, func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return name + ":ok", nil
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ const (
 	PolicyOperationAction          PolicyOperation = "action"
 	PolicyOperationResponseCompose PolicyOperation = "response_compose"
 	PolicyOperationResponsePublish PolicyOperation = "response_publish"
+	PolicyOperationTraceRead       PolicyOperation = "trace_read"
 )
 
 type PolicyRequest struct {

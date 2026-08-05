@@ -11,7 +11,12 @@ import (
 func TestExecuteCommand_StartRunReturnsTypedResult(t *testing.T) {
 	r := New()
 	ctx := context.Background()
-	result, err := r.ExecuteCommand(ctx, api.StartRunCommand{Request: "execute-command-typed-start"})
+	command := api.StartRunCommand{
+		RunID:      "execute-command-typed-start",
+		RootTaskID: "execute-command-typed-start-root",
+		Request:    "execute-command-typed-start",
+	}
+	result, err := r.ExecuteCommand(ctx, command)
 	if err != nil {
 		t.Fatalf("ExecuteCommand(StartRunCommand) error = %v", err)
 	}
@@ -27,6 +32,20 @@ func TestExecuteCommand_StartRunReturnsTypedResult(t *testing.T) {
 	}
 	if started.RootTask.RunID != started.Run.ID {
 		t.Fatalf("RootTask.RunID %q != Run.ID %q", started.RootTask.RunID, started.Run.ID)
+	}
+	if !started.Created {
+		t.Fatal("first StartRunCommand result Created = false, want true")
+	}
+	retriedResult, err := r.ExecuteCommand(ctx, command)
+	if err != nil {
+		t.Fatalf("ExecuteCommand(StartRunCommand retry) error = %v", err)
+	}
+	retried, ok := retriedResult.(api.StartRunResult)
+	if !ok {
+		t.Fatalf("ExecuteCommand(StartRunCommand retry) returned %T, want api.StartRunResult", retriedResult)
+	}
+	if retried.Created {
+		t.Fatal("retried StartRunCommand result Created = true, want false")
 	}
 }
 

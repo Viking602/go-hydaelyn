@@ -140,6 +140,8 @@ func UsageSelectorToModel(in api.UsageSelector) model.UsageSelector {
 		RunID:    in.RunID,
 		TaskID:   in.TaskID,
 		AgentID:  in.AgentID,
+		Kind:     model.UsageKind(in.Kind),
+		ToolName: in.ToolName,
 		Provider: in.Provider,
 		Since:    in.Since,
 		Until:    in.Until,
@@ -152,6 +154,8 @@ func UsageSelectorFromModel(in model.UsageSelector) api.UsageSelector {
 		RunID:    in.RunID,
 		TaskID:   in.TaskID,
 		AgentID:  in.AgentID,
+		Kind:     api.UsageKind(in.Kind),
+		ToolName: in.ToolName,
 		Provider: in.Provider,
 		Since:    in.Since,
 		Until:    in.Until,
@@ -225,12 +229,15 @@ func ResumeTokensToModel(in []api.ResumeToken) []model.ResumeToken {
 
 func UsageRecordToModel(in api.UsageRecord) model.UsageRecord {
 	return model.UsageRecord{
+		PricingState:          model.UsagePricingState(in.PricingState),
 		ID:                    in.ID,
 		RunID:                 in.RunID,
 		TaskID:                in.TaskID,
 		AgentID:               in.AgentID,
+		Kind:                  model.UsageKind(in.Kind),
 		Provider:              in.Provider,
 		Model:                 in.Model,
+		ToolName:              in.ToolName,
 		InputTokens:           in.InputTokens,
 		OutputTokens:          in.OutputTokens,
 		CachedInputTokens:     in.CachedInputTokens,
@@ -240,6 +247,7 @@ func UsageRecordToModel(in api.UsageRecord) model.UsageRecord {
 		Steps:                 in.Steps,
 		DurationMS:            in.DurationMS,
 		Credits:               in.Credits,
+		CreditsKind:           in.CreditsKind,
 		Metadata:              stringMapToModel(in.Metadata),
 		CreatedAt:             in.CreatedAt,
 	}
@@ -247,12 +255,15 @@ func UsageRecordToModel(in api.UsageRecord) model.UsageRecord {
 
 func UsageRecordFromModel(in model.UsageRecord) api.UsageRecord {
 	return api.UsageRecord{
+		PricingState:          api.UsagePricingState(in.PricingState),
 		ID:                    in.ID,
 		RunID:                 in.RunID,
 		TaskID:                in.TaskID,
 		AgentID:               in.AgentID,
+		Kind:                  api.UsageKind(in.Kind),
 		Provider:              in.Provider,
 		Model:                 in.Model,
+		ToolName:              in.ToolName,
 		InputTokens:           in.InputTokens,
 		OutputTokens:          in.OutputTokens,
 		CachedInputTokens:     in.CachedInputTokens,
@@ -262,6 +273,7 @@ func UsageRecordFromModel(in model.UsageRecord) api.UsageRecord {
 		Steps:                 in.Steps,
 		DurationMS:            in.DurationMS,
 		Credits:               in.Credits,
+		CreditsKind:           in.CreditsKind,
 		Metadata:              stringMapFromModel(in.Metadata),
 		CreatedAt:             in.CreatedAt,
 	}

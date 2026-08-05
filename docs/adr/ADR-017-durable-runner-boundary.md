@@ -53,32 +53,37 @@ schedule.
 
 | Concern | Surface |
 |---------|---------|
-| Run / Task lifecycle | `RunStore`, `TaskStore`, `Runner.QueueRun`, `Runner.NextEnvelope`, `Runner.AckEnvelope` |
+| Run / Task lifecycle | `RunStore`, `TaskStore`, Runner commands |
 | Event log | `EventStore` with monotonic `Sequence` per Run (ADR-007) |
-| Lease CAS | `LeaseStore.AcquireWithExpectedVersion`, `ExtendLease` |
-| Approval queue | `ApprovalStore` + `ResumeToken` |
+| Task lease CAS | `TaskExecutionLeaseStore` |
+| Approval and resume | `ApprovalStore`, `ResumeTokenStore` |
 | Outbox FIFO | `MailboxOutboxStore`, `UserMessageStore` |
-| Idempotency ledger | `ActionAttemptStore` |
-| Dead-letter | `DeadLetterStore` |
-| Trace spans | `TraceStore`, `TraceSpanUpdater` |
-| Usage metering | `UsageStore` |
-| Storage capabilities | `StoreCapabilities`, `CapabilityReporter` |
-| **New for v0.8.0** | `HandoffStore`, `TeamStateStore`, `AgentInstanceStore` |
+| Side-effect idempotency | `ActionAttemptStore` |
+| Dead-letter and trace facts | `DeadLetterStore`, `TraceStore` |
+| Granular measurement | `UsageStore` |
+| Multi-agent durable facts | `HandoffStore`, `TeamStateStore`, `AgentInstanceStore` |
+| Optional deployment facts | `AgentDefinitionStore` |
+| Optional aggregate capacity | `AdmissionReservationStore` |
+| Optional coordination claims | `ResourceClaimStore` |
+| Storage feature discovery | `StoreCapabilities`, `CapabilityReporter` |
 
-The three new stores hold *multi-agent state* but not *multi-agent
-decisions*. Runner records that a Handoff happened (auditable,
-replayable). It does not decide who the Handoff goes to — the
-Scheduler does.
+These stores hold facts and CAS state, not product decisions. Runner records
+that a handoff, admission transition, or resource claim happened. The scheduler,
+single-run coordinator, deployment assembler, or application decides which
+operation to request.
 
 ### 2. What Runner does NOT own
 
 | Concern | Owner |
 |---------|-------|
-| Picking the next agent | `multiagent.Scheduler` (ADR-016) |
+| Picking the next agent | `multiagent.Scheduler` |
 | Maintaining a multi-agent state machine | `multiagent.Scheduler` |
-| Translating natural-language handoffs into commands | rejected outright (typed Handoff only — ADR-016) |
-| Agent reasoning, schema repair, context selection | `agent.Engine` (ADR-015) |
-| Cross-run application memory writes | application via `api.Memory[T]` (ADR-013) |
+| Coordinating one agent's durable execution | `worker.SingleRunner` |
+| Installing declarative agent deployments | `worker.DefinitionDeployment` |
+| Choosing governance limits and policy values | application or Pack |
+| Interpreting resource keys as files/repos/accounts | application |
+| Agent reasoning, schema repair, context selection | `agent.Engine` |
+| Cross-run application memory writes | application via `api.Memory[T]` |
 
 ### 3. The Runner-to-Scheduler bridge
 
@@ -122,41 +127,37 @@ opaque to it; only the Scheduler interprets them.
   handoffs (back-compat); new code SHOULD route handoffs through
   `multiagent.Scheduler` and `HandoffStore`. The deprecation path
   is documented in 14-migration-guide.md.
-- Runner emits a `EventSchedulerTick` after each persisted result
-  so external Scheduler implementations can subscribe rather than
-  poll.
-- Resume after process kill MUST reconstruct: Run state (Runner),
-  Step trace (Engine, via EventStore), Scheduler decision history
-  (TeamStateStore + EventStore). The three reconstructions are
-  independent — failing one does not corrupt the others.
-- `TaskBudget` enforcement happens at Engine boundary (per
-  ADR-015). Runner persists `Task.Budget` and reports usage via
-  `UsageStore`, but does not itself terminate runs on budget
-  exhaustion — that surfaces as `FailureBudgetExhausted` from
-  Engine, which the Scheduler decides how to act on.
+- Runner emits `EventSchedulerTick` after each persisted result so external
+  Scheduler implementations can subscribe rather than poll.
+- Resume after process kill MUST reconstruct Run state, agent Step state, and
+  Scheduler state independently.
+- `TaskBudget` enforcement happens at the Engine boundary. Runner persists the
+  budget and typed failure but does not terminate a task independently.
+- Aggregate admission is acquired by `worker.SingleRunner`,
+  `worker.TeamRunner`, or a host before dispatch. Runner only exposes the
+  atomic store-backed command and persists its transitions.
+- Resource claims are opaque coordination keys. When a task lease and claims
+  are acquired together, the store operation MUST be all-or-nothing.
+- Definition snapshots are immutable execution inputs. A resumed Run uses its
+  recorded definition revision rather than the deployment's current revision.
 
 ### 5. Storage contract changes
 
-`UnitOfWork` gains three methods:
+The durable multi-agent stores remain required members of `UnitOfWork`.
+Definition snapshots, admission reservations, and resource claims are optional
+extensions discovered through `StoreCapabilities` and narrow UnitOfWork
+extension interfaces. A provider that reports a capability MUST expose the
+matching store from the same transaction.
 
-```go
-type UnitOfWork interface {
-    // ... existing 15 stores
-    Handoffs()       HandoffStore       // new in v0.8.0
-    TeamStates()     TeamStateStore     // new in v0.8.0
-    AgentInstances() AgentInstanceStore // new in v0.8.0
-}
-```
+The features themselves fail closed:
 
-Per ADR-012 Position D, the framework ships no implementation of
-these stores. Application providers must implement them and pass
-`contract.RunStoreProviderContractTests` (which is extended for the
-three new stores in v0.8.0).
+- a deployment using immutable definition resume requires definition snapshots;
+- aggregate quota, run-window, concurrency, or failure-breaker rules require
+  admission reservations;
+- tasks declaring resource claims require resource-claim support.
 
-`StoreCapabilities` gains no new flag in v0.8.0 — the three new
-stores are required, not optional. Applications upgrading from a
-v0.7-era provider must add implementations as part of the
-migration (documented in 14-migration-guide.md).
+Providers that do not use those features remain conformant. Providers that
+advertise them run the corresponding capability-gated contract suites.
 
 ## Consequences
 

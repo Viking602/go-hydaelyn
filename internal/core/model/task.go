@@ -43,6 +43,7 @@ type Task struct {
 	Budget             *TaskBudget          `json:"budget,omitempty"`
 	InputSchema        json.RawMessage      `json:"inputSchema,omitempty"`
 	OutputSchema       json.RawMessage      `json:"outputSchema,omitempty"`
+	ResourceClaims     []ResourceClaimSpec  `json:"resourceClaims,omitempty"`
 	CreatedAt          time.Time            `json:"createdAt"`
 	UpdatedAt          time.Time            `json:"updatedAt"`
 }

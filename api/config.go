@@ -8,10 +8,11 @@ const (
 )
 
 type Config struct {
-	StoreProvider StoreProvider
-	PolicyEngine  PolicyEngine
-	OutputGateway OutputGateway
-	Pipeline      PipelineComponents
+	StoreProvider  StoreProvider
+	PolicyEngine   PolicyEngine
+	PolicyEnforcer PolicyObligationEnforcer
+	OutputGateway  OutputGateway
+	Pipeline       PipelineComponents
 }
 
 func DefaultConfig() Config { return Config{} }

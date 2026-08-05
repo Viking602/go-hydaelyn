@@ -15,14 +15,22 @@ type (
 	StartRunResult    = runsvc.StartRunResult
 )
 
-func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (model.Run, model.Task, error) {
+func (r *Runtime) StartRunWithResult(ctx context.Context, cmd StartRunCommand) (StartRunResult, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.Run{}, model.Task{}, err
+		return StartRunResult{}, err
 	}
 	started, ok := result.(StartRunResult)
 	if !ok {
-		return model.Run{}, model.Task{}, ErrInvalidCommand
+		return StartRunResult{}, ErrInvalidCommand
+	}
+	return started, nil
+}
+
+func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (model.Run, model.Task, error) {
+	started, err := r.StartRunWithResult(ctx, cmd)
+	if err != nil {
+		return model.Run{}, model.Task{}, err
 	}
 	return started.Run, started.Root, nil
 }

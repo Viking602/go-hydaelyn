@@ -16,13 +16,16 @@ type IDGenerator func(string) string
 
 type Authorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
 
+type ObligationEnforcer func(context.Context, ports.UnitOfWork, model.PolicyDecision, model.HandoffRequest) (model.HandoffRequest, error)
+
 type TraceRecorder func(context.Context, ports.UnitOfWork, string, string, string, string) error
 
 type HandlerOptions struct {
-	NewID       IDGenerator
-	Authorize   Authorizer
-	RecordTrace TraceRecorder
-	MaxDepth    int
+	NewID              IDGenerator
+	Authorize          Authorizer
+	EnforceObligations ObligationEnforcer
+	RecordTrace        TraceRecorder
+	MaxDepth           int
 }
 
 type HandoffResult struct {
@@ -84,8 +87,16 @@ func (h handler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd HandoffCo
 	}
 	request := &model.HandoffRequest{RunID: cmd.RunID, TaskID: cmd.TaskID, FromAgentID: cmd.FromAgentID, ToAgentID: cmd.ToAgentID, ContextSummary: cmd.HandoffContext, TaskVersion: cmd.TaskVersion}
 	if h.options.Authorize != nil {
-		if _, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationHandoff, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: model.SourceIdentity{Type: model.SourceAgent, ID: cmd.FromAgentID}, Handoff: request}); err != nil {
+		decision, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationHandoff, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: model.SourceIdentity{Type: model.SourceAgent, ID: cmd.FromAgentID}, Handoff: request})
+		if err != nil {
 			return nil, err
+		}
+		if h.options.EnforceObligations != nil {
+			enforced, err := h.options.EnforceObligations(ctx, uow, decision, *request)
+			if err != nil {
+				return nil, err
+			}
+			request = &enforced
 		}
 	}
 	if h.options.RecordTrace != nil {
@@ -93,7 +104,7 @@ func (h handler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd HandoffCo
 			return nil, err
 		}
 	}
-	return h.applier.Apply(ctx, uow, task, request, cmd.HandoffContext)
+	return h.applier.Apply(ctx, uow, task, request, request.ContextSummary)
 }
 
 func (a Applier) Apply(ctx context.Context, uow ports.UnitOfWork, task model.Task, request *model.HandoffRequest, fallbackContext string) (HandoffResult, error) {

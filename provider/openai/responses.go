@@ -13,14 +13,17 @@ import (
 )
 
 type responsesRequest struct {
-	Model     string              `json:"model"`
-	Input     []json.RawMessage   `json:"input"`
-	Include   []string            `json:"include,omitempty"`
-	Tools     []responsesTool     `json:"tools,omitempty"`
-	Stream    bool                `json:"stream"`
-	Store     bool                `json:"store"`
-	Reasoning *responsesReasoning `json:"reasoning,omitempty"`
-	Text      *responsesText      `json:"text,omitempty"`
+	Model           string              `json:"model"`
+	Input           []json.RawMessage   `json:"input"`
+	Temperature     float64             `json:"temperature,omitempty"`
+	TopP            float64             `json:"top_p,omitempty"`
+	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
+	Include         []string            `json:"include,omitempty"`
+	Tools           []responsesTool     `json:"tools,omitempty"`
+	Stream          bool                `json:"stream"`
+	Store           bool                `json:"store"`
+	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Text            *responsesText      `json:"text,omitempty"`
 }
 
 type responsesTool struct {
@@ -113,12 +116,15 @@ func (d Driver) streamResponses(ctx context.Context, request provider.Request) (
 		return nil, err
 	}
 	body, err := marshalResponsesRequest(responsesRequest{
-		Model:     request.Model,
-		Input:     input,
-		Tools:     toResponsesTools(request.Tools),
-		Stream:    true,
-		Reasoning: responsesReasoningFromBudget(request.ThinkingBudget),
-		Text:      responsesTextFromRequest(request.ResponseFormat),
+		Model:           request.Model,
+		Temperature:     request.Temperature,
+		TopP:            request.TopP,
+		MaxOutputTokens: request.MaxTokens,
+		Input:           input,
+		Tools:           toResponsesTools(request.Tools),
+		Stream:          true,
+		Reasoning:       responsesReasoningFromBudget(request.ThinkingBudget),
+		Text:            responsesTextFromRequest(request.ResponseFormat),
 	}, request.ExtraBody)
 	if err != nil {
 		return nil, err
@@ -151,6 +157,11 @@ func marshalResponsesRequest(payload responsesRequest, extraBody map[string]any)
 		return nil, err
 	}
 	for key, value := range extraResponsesBodyFields(extraBody) {
+		if _, protected := protectedResponsesModelFields[key]; protected {
+			if _, set := merged[key]; set {
+				continue
+			}
+		}
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshal openai responses extra body field %q: %w", key, err)
@@ -251,6 +262,12 @@ var managedResponsesBodyFields = map[string]struct{}{
 	"previous_response_id": {},
 	"conversation":         {},
 	"prompt":               {},
+}
+
+var protectedResponsesModelFields = map[string]struct{}{
+	"temperature":       {},
+	"top_p":             {},
+	"max_output_tokens": {},
 }
 
 func toResponsesInput(messages []message.Message) ([]json.RawMessage, error) {

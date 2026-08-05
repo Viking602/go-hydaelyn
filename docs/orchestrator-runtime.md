@@ -40,6 +40,9 @@ active lease.
 State-changing commands execute behind the `StoreProvider -> UnitOfWork`
 contract so `RunStore + TaskStore + EventStore` updates stay atomic. The
 default in-memory runner implements the same contracts as durable drivers.
+Typed callers should prefer `Runner` methods. `StartRunWithResult` preserves
+the `Created` ownership bit needed to clean up a partially started run without
+terminalizing a concurrent winner.
 
 ## State Ownership
 

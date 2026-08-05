@@ -21,6 +21,35 @@ type Resolver interface {
 	Driver(model string) (Driver, error)
 }
 
+// NamedResolver resolves an explicit provider/model pair. Resolver
+// implementations may expose it when model names are not globally unique.
+type NamedResolver interface {
+	Resolver
+	DriverFor(providerName, model string) (Driver, error)
+}
+
+// Resolve chooses a driver by model and, when providerName is non-empty,
+// verifies or explicitly resolves the requested provider.
+func Resolve(resolver Resolver, providerName, model string) (Driver, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("%w: nil resolver", ErrNoDriverForModel)
+	}
+	if providerName == "" {
+		return resolver.Driver(model)
+	}
+	if named, ok := resolver.(NamedResolver); ok {
+		return named.DriverFor(providerName, model)
+	}
+	driver, err := resolver.Driver(model)
+	if err != nil {
+		return nil, err
+	}
+	if driver.Metadata().Name != providerName {
+		return nil, fmt.Errorf("%w: provider %q model %q", ErrNoDriverForModel, providerName, model)
+	}
+	return driver, nil
+}
+
 // ErrNoDriverForModel is returned by a Resolver that has no Driver registered
 // for the requested model name. agent.Build wraps it into a build error so an
 // unservable model fails at construction rather than at the first model call.
@@ -56,14 +85,18 @@ func (s singleResolver) Driver(string) (Driver, error) {
 // serialized. The expected pattern is to register all drivers at startup and
 // then only resolve.
 type Registry struct {
-	mu      sync.RWMutex
-	byModel map[string]Driver
+	mu              sync.RWMutex
+	byModel         map[string]Driver
+	byProviderModel map[string]Driver
 }
 
 // NewRegistry builds a Registry pre-populated with the given drivers, each
 // indexed by the model names it declares in Metadata().Models.
 func NewRegistry(drivers ...Driver) *Registry {
-	r := &Registry{byModel: make(map[string]Driver)}
+	r := &Registry{
+		byModel:         make(map[string]Driver),
+		byProviderModel: make(map[string]Driver),
+	}
 	for _, d := range drivers {
 		r.Register(d)
 	}
@@ -84,8 +117,15 @@ func (r *Registry) Register(d Driver) {
 	if r.byModel == nil {
 		r.byModel = make(map[string]Driver)
 	}
+	if r.byProviderModel == nil {
+		r.byProviderModel = make(map[string]Driver)
+	}
+	name := d.Metadata().Name
 	for _, model := range d.Metadata().Models {
 		r.byModel[model] = d
+		if name != "" {
+			r.byProviderModel[providerModelKey(name, model)] = d
+		}
 	}
 }
 
@@ -98,4 +138,18 @@ func (r *Registry) Driver(model string) (Driver, error) {
 		return d, nil
 	}
 	return nil, fmt.Errorf("%w: %q", ErrNoDriverForModel, model)
+}
+
+// DriverFor returns the driver registered for the exact provider/model pair.
+func (r *Registry) DriverFor(providerName, model string) (Driver, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if d, ok := r.byProviderModel[providerModelKey(providerName, model)]; ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("%w: provider %q model %q", ErrNoDriverForModel, providerName, model)
+}
+
+func providerModelKey(providerName, model string) string {
+	return providerName + "\x00" + model
 }

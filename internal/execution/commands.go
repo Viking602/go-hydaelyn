@@ -27,13 +27,14 @@ type ReleaseTaskExecutionCommand struct {
 }
 
 type AppendTaskExecutionEventCommand struct {
-	RunID       string
-	TaskID      string
-	LeaseID     string
-	HolderType  model.HolderType
-	HolderID    string
-	TaskVersion int
-	Event       model.Event
+	RunID        string
+	TaskID       string
+	LeaseID      string
+	HolderType   model.HolderType
+	HolderID     string
+	TaskVersion  int
+	Event        model.Event
+	UsageRecords []model.UsageRecord
 }
 
 func (AcquireTaskExecutionCommand) CommandName() string   { return "task_execution.acquire" }

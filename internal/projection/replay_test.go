@@ -2,6 +2,7 @@ package projection
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -29,8 +30,11 @@ func TestProjectPreservesSerializedTaskFields(t *testing.T) {
 		InputSchema:        json.RawMessage(`{"type":"object"}`),
 		OutputSchema:       json.RawMessage(`{"type":"string"}`),
 		CompletionCriteria: []string{"approved"},
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ResourceClaims: []model.ResourceClaimSpec{{
+			ID: "workspace", Key: "repo", Mode: model.ResourceClaimExclusive,
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	events := []model.Event{
 		{RunID: "run-1", Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(model.Run{ID: "run-1", Status: model.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
@@ -54,5 +58,8 @@ func TestProjectPreservesSerializedTaskFields(t *testing.T) {
 	}
 	if got.Result == nil || got.Result.Summary != "done" || string(got.InputSchema) != string(task.InputSchema) || string(got.OutputSchema) != string(task.OutputSchema) {
 		t.Fatalf("projected task dropped result/schema fields: %#v", got)
+	}
+	if !slices.Equal(got.ResourceClaims, task.ResourceClaims) {
+		t.Fatalf("projected resource claims = %#v, want %#v", got.ResourceClaims, task.ResourceClaims)
 	}
 }
