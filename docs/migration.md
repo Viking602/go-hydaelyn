@@ -5,8 +5,10 @@
 `tool/kit.ProcessTool` now creates parent-owned `os.Pipe` pairs, assigns the
 write ends to the child, and closes those write ends after `Start`. Copies
 run concurrently with `Wait`. After the launched process exits, remaining
-output is drained for up to 100ms; a descendant that still holds stdout or
-stderr cannot block the tool. Cancellation sets an immediate read deadline.
+output is drained for up to 100ms; if copies are still blocked, the parent
+closes the read ends. A descendant that still holds stdout or stderr cannot
+block the tool, including on Windows where pipe deadlines do not interrupt a
+blocked read. Cancellation closes the read ends immediately.
 The previous `StdoutPipe`/`StderrPipe` path could close the pipes under the
 readers during `Wait`. Hosts do not need to change call sites.
 

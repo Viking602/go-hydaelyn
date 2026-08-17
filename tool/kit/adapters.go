@@ -151,7 +151,7 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	copyErrs := make(chan error, 2)
 	copyOutput := func(reader io.ReadCloser) {
 		_, copyErr := io.Copy(output, reader)
-		if errors.Is(copyErr, os.ErrDeadlineExceeded) {
+		if ignoredCopyError(copyErr) {
 			copyErr = nil
 		}
 		closeErr := closePipe(reader)
@@ -163,9 +163,14 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	go copyOutput(stdoutRead)
 	go copyOutput(stderrRead)
 
-	waitErr := waitAndUnblockPipes(commandCtx, command, stdoutRead, stderrRead)
-	stdoutErr := <-copyErrs
-	stderrErr := <-copyErrs
+	copyDone := make(chan struct{})
+	var stdoutErr, stderrErr error
+	go func() {
+		stdoutErr = <-copyErrs
+		stderrErr = <-copyErrs
+		close(copyDone)
+	}()
+	waitErr := waitAndUnblockPipes(commandCtx, command, copyDone, stdoutRead, stderrRead)
 	if output.TooLarge() {
 		return output.Bytes(), fmt.Errorf("process output too large: limit %d bytes", defaultMaxProcessOutputBytes)
 	}
@@ -184,26 +189,41 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	return output.Bytes(), nil
 }
 
-func waitAndUnblockPipes(ctx context.Context, command *exec.Cmd, stdout, stderr *os.File) error {
+func waitAndUnblockPipes(ctx context.Context, command *exec.Cmd, copyDone <-chan struct{}, stdout, stderr *os.File) error {
 	waitErrs := make(chan error, 1)
 	go func() { waitErrs <- command.Wait() }()
 
-	var waitErr error
-	var deadline time.Time
 	select {
-	case waitErr = <-waitErrs:
-		deadline = time.Now().Add(100 * time.Millisecond)
+	case waitErr := <-waitErrs:
+		select {
+		case <-copyDone:
+			return waitErr
+		case <-time.After(100 * time.Millisecond):
+			// Windows anonymous pipes do not interrupt a blocked Read
+			// with SetReadDeadline. Close the parent read ends instead.
+			_ = stdout.Close()
+			_ = stderr.Close()
+			<-copyDone
+			return waitErr
+		}
 	case <-ctx.Done():
-		deadline = time.Now()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		var waitErr error
 		select {
 		case waitErr = <-waitErrs:
 		case <-time.After(time.Second):
 			waitErr = ctx.Err()
 		}
+		<-copyDone
+		return waitErr
 	}
-	_ = stdout.SetReadDeadline(deadline)
-	_ = stderr.SetReadDeadline(deadline)
-	return waitErr
+}
+
+func ignoredCopyError(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, io.ErrClosedPipe)
 }
 
 func closePipe(closer io.Closer) error {
