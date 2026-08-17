@@ -331,9 +331,10 @@ func (r TeamRunner) pulseSchedulerLease(ctx context.Context, lease api.TaskExecu
 }
 
 func (r TeamRunner) startSchedulerHeartbeat(ctx context.Context, lease api.TaskExecutionLease) (context.Context, func() error, error) {
-	return startLeaseHeartbeat(ctx, r.schedulerTTL(), func(hbCtx context.Context) error {
+	ttl := r.schedulerTTL()
+	return startLeaseHeartbeat(ctx, ttl, leaseRenewalPulse(lease.ExpiresAt, ttl, func(hbCtx context.Context) error {
 		return r.pulseSchedulerLease(hbCtx, lease)
-	})
+	}))
 }
 
 func (r TeamRunner) finishScheduler(ctx context.Context, lease api.TaskExecutionLease, driveErr error) error {

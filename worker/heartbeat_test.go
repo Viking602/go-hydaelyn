@@ -145,6 +145,11 @@ func TestCombineExecutionErrorsPrefersHeartbeatOverCancel(t *testing.T) {
 	if !errors.Is(joined, api.ErrLeaseNotActive) || !errors.Is(joined, other) {
 		t.Fatalf("combineExecutionErrors(tool, heartbeat) = %v", joined)
 	}
+
+	kept := combineExecutionErrors(errors.Join(other, context.Canceled), heartbeatErr)
+	if !errors.Is(kept, other) || !errors.Is(kept, api.ErrLeaseNotActive) {
+		t.Fatalf("combineExecutionErrors(join(tool, cancel), heartbeat) = %v, want both causes", kept)
+	}
 }
 
 func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
@@ -155,6 +160,69 @@ func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("pulseLeaseHeartbeat() error = %v, want nil after cancel", err)
+	}
+}
+
+func TestLeaseRenewalPulseSkipsUntilExpiryWouldAdvance(t *testing.T) {
+	var pulses atomic.Int32
+	expires := time.Now().UTC().Add(time.Hour)
+	pulse := leaseRenewalPulse(expires, time.Minute, func(context.Context) error {
+		pulses.Add(1)
+		return nil
+	})
+	if err := pulse(context.Background()); err != nil {
+		t.Fatalf("pulse() error = %v", err)
+	}
+	if got := pulses.Load(); got != 0 {
+		t.Fatalf("pulses = %d, want 0 while remaining expiry exceeds TTL", got)
+	}
+}
+
+func TestExecuteEnvelopeKeepsSuppliedLongerLease(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-supplied-lease", RootTaskID: "root", Request: "use existing lease",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-supplied-lease", Goal: "use existing lease",
+		OwnerAgentID: "agent-a", WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	lease, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
+		RunID: run.ID, TaskID: task.ID, EnvelopeID: envelope.ID,
+		HolderType: api.HolderAgent, HolderID: "agent-a", TTL: 30 * time.Minute,
+	})
+	if err != nil || !acquired {
+		t.Fatalf("AcquireTaskExecution() lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "kept"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	outcome, err := (AgentWorker{
+		Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted",
+		TTL: 20 * time.Millisecond,
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
+		Envelope: envelope, Lease: lease, TTL: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	if outcome.State != ExecutionCompleted {
+		t.Fatalf("outcome.State = %q, want completed", outcome.State)
 	}
 }
 

@@ -154,13 +154,13 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			HolderID: w.AgentID,
 		})
 	}()
-	execCtx, stopHeartbeat, err := startLeaseHeartbeat(ctx, ttl, func(hbCtx context.Context) error {
+	execCtx, stopHeartbeat, err := startLeaseHeartbeat(ctx, ttl, leaseRenewalPulse(lease.ExpiresAt, ttl, func(hbCtx context.Context) error {
 		return w.Runner.HeartbeatTaskExecution(hbCtx, api.HeartbeatTaskExecutionCommand{
 			LeaseID:  lease.ID,
 			HolderID: w.AgentID,
 			TTL:      ttl,
 		})
-	})
+	}))
 	if err != nil {
 		return ExecutionOutcome{}, err
 	}
@@ -193,6 +193,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if err != nil {
 		heartbeatErr := stopHeartbeat()
 		heartbeatStopped = true
+		err = combineExecutionErrors(err, heartbeatErr)
 		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
 		return failedExecutionOutcome(task, lease, agent.Result{}, err), errors.Join(err, heartbeatErr)
 	}
@@ -1050,10 +1051,44 @@ func combineExecutionErrors(runErr, heartbeatErr error) error {
 	if heartbeatErr == nil {
 		return runErr
 	}
-	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, heartbeatErr) {
-		return errors.Join(heartbeatErr, runErr)
+	if runErr == nil || onlyContextCanceled(runErr) {
+		return heartbeatErr
 	}
-	return heartbeatErr
+	if errors.Is(runErr, heartbeatErr) {
+		return runErr
+	}
+	return errors.Join(heartbeatErr, runErr)
+}
+
+func onlyContextCanceled(err error) bool {
+	if err == nil || !errors.Is(err, context.Canceled) {
+		return false
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return true
+	}
+	for _, inner := range joined.Unwrap() {
+		if inner != nil && !errors.Is(inner, context.Canceled) {
+			return false
+		}
+	}
+	return true
+}
+
+func leaseRenewalPulse(expiresAt time.Time, ttl time.Duration, heartbeat func(context.Context) error) func(context.Context) error {
+	current := expiresAt
+	return func(ctx context.Context) error {
+		next := time.Now().UTC().Add(ttl)
+		if !next.After(current) {
+			return nil
+		}
+		if err := heartbeat(ctx); err != nil {
+			return err
+		}
+		current = next
+		return nil
+	}
 }
 
 func pulseLeaseHeartbeat(ctx context.Context, pulse func(context.Context) error) error {
