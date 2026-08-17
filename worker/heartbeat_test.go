@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,19 +136,6 @@ func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("pulseLeaseHeartbeat() error = %v, want nil after cancel", err)
-	}
-}
-
-func TestIgnoreInactiveLeaseHeartbeat(t *testing.T) {
-	if err := ignoreInactiveLeaseHeartbeat(api.ErrLeaseNotActive); err != nil {
-		t.Fatalf("ignoreInactiveLeaseHeartbeat(ErrLeaseNotActive) = %v", err)
-	}
-	if err := ignoreInactiveLeaseHeartbeat(fmt.Errorf("worker: lease heartbeat failed: %w", api.ErrLeaseNotActive)); err != nil {
-		t.Fatalf("ignoreInactiveLeaseHeartbeat(wrapped) = %v", err)
-	}
-	want := errors.New("store down")
-	if err := ignoreInactiveLeaseHeartbeat(want); !errors.Is(err, want) {
-		t.Fatalf("ignoreInactiveLeaseHeartbeat(other) = %v, want %v", err, want)
 	}
 }
 

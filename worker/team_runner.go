@@ -44,13 +44,13 @@ func (r TeamRunner) Start(ctx context.Context, runID string) (multiagent.DriveRe
 		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
 	}
 	if _, err := r.loadState(execCtx, runID); err == nil {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(api.ErrIdempotencyConflict, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(api.ErrIdempotencyConflict, stopHeartbeat()))
 	} else if !errors.Is(err, api.ErrNotFound) {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, stopHeartbeat()))
 	}
 	state := multiagent.TeamState{RunID: runID}
 	if err := r.saveState(execCtx, state, false); err != nil {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, stopHeartbeat()))
 	}
 	return r.drive(ctx, execCtx, stopHeartbeat, state, lease)
 }
@@ -140,7 +140,7 @@ func (r TeamRunner) drive(
 		opts.InitialState = &state
 		result, driveErr = multiagent.Drive(execCtx, state.RunID, r.Team.Scheduler, executor, opts)
 	}
-	heartbeatErr := ignoreInactiveLeaseHeartbeat(stopHeartbeat())
+	heartbeatErr := stopHeartbeat()
 	if heartbeatErr != nil {
 		driveErr = errors.Join(driveErr, heartbeatErr)
 	}

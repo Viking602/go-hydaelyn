@@ -169,7 +169,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		if heartbeatStopped {
 			return
 		}
-		if stopErr := ignoreInactiveLeaseHeartbeat(stopHeartbeat()); stopErr != nil {
+		if stopErr := stopHeartbeat(); stopErr != nil {
 			err = errors.Join(err, stopErr)
 		}
 	}()
@@ -194,7 +194,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		heartbeatErr := stopHeartbeat()
 		heartbeatStopped = true
 		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
-		return failedExecutionOutcome(task, lease, agent.Result{}, err), errors.Join(err, ignoreInactiveLeaseHeartbeat(heartbeatErr))
+		return failedExecutionOutcome(task, lease, agent.Result{}, err), errors.Join(err, heartbeatErr)
 	}
 	started := time.Now()
 	result, runErr := w.runCheckpointedTask(
@@ -207,17 +207,22 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	// SingleRunner suspend/cancel causes or block the durable report.
 	heartbeatErr := stopHeartbeat()
 	heartbeatStopped = true
+	// A completed model turn can survive execCtx cancel. If the lease was
+	// lost or the heartbeat store failed, do not submit a success report.
+	if runErr == nil && heartbeatErr != nil {
+		runErr = heartbeatErr
+	}
 	if runErr != nil {
 		outcome, handled, outcomeErr := w.executionErrorOutcome(
 			ctx, task, lease, result, runErr, started,
 		)
 		leaseHandled = handled
-		return outcome, errors.Join(outcomeErr, ignoreInactiveLeaseHeartbeat(heartbeatErr))
+		return outcome, errors.Join(outcomeErr, heartbeatErr)
 	}
 
 	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
 	if err != nil {
-		return failedExecutionOutcome(task, lease, result, err), errors.Join(err, ignoreInactiveLeaseHeartbeat(heartbeatErr))
+		return failedExecutionOutcome(task, lease, result, err), err
 	}
 	return ExecutionOutcome{
 		State:   ExecutionCompleted,
@@ -225,7 +230,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		TaskID:  task.ID,
 		LeaseID: lease.ID,
 		Result:  result,
-	}, ignoreInactiveLeaseHeartbeat(heartbeatErr)
+	}, nil
 }
 
 func (w AgentWorker) runCheckpointedTask(
@@ -1050,13 +1055,6 @@ func pulseLeaseHeartbeat(ctx context.Context, pulse func(context.Context) error)
 		return err
 	}
 	return nil
-}
-
-func ignoreInactiveLeaseHeartbeat(err error) error {
-	if err == nil || errors.Is(err, api.ErrLeaseNotActive) {
-		return nil
-	}
-	return err
 }
 
 func tickLeaseHeartbeat(ctx context.Context, ttl time.Duration, pulse func(context.Context) error) error {
