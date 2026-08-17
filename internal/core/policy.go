@@ -20,11 +20,7 @@ func (p messagePolicyAdapter) Authorize(_ context.Context, request model.PolicyR
 	if p.check == nil || request.Message == nil {
 		return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
 	}
-	decision := p.check(*request.Message)
-	if decision.Effect == "" {
-		decision.Effect = model.PolicyEffectAllow
-	}
-	return decision, nil
+	return p.check(*request.Message), nil
 }
 
 func requestRunID(request model.PolicyRequest) string {

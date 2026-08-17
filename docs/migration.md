@@ -1,5 +1,16 @@
 # Migration Notes
 
+## Empty policy Effect is denied
+
+A `PolicyEngine` that returns `(PolicyDecision{}, nil)` or any empty or
+unknown `Effect` is now denied with reason `policy returned an unknown
+effect`. The runner previously rewrote an empty Effect to `allow`. Hosts
+that omitted `Effect` on an allow decision must set
+`Effect: api.PolicyEffectAllow` (or `policy.EffectAllow`) explicitly.
+
+`policy.Chain` applies the same rule: an engine that returns an empty
+Effect fails closed instead of being treated as allow.
+
 ## OpenAI provider default: Responses API
 
 An empty `openai.Config.WireAPI` now selects `/responses` instead of

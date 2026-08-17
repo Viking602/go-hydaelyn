@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,23 @@ func TestChainPreservesDistinctSelectorObligations(t *testing.T) {
 	}
 	if len(decision.Obligations) != 2 {
 		t.Fatalf("combined obligations = %#v, want both selector restrictions", decision.Obligations)
+	}
+}
+
+func TestChainFailsClosedOnEmptyEffect(t *testing.T) {
+	engine := NewChain(EngineFunc(func(context.Context, Request) (Decision, error) {
+		return Decision{}, nil
+	}))
+
+	decision, err := engine.Authorize(context.Background(), Request{Operation: OperationToolCall})
+	if err == nil {
+		t.Fatal("Authorize() error = nil, want unknown-effect failure")
+	}
+	if !strings.Contains(err.Error(), `unknown effect ""`) {
+		t.Fatalf("Authorize() error = %v, want unknown empty effect", err)
+	}
+	if decision.Effect != EffectDeny {
+		t.Fatalf("decision effect = %q, want deny", decision.Effect)
 	}
 }
 

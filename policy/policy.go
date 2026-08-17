@@ -62,6 +62,7 @@ func (f EngineFunc) Authorize(ctx context.Context, request Request) (Decision, e
 
 // Chain evaluates every engine and combines the decisions deterministically.
 // Effects use the precedence abort > deny > require_approval > pause > allow.
+// An empty or unknown Effect is rejected as malformed and fails closed.
 type Chain struct {
 	Engines []Engine
 }
@@ -93,9 +94,6 @@ func authorizeEngine(ctx context.Context, engine Engine, index int, request Requ
 	decision, err := engine.Authorize(ctx, request)
 	if err != nil {
 		return Decision{}, fmt.Errorf("policy: engine %d: %w", index, err)
-	}
-	if decision.Effect == "" {
-		decision.Effect = EffectAllow
 	}
 	if effectRank(decision.Effect) < 0 {
 		return Decision{}, fmt.Errorf("policy: engine %d returned unknown effect %q", index, decision.Effect)

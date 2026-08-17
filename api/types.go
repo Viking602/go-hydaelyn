@@ -412,6 +412,8 @@ const (
 	PolicyTargetTrace           PolicyObligationTarget = "trace"
 )
 
+// PolicyDecision is the authorization result for one request.
+// An empty or unknown Effect is denied as malformed policy data.
 type PolicyDecision struct {
 	DecisionID       string             `json:"decisionId"`
 	Effect           PolicyEffect       `json:"effect"`
