@@ -1063,19 +1063,43 @@ func combineExecutionErrors(runErr, heartbeatErr error) error {
 }
 
 func onlyContextCanceled(err error) bool {
-	if err == nil || !errors.Is(err, context.Canceled) {
+	if err == nil {
 		return false
 	}
-	joined, ok := err.(interface{ Unwrap() []error })
-	if !ok {
+	var failure *agent.AgentFailure
+	if errors.As(err, &failure) && failure != nil {
+		return false
+	}
+	return canceledLeavesOnly(err)
+}
+
+func canceledLeavesOnly(err error) bool {
+	if err == nil {
 		return true
 	}
-	for _, inner := range joined.Unwrap() {
-		if inner != nil && !errors.Is(inner, context.Canceled) {
-			return false
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		leaves := multi.Unwrap()
+		if len(leaves) == 0 {
+			return errors.Is(err, context.Canceled)
+		}
+		sawLeaf := false
+		for _, inner := range leaves {
+			if inner == nil {
+				continue
+			}
+			sawLeaf = true
+			if !canceledLeavesOnly(inner) {
+				return false
+			}
+		}
+		return sawLeaf || errors.Is(err, context.Canceled)
+	}
+	if single, ok := err.(interface{ Unwrap() error }); ok {
+		if inner := single.Unwrap(); inner != nil {
+			return canceledLeavesOnly(inner)
 		}
 	}
-	return true
+	return errors.Is(err, context.Canceled)
 }
 
 func leaseStillActive(ctx context.Context, runner *venat.Runner, leaseID, holderID string) error {

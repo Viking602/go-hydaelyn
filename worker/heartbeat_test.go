@@ -155,6 +155,25 @@ func TestCombineExecutionErrorsPrefersHeartbeatOverCancel(t *testing.T) {
 	}
 }
 
+func TestOnlyContextCanceledWalksWrappedJoins(t *testing.T) {
+	recorderErr := errors.New("checkpoint recorder failed")
+	wrapped := (&agent.AgentFailure{
+		Kind:   agent.FailureKindEngineError,
+		Reason: "loop canceled",
+	}).WithCause(errors.Join(context.Canceled, recorderErr))
+	if onlyContextCanceled(wrapped) {
+		t.Fatal("AgentFailure wrapping Join(Canceled, recorder) must not be treated as pure cancel")
+	}
+	heartbeatErr := fmt.Errorf("worker: lease heartbeat failed: %w", api.ErrLeaseNotActive)
+	got := combineExecutionErrors(wrapped, heartbeatErr)
+	if !errors.Is(got, recorderErr) || !errors.Is(got, api.ErrLeaseNotActive) {
+		t.Fatalf("combineExecutionErrors() = %v, want recorder and heartbeat causes", got)
+	}
+	if report := failureReport(got); report.Kind == "cancelled" {
+		t.Fatalf("failureReport kind = %q, want engine/heartbeat classification", report.Kind)
+	}
+}
+
 func TestFailureReportOnlyMarksPureCancel(t *testing.T) {
 	if got := failureReport(context.Canceled).Kind; got != "cancelled" {
 		t.Fatalf("failureReport(Canceled).Kind = %q, want cancelled", got)
