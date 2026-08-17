@@ -3,10 +3,12 @@
 ## ProcessTool owns stdout/stderr pipes
 
 `tool/kit.ProcessTool` now creates parent-owned `os.Pipe` pairs, assigns the
-write ends to the child, closes those write ends after `Start`, copies until
-EOF, and only then calls `Wait`. The previous `StdoutPipe`/`StderrPipe` path
-could close the pipes under the readers during `Wait`. Hosts do not need to
-change call sites.
+write ends to the child, and closes those write ends after `Start`. Copies
+run concurrently with `Wait`. After the launched process exits, remaining
+output is drained for up to 100ms; a descendant that still holds stdout or
+stderr cannot block the tool. Cancellation sets an immediate read deadline.
+The previous `StdoutPipe`/`StderrPipe` path could close the pipes under the
+readers during `Wait`. Hosts do not need to change call sites.
 
 ## Read APIs fail closed
 
