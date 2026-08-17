@@ -70,9 +70,7 @@ func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, reques
 }
 
 func normalizePolicyDecision(request model.PolicyRequest, decision *model.PolicyDecision, now time.Time) error {
-	if decision.Effect == "" {
-		decision.Effect = model.PolicyEffectAllow
-	}
+	// Empty Effect is unknown, not allow: a zero PolicyDecision must fail closed.
 	if policyEffectPrecedence(decision.Effect) < 0 {
 		decision.Effect = model.PolicyEffectDeny
 		decision.Reason = "policy returned an unknown effect"
