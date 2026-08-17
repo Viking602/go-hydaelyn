@@ -39,19 +39,20 @@ func (r TeamRunner) Start(ctx context.Context, runID string) (multiagent.DriveRe
 	if err != nil {
 		return multiagent.DriveResult{}, err
 	}
-	if err := r.pulseSchedulerLease(ctx, lease); err != nil {
+	execCtx, stopHeartbeat, err := r.startSchedulerHeartbeat(ctx, lease)
+	if err != nil {
 		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
 	}
-	if _, err := r.loadState(ctx, runID); err == nil {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, api.ErrIdempotencyConflict)
+	if _, err := r.loadState(execCtx, runID); err == nil {
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(api.ErrIdempotencyConflict, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
 	} else if !errors.Is(err, api.ErrNotFound) {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
 	}
 	state := multiagent.TeamState{RunID: runID}
-	if err := r.saveState(ctx, state, false); err != nil {
-		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
+	if err := r.saveState(execCtx, state, false); err != nil {
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, errors.Join(err, ignoreInactiveLeaseHeartbeat(stopHeartbeat())))
 	}
-	return r.drive(ctx, state, lease)
+	return r.drive(ctx, execCtx, stopHeartbeat, state, lease)
 }
 
 func (r TeamRunner) Resume(ctx context.Context, runID string) (multiagent.DriveResult, error) {
@@ -93,19 +94,20 @@ func (r TeamRunner) Resume(ctx context.Context, runID string) (multiagent.DriveR
 	if err != nil {
 		return multiagent.DriveResult{}, err
 	}
-	return r.drive(ctx, checkpoint, lease)
+	execCtx, stopHeartbeat, err := r.startSchedulerHeartbeat(ctx, lease)
+	if err != nil {
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
+	}
+	return r.drive(ctx, execCtx, stopHeartbeat, checkpoint, lease)
 }
 
-func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease api.TaskExecutionLease) (multiagent.DriveResult, error) {
-	runCtx, cancel := context.WithCancel(ctx)
-	heartbeatDone := make(chan error, 1)
-	go func() {
-		err := r.heartbeatScheduler(runCtx, lease)
-		heartbeatDone <- err
-		if err != nil {
-			cancel()
-		}
-	}()
+func (r TeamRunner) drive(
+	ctx context.Context,
+	execCtx context.Context,
+	stopHeartbeat func() error,
+	state multiagent.TeamState,
+	lease api.TaskExecutionLease,
+) (multiagent.DriveResult, error) {
 	opts := r.Options
 	userCheckpoint := opts.AfterTick
 	opts.InitialState = &state
@@ -131,15 +133,14 @@ func (r TeamRunner) drive(ctx context.Context, state multiagent.TeamState, lease
 		DecorateEngine: r.DecorateEngine,
 		TTL:            r.TTL,
 	}
-	state, resumeErr := r.resumePendingInstances(runCtx, state, classes, executor)
+	state, resumeErr := r.resumePendingInstances(execCtx, state, classes, executor)
 	result := multiagent.DriveResult{State: state, Ticks: state.Tick}
 	driveErr := resumeErr
 	if driveErr == nil {
 		opts.InitialState = &state
-		result, driveErr = multiagent.Drive(runCtx, state.RunID, r.Team.Scheduler, executor, opts)
+		result, driveErr = multiagent.Drive(execCtx, state.RunID, r.Team.Scheduler, executor, opts)
 	}
-	cancel()
-	heartbeatErr := <-heartbeatDone
+	heartbeatErr := ignoreInactiveLeaseHeartbeat(stopHeartbeat())
 	if heartbeatErr != nil {
 		driveErr = errors.Join(driveErr, heartbeatErr)
 	}
@@ -332,8 +333,8 @@ func (r TeamRunner) pulseSchedulerLease(ctx context.Context, lease api.TaskExecu
 	})
 }
 
-func (r TeamRunner) heartbeatScheduler(ctx context.Context, lease api.TaskExecutionLease) error {
-	return runLeaseHeartbeat(ctx, r.schedulerTTL(), func(hbCtx context.Context) error {
+func (r TeamRunner) startSchedulerHeartbeat(ctx context.Context, lease api.TaskExecutionLease) (context.Context, func() error, error) {
+	return startLeaseHeartbeat(ctx, r.schedulerTTL(), func(hbCtx context.Context) error {
 		return r.pulseSchedulerLease(hbCtx, lease)
 	})
 }

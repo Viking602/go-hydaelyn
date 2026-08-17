@@ -135,7 +135,7 @@ func (w AgentWorker) ExecuteContinuing(ctx context.Context, req ExecuteEnvelopeR
 	}
 }
 
-func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (ExecutionOutcome, error) {
+func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (outcome ExecutionOutcome, err error) {
 	if err := w.validateExecuteEnvelope(); err != nil {
 		return ExecutionOutcome{}, err
 	}
@@ -166,8 +166,11 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	}
 	heartbeatStopped := false
 	defer func() {
-		if !heartbeatStopped {
-			_ = stopHeartbeat()
+		if heartbeatStopped {
+			return
+		}
+		if stopErr := ignoreInactiveLeaseHeartbeat(stopHeartbeat()); stopErr != nil {
+			err = errors.Join(err, stopErr)
 		}
 	}()
 	if req.OnLeaseAcquired != nil {
