@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -125,5 +126,68 @@ func TestExecuteEnvelopeHeartbeatsBeforeAckAndSurvivesShortTTL(t *testing.T) {
 	}
 	if completed.Status != api.TaskStatusCompleted {
 		t.Fatalf("task status = %s, want completed", completed.Status)
+	}
+}
+
+func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := pulseLeaseHeartbeat(ctx, func(context.Context) error {
+		return api.ErrLeaseNotActive
+	})
+	if err != nil {
+		t.Fatalf("pulseLeaseHeartbeat() error = %v, want nil after cancel", err)
+	}
+}
+
+func TestIgnoreInactiveLeaseHeartbeat(t *testing.T) {
+	if err := ignoreInactiveLeaseHeartbeat(api.ErrLeaseNotActive); err != nil {
+		t.Fatalf("ignoreInactiveLeaseHeartbeat(ErrLeaseNotActive) = %v", err)
+	}
+	if err := ignoreInactiveLeaseHeartbeat(fmt.Errorf("worker: lease heartbeat failed: %w", api.ErrLeaseNotActive)); err != nil {
+		t.Fatalf("ignoreInactiveLeaseHeartbeat(wrapped) = %v", err)
+	}
+	want := errors.New("store down")
+	if err := ignoreInactiveLeaseHeartbeat(want); !errors.Is(err, want) {
+		t.Fatalf("ignoreInactiveLeaseHeartbeat(other) = %v, want %v", err, want)
+	}
+}
+
+func TestExecuteEnvelopeCompletesWhenHeartbeatWouldOverlapReport(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID: "run-heartbeat-finalize", RootTaskID: "root", Request: "finish",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.CreateTask(ctx, api.CreateTaskCommand{
+		RunID: run.ID, TaskID: "task-heartbeat-finalize", Goal: "finish",
+		OwnerAgentID: "agent-a", WriteTargets: []string{"summary"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	envelope, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
+		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("DispatchTask() error = %v", err)
+	}
+	engine := agent.Engine{Provider: scripted.New([]provider.Event{
+		{Kind: provider.EventTextDelta, Text: "done"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+	})}
+	outcome, err := (AgentWorker{
+		Runner: runner, Engine: engine, AgentID: "agent-a", Model: "scripted",
+		TTL: 8 * time.Millisecond,
+	}).ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{Envelope: envelope, TTL: 8 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("ExecuteEnvelope() error = %v", err)
+	}
+	if outcome.State != ExecutionCompleted {
+		t.Fatalf("outcome.State = %q, want completed", outcome.State)
 	}
 }
