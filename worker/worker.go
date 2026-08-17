@@ -204,17 +204,10 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		execCtx, task, run, lease, engine, checkpoint, hasCheckpoint,
 		req.Messages, req.Sink, started,
 	)
-	// Stop the loop before any terminal report/release so an overlapping
-	// heartbeat cannot observe the released lease and poison a committed result.
-	// Finalize on the parent context so a heartbeat cancel does not hide
-	// SingleRunner suspend/cancel causes or block the durable report.
-	heartbeatErr := stopHeartbeat()
-	heartbeatStopped = true
-	// Heartbeat cancel of execCtx usually surfaces as context.Canceled from
-	// the engine. Prefer the heartbeat/store cause so the durable failure
-	// report is not stored as kind "cancelled".
-	runErr = combineExecutionErrors(runErr, heartbeatErr)
 	if runErr != nil {
+		heartbeatErr := stopHeartbeat()
+		heartbeatStopped = true
+		runErr = combineExecutionErrors(runErr, heartbeatErr)
 		outcome, handled, outcomeErr := w.executionErrorOutcome(
 			ctx, task, lease, result, runErr, started,
 		)
@@ -222,7 +215,27 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		return outcome, errors.Join(outcomeErr, heartbeatErr)
 	}
 
-	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
+	report, output, err := w.prepareSuccessReport(task, result)
+	if err != nil {
+		heartbeatErr := stopHeartbeat()
+		heartbeatStopped = true
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
+		return failedExecutionOutcome(task, lease, result, err), errors.Join(err, heartbeatErr)
+	}
+	if err := w.writeTaskOutput(execCtx, output); err != nil {
+		heartbeatErr := stopHeartbeat()
+		heartbeatStopped = true
+		err = combineExecutionErrors(err, heartbeatErr)
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
+		return failedExecutionOutcome(task, lease, result, err), errors.Join(err, heartbeatErr)
+	}
+	heartbeatErr := stopHeartbeat()
+	heartbeatStopped = true
+	if heartbeatErr != nil {
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, heartbeatErr)
+		return failedExecutionOutcome(task, lease, result, heartbeatErr), heartbeatErr
+	}
+	leaseHandled, err = w.commitSuccessReport(ctx, task, lease, report)
 	if err != nil {
 		return failedExecutionOutcome(task, lease, result, err), err
 	}
@@ -962,7 +975,7 @@ func (w AgentWorker) submitFailureReportHandled(ctx context.Context, task api.Ta
 	return w.submitFailure(ctx, task, lease, cause) == nil
 }
 
-func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lease api.TaskExecutionLease, result agent.Result) (bool, error) {
+func (w AgentWorker) prepareSuccessReport(task api.Task, result agent.Result) (api.TypedReport, api.BlackboardItem, error) {
 	summary := strings.TrimSpace(result.Text)
 	if summary == "" {
 		summary = "completed"
@@ -983,8 +996,7 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 	if len(result.Structured) > 0 {
 		structured := map[string]any{}
 		if err := json.Unmarshal(result.Structured, &structured); err != nil {
-			err = fmt.Errorf("worker: validated structured output is not a JSON object: %w", err)
-			return w.submitFailureReportHandled(ctx, task, lease, err), err
+			return api.TypedReport{}, api.BlackboardItem{}, fmt.Errorf("worker: validated structured output is not a JSON object: %w", err)
 		}
 		report.Structured = structured
 	}
@@ -998,9 +1010,10 @@ func (w AgentWorker) submitSuccessReport(ctx context.Context, task api.Task, lea
 		Key:        firstWriteTarget(task),
 		Payload:    summary,
 	}
-	if err := w.writeTaskOutput(ctx, output); err != nil {
-		return w.submitFailureReportHandled(ctx, task, lease, err), err
-	}
+	return report, output, nil
+}
+
+func (w AgentWorker) commitSuccessReport(ctx context.Context, task api.Task, lease api.TaskExecutionLease, report api.TypedReport) (bool, error) {
 	reportErr := w.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
