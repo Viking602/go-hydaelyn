@@ -1,5 +1,13 @@
 # Migration Notes
 
+## ProcessTool owns stdout/stderr pipes
+
+`tool/kit.ProcessTool` now creates parent-owned `os.Pipe` pairs, assigns the
+write ends to the child, closes those write ends after `Start`, copies until
+EOF, and only then calls `Wait`. The previous `StdoutPipe`/`StderrPipe` path
+could close the pipes under the readers during `Wait`. Hosts do not need to
+change call sites.
+
 ## Read APIs fail closed
 
 `ReadyTasks`, `ReadyTasksContext`, `ActiveLeaseCount`,
