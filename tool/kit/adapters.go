@@ -189,9 +189,10 @@ func waitAndUnblockPipes(ctx context.Context, command *exec.Cmd, stdout, stderr 
 	go func() { waitErrs <- command.Wait() }()
 
 	var waitErr error
-	deadline := time.Now().Add(100 * time.Millisecond)
+	var deadline time.Time
 	select {
 	case waitErr = <-waitErrs:
+		deadline = time.Now().Add(100 * time.Millisecond)
 	case <-ctx.Done():
 		deadline = time.Now()
 		select {

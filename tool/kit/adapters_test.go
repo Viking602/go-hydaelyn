@@ -161,6 +161,32 @@ func TestProcessToolForwardsStdinJSON(t *testing.T) {
 	}
 }
 
+func TestProcessToolCapturesOutputAfterLongRunningChild(t *testing.T) {
+	const payloadSize = 64 << 10
+	if os.Getenv("VENAT_PROCESS_LONG_HELPER") == "1" {
+		time.Sleep(250 * time.Millisecond)
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("z"), payloadSize))
+		os.Exit(0)
+	}
+
+	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestProcessToolCapturesOutputAfterLongRunningChild$"},
+		Env:     append(os.Environ(), "VENAT_PROCESS_LONG_HELPER=1"),
+	})
+	result, err := driver.Execute(context.Background(), tool.Call{
+		ID:        "call-process-long",
+		Name:      "run",
+		Arguments: json.RawMessage(`{}`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got := len(result.Content); got != payloadSize {
+		t.Fatalf("captured %d bytes after long-running child, want %d", got, payloadSize)
+	}
+}
+
 func TestProcessToolReturnsAfterChildExitsWithInheritedPipes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("inherited-pipe orphan test uses a Unix shell")
