@@ -55,7 +55,7 @@ go get github.com/Viking602/venat@latest
 ```
 
 Requires Go 1.25+.
-Repository development and release gates pin Go 1.25.12.
+Repository development and release gates pin Go 1.25.13.
 
 ## Agent Skills
 
