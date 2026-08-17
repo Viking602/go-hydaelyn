@@ -56,7 +56,7 @@ func (r *Runtime) ListActionAttempts(ctx context.Context, selector model.ActionA
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.ActionAttempts().ListActionAttempts(ctx, selector)
 }
 

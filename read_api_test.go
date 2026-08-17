@@ -11,7 +11,7 @@ import (
 func TestPublicReadAPIsFailClosedOnStoreBegin(t *testing.T) {
 	ctx := context.Background()
 	errBoom := errors.New("store begin failed")
-	runner := NewDevelopment(api.Config{StoreProvider: failingBeginAPIProvider{err: errBoom}})
+	runner := NewDevelopment(api.Config{StoreProvider: failingBeginAPIProvider{err: errBoom, supportsListPending: true}})
 
 	if tasks, err := runner.ReadyTasksContext(ctx, "run-1"); tasks != nil || !errors.Is(err, errBoom) {
 		t.Fatalf("ReadyTasksContext() = %#v, %v, want nil, %v", tasks, err, errBoom)
@@ -39,10 +39,30 @@ func TestPublicReadAPIsFailClosedOnStoreBegin(t *testing.T) {
 	}
 }
 
+func TestResumeTokensRejectsStoreWithoutListPending(t *testing.T) {
+	runner := NewDevelopment(api.Config{StoreProvider: failingBeginAPIProvider{
+		err:                 errors.New("begin should not run"),
+		supportsListPending: false,
+	}})
+	if tokens, err := runner.ResumeTokens(); tokens != nil || !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("ResumeTokens() = %#v, %v, want nil, %v", tokens, err, api.ErrInvalidConfiguration)
+	}
+	if tokens, err := runner.PendingResumeTokens(context.Background(), api.ResumeTokenSelector{}); tokens != nil || !errors.Is(err, api.ErrInvalidConfiguration) {
+		t.Fatalf("PendingResumeTokens() = %#v, %v, want nil, %v", tokens, err, api.ErrInvalidConfiguration)
+	}
+}
+
 type failingBeginAPIProvider struct {
-	err error
+	err                 error
+	supportsListPending bool
 }
 
 func (p failingBeginAPIProvider) Begin(context.Context) (api.UnitOfWork, error) {
 	return nil, p.err
+}
+
+func (p failingBeginAPIProvider) Capabilities(context.Context) (api.StoreCapabilities, error) {
+	caps := api.DefaultStoreCapabilities()
+	caps.SupportsListPending = p.supportsListPending
+	return caps, nil
 }

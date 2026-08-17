@@ -12,9 +12,10 @@ Hosts that treated a missing error as "no ready tasks / no lease / no outbox /
 no resume tokens" must check the error. `0` from `ActiveLeaseCount` now means
 the store confirmed there is no active lease.
 
-`ResumeTokens` loads pending tokens from the configured store via
-`PendingResumeTokens`. Prefer `PendingResumeTokens` for new crash-recovery
-code.
+`ResumeTokens` and `PendingResumeTokens` load pending tokens from the
+configured store. Providers that do not advertise `SupportsListPending`
+return `ErrInvalidConfiguration` instead of an empty map. Prefer
+`PendingResumeTokens` for new crash-recovery code.
 
 ## Lease heartbeat starts at acquire
 

@@ -20,7 +20,7 @@ func (r *Runtime) PreviewAdmission(ctx context.Context, request model.AdmissionR
 	if err != nil {
 		return model.AdmissionDecision{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.admissionStore(ctx, uow)
 	if err != nil {
 		return model.AdmissionDecision{}, err
@@ -204,7 +204,7 @@ func (r *Runtime) LoadAdmissionReservation(ctx context.Context, id string) (mode
 	if err != nil {
 		return model.AdmissionReservation{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.admissionStore(ctx, uow)
 	if err != nil {
 		return model.AdmissionReservation{}, err
@@ -217,7 +217,7 @@ func (r *Runtime) ListAdmissionReservations(ctx context.Context, selector model.
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.admissionStore(ctx, uow)
 	if err != nil {
 		return nil, err

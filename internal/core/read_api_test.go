@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 	"github.com/Viking602/venat/internal/memory"
 )
 
 func TestReadAPIsFailClosedOnStoreBegin(t *testing.T) {
 	ctx := context.Background()
 	errBoom := errors.New("store begin failed")
-	rt := NewRuntime(Config{StoreProvider: failingBeginStoreProvider{err: errBoom}})
+	rt := NewRuntime(Config{StoreProvider: failingBeginStoreProvider{err: errBoom, supportsListPending: true}})
 
 	if tasks, err := rt.ReadyTasks(ctx, "run-1"); tasks != nil || !errors.Is(err, errBoom) {
 		t.Fatalf("ReadyTasks() = %#v, %v, want nil, %v", tasks, err, errBoom)
@@ -25,6 +26,42 @@ func TestReadAPIsFailClosedOnStoreBegin(t *testing.T) {
 	}
 	if tokens, err := rt.ResumeTokens(ctx); tokens != nil || !errors.Is(err, errBoom) {
 		t.Fatalf("ResumeTokens() = %#v, %v, want nil, %v", tokens, err, errBoom)
+	}
+}
+
+func TestResumeTokensRejectsStoreWithoutListPending(t *testing.T) {
+	ctx := context.Background()
+	rt := NewRuntime(Config{StoreProvider: failingBeginStoreProvider{
+		err:                 errors.New("begin should not run"),
+		supportsListPending: false,
+	}})
+	if tokens, err := rt.ResumeTokens(ctx); tokens != nil || !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("ResumeTokens() = %#v, %v, want nil, %v", tokens, err, ErrInvalidConfiguration)
+	}
+	if tokens, err := rt.PendingResumeTokens(ctx, model.ResumeTokenSelector{}); tokens != nil || !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("PendingResumeTokens() = %#v, %v, want nil, %v", tokens, err, ErrInvalidConfiguration)
+	}
+}
+
+func TestReadAPIsFailClosedOnReadCleanup(t *testing.T) {
+	ctx := context.Background()
+	errBoom := errors.New("read rollback failed")
+	rt := NewRuntime(Config{StoreProvider: failingRollbackStoreProvider{
+		inner: memory.NewProvider(),
+		err:   errBoom,
+	}})
+
+	if _, err := rt.ReadyTasks(ctx, "run-1"); !errors.Is(err, errBoom) {
+		t.Fatalf("ReadyTasks() error = %v, want %v", err, errBoom)
+	}
+	if _, err := rt.ActiveLeaseCount(ctx, "run-1", "task-1"); !errors.Is(err, errBoom) {
+		t.Fatalf("ActiveLeaseCount() error = %v, want %v", err, errBoom)
+	}
+	if _, err := rt.ResponseOutbox(ctx, "run-1"); !errors.Is(err, errBoom) {
+		t.Fatalf("ResponseOutbox() error = %v, want %v", err, errBoom)
+	}
+	if _, err := rt.ResumeTokens(ctx); !errors.Is(err, errBoom) {
+		t.Fatalf("ResumeTokens() error = %v, want %v", err, errBoom)
 	}
 }
 
@@ -51,16 +88,25 @@ func TestReadAPIsFailClosedOnStoreRead(t *testing.T) {
 }
 
 type failingBeginStoreProvider struct {
-	err error
+	err                 error
+	supportsListPending bool
 }
 
 func (p failingBeginStoreProvider) Begin(context.Context) (UnitOfWork, error) {
 	return nil, p.err
 }
 
+func (p failingBeginStoreProvider) Capabilities(context.Context) (ports.StoreCapabilities, error) {
+	return ports.StoreCapabilities{SupportsListPending: p.supportsListPending}, nil
+}
+
 type failingReadStoreProvider struct {
 	inner StoreProvider
 	err   error
+}
+
+func (p failingReadStoreProvider) Capabilities(ctx context.Context) (ports.StoreCapabilities, error) {
+	return p.inner.(CapabilityReporter).Capabilities(ctx)
 }
 
 func (p failingReadStoreProvider) Begin(ctx context.Context) (UnitOfWork, error) {
@@ -126,4 +172,31 @@ type failingResumeTokenStore struct {
 
 func (s failingResumeTokenStore) ListPending(context.Context, model.ResumeTokenSelector) ([]ResumeToken, error) {
 	return nil, s.err
+}
+
+type failingRollbackStoreProvider struct {
+	inner StoreProvider
+	err   error
+}
+
+func (p failingRollbackStoreProvider) Capabilities(ctx context.Context) (ports.StoreCapabilities, error) {
+	return p.inner.(CapabilityReporter).Capabilities(ctx)
+}
+
+func (p failingRollbackStoreProvider) Begin(ctx context.Context) (UnitOfWork, error) {
+	uow, err := p.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return failingRollbackUnitOfWork{UnitOfWork: uow, err: p.err}, nil
+}
+
+type failingRollbackUnitOfWork struct {
+	UnitOfWork
+	err error
+}
+
+func (u failingRollbackUnitOfWork) Rollback(ctx context.Context) error {
+	_ = u.UnitOfWork.Rollback(ctx)
+	return u.err
 }

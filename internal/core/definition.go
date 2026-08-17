@@ -40,7 +40,7 @@ func (r *Runtime) LoadAgentDefinitionSnapshot(ctx context.Context, definitionID,
 	if err != nil {
 		return model.AgentDefinitionSnapshot{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.agentDefinitionStore(ctx, uow)
 	if err != nil {
 		return model.AgentDefinitionSnapshot{}, err
@@ -54,7 +54,7 @@ func (r *Runtime) ListAgentDefinitionSnapshots(ctx context.Context, selector mod
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.agentDefinitionStore(ctx, uow)
 	if err != nil {
 		return nil, err

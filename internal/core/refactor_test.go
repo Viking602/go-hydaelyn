@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/internal/core/ports"
 )
 
 func TestCommandPipelinePolicyStoreAndTraceContracts(t *testing.T) {
@@ -986,6 +987,10 @@ func (p *recordingPolicy) Authorize(_ context.Context, request PolicyRequest) (P
 
 type recordingStoreProvider struct {
 	uow *recordingUnitOfWork
+}
+
+func (p recordingStoreProvider) Capabilities(ctx context.Context) (ports.StoreCapabilities, error) {
+	return p.uow.store.StoreCapabilities(ctx)
 }
 
 func (p recordingStoreProvider) Begin(ctx context.Context) (UnitOfWork, error) {

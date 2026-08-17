@@ -37,7 +37,7 @@ func (r *Runtime) QueryUsage(ctx context.Context, sel model.UsageSelector) ([]mo
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.UsageRecords().QueryUsage(ctx, sel)
 }
 
@@ -47,6 +47,6 @@ func (r *Runtime) SumUsageCredits(ctx context.Context, sel model.UsageSelector) 
 	if err != nil {
 		return 0, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.UsageRecords().SumCredits(ctx, sel)
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	approvalsvc "github.com/Viking602/venat/internal/approval"
 	"github.com/Viking602/venat/internal/core/model"
@@ -61,18 +62,26 @@ func (r *Runtime) newApprovalForTask(task model.Task, reason, requester string) 
 // crash-recovery enumeration primitive: a restarting host lists pending
 // tokens and feeds each to RecoverResumeToken instead of hand-rolling
 // store access.
-func (r *Runtime) PendingResumeTokens(ctx context.Context, sel model.ResumeTokenSelector) ([]model.ResumeToken, error) {
+func (r *Runtime) PendingResumeTokens(ctx context.Context, sel model.ResumeTokenSelector) (tokens []model.ResumeToken, err error) {
+	capabilities, err := r.StoreCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !capabilities.SupportsListPending {
+		return nil, fmt.Errorf("resume token enumeration is not supported: %w", model.ErrInvalidConfiguration)
+	}
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer joinReadCleanup(&err, done)
 	return uow.ResumeTokens().ListPending(ctx, sel)
 }
 
 // ResumeTokens returns unconsumed resume tokens keyed by TokenID.
 // Store errors are returned; an empty map means the store confirmed there
-// are no pending tokens. Prefer PendingResumeTokens for new call sites.
+// are no pending tokens. Stores that do not advertise SupportsListPending
+// return ErrInvalidConfiguration. Prefer PendingResumeTokens for new call sites.
 func (r *Runtime) ResumeTokens(ctx context.Context) (map[string]model.ResumeToken, error) {
 	tokens, err := r.PendingResumeTokens(ctx, model.ResumeTokenSelector{})
 	if err != nil {
