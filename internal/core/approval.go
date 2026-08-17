@@ -69,3 +69,21 @@ func (r *Runtime) PendingResumeTokens(ctx context.Context, sel model.ResumeToken
 	defer done()
 	return uow.ResumeTokens().ListPending(ctx, sel)
 }
+
+// ResumeTokens returns unconsumed resume tokens keyed by TokenID.
+// Store errors are returned; an empty map means the store confirmed there
+// are no pending tokens. Prefer PendingResumeTokens for new call sites.
+func (r *Runtime) ResumeTokens(ctx context.Context) (map[string]model.ResumeToken, error) {
+	tokens, err := r.PendingResumeTokens(ctx, model.ResumeTokenSelector{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]model.ResumeToken, len(tokens))
+	for _, token := range tokens {
+		if token.TokenID == "" {
+			continue
+		}
+		out[token.TokenID] = token
+	}
+	return out, nil
+}

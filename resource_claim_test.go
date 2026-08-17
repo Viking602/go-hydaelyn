@@ -40,8 +40,12 @@ func TestAcquireTaskExecutionWithClaims_AtomicLeaseLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if blockedTask.Status != api.TaskStatusDispatched || blockedTask.Attempts != 0 || runner.ActiveLeaseCountContext(ctx, secondTask.RunID, secondTask.ID) != 0 {
-		t.Fatalf("claim conflict partially acquired lease: task=%#v active=%d", blockedTask, runner.ActiveLeaseCountContext(ctx, secondTask.RunID, secondTask.ID))
+	active, activeErr := runner.ActiveLeaseCountContext(ctx, secondTask.RunID, secondTask.ID)
+	if activeErr != nil {
+		t.Fatalf("ActiveLeaseCountContext() error = %v", activeErr)
+	}
+	if blockedTask.Status != api.TaskStatusDispatched || blockedTask.Attempts != 0 || active != 0 {
+		t.Fatalf("claim conflict partially acquired lease: task=%#v active=%d", blockedTask, active)
 	}
 
 	if err := runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
@@ -140,8 +144,10 @@ func TestAcquireTaskExecutionWithClaims_RejectsNonTransactionalProvider(t *testi
 	}
 	if loaded, loadErr := runner.Task(ctx, task.RunID, task.ID); loadErr != nil {
 		t.Fatal(loadErr)
-	} else if loaded.Status != api.TaskStatusDispatched || runner.ActiveLeaseCountContext(ctx, task.RunID, task.ID) != 0 {
-		t.Fatalf("nontransactional store partially acquired execution: task=%#v", loaded)
+	} else if active, activeErr := runner.ActiveLeaseCountContext(ctx, task.RunID, task.ID); activeErr != nil {
+		t.Fatalf("ActiveLeaseCountContext() error = %v", activeErr)
+	} else if loaded.Status != api.TaskStatusDispatched || active != 0 {
+		t.Fatalf("nontransactional store partially acquired execution: task=%#v active=%d", loaded, active)
 	}
 }
 
@@ -200,8 +206,12 @@ func TestAcquireTaskExecutionWithClaims_FailsClosedWhenStorageLacksCapability(t 
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if loaded.Status != api.TaskStatusDispatched || runner.ActiveLeaseCountContext(ctx, task.RunID, task.ID) != 0 {
-		t.Fatalf("unsupported store partially acquired execution: task=%#v", loaded)
+	active, activeErr := runner.ActiveLeaseCountContext(ctx, task.RunID, task.ID)
+	if activeErr != nil {
+		t.Fatalf("ActiveLeaseCountContext() error = %v", activeErr)
+	}
+	if loaded.Status != api.TaskStatusDispatched || active != 0 {
+		t.Fatalf("unsupported store partially acquired execution: task=%#v active=%d", loaded, active)
 	}
 }
 

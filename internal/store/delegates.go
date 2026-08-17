@@ -11,24 +11,21 @@ import (
 // Options wires Delegates to the runtime's selected store provider without
 // making this package depend on internal/core.
 type Options struct {
-	BeginWrite   func(context.Context) (ports.UnitOfWork, error)
-	BeginRead    func(context.Context) (ports.UnitOfWork, func(), error)
-	ResumeTokens func() map[string]model.ResumeToken
+	BeginWrite func(context.Context) (ports.UnitOfWork, error)
+	BeginRead  func(context.Context) (ports.UnitOfWork, func(), error)
 }
 
 // Delegates implements the store-facing runtime methods by delegating through
 // the configured UnitOfWork boundary.
 type Delegates struct {
-	beginWrite   func(context.Context) (ports.UnitOfWork, error)
-	beginRead    func(context.Context) (ports.UnitOfWork, func(), error)
-	resumeTokens func() map[string]model.ResumeToken
+	beginWrite func(context.Context) (ports.UnitOfWork, error)
+	beginRead  func(context.Context) (ports.UnitOfWork, func(), error)
 }
 
 func NewDelegates(options Options) *Delegates {
 	return &Delegates{
-		beginWrite:   options.BeginWrite,
-		beginRead:    options.BeginRead,
-		resumeTokens: options.ResumeTokens,
+		beginWrite: options.BeginWrite,
+		beginRead:  options.BeginRead,
 	}
 }
 
@@ -129,16 +126,6 @@ func (d *Delegates) ListMessages(ctx context.Context, runID string) ([]model.Use
 	}
 	defer done()
 	return uow.UserMessages().ListMessages(ctx, runID)
-}
-
-// ResumeTokens returns a snapshot of all current resume tokens keyed by tokenID.
-// It is intentionally injected because the public store contract has no token
-// listing method.
-func (d *Delegates) ResumeTokens() map[string]model.ResumeToken {
-	if d.resumeTokens == nil {
-		return map[string]model.ResumeToken{}
-	}
-	return d.resumeTokens()
 }
 
 func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]model.UserMessage, error) {

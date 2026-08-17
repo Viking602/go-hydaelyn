@@ -103,8 +103,8 @@ func TestExecuteEnvelopeHeartbeatsBeforeAckAndSurvivesShortTTL(t *testing.T) {
 	if _, err := runner.Recover(ctx, run.ID); err != nil {
 		t.Fatalf("Recover() error = %v", err)
 	}
-	if got := runner.ActiveLeaseCountContext(ctx, run.ID, task.ID); got != 1 {
-		t.Fatalf("active leases after Recover() = %d, want 1", got)
+	if got, err := runner.ActiveLeaseCountContext(ctx, run.ID, task.ID); err != nil || got != 1 {
+		t.Fatalf("active leases after Recover() = %d, err=%v, want 1", got, err)
 	}
 	stolen, acquired, err := runner.AcquireTaskExecution(ctx, api.AcquireTaskExecutionCommand{
 		RunID: run.ID, TaskID: task.ID, EnvelopeID: envelope.ID,

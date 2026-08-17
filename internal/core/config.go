@@ -74,14 +74,6 @@ func NewRuntime(config Config) *Runtime {
 	rt.Delegates = storedel.NewDelegates(storedel.Options{
 		BeginWrite: rt.beginWriteUoW,
 		BeginRead:  rt.beginReadUoW,
-		ResumeTokens: func() map[string]model.ResumeToken {
-			snap := rt.memProvider.CommittedSnapshot()
-			result := make(map[string]model.ResumeToken, len(snap.ResumeTokens))
-			for k, v := range snap.ResumeTokens {
-				result[k] = v
-			}
-			return result
-		},
 	})
 	rt.pipeline = defaultPipeline(config.Pipeline)
 	rt.registerUoWCommandHandlers()

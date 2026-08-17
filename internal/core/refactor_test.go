@@ -66,6 +66,17 @@ func TestStoreFirstPublicReadsUseConfiguredStoreProvider(t *testing.T) {
 	if err := durable.store.WriteItem(ctx, BlackboardItem{ID: "bb-read", RunID: run.ID, TaskID: task.ID, Source: SourceIdentity{Type: SourceSystem, ID: "seed"}, Visibility: BlackboardVisibilityAgentVisible, Key: "seed", Payload: "item"}); err != nil {
 		t.Fatalf("WriteItem(seed) error = %v", err)
 	}
+	seedUoW, err := durable.store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin(seed token) error = %v", err)
+	}
+	if err := seedUoW.ResumeTokens().SaveResumeToken(ctx, ResumeToken{TokenID: "tok-read", RunID: run.ID, TaskID: task.ID}); err != nil {
+		_ = seedUoW.Rollback(ctx)
+		t.Fatalf("SaveResumeToken(seed) error = %v", err)
+	}
+	if err := seedUoW.Commit(ctx); err != nil {
+		t.Fatalf("Commit(seed token) error = %v", err)
+	}
 	if got, err := rt.Run(ctx, run.ID); err != nil || got.ID != run.ID {
 		t.Fatalf("Run() read from store = %#v err=%v", got, err)
 	}
@@ -75,10 +86,10 @@ func TestStoreFirstPublicReadsUseConfiguredStoreProvider(t *testing.T) {
 	if events, err := rt.RunEvents(ctx, run.ID); err != nil || len(events) == 0 {
 		t.Fatalf("RunEvents() read from store events=%#v err=%v", events, err)
 	}
-	if ready := rt.ReadyTasks(context.Background(), run.ID); !containsTask(ready, task.ID) {
+	if ready := mustReadyTasks(context.Background(), t, rt, run.ID); !containsTask(ready, task.ID) {
 		t.Fatalf("ReadyTasks() did not read store task: %#v", ready)
 	}
-	if outbox := rt.ResponseOutbox(context.Background(), run.ID); len(outbox) != 1 || outbox[0].ID != "msg-read" {
+	if outbox := mustResponseOutbox(context.Background(), t, rt, run.ID); len(outbox) != 1 || outbox[0].ID != "msg-read" {
 		t.Fatalf("ResponseOutbox() read from store = %#v", outbox)
 	}
 	if spans := rt.TraceSpans(context.Background(), run.ID); !containsSpan(spans, "seed") {
@@ -86,6 +97,9 @@ func TestStoreFirstPublicReadsUseConfiguredStoreProvider(t *testing.T) {
 	}
 	if items, err := rt.SelectItems(ctx, run.ID, BlackboardSelector{Keys: []string{"seed"}}); err != nil || len(items) != 1 || items[0].ID != "bb-read" {
 		t.Fatalf("SelectItems() read from store items=%#v err=%v", items, err)
+	}
+	if tokens := mustResumeTokens(ctx, t, rt); tokens["tok-read"].TokenID != "tok-read" {
+		t.Fatalf("ResumeTokens() did not read store token: %#v", tokens)
 	}
 }
 
@@ -186,11 +200,11 @@ func TestPolicyAppliesToRuntimeBoundaries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	message := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("response publish should be policy denied, got %v", err)
 	}
-	after := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	after := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	if after.Status != UserMessageQueued {
 		t.Fatalf("denied publish must not mutate message status, got %#v", after)
 	}
@@ -234,7 +248,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 		t.Fatalf("tool_call pause should block command, got %v", err)
 	}
 	assertPolicyBlockedTask(ctx, t, toolRT, toolRun.ID, toolTask.ID, TaskStatusPaused, RunStatusBlocked)
-	if active := toolRT.ActiveLeaseCount(context.Background(), toolRun.ID, toolTask.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, toolRT, toolRun.ID, toolTask.ID); active != 0 {
 		t.Fatalf("policy pause must release active lease, got %d", active)
 	}
 
@@ -247,7 +261,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 		t.Fatalf("action pause should block command, got %v", err)
 	}
 	assertPolicyBlockedTask(ctx, t, actionRT, actionRun.ID, actionTask.ID, TaskStatusPaused, RunStatusBlocked)
-	if active := actionRT.ActiveLeaseCount(context.Background(), actionRun.ID, actionTask.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, actionRT, actionRun.ID, actionTask.ID); active != 0 {
 		t.Fatalf("policy pause must release action lease, got %d", active)
 	}
 
@@ -259,7 +273,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	if err := responseRT.SubmitResponseOutput(ctx, SubmitResponseOutputCommand{RunID: responseRun.ID, TaskID: responseTask.ID, LeaseID: responseLease.ID, HolderType: HolderComponent, HolderID: "response_composer", TaskVersion: responseTask.Version, Payload: "safe"}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := responseRT.ResponseOutbox(context.Background(), responseRun.ID)[0]
+	message := mustResponseOutbox(context.Background(), t, responseRT, responseRun.ID)[0]
 	if err := responseRT.PublishResponse(ctx, PublishResponseCommand{RunID: responseRun.ID, MessageID: message.ID}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("response_publish require_approval should block command, got %v", err)
 	}
@@ -270,7 +284,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	if responseRunAfter.Status != RunStatusWaitingApproval || !collectEventTypes(responseRT.Events(context.Background(), responseRun.ID)).Contains(EventApprovalRequested) {
 		t.Fatalf("response_publish require_approval did not create approval blocker: run=%#v events=%#v", responseRunAfter, responseRT.Events(context.Background(), responseRun.ID))
 	}
-	if got := responseRT.ResponseOutbox(context.Background(), responseRun.ID)[0].Status; got != UserMessageQueued {
+	if got := mustResponseOutbox(context.Background(), t, responseRT, responseRun.ID)[0].Status; got != UserMessageQueued {
 		t.Fatalf("blocked response publish mutated message status to %s", got)
 	}
 }
@@ -305,8 +319,8 @@ func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 		t.Fatalf("expected retry scheduling, got %#v", retryEnv)
 	}
 	retryTask := mustLoadTask(ctx, t, rt, run.ID, task.ID)
-	if retryTask.Status != TaskStatusDispatched || rt.ActiveLeaseCount(context.Background(), run.ID, task.ID) != 0 {
-		t.Fatalf("retry should release active lease and redispatch task: task=%#v active=%d", retryTask, rt.ActiveLeaseCount(context.Background(), run.ID, task.ID))
+	if retryTask.Status != TaskStatusDispatched || mustActiveLeaseCount(context.Background(), t, rt, run.ID, task.ID) != 0 {
+		t.Fatalf("retry should release active lease and redispatch task: task=%#v active=%d", retryTask, mustActiveLeaseCount(context.Background(), t, rt, run.ID, task.ID))
 	}
 	if _, acquired, err := rt.AcquireTaskExecution(ctx, AcquireTaskExecutionCommand{
 		RunID:      run.ID,
@@ -325,7 +339,7 @@ func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 	if blocked.Status != TaskStatusBlocked {
 		t.Fatalf("exhausted mailbox delivery should block task, got %#v", blocked)
 	}
-	if active := rt.ActiveLeaseCount(ctx, run.ID, task.ID); active != 0 {
+	if active := mustActiveLeaseCount(ctx, t, rt, run.ID, task.ID); active != 0 {
 		t.Fatalf("terminal dead-letter should release active lease, got %d", active)
 	}
 	uow, err := rt.Begin(ctx)
@@ -380,11 +394,11 @@ func TestApprovalResumeTokenRecovery(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitTypedReport(needs_approval) error = %v", err)
 	}
-	resumeTokens := rt.ResumeTokens()
+	resumeTokens := mustResumeTokens(ctx, t, rt)
 	if len(resumeTokens) != 1 {
 		t.Fatalf("expected resumable approval blocker, got %#v", resumeTokens)
 	}
-	if active := rt.ActiveLeaseCount(context.Background(), run.ID, approvalTask.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, rt, run.ID, approvalTask.ID); active != 0 {
 		t.Fatalf("needs_approval must release active lease, got %d", active)
 	}
 	for tokenID := range resumeTokens {
@@ -423,7 +437,7 @@ func TestDecideApprovalApprovedResumesPausedTaskAndRun(t *testing.T) {
 	if waiting.Status != RunStatusWaitingApproval {
 		t.Fatalf("needs_approval should block run, got %#v", waiting)
 	}
-	tokens := rt.ResumeTokens()
+	tokens := mustResumeTokens(ctx, t, rt)
 	if len(tokens) != 1 {
 		t.Fatalf("expected one resume token, got %#v", tokens)
 	}
@@ -488,7 +502,7 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 	if retryTask.Status != TaskStatusDispatched || retryTask.Error != "temporary" || retryTask.Attempts != 1 {
 		t.Fatalf("first failed report should expose dispatched retry attempt and error, got %#v", retryTask)
 	}
-	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, rt, run.ID, task.ID); active != 0 {
 		t.Fatalf("retry should release active lease, got %d", active)
 	}
 
@@ -528,7 +542,7 @@ func TestFailedReportRetriesThenFailsTask(t *testing.T) {
 	if failed.Status != TaskStatusFailed || failed.Error != "permanent" {
 		t.Fatalf("second failed report should fail task, got %#v", failed)
 	}
-	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, rt, run.ID, task.ID); active != 0 {
 		t.Fatalf("final failure should release active lease, got %d", active)
 	}
 }
@@ -554,7 +568,7 @@ func TestBlockedReportReleasesLease(t *testing.T) {
 	if blocked.Status != TaskStatusBlocked {
 		t.Fatalf("blocked report should block task, got %#v", blocked)
 	}
-	if active := rt.ActiveLeaseCount(context.Background(), run.ID, task.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, rt, run.ID, task.ID); active != 0 {
 		t.Fatalf("blocked report must release active lease, got %d", active)
 	}
 }
@@ -598,7 +612,7 @@ func TestActionAttemptReconcileAndSourceIdentitySelector(t *testing.T) {
 	if reconcile.Status != TaskStatusReconcileRequired {
 		t.Fatalf("unknown action attempt should require reconcile, got %#v", reconcile)
 	}
-	if active := rt.ActiveLeaseCount(context.Background(), run.ID, actionTask.ID); active != 0 {
+	if active := mustActiveLeaseCount(context.Background(), t, rt, run.ID, actionTask.ID); active != 0 {
 		t.Fatalf("reconcile-required action attempt must release active lease, got %d", active)
 	}
 
@@ -633,7 +647,7 @@ func TestPublishResponseDoesNotHoldRuntimeLockDuringGatewayCall(t *testing.T) {
 	}
 	rt.SetOutputGateway(reentrantGateway{rt: rt})
 	done := make(chan error, 1)
-	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	message := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	go func() {
 		done <- rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID})
 	}()
@@ -773,12 +787,12 @@ func TestPublishResponseFailureCommitsAuditWithoutPublishing(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	message := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	rt.SetOutputGateway(failingGateway{})
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); !errors.Is(err, errPublishFailed) {
 		t.Fatalf("PublishResponse(failing gateway) error = %v, want %v", err, errPublishFailed)
 	}
-	after := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	after := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	if after.Status != UserMessageQueued {
 		t.Fatalf("failed publish must leave message queued, got %#v", after)
 	}
@@ -1043,7 +1057,7 @@ type reentrantGateway struct {
 }
 
 func (g reentrantGateway) Publish(_ context.Context, message UserMessage) error {
-	_ = g.rt.ResponseOutbox(context.Background(), message.RunID)
+	_, _ = g.rt.ResponseOutbox(context.Background(), message.RunID)
 	return nil
 }
 
@@ -1207,4 +1221,40 @@ func mustLoadTask(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID 
 		t.Fatalf("Task(%s) error = %v", taskID, err)
 	}
 	return task
+}
+
+func mustReadyTasks(ctx context.Context, t *testing.T, rt *Runtime, runID string) []Task {
+	t.Helper()
+	tasks, err := rt.ReadyTasks(ctx, runID)
+	if err != nil {
+		t.Fatalf("ReadyTasks() error = %v", err)
+	}
+	return tasks
+}
+
+func mustActiveLeaseCount(ctx context.Context, t *testing.T, rt *Runtime, runID, taskID string) int {
+	t.Helper()
+	n, err := rt.ActiveLeaseCount(ctx, runID, taskID)
+	if err != nil {
+		t.Fatalf("ActiveLeaseCount() error = %v", err)
+	}
+	return n
+}
+
+func mustResponseOutbox(ctx context.Context, t *testing.T, rt *Runtime, runID string) []UserMessage {
+	t.Helper()
+	messages, err := rt.ResponseOutbox(ctx, runID)
+	if err != nil {
+		t.Fatalf("ResponseOutbox() error = %v", err)
+	}
+	return messages
+}
+
+func mustResumeTokens(ctx context.Context, t *testing.T, rt *Runtime) map[string]ResumeToken {
+	t.Helper()
+	tokens, err := rt.ResumeTokens(ctx)
+	if err != nil {
+		t.Fatalf("ResumeTokens() error = %v", err)
+	}
+	return tokens
 }

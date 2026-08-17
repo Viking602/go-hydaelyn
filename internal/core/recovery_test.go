@@ -53,7 +53,7 @@ func TestRecoverRequeuesExpiredExecutionOnce(t *testing.T) {
 	if recoveredEnvelope.Status != "pending" || recoveredEnvelope.TaskVersion != recovered.Version {
 		t.Fatalf("recovered envelope = %#v, task version = %d", recoveredEnvelope, recovered.Version)
 	}
-	if active := rt.ActiveLeaseCount(ctx, run.ID, task.ID); active != 0 {
+	if active := mustActiveLeaseCount(ctx, t, rt, run.ID, task.ID); active != 0 {
 		t.Fatalf("recovery left %d active leases", active)
 	}
 
