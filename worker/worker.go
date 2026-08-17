@@ -219,6 +219,7 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	if err != nil {
 		heartbeatErr := stopHeartbeat()
 		heartbeatStopped = true
+		err = combineExecutionErrors(err, heartbeatErr)
 		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
 		return failedExecutionOutcome(task, lease, result, err), errors.Join(err, heartbeatErr)
 	}
