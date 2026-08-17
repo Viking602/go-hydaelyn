@@ -1,5 +1,13 @@
 # Migration Notes
 
+## Lease heartbeat starts at acquire
+
+`worker.AgentWorker` and `worker.TeamRunner` now heartbeat immediately after
+a successful lease acquire, then every `ttl/3`. Previously the first
+heartbeat waited for the first ticker, so a slow ack/load or short TTL
+could expire the lease and let recovery redispatch while the original
+worker was still running. Hosts do not need to change call sites.
+
 ## Empty policy Effect is denied
 
 A `PolicyEngine` that returns `(PolicyDecision{}, nil)` or any empty or
