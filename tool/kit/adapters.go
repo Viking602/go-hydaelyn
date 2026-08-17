@@ -151,6 +151,9 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	copyErrs := make(chan error, 2)
 	copyOutput := func(reader io.ReadCloser) {
 		_, copyErr := io.Copy(output, reader)
+		if errors.Is(copyErr, os.ErrDeadlineExceeded) {
+			copyErr = nil
+		}
 		closeErr := closePipe(reader)
 		if errors.Is(copyErr, errProcessOutputTooLarge) {
 			cancel()
@@ -160,9 +163,9 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	go copyOutput(stdoutRead)
 	go copyOutput(stderrRead)
 
+	waitErr := waitAndUnblockPipes(commandCtx, command, stdoutRead, stderrRead)
 	stdoutErr := <-copyErrs
 	stderrErr := <-copyErrs
-	waitErr := command.Wait()
 	if output.TooLarge() {
 		return output.Bytes(), fmt.Errorf("process output too large: limit %d bytes", defaultMaxProcessOutputBytes)
 	}
@@ -179,6 +182,27 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 		return output.Bytes(), stderrErr
 	}
 	return output.Bytes(), nil
+}
+
+func waitAndUnblockPipes(ctx context.Context, command *exec.Cmd, stdout, stderr *os.File) error {
+	waitErrs := make(chan error, 1)
+	go func() { waitErrs <- command.Wait() }()
+
+	var waitErr error
+	deadline := time.Now().Add(100 * time.Millisecond)
+	select {
+	case waitErr = <-waitErrs:
+	case <-ctx.Done():
+		deadline = time.Now()
+		select {
+		case waitErr = <-waitErrs:
+		case <-time.After(time.Second):
+			waitErr = ctx.Err()
+		}
+	}
+	_ = stdout.SetReadDeadline(deadline)
+	_ = stderr.SetReadDeadline(deadline)
+	return waitErr
 }
 
 func closePipe(closer io.Closer) error {

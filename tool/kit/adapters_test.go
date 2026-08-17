@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +158,34 @@ func TestProcessToolForwardsStdinJSON(t *testing.T) {
 	}
 	if result.Content != `{"query":"venat"}` {
 		t.Fatalf("stdin round-trip = %#q", result.Content)
+	}
+}
+
+func TestProcessToolReturnsAfterChildExitsWithInheritedPipes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("inherited-pipe orphan test uses a Unix shell")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
+		Command: "sh",
+		Args:    []string{"-c", "printf ready; sleep 8 &"},
+	})
+	started := time.Now()
+	result, err := driver.Execute(ctx, tool.Call{
+		ID:        "call-process-orphan",
+		Name:      "run",
+		Arguments: json.RawMessage(`{}`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "ready") {
+		t.Fatalf("missing child output in %#q", result.Content)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("blocked on inherited pipe for %s", elapsed)
 	}
 }
 
