@@ -140,10 +140,7 @@ func (r TeamRunner) drive(
 		opts.InitialState = &state
 		result, driveErr = multiagent.Drive(execCtx, state.RunID, r.Team.Scheduler, executor, opts)
 	}
-	heartbeatErr := stopHeartbeat()
-	if heartbeatErr != nil {
-		driveErr = errors.Join(driveErr, heartbeatErr)
-	}
+	driveErr = combineExecutionErrors(driveErr, stopHeartbeat())
 	if errors.Is(driveErr, multiagent.ErrExecutionSuspended) {
 		releaseErr := r.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
 			LeaseID:  lease.ID,

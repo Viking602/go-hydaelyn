@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -125,6 +126,24 @@ func TestExecuteEnvelopeHeartbeatsBeforeAckAndSurvivesShortTTL(t *testing.T) {
 	}
 	if completed.Status != api.TaskStatusCompleted {
 		t.Fatalf("task status = %s, want completed", completed.Status)
+	}
+}
+
+func TestCombineExecutionErrorsPrefersHeartbeatOverCancel(t *testing.T) {
+	heartbeatErr := fmt.Errorf("worker: lease heartbeat failed: %w", api.ErrLeaseNotActive)
+	got := combineExecutionErrors(context.Canceled, heartbeatErr)
+	if !errors.Is(got, api.ErrLeaseNotActive) {
+		t.Fatalf("combineExecutionErrors() = %v, want heartbeat cause", got)
+	}
+	report := failureReport(got)
+	if report.Kind == "cancelled" {
+		t.Fatalf("failureReport kind = %q, want a non-cancelled lost-lease failure", report.Kind)
+	}
+
+	other := errors.New("tool failed")
+	joined := combineExecutionErrors(other, heartbeatErr)
+	if !errors.Is(joined, api.ErrLeaseNotActive) || !errors.Is(joined, other) {
+		t.Fatalf("combineExecutionErrors(tool, heartbeat) = %v", joined)
 	}
 }
 

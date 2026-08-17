@@ -207,11 +207,10 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	// SingleRunner suspend/cancel causes or block the durable report.
 	heartbeatErr := stopHeartbeat()
 	heartbeatStopped = true
-	// A completed model turn can survive execCtx cancel. If the lease was
-	// lost or the heartbeat store failed, do not submit a success report.
-	if runErr == nil && heartbeatErr != nil {
-		runErr = heartbeatErr
-	}
+	// Heartbeat cancel of execCtx usually surfaces as context.Canceled from
+	// the engine. Prefer the heartbeat/store cause so the durable failure
+	// report is not stored as kind "cancelled".
+	runErr = combineExecutionErrors(runErr, heartbeatErr)
 	if runErr != nil {
 		outcome, handled, outcomeErr := w.executionErrorOutcome(
 			ctx, task, lease, result, runErr, started,
@@ -1045,6 +1044,16 @@ func leaseHeartbeatInterval(ttl time.Duration) time.Duration {
 		return time.Millisecond
 	}
 	return interval
+}
+
+func combineExecutionErrors(runErr, heartbeatErr error) error {
+	if heartbeatErr == nil {
+		return runErr
+	}
+	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, heartbeatErr) {
+		return errors.Join(heartbeatErr, runErr)
+	}
+	return heartbeatErr
 }
 
 func pulseLeaseHeartbeat(ctx context.Context, pulse func(context.Context) error) error {
