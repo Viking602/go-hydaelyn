@@ -150,6 +150,22 @@ func TestCombineExecutionErrorsPrefersHeartbeatOverCancel(t *testing.T) {
 	if !errors.Is(kept, other) || !errors.Is(kept, api.ErrLeaseNotActive) {
 		t.Fatalf("combineExecutionErrors(join(tool, cancel), heartbeat) = %v, want both causes", kept)
 	}
+	if report := failureReport(kept); report.Kind == "cancelled" {
+		t.Fatalf("failureReport(compound) kind = cancelled, want a non-cancel classification")
+	}
+}
+
+func TestFailureReportOnlyMarksPureCancel(t *testing.T) {
+	if got := failureReport(context.Canceled).Kind; got != "cancelled" {
+		t.Fatalf("failureReport(Canceled).Kind = %q, want cancelled", got)
+	}
+	if got := failureReport(fmt.Errorf("worker: %w", context.Canceled)).Kind; got != "cancelled" {
+		t.Fatalf("failureReport(wrapped Canceled).Kind = %q, want cancelled", got)
+	}
+	compound := errors.Join(api.ErrLeaseNotActive, context.Canceled)
+	if got := failureReport(compound).Kind; got == "cancelled" {
+		t.Fatalf("failureReport(join(lease, cancel)).Kind = cancelled")
+	}
 }
 
 func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {

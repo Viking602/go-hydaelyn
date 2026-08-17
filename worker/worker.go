@@ -1259,7 +1259,7 @@ func failureReport(cause error) api.TypedReport {
 		Status:  api.ReportStatusFailed,
 		Summary: cause.Error(),
 	}
-	if errors.Is(cause, context.Canceled) {
+	if onlyContextCanceled(cause) {
 		report.Kind = "cancelled"
 		return report
 	}
