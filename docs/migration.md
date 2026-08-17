@@ -1,5 +1,22 @@
 # Migration Notes
 
+## Read APIs fail closed
+
+`ReadyTasks`, `ReadyTasksContext`, `ActiveLeaseCount`,
+`ActiveLeaseCountContext`, `ResponseOutbox`, `ResponseOutboxContext`,
+`ResumeTokens`, and `ResumeTokensContext` now return `(T, error)`. Store and
+unit-of-work failures are returned instead of collapsing to an empty slice,
+`0`, or an empty map.
+
+Hosts that treated a missing error as "no ready tasks / no lease / no outbox /
+no resume tokens" must check the error. `0` from `ActiveLeaseCount` now means
+the store confirmed there is no active lease.
+
+`ResumeTokens` and `PendingResumeTokens` load pending tokens from the
+configured store. Providers that do not advertise `SupportsListPending`
+return `ErrInvalidConfiguration` instead of an empty map. Prefer
+`PendingResumeTokens` for new crash-recovery code.
+
 ## Lease heartbeat starts at acquire
 
 `worker.AgentWorker` and `worker.TeamRunner` now heartbeat immediately after

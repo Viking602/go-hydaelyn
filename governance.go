@@ -11,13 +11,19 @@ import (
 	"github.com/Viking602/venat/internal/core/model"
 )
 
-// Deprecated: use ActiveLeaseCountContext.
-func (r *Runner) ActiveLeaseCount(runID, taskID string) int {
+// Deprecated: use ActiveLeaseCountContext so cancellation and storage errors
+// are observable. A count of 0 means the store confirmed there is no active
+// lease; store failures are returned as errors, not collapsed to 0.
+func (r *Runner) ActiveLeaseCount(runID, taskID string) (int, error) {
 	return r.ActiveLeaseCountContext(context.Background(), runID, taskID)
 }
 
-func (r *Runner) ActiveLeaseCountContext(ctx context.Context, runID, taskID string) int {
-	return r.rt.ActiveLeaseCount(ctx, runID, taskID)
+func (r *Runner) ActiveLeaseCountContext(ctx context.Context, runID, taskID string) (int, error) {
+	count, err := r.rt.ActiveLeaseCount(ctx, runID, taskID)
+	if err != nil {
+		return 0, adapter.ErrorToAPI(err)
+	}
+	return count, nil
 }
 
 func (r *Runner) AcquireTaskExecution(ctx context.Context, cmd api.AcquireTaskExecutionCommand) (api.TaskExecutionLease, bool, error) {
@@ -113,8 +119,19 @@ func (r *Runner) RecoverResumeToken(ctx context.Context, cmd api.RecoverResumeTo
 	return adapter.ResumeTokenFromModel(token), nil
 }
 
-func (r *Runner) ResumeTokens() map[string]api.ResumeToken {
-	return adapter.ResumeTokensFromModelMap(r.rt.ResumeTokens())
+// Deprecated: use PendingResumeTokens. Store failures are returned instead of
+// an empty map. The snapshot is loaded from the configured store via
+// PendingResumeTokens, not from the in-memory development provider.
+func (r *Runner) ResumeTokens() (map[string]api.ResumeToken, error) {
+	return r.ResumeTokensContext(context.Background())
+}
+
+func (r *Runner) ResumeTokensContext(ctx context.Context) (map[string]api.ResumeToken, error) {
+	tokens, err := r.rt.ResumeTokens(ctx)
+	if err != nil {
+		return nil, adapter.ErrorToAPI(err)
+	}
+	return adapter.ResumeTokensFromModelMap(tokens), nil
 }
 
 func (r *Runner) StartActionAttempt(ctx context.Context, cmd api.StartActionAttemptCommand) (api.ActionAttempt, error) {

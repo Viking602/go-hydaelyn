@@ -46,7 +46,7 @@ func (r *Runtime) queuedResponseMessages(ctx context.Context) ([]model.UserMessa
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	scanner, ok := uow.UserMessages().(UserMessageOutboxScanner)
 	if !ok {
 		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", ErrInvalidConfiguration)

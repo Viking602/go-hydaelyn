@@ -132,7 +132,11 @@ func testExpiredExecutionRecovery(t *testing.T, open func() api.StoreProvider) (
 	if recovered.Status != api.TaskStatusDispatched {
 		t.Fatalf("recovered task status = %q, want %q", recovered.Status, api.TaskStatusDispatched)
 	}
-	if active := runtimeB.ActiveLeaseCountContext(ctx, run.ID, task.ID); active != 0 {
+	active, err := runtimeB.ActiveLeaseCountContext(ctx, run.ID, task.ID)
+	if err != nil {
+		t.Fatalf("ActiveLeaseCountContext() error = %v", err)
+	}
+	if active != 0 {
 		t.Fatalf("Recover() left %d active leases, want 0", active)
 	}
 	events := recoveryEvents(t, runtimeB, run.ID)

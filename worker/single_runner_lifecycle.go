@@ -50,7 +50,11 @@ func (s *SingleRunner) Report(ctx context.Context, runID string, report api.Type
 	if state.Envelope.ID == "" {
 		return SingleRun{}, fmt.Errorf("%w: no pending envelope for run %q", ErrSingleRunNotResumable, runID)
 	}
-	if count := s.Runner.ActiveLeaseCountContext(ctx, runID, state.Task.ID); count > 0 {
+	count, err := s.Runner.ActiveLeaseCountContext(ctx, runID, state.Task.ID)
+	if err != nil {
+		return SingleRun{}, fmt.Errorf("worker: inspect active leases: %w", err)
+	}
+	if count > 0 {
 		return SingleRun{}, fmt.Errorf("%w: run %s has %d active leases", ErrSingleRunNotOwned, runID, count)
 	}
 	ttl := s.Worker.executeEnvelopeTTL(ExecuteEnvelopeRequest{})
@@ -114,7 +118,11 @@ func (s *SingleRunner) interrupt(ctx context.Context, runID string, cause error)
 	if err != nil {
 		return err
 	}
-	if count := s.Runner.ActiveLeaseCountContext(ctx, runID, state.Task.ID); count > 0 {
+	count, err := s.Runner.ActiveLeaseCountContext(ctx, runID, state.Task.ID)
+	if err != nil {
+		return fmt.Errorf("worker: inspect active leases: %w", err)
+	}
+	if count > 0 {
 		return fmt.Errorf("%w: run %s has %d active leases", ErrSingleRunNotOwned, runID, count)
 	}
 	if terminalRunStatus(state.Run.Status) {

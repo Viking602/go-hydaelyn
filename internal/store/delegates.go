@@ -11,24 +11,21 @@ import (
 // Options wires Delegates to the runtime's selected store provider without
 // making this package depend on internal/core.
 type Options struct {
-	BeginWrite   func(context.Context) (ports.UnitOfWork, error)
-	BeginRead    func(context.Context) (ports.UnitOfWork, func(), error)
-	ResumeTokens func() map[string]model.ResumeToken
+	BeginWrite func(context.Context) (ports.UnitOfWork, error)
+	BeginRead  func(context.Context) (ports.UnitOfWork, func() error, error)
 }
 
 // Delegates implements the store-facing runtime methods by delegating through
 // the configured UnitOfWork boundary.
 type Delegates struct {
-	beginWrite   func(context.Context) (ports.UnitOfWork, error)
-	beginRead    func(context.Context) (ports.UnitOfWork, func(), error)
-	resumeTokens func() map[string]model.ResumeToken
+	beginWrite func(context.Context) (ports.UnitOfWork, error)
+	beginRead  func(context.Context) (ports.UnitOfWork, func() error, error)
 }
 
 func NewDelegates(options Options) *Delegates {
 	return &Delegates{
-		beginWrite:   options.BeginWrite,
-		beginRead:    options.BeginRead,
-		resumeTokens: options.ResumeTokens,
+		beginWrite: options.BeginWrite,
+		beginRead:  options.BeginRead,
 	}
 }
 
@@ -43,7 +40,7 @@ func (d *Delegates) LoadRun(ctx context.Context, runID string) (model.Run, error
 	if err != nil {
 		return model.Run{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Runs().LoadRun(ctx, runID)
 }
 
@@ -58,7 +55,7 @@ func (d *Delegates) LoadTask(ctx context.Context, runID, taskID string) (model.T
 	if err != nil {
 		return model.Task{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
 }
 
@@ -67,7 +64,7 @@ func (d *Delegates) ListTasks(ctx context.Context, runID string) ([]model.Task, 
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Tasks().ListTasks(ctx, runID)
 }
 
@@ -82,7 +79,7 @@ func (d *Delegates) ListEvents(ctx context.Context, runID string) ([]model.Event
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Events().ListEvents(ctx, runID)
 }
 
@@ -97,7 +94,7 @@ func (d *Delegates) ListTraceSpans(ctx context.Context, runID string) ([]model.T
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Trace().ListTraceSpans(ctx, runID)
 }
 
@@ -112,7 +109,7 @@ func (d *Delegates) LoadMessage(ctx context.Context, runID, messageID string) (m
 	if err != nil {
 		return model.UserMessage{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.UserMessages().LoadMessage(ctx, runID, messageID)
 }
 
@@ -127,18 +124,8 @@ func (d *Delegates) ListMessages(ctx context.Context, runID string) ([]model.Use
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.UserMessages().ListMessages(ctx, runID)
-}
-
-// ResumeTokens returns a snapshot of all current resume tokens keyed by tokenID.
-// It is intentionally injected because the public store contract has no token
-// listing method.
-func (d *Delegates) ResumeTokens() map[string]model.ResumeToken {
-	if d.resumeTokens == nil {
-		return map[string]model.ResumeToken{}
-	}
-	return d.resumeTokens()
 }
 
 func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]model.UserMessage, error) {
@@ -146,7 +133,7 @@ func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]model.UserMessage
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	scanner, ok := uow.UserMessages().(ports.UserMessageOutboxScanner)
 	if !ok {
 		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", model.ErrInvalidConfiguration)
@@ -165,7 +152,7 @@ func (d *Delegates) LoadEnvelope(ctx context.Context, envelopeID string) (model.
 	if err != nil {
 		return model.TaskEnvelope{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.MailboxOutbox().LoadEnvelope(ctx, envelopeID)
 }
 
@@ -180,7 +167,7 @@ func (d *Delegates) ListEnvelopes(ctx context.Context, runID string) ([]model.Ta
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.MailboxOutbox().ListEnvelopes(ctx, runID)
 }
 
@@ -212,7 +199,7 @@ func (d *Delegates) openWrite(ctx context.Context) (ports.UnitOfWork, error) {
 	return d.beginWrite(ctx)
 }
 
-func (d *Delegates) openRead(ctx context.Context) (ports.UnitOfWork, func(), error) {
+func (d *Delegates) openRead(ctx context.Context) (ports.UnitOfWork, func() error, error) {
 	if d == nil {
 		return nil, nil, fmt.Errorf("store delegates missing read unit of work: %w", model.ErrInvalidConfiguration)
 	}
@@ -223,5 +210,5 @@ func (d *Delegates) openRead(ctx context.Context) (ports.UnitOfWork, func(), err
 	if err != nil {
 		return nil, nil, err
 	}
-	return uow, func() { _ = uow.Rollback(ctx) }, nil
+	return uow, func() error { return uow.Rollback(ctx) }, nil
 }

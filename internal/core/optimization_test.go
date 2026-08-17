@@ -184,7 +184,7 @@ func TestTypedReportCompletionRetryHandoffAndClarificationSemantics(t *testing.T
 	if clarificationRun.Status != RunStatusWaitingUserInput {
 		t.Fatalf("needs_clarification should block run, got %#v", clarificationRun)
 	}
-	messages := rt.ResponseOutbox(context.Background(), run.ID)
+	messages := mustResponseOutbox(context.Background(), t, rt, run.ID)
 	if len(messages) == 0 || messages[len(messages)-1].Type != UserMessageTypeClarificationRequest {
 		t.Fatalf("needs_clarification should queue clarification request, got %#v", messages)
 	}
@@ -220,7 +220,7 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	}); err != nil {
 		t.Fatalf("SubmitResponseOutput() error = %v", err)
 	}
-	message := rt.ResponseOutbox(context.Background(), run.ID)[0]
+	message := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); err != nil {
 		t.Fatalf("PublishResponse() error = %v", err)
 	}

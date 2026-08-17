@@ -23,13 +23,19 @@ func (r *Runner) Task(ctx context.Context, runID, taskID string) (api.Task, erro
 	return adapter.TaskFromModel(task), nil
 }
 
-// Deprecated: use ReadyTasksContext.
-func (r *Runner) ReadyTasks(runID string) []api.Task {
+// Deprecated: use ReadyTasksContext so cancellation and storage errors are
+// observable. An empty slice means the store confirmed there are no ready
+// tasks; store failures are returned as errors, not collapsed to nil.
+func (r *Runner) ReadyTasks(runID string) ([]api.Task, error) {
 	return r.ReadyTasksContext(context.Background(), runID)
 }
 
-func (r *Runner) ReadyTasksContext(ctx context.Context, runID string) []api.Task {
-	return adapter.TasksFromModel(r.rt.ReadyTasks(ctx, runID))
+func (r *Runner) ReadyTasksContext(ctx context.Context, runID string) ([]api.Task, error) {
+	tasks, err := r.rt.ReadyTasks(ctx, runID)
+	if err != nil {
+		return nil, adapter.ErrorToAPI(err)
+	}
+	return adapter.TasksFromModel(tasks), nil
 }
 
 func (r *Runner) TransitionTask(ctx context.Context, cmd api.TransitionTaskCommand) error {

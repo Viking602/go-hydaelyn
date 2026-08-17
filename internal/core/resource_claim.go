@@ -110,7 +110,7 @@ func (r *Runtime) LoadResourceClaim(ctx context.Context, id string) (model.Resou
 	if err != nil {
 		return model.ResourceClaim{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.resourceClaimStore(ctx, uow)
 	if err != nil {
 		return model.ResourceClaim{}, err
@@ -123,7 +123,7 @@ func (r *Runtime) ListResourceClaims(ctx context.Context, selector model.Resourc
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	store, err := r.resourceClaimStore(ctx, uow)
 	if err != nil {
 		return nil, err

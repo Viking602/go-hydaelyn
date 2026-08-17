@@ -1435,8 +1435,8 @@ func TestAgentWorkerSubmitsFailedReportAndReleasesLeaseOnEngineError(t *testing.
 	if failed.Result == nil || failed.Result.Kind != string(agent.FailureKindEngineError) {
 		t.Fatalf("failed report should carry the agent failure kind, got %#v", failed.Result)
 	}
-	if active := runner.ActiveLeaseCountContext(ctx, run.ID, task.ID); active != 0 {
-		t.Fatalf("engine failure should release active lease, got %d", active)
+	if active, err := runner.ActiveLeaseCountContext(ctx, run.ID, task.ID); err != nil || active != 0 {
+		t.Fatalf("engine failure should release active lease, got %d err=%v", active, err)
 	}
 }
 

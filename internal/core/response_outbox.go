@@ -6,15 +6,13 @@ import (
 	"github.com/Viking602/venat/internal/core/model"
 )
 
-func (r *Runtime) ResponseOutbox(ctx context.Context, runID string) []model.UserMessage {
+// ResponseOutbox lists user messages for runID. Store errors are returned;
+// an empty slice means the store confirmed there are no messages.
+func (r *Runtime) ResponseOutbox(ctx context.Context, runID string) (messages []model.UserMessage, err error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer done()
-	messages, err := uow.UserMessages().ListMessages(ctx, runID)
-	if err != nil {
-		return nil
-	}
-	return messages
+	defer joinReadCleanup(&err, done)
+	return uow.UserMessages().ListMessages(ctx, runID)
 }

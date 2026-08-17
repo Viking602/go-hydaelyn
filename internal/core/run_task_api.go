@@ -52,7 +52,7 @@ func (r *Runtime) Run(ctx context.Context, runID string) (model.Run, error) {
 	if err != nil {
 		return model.Run{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Runs().LoadRun(ctx, runID)
 }
 
@@ -61,25 +61,27 @@ func (r *Runtime) Task(ctx context.Context, runID, taskID string) (model.Task, e
 	if err != nil {
 		return model.Task{}, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
 }
 
-func (r *Runtime) ReadyTasks(ctx context.Context, runID string) []model.Task {
+// ReadyTasks returns tasks that can become ready. Store errors are returned;
+// an empty slice means the store confirmed there are no ready tasks.
+func (r *Runtime) ReadyTasks(ctx context.Context, runID string) (out []model.Task, err error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer done()
+	defer joinReadCleanup(&err, done)
 	tasks, err := uow.Tasks().ListTasks(ctx, runID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	byID := make(map[string]model.Task, len(tasks))
 	for _, task := range tasks {
 		byID[task.ID] = task
 	}
-	out := make([]model.Task, 0, len(tasks))
+	out = make([]model.Task, 0, len(tasks))
 	for _, task := range tasks {
 		ready, _ := dependencyGate(task, byID)
 		if !taskCanBecomeReady(task.Status) || !ready {
@@ -90,7 +92,7 @@ func (r *Runtime) ReadyTasks(ctx context.Context, runID string) []model.Task {
 	slices.SortFunc(out, func(a, b model.Task) int {
 		return stringsCompare(a.ID, b.ID)
 	})
-	return out
+	return out, nil
 }
 
 func (r *Runtime) Events(ctx context.Context, runID string) []model.Event {
@@ -103,7 +105,7 @@ func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]model.Event, e
 	if err != nil {
 		return nil, err
 	}
-	defer done()
+	defer func() { _ = done() }()
 	events, err := uow.Events().ListEvents(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -116,15 +118,21 @@ func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]model.Event, e
 	return slices.Clone(events), nil
 }
 
-func (r *Runtime) ActiveLeaseCount(ctx context.Context, runID, taskID string) int {
+// ActiveLeaseCount returns 1 when the task has a non-expired active lease.
+// A count of 0 means the store confirmed there is none; store errors are
+// returned instead of collapsing to 0.
+func (r *Runtime) ActiveLeaseCount(ctx context.Context, runID, taskID string) (n int, err error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	defer done()
+	defer joinReadCleanup(&err, done)
 	lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, runID, taskID)
-	if err != nil || !ok || lease.Status != model.LeaseStatusActive || !model.LeaseExpiry(lease).After(time.Now().UTC()) {
-		return 0
+	if err != nil {
+		return 0, err
 	}
-	return 1
+	if !ok || lease.Status != model.LeaseStatusActive || !model.LeaseExpiry(lease).After(time.Now().UTC()) {
+		return 0, nil
+	}
+	return 1, nil
 }
