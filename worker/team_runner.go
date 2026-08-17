@@ -39,6 +39,9 @@ func (r TeamRunner) Start(ctx context.Context, runID string) (multiagent.DriveRe
 	if err != nil {
 		return multiagent.DriveResult{}, err
 	}
+	if err := r.pulseSchedulerLease(ctx, lease); err != nil {
+		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, err)
+	}
 	if _, err := r.loadState(ctx, runID); err == nil {
 		return multiagent.DriveResult{}, r.releaseSchedulerLease(ctx, lease, api.ErrIdempotencyConflict)
 	} else if !errors.Is(err, api.ErrNotFound) {
@@ -321,27 +324,18 @@ func (r TeamRunner) acquireScheduler(ctx context.Context, runID string) (api.Tas
 	return lease, nil
 }
 
+func (r TeamRunner) pulseSchedulerLease(ctx context.Context, lease api.TaskExecutionLease) error {
+	return r.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
+		LeaseID:  lease.ID,
+		HolderID: lease.HolderID,
+		TTL:      r.schedulerTTL(),
+	})
+}
+
 func (r TeamRunner) heartbeatScheduler(ctx context.Context, lease api.TaskExecutionLease) error {
-	ttl := r.schedulerTTL()
-	ticker := time.NewTicker(ttl / 3)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			if err := r.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
-				LeaseID:  lease.ID,
-				HolderID: lease.HolderID,
-				TTL:      ttl,
-			}); err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				return err
-			}
-		}
-	}
+	return runLeaseHeartbeat(ctx, r.schedulerTTL(), func(hbCtx context.Context) error {
+		return r.pulseSchedulerLease(hbCtx, lease)
+	})
 }
 
 func (r TeamRunner) finishScheduler(ctx context.Context, lease api.TaskExecutionLease, driveErr error) error {

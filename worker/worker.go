@@ -135,7 +135,7 @@ func (w AgentWorker) ExecuteContinuing(ctx context.Context, req ExecuteEnvelopeR
 	}
 }
 
-func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (ExecutionOutcome, error) {
+func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeRequest) (outcome ExecutionOutcome, err error) {
 	if err := w.validateExecuteEnvelope(); err != nil {
 		return ExecutionOutcome{}, err
 	}
@@ -143,11 +143,6 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 	lease, err := w.envelopeLease(ctx, req, ttl)
 	if err != nil {
 		return ExecutionOutcome{}, err
-	}
-	if req.OnLeaseAcquired != nil {
-		if err := req.OnLeaseAcquired(lease); err != nil {
-			return ExecutionOutcome{}, fmt.Errorf("worker: observe acquired execution lease: %w", err)
-		}
 	}
 	leaseHandled := false
 	defer func() {
@@ -159,36 +154,56 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			HolderID: w.AgentID,
 		})
 	}()
-
-	if err := w.ackEnvelope(ctx, req.Envelope); err != nil {
+	execCtx, stopHeartbeat, err := startLeaseHeartbeat(ctx, ttl, func(hbCtx context.Context) error {
+		return w.Runner.HeartbeatTaskExecution(hbCtx, api.HeartbeatTaskExecutionCommand{
+			LeaseID:  lease.ID,
+			HolderID: w.AgentID,
+			TTL:      ttl,
+		})
+	})
+	if err != nil {
 		return ExecutionOutcome{}, err
 	}
-	task, run, err := w.loadEnvelopeTaskRun(ctx, req.Envelope)
+	defer func() {
+		if stopErr := stopHeartbeat(); stopErr != nil {
+			err = stopErr
+		}
+	}()
+	if req.OnLeaseAcquired != nil {
+		if hookErr := req.OnLeaseAcquired(lease); hookErr != nil {
+			return ExecutionOutcome{}, fmt.Errorf("worker: observe acquired execution lease: %w", hookErr)
+		}
+	}
+
+	if err := w.ackEnvelope(execCtx, req.Envelope); err != nil {
+		return ExecutionOutcome{}, err
+	}
+	task, run, err := w.loadEnvelopeTaskRun(execCtx, req.Envelope)
 	if err != nil {
 		return ExecutionOutcome{}, err
 	}
 
 	engine := w.executionEngine(task, lease)
 	defer w.Runner.RemoveToolsForInvocation(task.RunID, task.ID, api.HolderAgent, w.AgentID)
-	checkpoint, hasCheckpoint, err := w.latestExecutionCheckpoint(ctx, task)
+	checkpoint, hasCheckpoint, err := w.latestExecutionCheckpoint(execCtx, task)
 	if err != nil {
-		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
+		leaseHandled = w.submitFailureReportHandled(execCtx, task, lease, err)
 		return failedExecutionOutcome(task, lease, agent.Result{}, err), err
 	}
 	started := time.Now()
 	result, runErr := w.runCheckpointedTask(
-		ctx, task, run, lease, engine, checkpoint, hasCheckpoint,
-		req.Messages, req.Sink, ttl, started,
+		execCtx, task, run, lease, engine, checkpoint, hasCheckpoint,
+		req.Messages, req.Sink, started,
 	)
 	if runErr != nil {
 		outcome, handled, outcomeErr := w.executionErrorOutcome(
-			ctx, task, lease, result, runErr, started,
+			execCtx, task, lease, result, runErr, started,
 		)
 		leaseHandled = handled
 		return outcome, outcomeErr
 	}
 
-	leaseHandled, err = w.submitSuccessReport(ctx, task, lease, result)
+	leaseHandled, err = w.submitSuccessReport(execCtx, task, lease, result)
 	if err != nil {
 		return failedExecutionOutcome(task, lease, result, err), err
 	}
@@ -211,7 +226,6 @@ func (w AgentWorker) runCheckpointedTask(
 	hasCheckpoint bool,
 	messages []message.Message,
 	sink stream.Sink,
-	ttl time.Duration,
 	started time.Time,
 ) (agent.Result, error) {
 	baseContextBuilder := engine.ContextBuilder
@@ -234,9 +248,7 @@ func (w AgentWorker) runCheckpointedTask(
 	var result agent.Result
 	var runErr error
 	if hasCheckpoint && checkpoint.Checkpoint.PendingToolCalls {
-		resumeMessages, runErr = withLeaseHeartbeat(ctx, w, lease.ID, ttl, func(runCtx context.Context) ([]message.Message, error) {
-			return w.resumePendingToolCalls(runCtx, engine, checkpoint.Checkpoint)
-		})
+		resumeMessages, runErr = w.resumePendingToolCalls(ctx, engine, checkpoint.Checkpoint)
 		engine.ContextBuilder = workerContextBuilder{
 			worker: w, run: run, inner: baseContextBuilder, extra: messages, resume: resumeMessages,
 		}
@@ -253,7 +265,7 @@ func (w AgentWorker) runCheckpointedTask(
 	if runErr != nil {
 		return result, runErr
 	}
-	result, runErr = w.runEngineWithHeartbeat(ctx, engine, task, lease.ID, ttl, sink)
+	result, runErr = w.runEngineWithHeartbeat(ctx, engine, task, sink)
 	if usageErr := w.appendPartialModelUsage(ctx, task, lease, engine, result); usageErr != nil {
 		runErr = errors.Join(runErr, usageErr)
 	}
@@ -905,52 +917,26 @@ func pendingToolCalls(messages []message.Message) []tool.Call {
 	return pending
 }
 
-func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, leaseID string, ttl time.Duration, sink stream.Sink) (agent.Result, error) {
-	return withLeaseHeartbeat(ctx, w, leaseID, ttl, func(runCtx context.Context) (agent.Result, error) {
-		// The task carries its OutputSchema through the durable store (see
-		// api.Task.OutputSchema); rebuild the OutputPolicy from it so structured
-		// validation actually runs on the worker path.
-		policy := agent.OutputPolicy{
-			Schema:   task.OutputSchema,
-			Validate: len(task.OutputSchema) > 0,
-		}
-		var result agent.Result
-		if sink == nil {
-			result = engine.Run(runCtx, task, policy)
-		} else {
-			result = engine.RunStream(runCtx, task, policy, sink)
-		}
-		if result.Failure != nil {
-			// AgentFailure satisfies error and preserves its underlying provider
-			// or tool cause for errors.Is/errors.As.
-			return result, result.Failure
-		}
-		return result, nil
-	})
-}
-
-func withLeaseHeartbeat[T any](
-	ctx context.Context,
-	worker AgentWorker,
-	leaseID string,
-	ttl time.Duration,
-	run func(context.Context) (T, error),
-) (T, error) {
-	runCtx, stopRun := context.WithCancel(ctx)
-	heartbeatDone := make(chan error, 1)
-	go func() {
-		err := worker.heartbeatLoop(runCtx, leaseID, ttl)
-		heartbeatDone <- err
-		if err != nil {
-			stopRun()
-		}
-	}()
-	result, runErr := run(runCtx)
-	stopRun()
-	if err := <-heartbeatDone; err != nil {
-		return result, fmt.Errorf("worker: lease heartbeat failed: %w", err)
+func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, sink stream.Sink) (agent.Result, error) {
+	// The task carries its OutputSchema through the durable store (see
+	// api.Task.OutputSchema); rebuild the OutputPolicy from it so structured
+	// validation actually runs on the worker path.
+	policy := agent.OutputPolicy{
+		Schema:   task.OutputSchema,
+		Validate: len(task.OutputSchema) > 0,
 	}
-	return result, runErr
+	var result agent.Result
+	if sink == nil {
+		result = engine.Run(ctx, task, policy)
+	} else {
+		result = engine.RunStream(ctx, task, policy, sink)
+	}
+	if result.Failure != nil {
+		// AgentFailure satisfies error and preserves its underlying provider
+		// or tool cause for errors.Is/errors.As.
+		return result, result.Failure
+	}
+	return result, nil
 }
 
 func (w AgentWorker) submitFailureReportHandled(ctx context.Context, task api.Task, lease api.TaskExecutionLease, cause error) bool {
@@ -1036,31 +1022,66 @@ func (w AgentWorker) writeTaskOutput(ctx context.Context, item api.BlackboardIte
 	return w.Runner.WriteItem(ctx, item)
 }
 
-func (w AgentWorker) heartbeatLoop(ctx context.Context, leaseID string, ttl time.Duration) error {
+func leaseHeartbeatInterval(ttl time.Duration) time.Duration {
 	interval := ttl / 3
 	if interval <= 0 {
-		interval = time.Millisecond
+		return time.Millisecond
 	}
-	ticker := time.NewTicker(interval)
+	return interval
+}
+
+func pulseLeaseHeartbeat(ctx context.Context, pulse func(context.Context) error) error {
+	if err := pulse(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func tickLeaseHeartbeat(ctx context.Context, ttl time.Duration, pulse func(context.Context) error) error {
+	ticker := time.NewTicker(leaseHeartbeatInterval(ttl))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			err := w.Runner.HeartbeatTaskExecution(ctx, api.HeartbeatTaskExecutionCommand{
-				LeaseID:  leaseID,
-				HolderID: w.AgentID,
-				TTL:      ttl,
-			})
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
+			if err := pulseLeaseHeartbeat(ctx, pulse); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func runLeaseHeartbeat(ctx context.Context, ttl time.Duration, pulse func(context.Context) error) error {
+	if err := pulseLeaseHeartbeat(ctx, pulse); err != nil {
+		return err
+	}
+	return tickLeaseHeartbeat(ctx, ttl, pulse)
+}
+
+func startLeaseHeartbeat(ctx context.Context, ttl time.Duration, pulse func(context.Context) error) (context.Context, func() error, error) {
+	if err := pulseLeaseHeartbeat(ctx, pulse); err != nil {
+		return ctx, func() error { return nil }, fmt.Errorf("worker: lease heartbeat failed: %w", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		err := tickLeaseHeartbeat(runCtx, ttl, pulse)
+		done <- err
+		if err != nil {
+			cancel()
+		}
+	}()
+	return runCtx, func() error {
+		cancel()
+		if err := <-done; err != nil {
+			return fmt.Errorf("worker: lease heartbeat failed: %w", err)
+		}
+		return nil
+	}, nil
 }
 
 // workerContextBuilder layers durable checkpoint replay over a host context
