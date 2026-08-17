@@ -334,6 +334,8 @@ func (r TeamRunner) startSchedulerHeartbeat(ctx context.Context, lease api.TaskE
 	ttl := r.schedulerTTL()
 	return startLeaseHeartbeat(ctx, ttl, leaseRenewalPulse(lease.ExpiresAt, ttl, func(hbCtx context.Context) error {
 		return r.pulseSchedulerLease(hbCtx, lease)
+	}, func(hbCtx context.Context) error {
+		return leaseStillActive(hbCtx, r.Runner, lease.ID, lease.HolderID)
 	}))
 }
 

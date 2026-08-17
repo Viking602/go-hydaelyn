@@ -160,6 +160,8 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 			HolderID: w.AgentID,
 			TTL:      ttl,
 		})
+	}, func(hbCtx context.Context) error {
+		return leaseStillActive(hbCtx, w.Runner, lease.ID, w.AgentID)
 	}))
 	if err != nil {
 		return ExecutionOutcome{}, err
@@ -1076,12 +1078,37 @@ func onlyContextCanceled(err error) bool {
 	return true
 }
 
-func leaseRenewalPulse(expiresAt time.Time, ttl time.Duration, heartbeat func(context.Context) error) func(context.Context) error {
+func leaseStillActive(ctx context.Context, runner *venat.Runner, leaseID, holderID string) error {
+	if runner == nil {
+		return ErrRunnerMissing
+	}
+	uow, err := runner.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	lease, loadErr := uow.Leases().LoadLease(ctx, leaseID)
+	rollbackErr := uow.Rollback(ctx)
+	if loadErr != nil {
+		return loadErr
+	}
+	if rollbackErr != nil {
+		return rollbackErr
+	}
+	if lease.HolderID != holderID || lease.Status != api.LeaseStatusActive || lease.ExpiresAt.IsZero() || !lease.ExpiresAt.After(time.Now().UTC()) {
+		return api.ErrLeaseNotActive
+	}
+	return nil
+}
+
+func leaseRenewalPulse(expiresAt time.Time, ttl time.Duration, heartbeat, validate func(context.Context) error) func(context.Context) error {
 	current := expiresAt
 	return func(ctx context.Context) error {
 		next := time.Now().UTC().Add(ttl)
 		if !next.After(current) {
-			return nil
+			if validate == nil {
+				return nil
+			}
+			return validate(ctx)
 		}
 		if err := heartbeat(ctx); err != nil {
 			return err

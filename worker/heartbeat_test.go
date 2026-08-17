@@ -180,17 +180,32 @@ func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
 }
 
 func TestLeaseRenewalPulseSkipsUntilExpiryWouldAdvance(t *testing.T) {
-	var pulses atomic.Int32
+	var heartbeats, validations atomic.Int32
 	expires := time.Now().UTC().Add(time.Hour)
 	pulse := leaseRenewalPulse(expires, time.Minute, func(context.Context) error {
-		pulses.Add(1)
+		heartbeats.Add(1)
+		return nil
+	}, func(context.Context) error {
+		validations.Add(1)
 		return nil
 	})
 	if err := pulse(context.Background()); err != nil {
 		t.Fatalf("pulse() error = %v", err)
 	}
-	if got := pulses.Load(); got != 0 {
-		t.Fatalf("pulses = %d, want 0 while remaining expiry exceeds TTL", got)
+	if heartbeats.Load() != 0 || validations.Load() != 1 {
+		t.Fatalf("heartbeats=%d validations=%d, want skip-extend plus validate", heartbeats.Load(), validations.Load())
+	}
+}
+
+func TestLeaseRenewalPulseDetectsLostLeaseWhileSkippingExtend(t *testing.T) {
+	pulse := leaseRenewalPulse(time.Now().UTC().Add(time.Hour), time.Minute, func(context.Context) error {
+		t.Fatal("Heartbeat must not run when it would shorten expiry")
+		return nil
+	}, func(context.Context) error {
+		return api.ErrLeaseNotActive
+	})
+	if err := pulse(context.Background()); !errors.Is(err, api.ErrLeaseNotActive) {
+		t.Fatalf("pulse() error = %v, want ErrLeaseNotActive", err)
 	}
 }
 
