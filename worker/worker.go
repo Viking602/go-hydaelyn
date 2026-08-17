@@ -1066,10 +1066,6 @@ func onlyContextCanceled(err error) bool {
 	if err == nil {
 		return false
 	}
-	var failure *agent.AgentFailure
-	if errors.As(err, &failure) && failure != nil {
-		return false
-	}
 	return canceledLeavesOnly(err)
 }
 

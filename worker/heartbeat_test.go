@@ -156,6 +156,17 @@ func TestCombineExecutionErrorsPrefersHeartbeatOverCancel(t *testing.T) {
 }
 
 func TestOnlyContextCanceledWalksWrappedJoins(t *testing.T) {
+	cancelOnly := (&agent.AgentFailure{
+		Kind:   agent.FailureKindEngineError,
+		Reason: "host canceled",
+	}).WithCause(context.Canceled)
+	if !onlyContextCanceled(cancelOnly) {
+		t.Fatal("AgentFailure whose only cause is Canceled must still be cancel-only")
+	}
+	if got := failureReport(cancelOnly).Kind; got != "cancelled" {
+		t.Fatalf("failureReport(cancel-only AgentFailure).Kind = %q, want cancelled", got)
+	}
+
 	recorderErr := errors.New("checkpoint recorder failed")
 	wrapped := (&agent.AgentFailure{
 		Kind:   agent.FailureKindEngineError,
