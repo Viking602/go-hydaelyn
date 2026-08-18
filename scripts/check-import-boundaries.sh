@@ -75,7 +75,7 @@ for line in text.splitlines():
 text = "\n".join(cleaned)
 
 paths = []
-for match in re.finditer(r'(?m)^\s*import\s+(?:[A-Za-z_][\w.]*\s+)?(["`])(.+?)\1', text):
+for match in re.finditer(r'(?m)^\s*import\s+(?:(?:[A-Za-z_][\w.]*|\.)\s+)?(["`])(.+?)\1', text):
     paths.append(match.group(2))
 for match in re.finditer(r"(?s)import\s*\((.*?)\)", text):
     for inner in re.finditer(r'(["`])(.+?)\1', match.group(1)):

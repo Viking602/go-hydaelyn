@@ -561,7 +561,7 @@ func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
 	capability := api.Capability{
 		Name: "summarize", AgentID: "agent-1", Description: "summarize text",
-		RequiresLease: true, RequiresPolicy: true,
+		RequiresLease: true, RequiresPolicy: false,
 	}
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		return uow.CapabilityCatalog().SaveCapability(context.Background(), capability)
@@ -572,7 +572,7 @@ func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 			return err
 		}
 		if len(got) != 1 || got[0].Name != capability.Name ||
-			!got[0].RequiresLease || !got[0].RequiresPolicy {
+			!got[0].RequiresLease || got[0].RequiresPolicy {
 			t.Fatalf("capability list mismatch: %+v", got)
 		}
 		return nil
@@ -581,12 +581,21 @@ func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 
 func testSaveCapabilityRejectsReservedName(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
+	names := []string{
+		api.CapabilityNameSelfProfile,
+		api.CapabilityNameSelfMemoryRead,
+		api.CapabilityNameSelfHistory,
+		api.CapabilityNameSelfSummarizeHistory,
+		api.HydaelynSelfNamespace + "extra",
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error {
-		err := uow.CapabilityCatalog().SaveCapability(context.Background(), api.Capability{
-			Name: api.CapabilityNameSelfProfile, AgentID: "agent-1",
-		})
-		if !errors.Is(err, api.ErrCapabilityNameReserved) {
-			t.Fatalf("SaveCapability(reserved) = %v, want ErrCapabilityNameReserved", err)
+		for _, name := range names {
+			err := uow.CapabilityCatalog().SaveCapability(context.Background(), api.Capability{
+				Name: name, AgentID: "agent-1",
+			})
+			if !errors.Is(err, api.ErrCapabilityNameReserved) {
+				t.Fatalf("SaveCapability(%q) = %v, want ErrCapabilityNameReserved", name, err)
+			}
 		}
 		return nil
 	})
