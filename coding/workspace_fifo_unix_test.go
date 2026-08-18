@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Viking602/venat/coding/internal/hashline"
 )
 
 func TestLocalWorkspace_ReadFile_FIFODoesNotBlock(t *testing.T) {
@@ -54,5 +56,28 @@ func TestLocalWorkspace_ReadFile_SymlinkToFIFODoesNotBlock(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ReadFile blocked on symlink to FIFO")
+	}
+}
+
+func TestLocalWorkspace_WriteText_FIFODoesNotBlock(t *testing.T) {
+	ws, root := newTestWorkspace(t, map[string]string{"target.txt": "safe\n"})
+	if err := os.Remove(filepath.Join(root, "target.txt")); err != nil {
+		t.Fatalf("remove target: %v", err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(root, "target.txt"), 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	fs := ws.(hashline.Filesystem)
+	errc := make(chan error, 1)
+	go func() {
+		errc <- fs.WriteText(context.Background(), "target.txt", "pwned\n")
+	}()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("WriteText(fifo) must fail")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteText blocked on FIFO")
 	}
 }

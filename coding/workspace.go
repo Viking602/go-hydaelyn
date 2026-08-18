@@ -859,6 +859,15 @@ func (w *localWorkspace) writeResolved(abs, canon, text string) error {
 	if err != nil {
 		return fmt.Errorf("coding: write %q: %w", canon, err)
 	}
+	opened, statErr := f.Stat()
+	if statErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("coding: write %q: %w", canon, statErr)
+	}
+	if !opened.Mode().IsRegular() {
+		_ = f.Close()
+		return fmt.Errorf("coding: write %q: %w", canon, ErrNotRegularFile)
+	}
 	_, wErr := f.Write([]byte(text))
 	closeErr := f.Close()
 	if wErr != nil {

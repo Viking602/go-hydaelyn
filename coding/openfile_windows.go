@@ -4,6 +4,8 @@ package coding
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -23,8 +25,21 @@ func openRegularWrite(path string, _ os.FileMode) (*os.File, error) {
 	return f, nil
 }
 
+func windowsExtendedPath(path string) string {
+	path = filepath.Clean(path)
+	path = strings.ReplaceAll(path, `/`, `\`)
+	switch {
+	case strings.HasPrefix(path, `\\?\`), strings.HasPrefix(path, `\??\`):
+		return path
+	case strings.HasPrefix(path, `\\`):
+		return `\\?\UNC\` + path[2:]
+	default:
+		return `\\?\` + path
+	}
+}
+
 func openWindowsLeaf(path string, access uint32) (*os.File, error) {
-	name, err := syscall.UTF16PtrFromString(path)
+	name, err := syscall.UTF16PtrFromString(windowsExtendedPath(path))
 	if err != nil {
 		return nil, err
 	}
