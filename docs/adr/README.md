@@ -17,7 +17,7 @@ ADR-001 through ADR-008 were originally authored in Chinese (before the English-
 
 ## v0.8.0 (complete)
 
-- [ADR-009 Capability Public API](ADR-009-capability-public-api.md) — declaration vs execution vs enforcement; the four exports (MCP / OpenAPI / CLI / LLM tool def); reserved `hydaelyn.self.*` namespace
+- [ADR-009 Capability Public API](ADR-009-capability-public-api.md) — declaration vs execution vs enforcement; MCP export ships; OpenAPI / CLI / LLM tool def remain Deferred; reserved `hydaelyn.self.*` namespace; 2026-08-18 amendment keeps `map[string]any` schemas and `RequiresApproval`
 - [ADR-010 Usage, Budget, and Policy composition](ADR-010-usage-budget-policy-composition.md) — measurement (`UsageRecord`) feeds enforcement (`BudgetPolicy` ⊆ `PolicyEngine`); conditional authorization via `PolicyEnforcer` obligations
 - [ADR-011 Context four-layer model](ADR-011-context-four-layer-model.md) — Blackboard / Memory / Artifact / ContextSource; `ContextScope` axis
 - [ADR-012 Storage contract and Position D](ADR-012-storage-contract-position-c.md): framework owns contract verbs and conformance tests; applications own schema and implementation; no reference backend ships

@@ -317,7 +317,7 @@ func (s *SingleRunner) runAndRootForStart(
 	}
 	started, err := s.Runner.StartRunWithResult(ctx, api.StartRunCommand{
 		RunID: request.RunID, RootTaskID: request.RootTaskID,
-		Request: request.Request, Metadata: metadata,
+		Request: request.Request, AgentVersion: s.AgentVersion, Metadata: metadata,
 	})
 	if err != nil {
 		return api.Run{}, api.Task{}, false, fmt.Errorf("worker: start single run: %w", err)

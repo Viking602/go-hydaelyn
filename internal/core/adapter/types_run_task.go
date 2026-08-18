@@ -7,25 +7,27 @@ import (
 
 func RunToModel(in api.Run) model.Run {
 	return model.Run{
-		ID:         in.ID,
-		Status:     model.RunStatus(in.Status),
-		Request:    in.Request,
-		RootTaskID: in.RootTaskID,
-		Metadata:   stringMapToModel(in.Metadata),
-		CreatedAt:  in.CreatedAt,
-		UpdatedAt:  in.UpdatedAt,
+		ID:           in.ID,
+		Status:       model.RunStatus(in.Status),
+		Request:      in.Request,
+		RootTaskID:   in.RootTaskID,
+		AgentVersion: in.AgentVersion,
+		Metadata:     stringMapToModel(in.Metadata),
+		CreatedAt:    in.CreatedAt,
+		UpdatedAt:    in.UpdatedAt,
 	}
 }
 
 func RunFromModel(in model.Run) api.Run {
 	return api.Run{
-		ID:         in.ID,
-		Status:     api.RunStatus(in.Status),
-		Request:    in.Request,
-		RootTaskID: in.RootTaskID,
-		Metadata:   stringMapFromModel(in.Metadata),
-		CreatedAt:  in.CreatedAt,
-		UpdatedAt:  in.UpdatedAt,
+		ID:           in.ID,
+		Status:       api.RunStatus(in.Status),
+		Request:      in.Request,
+		RootTaskID:   in.RootTaskID,
+		AgentVersion: in.AgentVersion,
+		Metadata:     stringMapFromModel(in.Metadata),
+		CreatedAt:    in.CreatedAt,
+		UpdatedAt:    in.UpdatedAt,
 	}
 }
 

@@ -140,7 +140,7 @@ func traceCommandToCore(command api.Command) (core.RuntimeCommand, bool) {
 }
 
 func StartRunCommandToCore(cmd api.StartRunCommand) core.StartRunCommand {
-	return core.StartRunCommand{RunID: cmd.RunID, RootTaskID: cmd.RootTaskID, Request: cmd.Request, Metadata: stringMapToModel(cmd.Metadata)}
+	return core.StartRunCommand{RunID: cmd.RunID, RootTaskID: cmd.RootTaskID, Request: cmd.Request, AgentVersion: cmd.AgentVersion, Metadata: stringMapToModel(cmd.Metadata)}
 }
 
 func CreateTaskCommandToCore(cmd api.CreateTaskCommand) core.CreateTaskCommand {

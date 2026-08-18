@@ -1,6 +1,6 @@
 # Venat v0.14.0 Product Specification
 
-Status: **Unreleased**
+Status: **Released**
 
 This directory records the v0.14.0 control-plane additions. Historical release
 records, including `v0.8.0/`, remain unchanged; the corresponding Git tag is the

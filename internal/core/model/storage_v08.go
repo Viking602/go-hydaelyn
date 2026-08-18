@@ -144,6 +144,8 @@ type Capability struct {
 	RiskLevel        string
 	Idempotent       bool
 	RequiresApproval bool
+	RequiresLease    bool
+	RequiresPolicy   bool
 	Tags             []string
 	Metadata         map[string]string
 }

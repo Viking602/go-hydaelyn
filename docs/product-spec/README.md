@@ -15,18 +15,20 @@ as a promise.
 | [v0.11.0](../release-notes/v0.11.0.md) | Released 2026-07-18 | Context-aware compaction, tool-call sequencing, and bounded history preparation |
 | [v0.12.0](../release-notes/v0.12.0.md) | Released 2026-07-31 | Project, module, package, and CLI rename from Hydaelyn to Venat |
 | [v0.13.0](../release-notes/v0.13.0.md) | Released 2026-08-01 | Durable execution recovery, typed outcomes, checkpoint restoration, provider reliability, and Responses API support |
-| [v0.14.0](./v0.14.0/) | Unreleased | Executable agent definitions, single-agent lifecycle orchestration, transactional admission, resource claims, granular usage, policy obligations, and storage conformance extensions |
+| [v0.14.0](./v0.14.0/) | Released | Executable agent definitions, single-agent lifecycle orchestration, transactional admission, resource claims, granular usage, policy obligations, and storage conformance extensions |
 | [Future backlog](../plans/future-backlog.md) | Unversioned | Scheduler expansion, memory and artifact work, OpenTelemetry integration, and production pack content |
 
-The latest published release is v0.13.0. The v0.14.0 row describes the current
-release candidate and does not imply that a tag or GitHub Release exists.
+The latest published release is v0.14.0.
 
 ## Architecture
 
-Venat has four load-bearing layers:
+Venat's documentation map is five layers. The linear picture is not a
+hard DAG; reverse-edge bans are the executable rule:
 
 ```text
-Packs / Examples
+Packs / Workflow / Examples
+        ↓ host wiring
+Worker integration (worker/)
         ↓
 Multi-Agent Layer  (multiagent/)
         ↓
@@ -35,6 +37,8 @@ Agent Loop Layer   (agent/)
 Durable Runner     (root + internal/)
 ```
 
+The live boundary document is
+[`docs/architecture-boundaries.md`](../architecture-boundaries.md).
 The executable import-boundary rules live in
 [`scripts/check-import-boundaries.sh`](../../scripts/check-import-boundaries.sh).
 The historical v0.8.0 architecture record is
@@ -42,11 +46,11 @@ The historical v0.8.0 architecture record is
 
 ## Reading order
 
-1. Read the [latest released notes](../release-notes/v0.13.0.md).
-2. Read the [v0.8.0 architecture boundaries](./v0.8.0/11-boundaries.md) and
-   [package structure](./v0.8.0/12-package-structure.md).
-3. Review the [unreleased v0.14.0 specification](./v0.14.0/) when building
-   this release branch.
+1. Read the [latest released notes](../release-notes/v0.14.0.md).
+2. Read the [live architecture boundaries](../architecture-boundaries.md)
+   and the [v0.8.0 package structure](./v0.8.0/12-package-structure.md).
+3. Review the [v0.14.0 specification](./v0.14.0/) for the current
+   control-plane surface.
 4. Treat the [future backlog](../plans/future-backlog.md) as uncommitted scope.
 
 ## Conventions

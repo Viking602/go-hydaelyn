@@ -93,8 +93,15 @@ These constraints apply to all changes:
 2. **No exported symbol renames** - Public API changes require explicit approval
 3. **No new linting stack** - Keep linting centralized in `.golangci.yml`, CI, and the existing Makefile targets
 
+## Architecture
+
+Live import seams, ownership rules, and the six principles are in
+[docs/architecture-boundaries.md](docs/architecture-boundaries.md).
+`make verify` and `make architecture-check` enforce them.
+
 ## References
 
+- [Architecture Boundaries](docs/architecture-boundaries.md)
 - [Effective Go](https://go.dev/doc/effective_go) - Official Go style guide
 - [Package Names](https://go.dev/blog/package-names) - Go blog on package naming conventions
 - [Google Go Style Guide](https://google.github.io/styleguide/go/) - Comprehensive Go conventions

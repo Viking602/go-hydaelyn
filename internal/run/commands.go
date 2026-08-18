@@ -7,10 +7,11 @@ import (
 )
 
 type StartRunCommand struct {
-	RunID      string
-	RootTaskID string
-	Request    string
-	Metadata   map[string]string
+	RunID        string
+	RootTaskID   string
+	Request      string
+	AgentVersion string
+	Metadata     map[string]string
 }
 
 type CreateTaskCommand struct {

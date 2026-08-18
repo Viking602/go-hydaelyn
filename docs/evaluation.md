@@ -288,9 +288,9 @@ A runnable variant (without `*testing.T`) lives at
 
 ## Integration with packs
 
-Each pack ships its eval cases as `EvalCases` on its `packs.Pack` value (e.g.
-`research.SmokeCases`) and a host runs them through `eval.RunSuite(t, cases)`.
-See [`packs/research/eval_test.go`](../packs/research/eval_test.go) for the
+Pack production code does not carry eval cases. Each pack keeps its smoke
+suite in `_test.go` and runs it through `eval.RunSuite(t, cases)`. See
+[`packs/research/eval_test.go`](../packs/research/eval_test.go) for the
 canonical per-pack self-check. Swapping the harness's scripted provider for a
 live one turns a smoke suite into a quality gate without changing the case
 shape.

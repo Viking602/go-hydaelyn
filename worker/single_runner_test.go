@@ -172,7 +172,7 @@ func TestSingleRunnerStartRepairsRunCreatedBeforeTask(t *testing.T) {
 	}
 	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
 		RunID: request.RunID, RootTaskID: request.RootTaskID,
-		Request: request.Request, Metadata: metadata,
+		Request: request.Request, AgentVersion: coordinator.AgentVersion, Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("StartRun(partial) error = %v", err)
 	}
@@ -221,7 +221,7 @@ func TestSingleRunnerConcurrentStartLoserDoesNotFailWinnerRun(t *testing.T) {
 	}
 	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
 		RunID: request.RunID, RootTaskID: request.RootTaskID,
-		Request: request.Request, Metadata: metadata,
+		Request: request.Request, AgentVersion: coordinator.AgentVersion, Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("winner StartRun() error = %v", err)
 	}

@@ -32,8 +32,9 @@ func TestStartCreatesRunRootTaskAndEvents(t *testing.T) {
 
 	metadata := map[string]string{"owner": "runtime"}
 	run, root, err := runsvc.Start(ctx, uow, testIDGenerator(), runsvc.StartInput{
-		Request:  "ship agent runtime",
-		Metadata: metadata,
+		Request:      "ship agent runtime",
+		AgentVersion: "def-v3",
+		Metadata:     metadata,
 	})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -45,6 +46,9 @@ func TestStartCreatesRunRootTaskAndEvents(t *testing.T) {
 	}
 	if run.Metadata["owner"] != "runtime" {
 		t.Fatalf("Start() did not clone metadata: %#v", run.Metadata)
+	}
+	if run.AgentVersion != "def-v3" {
+		t.Fatalf("Start() AgentVersion = %q, want def-v3", run.AgentVersion)
 	}
 	if root.Type != model.TaskTypeWorker || root.Status != model.TaskStatusCreated || root.Version != 1 {
 		t.Fatalf("unexpected root task contract: %#v", root)
@@ -93,6 +97,11 @@ func TestStartIsIdempotentForExplicitRunIdentity(t *testing.T) {
 	conflict.Request = "replace existing run"
 	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), conflict); !errors.Is(err, model.ErrIdempotencyConflict) {
 		t.Fatalf("Start(conflict) error = %v, want ErrIdempotencyConflict", err)
+	}
+	versionConflict := input
+	versionConflict.AgentVersion = "other"
+	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), versionConflict); !errors.Is(err, model.ErrIdempotencyConflict) {
+		t.Fatalf("Start(version conflict) error = %v, want ErrIdempotencyConflict", err)
 	}
 }
 

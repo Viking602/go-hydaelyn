@@ -16,9 +16,14 @@ fi
 
 baseline="$(tr -d '[:space:]' < "$BASELINE_FILE")"
 
-# Pattern: business-domain words that must not leak into framework.
-# Word boundaries on Hazard/Incident avoid false positives like "incident_response_example".
-pattern='Synthesis|ReviewResult|ActionResult|TaskTypeAction|\bHazard\b|\bIncident\b'
+# Identifier-safe subset of the ADR-008 closed list. Generic English nouns
+# (change, document, repository, action, review, lead, sales, deploy) are
+# banned as TaskType / domain identifiers by the ADR, but grepping them as
+# bare words produces false positives. Packs, examples, and docs may use
+# the full list.
+# Word boundaries on Hazard/Incident/Ticket/Customer avoid false positives
+# like incident_response_example.
+pattern='Synthesis|ReviewResult|ActionResult|TaskTypeAction|TaskTypeReview|TaskTypeSynthesis|\bHazard\b|\bIncident\b|\bTicket\b|\bCustomer\b|agent_review'
 
 count="$(
   {
@@ -29,6 +34,7 @@ count="$(
       --exclude-dir=docs \
       --exclude-dir=testdata \
       --exclude-dir=pattern \
+      --exclude-dir=packs \
       --exclude-dir=.git \
       . 2>/dev/null || true
   } \
@@ -49,6 +55,7 @@ if (( count > baseline )); then
     --exclude-dir=docs \
     --exclude-dir=testdata \
     --exclude-dir=pattern \
+    --exclude-dir=packs \
     --exclude-dir=.git \
     . >&2 || true
   exit 1

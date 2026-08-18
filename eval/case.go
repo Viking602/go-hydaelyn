@@ -18,8 +18,8 @@ type EvalCase struct {
 	// Setup returns the Harness the case executes in. The framework calls it
 	// once per run and calls Harness.Cleanup afterwards. When nil, the
 	// framework uses NewHarness with the case's defaults. Setup takes no
-	// *testing.T so packs can declare EvalCases as plain values without
-	// importing the testing package into their production build; the testing
+	// *testing.T so pack tests can declare cases as plain values without
+	// importing the testing package into production pack code; the testing
 	// dependency stays confined to the Run/RunSuite wrappers (plan §6.2).
 	Setup func() Harness
 	// Input is the command used to start the run. (Spec §3: api.StartRunCommand

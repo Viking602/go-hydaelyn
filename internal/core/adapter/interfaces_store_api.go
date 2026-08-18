@@ -610,6 +610,9 @@ func (a apiAgentProfileStoreAdapter) ListAgentProfiles(ctx context.Context, sel 
 type apiCapabilityStoreAdapter struct{ inner api.CapabilityStore }
 
 func (a apiCapabilityStoreAdapter) SaveCapability(ctx context.Context, capability model.Capability) error {
+	if err := model.ValidateCapabilityName(capability.Name); err != nil {
+		return err
+	}
 	return ErrorToCore(a.inner.SaveCapability(ctx, CapabilityFromModel(capability)))
 }
 

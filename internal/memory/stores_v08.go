@@ -109,8 +109,8 @@ func (s *capabilityStore) SaveCapability(_ context.Context, capability model.Cap
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(capability.Name) == "" {
-		return fmt.Errorf("capability name required: %w", model.ErrInvalidCommand)
+	if err := model.ValidateCapabilityName(capability.Name); err != nil {
+		return err
 	}
 	u.staged.Capabilities[capabilityKey(capability.Name, capability.AgentID)] = capability
 	return nil

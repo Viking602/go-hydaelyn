@@ -1,16 +1,16 @@
 // Package coding is the declarative manifest for the sandboxed coding
 // capability specified in docs/coding-agent-hashline.md. It bundles the
-// code-editor AgentDefinition, one CapabilityManifest describing the
-// coding.* tools, and a smoke eval suite — nothing else.
+// code-editor AgentDefinition and one CapabilityManifest describing the
+// coding.* tools — nothing else.
 //
 // Like every pack (see packs/devops, packs/research) this file imports
-// only api + eval and MUST NOT import the coding/ runtime package: a pack
-// is configuration the host mounts, and the host is responsible for
-// binding each Capability to a concrete tool.Driver from
-// coding.NewToolSet(ws) and attaching coding.PolicyEngine() on the worker
-// path. The manifest mirrors the tool metadata table in spec §6 and the
-// agent instructions in spec §8 so the catalog stays in sync with the
-// implementation without coupling to it.
+// only api and MUST NOT import the coding/ runtime package: a pack is
+// configuration the host mounts, and the host is responsible for binding
+// each Capability to a concrete tool.Driver from coding.NewToolSet(ws)
+// and attaching coding.PolicyEngine() on the worker path. The manifest
+// mirrors the tool metadata table in spec §6 and the agent instructions
+// in spec §8 so the catalog stays in sync with the implementation
+// without coupling to it.
 //
 // Mount it via:
 //
@@ -20,10 +20,7 @@ package coding
 
 import (
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/eval"
-	"github.com/Viking602/venat/eval/assertions"
 	"github.com/Viking602/venat/packs"
-	"github.com/Viking602/venat/provider"
 )
 
 // PackName is the registry identifier for this pack.
@@ -147,7 +144,6 @@ var Pack = packs.Pack{
 			DocumentURL: "docs/coding-agent-hashline.md",
 		},
 	},
-	EvalCases: SmokeCases,
 }
 
 // codeEditor is the single coding agent (spec §8). Tools list the executable
@@ -207,53 +203,3 @@ const instructions = `You are a careful coding agent in a sandboxed workspace.
 8. Prefer small patches; review coding.git_diff; run focused go_test; report results.
 9. Never access paths outside the workspace; never request arbitrary shell; never
    commit/push/delete unless explicitly asked.`
-
-// SmokeCases is a one-case eval suite that drives the pack against a
-// deterministic scripted model and verifies the run completes while narrating
-// the hashline protocol. It is a WIRING/SHAPE smoke check — it proves the pack
-// mounts and the eval surface grades its output — not a capability guard; the
-// scripted model performs no real edit. Hosts run it in CI via
-// eval.RunSuite(t, SmokeCases).
-//
-// Scope note: the framework's default eval Harness executes a scripted text
-// completion through the worker bridge — it does not register the coding.*
-// tool.Drivers or attach coding.PolicyEngine (that wiring is the host's job,
-// per the pack boundary). So the smoke case grades only what a scripted run
-// can truthfully satisfy: terminal status plus the agent narrating the
-// read→edit handoff. The richer governance/tool assertions the spec lists
-// (assertions.PolicyDecisionDeniedBy, assertions.ToolCalledWithArg,
-// assertions.EventEmitted) require a Harness whose run actually exercises the
-// coding tools under coding.PolicyEngine; those land with the M7 integration
-// suite alongside the runtime package, not in this declarative manifest. The
-// case shape is identical, so swapping in such a Harness upgrades this smoke
-// suite into a quality gate without touching the assertion vocabulary.
-var SmokeCases = []eval.EvalCase{
-	{
-		Name:        "hashline-protocol-narration-shape",
-		Description: "scripted run completes and the eval surface observes the narrated output (wiring smoke check, not a capability guard)",
-		Setup: func() eval.Harness {
-			return eval.NewHarness(
-				eval.WithAgentID("coding.code-editor"),
-				eval.WithScript([]provider.Event{
-					{Kind: provider.EventTextDelta, Text: "Read ¶main.go#A1B2, applied edit_hashline, verified with go_test."},
-					{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-				}),
-			)
-		},
-		Input: api.StartRunCommand{
-			RunID:      "coding-smoke",
-			RootTaskID: "root",
-			Request:    "fix the off-by-one in main.go using the hashline protocol",
-		},
-		Assertions: []eval.Assertion{
-			assertions.RunTerminatedWithStatus{Status: api.RunStatusCompleted},
-			// OutputContains here asserts the SHAPE of the scripted narration the
-			// harness emits — i.e. that the eval surface is wired and grades the
-			// run's output — NOT that any edit was performed. The substring is
-			// authored by WithScript above, so this is a self-consistency/wiring
-			// check; the real capability guard lives in coding's M7 regression
-			// suite, which drives the actual tools under coding.PolicyEngine.
-			assertions.OutputContains{Substring: "edit_hashline"},
-		},
-	},
-}

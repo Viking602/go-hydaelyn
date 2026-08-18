@@ -47,13 +47,14 @@ func Task(task model.Task) map[string]any {
 
 func Run(run model.Run) map[string]any {
 	return map[string]any{
-		"id":         run.ID,
-		"status":     string(run.Status),
-		"request":    run.Request,
-		"rootTaskId": run.RootTaskID,
-		"metadata":   maps.Clone(run.Metadata),
-		"createdAt":  run.CreatedAt,
-		"updatedAt":  run.UpdatedAt,
+		"id":           run.ID,
+		"status":       string(run.Status),
+		"request":      run.Request,
+		"rootTaskId":   run.RootTaskID,
+		"agentVersion": run.AgentVersion,
+		"metadata":     maps.Clone(run.Metadata),
+		"createdAt":    run.CreatedAt,
+		"updatedAt":    run.UpdatedAt,
 	}
 }
 
