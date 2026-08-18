@@ -143,18 +143,26 @@ flow.
 
 ## How it works
 
-Venat is four layers. Their critical import seams are explicit and checked
-in CI: `api/` imports no Venat package, `agent/` never imports
-`multiagent/`, `multiagent/` never imports the root Runner, `worker/`, or
-`internal/`, and the root facade never imports `multiagent/`. The shared
-`stream/` package is intentionally available to `multiagent/`; it is a
-runtime-neutral collaboration primitive, not an upward dependency on Runner.
+Venat's documentation map is five layers. The linear picture is not a
+hard DAG; reverse-edge bans are the executable rule. `api/` imports no
+Venat package, `agent/` never imports `multiagent/`, `multiagent/` never
+imports the root Runner, `worker/`, or `internal/`, the root facade never
+imports `multiagent/`, and `worker/` / `packs/` / `coding/` keep their
+reverse-edge bans. The shared `stream/` package is intentionally
+available to `multiagent/`; it is a runtime-neutral collaboration
+primitive, not an upward dependency on Runner. See
+[architecture boundaries](docs/architecture-boundaries.md).
 
 ```
 ┌─────────────────────────────────────────────┐
 │ Packs / Workflow / Examples                 │
 │ research, customer-support, devops, aiops,  │
 │ workflow modeling                           │
+└─────────────────────────────────────────────┘
+                    ↓ host wiring
+┌─────────────────────────────────────────────┐
+│ Worker integration  (worker/)               │
+│ poll, lease, execute, team drive            │
 └─────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────┐
@@ -252,7 +260,9 @@ These belong in application code or optional plugins.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for coding standards and the
-architectural gates CI enforces (`sentrux`, `check-public-any.sh`,
-`check-business-words.sh`, `check-import-boundaries.sh`). The fast local gate is
-`make verify`; run `make ci-local` before substantial changes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[architecture boundaries](docs/architecture-boundaries.md) for coding
+standards and the architectural gates CI enforces (`sentrux`,
+`check-public-any.sh`, `check-business-words.sh`,
+`check-import-boundaries.sh`). The fast local gate is `make verify`; run
+`make ci-local` before substantial changes.

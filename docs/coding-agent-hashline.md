@@ -80,15 +80,13 @@ coding/
     *_test.go
 
 packs/coding/
-  coding.go            // single file: api.AgentDefinition + api.CapabilityManifest + []eval.EvalCase
+  coding.go            // single file: api.AgentDefinition + api.CapabilityManifest
 ```
 
-Import rule: `packs/coding` imports only the declarative-only set the worked
-example `packs/research/research.go` uses — `api`, `eval`, `eval/assertions`,
-`packs`, and `provider` (the last two for the `packs.Pack` value and the scripted
-smoke harness). It must NOT import `coding/` (the runtime) or the kernel. The
-wiring (build a `tool.Bus` from `coding.NewToolSet(ws)` and attach to the agent)
-is done by the host / example.
+Import rule: `packs/coding` imports only `api` and `packs`. Smoke eval cases
+live in `coding_test.go`. It must NOT import `coding/` (the runtime) or the
+kernel. The wiring (build a `tool.Bus` from `coding.NewToolSet(ws)` and attach
+to the agent) is done by the host / example.
 
 Source files to read before implementing (verify exact signatures against these):
 `tool/tool.go`, `tool/kit/toolkit.go`, `message/message.go`, `policy/policy.go`,

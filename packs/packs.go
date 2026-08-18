@@ -1,9 +1,9 @@
 // Package packs is the v0.8.0 "vertical pack" registry root. A pack is a
-// curated bundle of AgentDefinitions, Capabilities, eval cases, and
-// recipes for one application domain. Packs MUST NOT touch the Venat
-// kernel surface — they only consume the public api/* and runtime/* types
-// and re-export configuration the host application can mount into its
-// own Runner.
+// curated bundle of AgentDefinitions, Capabilities, and recipes for one
+// application domain. Packs MUST NOT touch the Venat kernel surface —
+// they only consume the public api/* types and re-export configuration
+// the host application can mount into its own Runner. Eval suites live
+// in pack tests, not on the production Pack value.
 //
 // The framework ships skeleton packs under packs/research,
 // packs/customer-support, packs/devops, and packs/aiops. Each pack
@@ -53,8 +53,9 @@ type Pack struct {
 	// catalog without breaking pack authors.
 	Recipes []Recipe
 
-	// EvalCases grade agents in this pack. Hosts MAY run them in CI via
-	// eval.RunSuite(t, pack.EvalCases).
+	// Deprecated: eval cases belong in pack tests. Hosts should call
+	// eval.RunSuite from _test.go. The field remains so existing pack
+	// literals compile; shipped packs leave it empty.
 	EvalCases []eval.EvalCase
 }
 

@@ -35,7 +35,10 @@ func TestToolCapabilityProjectionCopiesMutableMetadata(t *testing.T) {
 	if capability.Name != tool.Name || capability.AgentID != "agent-1" || capability.EffectType != ToolEffectWrite {
 		t.Fatalf("AsCapability() identity/effect = %#v", capability)
 	}
-	if !capability.RequiresApproval || !capability.Idempotent || capability.RiskLevel != "medium" {
+	if !capability.RequiresApproval || !capability.RequiresLease || !capability.RequiresPolicy {
+		t.Fatalf("AsCapability() requirement flags = %#v", capability)
+	}
+	if !capability.Idempotent || capability.RiskLevel != "medium" {
 		t.Fatalf("AsCapability() policy fields = %#v", capability)
 	}
 	if capability.Tags[0] != "report" || capability.Metadata["owner"] != "runtime" {

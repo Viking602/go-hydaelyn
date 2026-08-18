@@ -4,20 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Four layers: Packs → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `worker/`, `memory/`, `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`.
+Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Documentation map: Packs → Worker integration (`worker/`) → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The linear picture is documentation only; reverse-edge bans stay. The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `coding/`, `memory/` (deprecated; use `api.Memory`), `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`. `internal/memory` is the process-local development/test store, not a Position D reference backend. See `docs/architecture-boundaries.md`.
 
 ## Build, test, and development commands
 
-- `make verify` — fast local gate; run before routine changes (fmt-check + vet + tidy-check + lint + test).
-- `make ci-local` — full CI-parity gate; run before substantial changes (adds staticcheck, vulncheck, race, `architecture-check`).
+- `make verify` — fast local gate; run before routine changes (fmt-check + vet + tidy-check + lint + test + architecture-check).
+- `make ci-local` — full CI-parity gate; run before substantial changes (adds staticcheck, vulncheck, race).
 - `make fmt` / `make fmt-check` — format with gofmt + goimports / fail if not clean.
 - `make test` / `make test-race` — `go test ./...` / race-enabled with 10m timeout.
-- `make architecture-check` — runs `sentrux check .`, `scripts/check-business-words.sh`, `scripts/check-public-any.sh`.
+- `make architecture-check` — runs `sentrux check .`, `scripts/check-business-words.sh`, `scripts/check-public-any.sh`, `scripts/check-import-boundaries.sh`.
 - Run an example with `go run ./_examples/<name>`.
 
 ## Critical gates
 
-`make architecture-check` (and the three checks it runs) are hard gates — a violation fails CI even if tests pass. Run `make verify` before finishing routine work and `make ci-local` before substantial changes.
+`make architecture-check` (and the four checks it runs) are hard gates — a violation fails CI even if tests pass. Run `make verify` before finishing routine work and `make ci-local` before substantial changes.
 
 ## Public any-field contract (ADR-009)
 

@@ -7,10 +7,6 @@ import (
 	"github.com/Viking602/venat/packs/coding"
 )
 
-// TestCodingPack_SmokeSuite is the per-pack self-check: the pack ships its eval
-// cases (coding.SmokeCases, also surfaced as Pack.EvalCases) and runs them
-// through eval.RunSuite. Each case executes its scripted run to a terminal
-// status and grades the typed assertions.
 func TestCodingPack_SmokeSuite(t *testing.T) {
 	results := eval.RunSuite(t, coding.SmokeCases)
 	if len(results) != len(coding.SmokeCases) {
@@ -23,9 +19,6 @@ func TestCodingPack_SmokeSuite(t *testing.T) {
 	}
 }
 
-// TestCodingPack_Shape guards the manifest invariants the pack relies on: a
-// named pack and manifest, one agent, and the full coding.* tool set surfaced
-// as capabilities.
 func TestCodingPack_Shape(t *testing.T) {
 	if coding.Pack.Name != coding.PackName || coding.Pack.Version == "" {
 		t.Fatalf("pack name/version: %q / %q", coding.Pack.Name, coding.Pack.Version)

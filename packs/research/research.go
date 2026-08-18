@@ -1,6 +1,6 @@
 // Package research is the v0.8.0 worked-example pack: a small bundle of
-// agent definitions, capabilities, and an eval suite that demonstrates
-// the shape every pack should follow.
+// agent definitions and capabilities that demonstrates the shape every
+// pack should follow. Eval smoke cases live in research_test.
 //
 // The pack mounts cleanly via:
 //
@@ -15,10 +15,7 @@ package research
 
 import (
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/eval"
-	"github.com/Viking602/venat/eval/assertions"
 	"github.com/Viking602/venat/packs"
-	"github.com/Viking602/venat/provider"
 )
 
 // PackName is the registry identifier for this pack.
@@ -28,7 +25,7 @@ const PackName = "research"
 var Pack = packs.Pack{
 	Name:        PackName,
 	Version:     "0.8.0",
-	Description: "Reference pack: a planner / researcher / writer triad with a smoke eval suite.",
+	Description: "Reference pack: a planner / researcher / writer triad.",
 	Agents:      []api.AgentDefinition{planner, researcher, writer},
 	Capabilities: []api.CapabilityManifest{
 		{
@@ -73,7 +70,6 @@ var Pack = packs.Pack{
 			DocumentURL: "docs/recipes/research-triad.md",
 		},
 	},
-	EvalCases: SmokeCases,
 }
 
 var planner = api.AgentDefinition{
@@ -123,32 +119,5 @@ var writer = api.AgentDefinition{
 	},
 	Governance: api.GovernancePolicy{
 		Budget: api.Budget{MaxModelCalls: 2},
-	},
-}
-
-// SmokeCases is a one-case eval suite that drives the pack against a
-// deterministic scripted model and verifies the run completes with a
-// non-empty answer. Hosts run it in CI via eval.RunSuite(t, SmokeCases).
-// Swapping the harness's scripted provider for a live one turns this into
-// a full quality gate without changing the case shape.
-var SmokeCases = []eval.EvalCase{
-	{
-		Name:        "cited-answer",
-		Description: "the final answer is non-empty and mentions a source",
-		Setup: func() eval.Harness {
-			return eval.NewHarness(eval.WithScript([]provider.Event{
-				{Kind: provider.EventTextDelta, Text: "Answer with source [1] attached."},
-				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
-			}))
-		},
-		Input: api.StartRunCommand{
-			RunID:      "research-smoke",
-			RootTaskID: "root",
-			Request:    "summarize the question with at least one source",
-		},
-		Assertions: []eval.Assertion{
-			assertions.RunTerminatedWithStatus{Status: api.RunStatusCompleted},
-			assertions.OutputContains{Substring: "source"},
-		},
 	},
 }

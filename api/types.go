@@ -554,13 +554,14 @@ type UserMessage struct {
 }
 
 type Run struct {
-	ID         string            `json:"id"`
-	Status     RunStatus         `json:"status"`
-	Request    string            `json:"request,omitempty"`
-	RootTaskID string            `json:"rootTaskId,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	CreatedAt  time.Time         `json:"createdAt"`
-	UpdatedAt  time.Time         `json:"updatedAt"`
+	ID           string            `json:"id"`
+	Status       RunStatus         `json:"status"`
+	Request      string            `json:"request,omitempty"`
+	RootTaskID   string            `json:"rootTaskId,omitempty"`
+	AgentVersion string            `json:"agentVersion,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
 }
 
 type Task struct {
@@ -823,6 +824,8 @@ type Capability struct {
 	RiskLevel        string            `json:"riskLevel,omitempty"`
 	Idempotent       bool              `json:"idempotent,omitempty"`
 	RequiresApproval bool              `json:"requiresApproval,omitempty"`
+	RequiresLease    bool              `json:"requiresLease,omitempty"`
+	RequiresPolicy   bool              `json:"requiresPolicy,omitempty"`
 	Tags             []string          `json:"tags,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
 }
@@ -846,6 +849,8 @@ func (t Tool) AsCapability(agentID string) Capability {
 		RiskLevel:        t.RiskLevel,
 		Idempotent:       t.Idempotent,
 		RequiresApproval: t.RequiresActionTask,
+		RequiresLease:    t.RequiresActionTask,
+		RequiresPolicy:   t.RequiresActionTask,
 		Tags:             append([]string(nil), t.PolicyTags...),
 		Metadata:         cloneStringMap(t.Metadata),
 	}

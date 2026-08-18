@@ -26,4 +26,5 @@ var (
 	ErrCheckpointLimitExceeded   = errors.New("orchestrator: execution checkpoint limit exceeded")
 	ErrUsageUnpriced             = errors.New("orchestrator: usage is unpriced")
 	ErrInvalidConfiguration      = errors.New("orchestrator: invalid configuration")
+	ErrCapabilityNameReserved    = errors.New("orchestrator: capability name is reserved")
 )

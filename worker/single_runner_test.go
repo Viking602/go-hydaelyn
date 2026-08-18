@@ -153,6 +153,78 @@ func TestSingleRunnerStartRetryReturnsExistingDurableState(t *testing.T) {
 	if _, err := coordinator.Start(ctx, changed); !errors.Is(err, api.ErrIdempotencyConflict) {
 		t.Fatalf("Start(conflicting retry) error = %v, want ErrIdempotencyConflict", err)
 	}
+	coordinator.AgentVersion = "v2"
+	if _, err := coordinator.Start(ctx, request); !errors.Is(err, api.ErrIdempotencyConflict) {
+		t.Fatalf("Start(version conflict) error = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+func TestSingleRunnerStartRetryAcceptsLegacyUnstampedVersion(t *testing.T) {
+	ctx := context.Background()
+	coordinator := newSingleRunnerTestCoordinator(
+		time.Date(2026, time.August, 4, 14, 47, 0, 0, time.UTC),
+		scripted.New(nil),
+		api.GovernancePolicy{},
+	)
+	request, err := normalizeSingleRunStartRequest(StartSingleRunRequest{
+		RunID: "single-start-legacy-version", Request: "upgrade unstamped run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := coordinator.startMetadata(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
+		RunID: request.RunID, RootTaskID: request.RootTaskID,
+		Request: request.Request, Metadata: metadata,
+	}); err != nil {
+		t.Fatalf("StartRun(legacy) error = %v", err)
+	}
+	state, err := coordinator.Start(ctx, request)
+	if err != nil {
+		t.Fatalf("Start(legacy retry) error = %v", err)
+	}
+	if state.Run.ID != request.RunID {
+		t.Fatalf("legacy retry state = %#v", state)
+	}
+}
+
+func TestSingleRunnerStartRetryConflictsOnLegacyDefinitionVersion(t *testing.T) {
+	ctx := context.Background()
+	coordinator := newSingleRunnerTestCoordinator(
+		time.Date(2026, time.August, 4, 14, 48, 0, 0, time.UTC),
+		scripted.New(nil),
+		api.GovernancePolicy{},
+	)
+	coordinator.definitionID = "single-agent"
+	request, err := normalizeSingleRunStartRequest(StartSingleRunRequest{
+		RunID: "single-start-legacy-def", Request: "upgrade stamped definition",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := coordinator.startMetadata(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata[singleRunDefinitionVersionMetadata] != "v1" {
+		t.Fatalf("definition version metadata = %q, want v1", metadata[singleRunDefinitionVersionMetadata])
+	}
+	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
+		RunID: request.RunID, RootTaskID: request.RootTaskID,
+		Request: request.Request, Metadata: metadata,
+	}); err != nil {
+		t.Fatalf("StartRun(legacy definition) error = %v", err)
+	}
+	if _, _, _, err := coordinator.inspectSingleRunStart(ctx, request, metadata); err != nil {
+		t.Fatalf("inspect(matching legacy definition) error = %v", err)
+	}
+	coordinator.AgentVersion = "v2"
+	if _, _, _, err := coordinator.inspectSingleRunStart(ctx, request, metadata); !errors.Is(err, api.ErrIdempotencyConflict) {
+		t.Fatalf("inspect(legacy definition mismatch) error = %v, want ErrIdempotencyConflict", err)
+	}
 }
 
 func TestSingleRunnerStartRepairsRunCreatedBeforeTask(t *testing.T) {
@@ -172,7 +244,7 @@ func TestSingleRunnerStartRepairsRunCreatedBeforeTask(t *testing.T) {
 	}
 	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
 		RunID: request.RunID, RootTaskID: request.RootTaskID,
-		Request: request.Request, Metadata: metadata,
+		Request: request.Request, AgentVersion: coordinator.AgentVersion, Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("StartRun(partial) error = %v", err)
 	}
@@ -221,7 +293,7 @@ func TestSingleRunnerConcurrentStartLoserDoesNotFailWinnerRun(t *testing.T) {
 	}
 	if _, _, err := coordinator.Runner.StartRun(ctx, api.StartRunCommand{
 		RunID: request.RunID, RootTaskID: request.RootTaskID,
-		Request: request.Request, Metadata: metadata,
+		Request: request.Request, AgentVersion: coordinator.AgentVersion, Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("winner StartRun() error = %v", err)
 	}

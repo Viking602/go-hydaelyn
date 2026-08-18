@@ -363,6 +363,8 @@ func CapabilityToModel(in api.Capability) model.Capability {
 		RiskLevel:        in.RiskLevel,
 		Idempotent:       in.Idempotent,
 		RequiresApproval: in.RequiresApproval,
+		RequiresLease:    in.RequiresLease,
+		RequiresPolicy:   in.RequiresPolicy,
 		Tags:             cloneStrings(in.Tags),
 		Metadata:         stringMapToModel(in.Metadata),
 	}
@@ -380,6 +382,8 @@ func CapabilityFromModel(in model.Capability) api.Capability {
 		RiskLevel:        in.RiskLevel,
 		Idempotent:       in.Idempotent,
 		RequiresApproval: in.RequiresApproval,
+		RequiresLease:    in.RequiresLease,
+		RequiresPolicy:   in.RequiresPolicy,
 		Tags:             cloneStrings(in.Tags),
 		Metadata:         stringMapFromModel(in.Metadata),
 	}

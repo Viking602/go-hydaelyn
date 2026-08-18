@@ -40,6 +40,6 @@ backend under [ADR-013](../adr/ADR-013-memory-kernel-vs-pipeline.md).
 - Expand capability exports only when the high-level contracts remain neutral
   across provider, CLI, and transport consumers.
 
-The active stabilization scope is documented in
-[the current plan](./active-plan.md). The next candidate release is described in
-[the unreleased v0.10.0 notes](../release-notes/v0.10.0.md).
+The active execution scope is documented in
+[the current plan](./active-plan.md). The latest published release is
+described in [the v0.14.0 notes](../release-notes/v0.14.0.md).

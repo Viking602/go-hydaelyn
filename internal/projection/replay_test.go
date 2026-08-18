@@ -63,3 +63,30 @@ func TestProjectPreservesSerializedTaskFields(t *testing.T) {
 		t.Fatalf("projected resource claims = %#v, want %#v", got.ResourceClaims, task.ResourceClaims)
 	}
 }
+
+func TestProjectPreservesRunAgentVersion(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	run := model.Run{
+		ID: "run-version", Status: model.RunStatusRunning,
+		Request: "hello", RootTaskID: "root", AgentVersion: "def-v3",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	events := []model.Event{
+		{RunID: run.ID, Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(run)}},
+	}
+	raw, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var serialized []model.Event
+	if err := json.Unmarshal(raw, &serialized); err != nil {
+		t.Fatal(err)
+	}
+	projection, err := Project(serialized)
+	if err != nil {
+		t.Fatalf("Project() error = %v", err)
+	}
+	if projection.Run.AgentVersion != "def-v3" {
+		t.Fatalf("projected AgentVersion = %q, want def-v3", projection.Run.AgentVersion)
+	}
+}

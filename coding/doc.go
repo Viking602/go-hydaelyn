@@ -5,8 +5,8 @@
 // not a Pack.
 //
 // packs/coding is the deployable counterpart: a declarative manifest
-// (AgentDefinition, CapabilityManifest, eval suite) that hosts mount and
-// then bind to this package's drivers via coding.NewToolSet. The pack
-// must never import this package — see the package comment in
-// packs/coding for the boundary rationale and the mount recipe.
+// (AgentDefinition, CapabilityManifest) that hosts mount and then bind
+// to this package's drivers via coding.NewToolSet. The pack must never
+// import this package — see the package comment in packs/coding for the
+// boundary rationale and the mount recipe.
 package coding

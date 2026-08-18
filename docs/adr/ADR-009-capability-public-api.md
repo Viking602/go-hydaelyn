@@ -33,9 +33,9 @@ internal/capability    (enforcement:  timeout/retry/permission)
 ### `api.Capability` shape
 
 - Identity: `Name` (recommended convention `provider.action`), `Version`, `Description`.
-- Schema: `InputSchema` / `OutputSchema` as `json.RawMessage` so adapters choose their preferred JSON Schema dialect.
+- Schema: `InputSchema` / `OutputSchema` as `map[string]any` JSON Schema objects (see the 2026-08-18 amendment).
 - Classification: `EffectType` (reuses existing `ToolEffectType`), `Idempotent` (metadata, framework does not enforce).
-- Runtime requirements: `RequiresLease`, `RequiresPolicy` (the runtime rejects bypass attempts).
+- Runtime requirements: `RequiresApproval`, `RequiresLease`, `RequiresPolicy`.
 - Free-form: `Tags []string`, `Metadata map[string]string` (framework ignores `Metadata` except for serialization).
 
 ### `api.CapabilityManifest`
@@ -48,16 +48,18 @@ A Tool produces its Capability view via an additive method. Defaults are conserv
 
 ### Four exports, all driven from the same manifest
 
-- **MCP Tool** — `transport/mcp/export.go::ToolsFromCapabilities`
-- **OpenAPI Operation** — `transport/openapi/export.go::DocumentFromManifest`
-- **CLI Command** — `cmd/capabilitycli/generator.go::CommandsFromManifest`
-- **LLM Tool Definition** — `provider/tooldef.go::ToolDefinitionFromCapability`
+- **MCP Tool** — `transport/mcp/export.go::ToolsFromCapabilities` (ships)
+- **OpenAPI Operation** — `transport/openapi/export.go::DocumentFromManifest` (Deferred)
+- **CLI Command** — `cmd/capabilitycli/generator.go::CommandsFromManifest` (Deferred)
+- **LLM Tool Definition** — `provider/tooldef.go::ToolDefinitionFromCapability` (Deferred)
 
-A single source of truth means an MCP tool, an OpenAPI operation, a CLI subcommand, and an LLM tool definition for the same Capability cannot drift out of sync.
+MCP is the only shipped renderer. OpenAPI, CLI, and LLM tool-def remain
+accepted as the target shape and must not be re-introduced as "already
+implemented" until those packages exist.
 
 ### Reserved namespace `hydaelyn.self.*`
 
-`const HydaelynSelfNamespace = "hydaelyn.self."` plus four name constants (`CapabilityNameSelfProfile`, `CapabilityNameSelfMemoryRead`, `CapabilityNameSelfHistory`, `CapabilityNameSelfSummarizeHistory`). `Registry.RegisterCapability` rejects user registrations under this prefix with `ErrCapabilityNameReserved`. v0.8.0 ships the reservation; v0.9.0+ ships the read-only implementations.
+`const HydaelynSelfNamespace = "hydaelyn.self."` plus four name constants (`CapabilityNameSelfProfile`, `CapabilityNameSelfMemoryRead`, `CapabilityNameSelfHistory`, `CapabilityNameSelfSummarizeHistory`). There is no separate capability registry: `CapabilityStore.SaveCapability` rejects names under this prefix with `ErrCapabilityNameReserved`. The reservation ships now; implementations remain later.
 
 Rationale for reserving without shipping: once production deployments populate Capability allowlists, claiming the namespace later would either collide or force renames. The cost of reserving in v0.8.0 is one constant block plus one registration guard. The benefit is permanent.
 
@@ -92,7 +94,28 @@ The original Decision section described `CapabilityNameSelfMemoryRead` as a rese
 - A single runtime may register multiple `Memory[T]` for different `T`. Capability binding distinguishes them via a registration name (`chat_history` vs `user_preferences`, etc.).
 - This amendment does **not** add new reserved names (`.memory.write` / `.memory.forget`) under `hydaelyn.self.*`. The `Write` / `Forget` verbs on `Memory[T]` are first-class on the interface, but they are not promoted to reserved capability names — applications expose them as their own capabilities if they want them callable via the Capability surface.
 
-The reservation itself (the constant `CapabilityNameSelfMemoryRead`, the `Registry.RegisterCapability` rejection of user registrations under `hydaelyn.self.`) is unchanged.
+The reservation itself (the constant `CapabilityNameSelfMemoryRead`, the `SaveCapability` rejection of user registrations under `hydaelyn.self.`) is unchanged.
+
+## Amendment 2026-08-18 — keep shipped schema and approval flag; MCP only
+
+The original Decision described `InputSchema` / `OutputSchema` as
+`json.RawMessage` and listed four export packages as if they already
+existed. The shipped public type uses `map[string]any` (with
+`// godoc-allow-any`) and `RequiresApproval` in addition to
+`RequiresLease` / `RequiresPolicy`. Changing those now would be a
+compatibility break without a consumer that needs `json.RawMessage`.
+
+This amendment locks the live shape:
+
+- Keep `map[string]any` schemas and `RequiresApproval`.
+- Keep `RequiresLease` and `RequiresPolicy` as additive flags.
+- `Tool.AsCapability` copies `RequiresActionTask` onto approval, lease,
+  and policy. Callers that need a finer split publish a Capability
+  directly.
+- `api.ValidateCapabilityName` / `SaveCapability` reject
+  `hydaelyn.self.*`. The four reserved name constants stay stable.
+- `transport/mcp.ToolsFromCapabilities` is the only shipped export.
+  OpenAPI, CLI, and LLM tool-def stay Deferred.
 
 ## References
 

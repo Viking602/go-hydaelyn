@@ -43,7 +43,7 @@ func TestMyProvider_ContractCompliance(t *testing.T) {
 ## What this package contains
 
 `RunStoreProviderContractTests` is the package's only exported contract suite.
-It runs eight top-level groups with executable assertions:
+It runs eleven top-level groups with executable assertions:
 
 | Group | Coverage |
 | ----- | -------- |
@@ -55,6 +55,9 @@ It runs eight top-level groups with executable assertions:
 | `ReplayDeterminism` | Stable full and partial replay |
 | `CapabilitySelfConsistency` | Declared optional capabilities match runtime behavior |
 | `MultiAgentStores` | Handoff, team-state, and agent-instance persistence |
+| `AgentDefinitionSnapshots` | Optional immutable definition snapshot writes and reads |
+| `AdmissionReservations` | Optional transactional admission reservation lifecycle |
+| `ResourceClaims` | Optional shared and exclusive resource-claim acquisition |
 
 These are real tests, not placeholder stubs. `t.Skip` is used only for the
 optional list-pending scenarios when a provider reports that capability as

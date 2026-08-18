@@ -14,13 +14,14 @@ func runFromPayload(value any) model.Run {
 		return model.Run{}
 	}
 	return model.Run{
-		ID:         stringFromPayload(payload["id"]),
-		Status:     model.RunStatus(stringFromPayload(payload["status"])),
-		Request:    stringFromPayload(payload["request"]),
-		RootTaskID: stringFromPayload(payload["rootTaskId"]),
-		Metadata:   stringMapFromPayload(payload["metadata"]),
-		CreatedAt:  timeFromPayload(payload["createdAt"]),
-		UpdatedAt:  timeFromPayload(payload["updatedAt"]),
+		ID:           stringFromPayload(payload["id"]),
+		Status:       model.RunStatus(stringFromPayload(payload["status"])),
+		Request:      stringFromPayload(payload["request"]),
+		RootTaskID:   stringFromPayload(payload["rootTaskId"]),
+		AgentVersion: stringFromPayload(payload["agentVersion"]),
+		Metadata:     stringMapFromPayload(payload["metadata"]),
+		CreatedAt:    timeFromPayload(payload["createdAt"]),
+		UpdatedAt:    timeFromPayload(payload["updatedAt"]),
 	}
 }
 

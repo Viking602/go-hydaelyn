@@ -26,8 +26,8 @@
 - [Migration Notes](migration.md): version-to-version API changes.
 - [SemVer and Compatibility](semver.md): stability policy.
 - [Product Release Status](product-spec/README.md): shipped and planned surfaces.
-- [v0.10.0 Release Notes](release-notes/v0.10.0.md): unreleased candidate changes.
-- [Agent Skills Full Lifecycle Plan](plans/agent-skills-full-lifecycle.md): implementation and acceptance checklist for v0.10.0 Skills support.
+- [v0.14.0 Release Notes](release-notes/v0.14.0.md): latest published release.
+- [Architecture Boundaries](architecture-boundaries.md): live import seams and ownership rules.
 
 ## Package map
 
@@ -44,12 +44,14 @@
 | `tool/`, `hook/`, `policy/`, `message/` | Tool execution, hooks, policy, and messages |
 | `memory/` | Optional `Memory[T]` plugin contract; no backend ships |
 | `worker/` | Optional bridge from task envelopes to `agent.Engine` |
-| `packs/` | Vertical pack skeletons |
+| `coding/` | Sandboxed coding-agent runtime; hosts bind pack manifests to it |
+| `packs/` | Vertical pack skeletons (eval suites live in pack tests) |
 | `eval/` | Evaluation cases, assertions, matchers, and reporters |
 | `contract/` | Storage conformance tests |
 
 ## Architecture and maintenance
 
+- [Architecture Boundaries](architecture-boundaries.md)
 - [North Star Runtime](architecture/north-star-runtime.md)
 - [Ecosystem Split Boundary](ecosystem-split.md)
 - [ADR Index](adr/README.md)

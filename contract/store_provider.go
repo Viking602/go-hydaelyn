@@ -123,6 +123,7 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 	t.Helper()
 	runSuite(t, factory, []suiteCase{
 		{"TestSaveAndLoad_Run", testSaveAndLoadRun},
+		{"TestListRuns_FiltersByAgentVersion", testListRunsFiltersByAgentVersion},
 		{"TestSaveAndLoad_Task", testSaveAndLoadTask},
 		{"TestAppendAndList_Events", testAppendAndListEvents},
 		{"TestSaveAndList_TraceSpans", testSaveAndListTraceSpans},
@@ -134,6 +135,7 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 		{"TestSaveAndLoad_ResumeToken", testSaveAndLoadResumeToken},
 		{"TestSaveAndList_AgentProfiles", testSaveAndListAgentProfiles},
 		{"TestSaveAndList_Capabilities", testSaveAndListCapabilities},
+		{"TestSaveCapability_RejectsReservedName", testSaveCapabilityRejectsReservedName},
 		{"TestSaveAndList_UsageRecords", testSaveAndListUsageRecords},
 		{"TestUsageRecord_IdempotentAppend", testUsageRecordIdempotentAppend},
 		{"TestUsageRecord_KindAndLegacySelection", testUsageRecordKindAndLegacySelection},
@@ -146,15 +148,40 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 
 func testSaveAndLoadRun(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	want := api.Run{ID: "run-crud-1", Status: api.RunStatusCreated, Request: "hello", CreatedAt: time.Now().UTC()}
+	want := api.Run{
+		ID: "run-crud-1", Status: api.RunStatusCreated, Request: "hello",
+		AgentVersion: "agent-v3", CreatedAt: time.Now().UTC(),
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error { return uow.Runs().SaveRun(context.Background(), want) })
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		got, err := uow.Runs().LoadRun(context.Background(), want.ID)
 		if err != nil {
 			return err
 		}
-		if got.ID != want.ID || got.Request != want.Request {
+		if got.ID != want.ID || got.Request != want.Request || got.AgentVersion != want.AgentVersion {
 			t.Fatalf("LoadRun mismatch: %+v vs %+v", got, want)
+		}
+		return nil
+	})
+}
+
+func testListRunsFiltersByAgentVersion(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	v1 := api.Run{ID: "run-v1", Status: api.RunStatusCreated, AgentVersion: "v1"}
+	v2 := api.Run{ID: "run-v2", Status: api.RunStatusCreated, AgentVersion: "v2"}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		if err := uow.Runs().SaveRun(context.Background(), v1); err != nil {
+			return err
+		}
+		return uow.Runs().SaveRun(context.Background(), v2)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		got, err := uow.Runs().ListRuns(context.Background(), api.RunSelector{AgentVersion: "v2"})
+		if err != nil {
+			return err
+		}
+		if len(got) != 1 || got[0].ID != v2.ID || got[0].AgentVersion != "v2" {
+			t.Fatalf("ListRuns(AgentVersion=v2) = %+v", got)
 		}
 		return nil
 	})
@@ -532,7 +559,10 @@ func testAgentDefinitionSnapshotImmutableVersion(t *testing.T, factory ProviderF
 
 func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	capability := api.Capability{Name: "summarize", AgentID: "agent-1", Description: "summarize text"}
+	capability := api.Capability{
+		Name: "summarize", AgentID: "agent-1", Description: "summarize text",
+		RequiresLease: true, RequiresPolicy: false,
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		return uow.CapabilityCatalog().SaveCapability(context.Background(), capability)
 	})
@@ -541,8 +571,31 @@ func testSaveAndListCapabilities(t *testing.T, factory ProviderFactory) {
 		if err != nil {
 			return err
 		}
-		if len(got) != 1 || got[0].Name != capability.Name {
+		if len(got) != 1 || got[0].Name != capability.Name ||
+			!got[0].RequiresLease || got[0].RequiresPolicy {
 			t.Fatalf("capability list mismatch: %+v", got)
+		}
+		return nil
+	})
+}
+
+func testSaveCapabilityRejectsReservedName(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	names := []string{
+		api.CapabilityNameSelfProfile,
+		api.CapabilityNameSelfMemoryRead,
+		api.CapabilityNameSelfHistory,
+		api.CapabilityNameSelfSummarizeHistory,
+		api.HydaelynSelfNamespace + "extra",
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		for _, name := range names {
+			err := uow.CapabilityCatalog().SaveCapability(context.Background(), api.Capability{
+				Name: name, AgentID: "agent-1",
+			})
+			if !errors.Is(err, api.ErrCapabilityNameReserved) {
+				t.Fatalf("SaveCapability(%q) = %v, want ErrCapabilityNameReserved", name, err)
+			}
 		}
 		return nil
 	})

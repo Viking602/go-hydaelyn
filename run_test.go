@@ -27,12 +27,15 @@ func TestQueueRun_ReturnsRun(t *testing.T) {
 func TestStartRun_ReturnsRunAndTask(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()
-	run, task, err := r.StartRun(ctx, api.StartRunCommand{Request: "hello"})
+	run, task, err := r.StartRun(ctx, api.StartRunCommand{Request: "hello", AgentVersion: "agent-v1"})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
 	if run.ID == "" {
 		t.Error("expected non-empty run ID")
+	}
+	if run.AgentVersion != "agent-v1" {
+		t.Errorf("run.AgentVersion = %q, want agent-v1", run.AgentVersion)
 	}
 	if task.ID == "" {
 		t.Error("expected non-empty task ID")

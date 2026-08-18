@@ -93,10 +93,11 @@ func TestCommandToCore_StartTraceSpan(t *testing.T) {
 
 func TestStartRunCommandToCore(t *testing.T) {
 	cmd := api.StartRunCommand{
-		RunID:      "r1",
-		RootTaskID: "root",
-		Request:    "do something",
-		Metadata:   map[string]string{"env": "prod"},
+		RunID:        "r1",
+		RootTaskID:   "root",
+		Request:      "do something",
+		AgentVersion: "def-v2",
+		Metadata:     map[string]string{"env": "prod"},
 	}
 	core := adapter.StartRunCommandToCore(cmd)
 	if core.RunID != "r1" {
@@ -104,6 +105,9 @@ func TestStartRunCommandToCore(t *testing.T) {
 	}
 	if core.RootTaskID != "root" {
 		t.Errorf("RootTaskID mismatch: got %q", core.RootTaskID)
+	}
+	if core.AgentVersion != "def-v2" {
+		t.Errorf("AgentVersion mismatch: got %q", core.AgentVersion)
 	}
 	if core.Metadata["env"] != "prod" {
 		t.Errorf("Metadata not copied: got %v", core.Metadata)

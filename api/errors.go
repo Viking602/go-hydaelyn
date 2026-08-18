@@ -26,6 +26,7 @@ var (
 	ErrCheckpointLimitExceeded   = errors.New("orchestrator: execution checkpoint limit exceeded")
 	ErrUsageUnpriced             = errors.New("orchestrator: usage is unpriced")
 	ErrInvalidConfiguration      = errors.New("orchestrator: invalid configuration")
+	ErrCapabilityNameReserved    = errors.New("orchestrator: capability name is reserved")
 	ErrInvalidAddress            = errors.New("orchestrator: invalid address")
 	ErrNoRecipients              = errors.New("orchestrator: address resolved to zero recipients")
 	ErrSubscriptionClosed        = errors.New("orchestrator: blackboard subscription already closed")

@@ -100,9 +100,11 @@ func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.R
 		if !sel.Until.IsZero() && run.CreatedAt.After(sel.Until) {
 			continue
 		}
-		// AgentID / AgentVersion: Run model doesn't yet carry these in
-		// v0.8.0 baseline. When AgentProfile binding lands (doc 03), this
-		// match clause should consult run.AgentID / run.AgentVersion.
+		if sel.AgentVersion != "" && run.AgentVersion != sel.AgentVersion {
+			continue
+		}
+		// AgentID is not stamped on Run yet; keep the selector field for
+		// callers that already filter by version or identity metadata.
 		out = append(out, run)
 	}
 	slices.SortFunc(out, func(a, b model.Run) int {

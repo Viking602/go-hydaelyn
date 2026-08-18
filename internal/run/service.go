@@ -19,10 +19,11 @@ import (
 type IDGenerator func(prefix string) string
 
 type StartInput struct {
-	RunID      string
-	RootTaskID string
-	Request    string
-	Metadata   map[string]string
+	RunID        string
+	RootTaskID   string
+	Request      string
+	AgentVersion string
+	Metadata     map[string]string
 }
 
 type CreateTaskInput struct {
@@ -70,6 +71,7 @@ func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 	existing, err := uow.Runs().LoadRun(ctx, runID)
 	if err == nil {
 		if existing.RootTaskID != rootID || existing.Request != input.Request ||
+			existing.AgentVersion != input.AgentVersion ||
 			!maps.Equal(existing.Metadata, input.Metadata) {
 			return model.Run{}, model.Task{}, false, fmt.Errorf(
 				"run: start input conflicts with existing run %q: %w",
@@ -87,13 +89,14 @@ func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 		return model.Run{}, model.Task{}, false, err
 	}
 	run := model.Run{
-		ID:         runID,
-		Status:     model.RunStatusCreated,
-		Request:    input.Request,
-		RootTaskID: rootID,
-		Metadata:   maps.Clone(input.Metadata),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:           runID,
+		Status:       model.RunStatusCreated,
+		Request:      input.Request,
+		RootTaskID:   rootID,
+		AgentVersion: input.AgentVersion,
+		Metadata:     maps.Clone(input.Metadata),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	root := model.Task{
 		ID:             rootID,

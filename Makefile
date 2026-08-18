@@ -98,7 +98,7 @@ build: ## go build ./...
 	$(GO) build ./...
 
 .PHONY: verify
-verify: fmt-check vet tidy-check lint test ## Fast local gate
+verify: fmt-check vet tidy-check lint test architecture-check ## Fast local gate
 
 .PHONY: ci-local
 ci-local: fmt-check tidy-check vet staticcheck vulncheck lint test test-race architecture-check ## Local CI parity gate
