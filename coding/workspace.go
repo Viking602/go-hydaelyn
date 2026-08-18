@@ -281,7 +281,7 @@ func (w *localWorkspace) readBounded(abs, canon string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(resolved, readOpenFlags, 0)
+	f, err := openRegularRead(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("coding: read %q: %w", canon, err)
 	}
@@ -526,7 +526,7 @@ func (w *localWorkspace) WriteFile(ctx context.Context, req WriteFileRequest) (W
 	if err != nil {
 		return WriteFileResult{}, err
 	}
-	created, createErr := os.OpenFile(abs, createOpenFlags, 0o644)
+	created, createErr := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if createErr != nil {
 		if os.IsExist(createErr) {
 			return WriteFileResult{}, fmt.Errorf("%w: %q already exists; use edit_hashline", ErrFileExists, canon)
@@ -840,7 +840,9 @@ func (w *localWorkspace) RestoreText(ctx context.Context, path, text string) err
 
 // writeResolved writes text to an already-resolved absolute path after
 // re-checking workspace containment and that the leaf is a regular file.
-// Unix opens use O_NOFOLLOW so a swapped symlink cannot escape the sandbox.
+// Unix opens use O_NOFOLLOW. Windows opens the leaf with
+// FILE_FLAG_OPEN_REPARSE_POINT and rejects a reparse point, so a swapped
+// symlink cannot escape the sandbox.
 func (w *localWorkspace) writeResolved(abs, canon, text string) error {
 	resolved, err := w.containResolved(abs, canon)
 	if err != nil {
@@ -853,7 +855,7 @@ func (w *localWorkspace) writeResolved(abs, canon, text string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("coding: write %q: %w", canon, ErrNotRegularFile)
 	}
-	f, err := os.OpenFile(resolved, writeOpenFlags, info.Mode().Perm())
+	f, err := openRegularWrite(resolved, info.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("coding: write %q: %w", canon, err)
 	}

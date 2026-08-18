@@ -9,7 +9,9 @@ regular file inside the workspace.
 
 `WriteFile` creates with `O_EXCL` after re-resolving the parent. In-place
 writes (`WriteText` / `RestoreText`) re-evaluate the path, re-check
-containment, require a regular file, and open with `O_NOFOLLOW` on Unix.
+containment, and require a regular file. Unix opens use `O_NOFOLLOW`;
+Windows opens the leaf with `FILE_FLAG_OPEN_REPARSE_POINT` and rejects a
+reparse point so a swapped symlink cannot leave the workspace.
 Hosts do not need to change call sites.
 
 ## ProcessTool owns stdout/stderr pipes
