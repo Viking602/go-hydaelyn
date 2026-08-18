@@ -74,6 +74,35 @@ func TestToolsFromCapabilities_CopiesTypedRequiredSlice(t *testing.T) {
 	}
 }
 
+func TestToolsFromCapabilities_CopiesTypedNestedMapsAndIntSlices(t *testing.T) {
+	properties := map[string]map[string]any{"q": {"type": "string"}}
+	enum := []int{1, 2}
+	labels := map[string]string{"q": "query"}
+	tools := ToolsFromCapabilities(api.CapabilityManifest{
+		Capabilities: []api.Capability{{
+			Name: "web_search",
+			InputSchema: map[string]any{
+				"type": "object", "properties": properties, "enum": enum, "labels": labels,
+			},
+		}},
+	})
+	properties["q"]["type"] = "mutated"
+	enum[0] = 9
+	labels["q"] = "mutated"
+	gotProps, ok := tools[0].InputSchema["properties"].(map[string]map[string]any)
+	if !ok || gotProps["q"]["type"] != "string" {
+		t.Fatalf("typed nested map was not copied: %#v", tools[0].InputSchema["properties"])
+	}
+	gotEnum, ok := tools[0].InputSchema["enum"].([]int)
+	if !ok || gotEnum[0] != 1 {
+		t.Fatalf("typed int slice was not copied: %#v", tools[0].InputSchema["enum"])
+	}
+	gotLabels, ok := tools[0].InputSchema["labels"].(map[string]string)
+	if !ok || gotLabels["q"] != "query" {
+		t.Fatalf("typed string map was not copied: %#v", tools[0].InputSchema["labels"])
+	}
+}
+
 func TestToolsFromCapabilities_EmptyManifest(t *testing.T) {
 	if got := ToolsFromCapabilities(api.CapabilityManifest{}); len(got) != 0 {
 		t.Fatalf("empty manifest tools = %#v", got)

@@ -270,7 +270,7 @@ func (s *SingleRunner) inspectSingleRunStart(
 	}
 	if existing.RootTaskID != request.RootTaskID ||
 		existing.Request != request.Request ||
-		existing.AgentVersion != s.AgentVersion ||
+		s.startVersionConflicts(existing) ||
 		!maps.Equal(existing.Metadata, metadata) {
 		return api.Run{}, nil, false, fmt.Errorf(
 			"%w: run %q was started with different durable input",
@@ -289,6 +289,19 @@ func (s *SingleRunner) inspectSingleRunStart(
 		return api.Run{}, nil, false, err
 	}
 	return existing, nil, true, nil
+}
+
+func (s *SingleRunner) startVersionConflicts(existing api.Run) bool {
+	if existing.AgentVersion == s.AgentVersion {
+		return false
+	}
+	if existing.AgentVersion != "" {
+		return true
+	}
+	if stamped := existing.Metadata[singleRunDefinitionVersionMetadata]; stamped != "" {
+		return stamped != s.AgentVersion
+	}
+	return false
 }
 
 func (s *SingleRunner) admissionForStart(

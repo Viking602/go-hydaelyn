@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
-	"slices"
+	"reflect"
 
 	"github.com/Viking602/venat/api"
 )
@@ -45,26 +45,41 @@ func cloneAnyMap(in map[string]any) map[string]any {
 }
 
 func cloneJSONValue(value any) any {
-	switch current := value.(type) {
-	case map[string]any:
-		return cloneAnyMap(current)
-	case []any:
-		out := make([]any, len(current))
-		for i, item := range current {
-			out[i] = cloneJSONValue(item)
+	if value == nil {
+		return nil
+	}
+	if raw, ok := value.(json.RawMessage); ok {
+		return append(json.RawMessage(nil), raw...)
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.IsNil() {
+			return value
 		}
-		return out
-	case []string:
-		return slices.Clone(current)
-	case []map[string]any:
-		out := make([]map[string]any, len(current))
-		for i, item := range current {
-			out[i] = cloneAnyMap(item)
+		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		for iter := rv.MapRange(); iter.Next(); {
+			out.SetMapIndex(iter.Key(), reflect.ValueOf(cloneJSONValue(iter.Value().Interface())))
 		}
-		return out
-	case json.RawMessage:
-		return append(json.RawMessage(nil), current...)
+		return out.Interface()
+	case reflect.Slice:
+		if rv.IsNil() {
+			return value
+		}
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			cloned := cloneJSONValue(rv.Index(i).Interface())
+			if cloned == nil {
+				continue
+			}
+			elem := out.Index(i)
+			cv := reflect.ValueOf(cloned)
+			if cv.Type().AssignableTo(elem.Type()) {
+				elem.Set(cv)
+			}
+		}
+		return out.Interface()
 	default:
-		return current
+		return value
 	}
 }
