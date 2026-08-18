@@ -272,11 +272,16 @@ func (w *localWorkspace) Root() string { return w.root }
 
 // readBounded loads a resolved file into memory while rejecting non-regular
 // files (FIFOs/devices/sockets/directories, which could block forever) and
-// files larger than the per-file ceiling. The io.LimitReader guards against a
-// file growing between the size check and the read (TOCTOU), so the in-memory
+// files larger than the per-file ceiling. The leaf is Lstat'd before open so
+// a FIFO cannot block the reader. The io.LimitReader guards against a file
+// growing between the size check and the read (TOCTOU), so the in-memory
 // copy is hard-bounded regardless. canon is used only for error messages.
 func (w *localWorkspace) readBounded(abs, canon string) ([]byte, error) {
-	f, err := os.Open(abs)
+	resolved, err := w.regularFilePath(abs, canon)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(resolved, readOpenFlags, 0)
 	if err != nil {
 		return nil, fmt.Errorf("coding: read %q: %w", canon, err)
 	}
@@ -303,6 +308,51 @@ func (w *localWorkspace) readBounded(abs, canon string) ([]byte, error) {
 			canon, w.maxFileBytes, ErrFileTooLarge)
 	}
 	return data, nil
+}
+
+// regularFilePath returns a path that is a regular file inside the workspace.
+// Non-regular, non-symlink leaves are rejected before open. In-workspace
+// symlinks are resolved and the target must itself be a regular file.
+func (w *localWorkspace) regularFilePath(abs, canon string) (string, error) {
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return "", fmt.Errorf("coding: read %q: %w", canon, err)
+	}
+	if info.Mode().IsRegular() {
+		return abs, nil
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", fmt.Errorf("coding: read %q: %w", canon, ErrNotRegularFile)
+	}
+	resolved, err := w.containResolved(abs, canon)
+	if err != nil {
+		return "", err
+	}
+	target, err := os.Lstat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("coding: read %q: %w", canon, err)
+	}
+	if !target.Mode().IsRegular() {
+		return "", fmt.Errorf("coding: read %q: %w", canon, ErrNotRegularFile)
+	}
+	return resolved, nil
+}
+
+// containResolved evaluates abs through symlinks and rejects a target that
+// leaves the workspace.
+func (w *localWorkspace) containResolved(abs, canon string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("coding: resolve %q: %w", canon, err)
+	}
+	rel, err := filepath.Rel(w.root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("coding: %q: %w", canon, workspace.ErrPathEscape)
+	}
+	if _, _, err := workspace.ResolveWorkspacePath(w.root, rel); err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 // resolve validates a workspace-relative path against the root, returning the
@@ -472,8 +522,24 @@ func (w *localWorkspace) WriteFile(ctx context.Context, req WriteFileRequest) (W
 	if mkErr := os.MkdirAll(filepath.Dir(abs), 0o755); mkErr != nil {
 		return WriteFileResult{}, fmt.Errorf("coding: mkdir for %q: %w", canon, mkErr)
 	}
-	if wErr := os.WriteFile(abs, []byte(req.Content), 0o644); wErr != nil {
+	abs, canon, err = w.resolve(req.Path)
+	if err != nil {
+		return WriteFileResult{}, err
+	}
+	created, createErr := os.OpenFile(abs, createOpenFlags, 0o644)
+	if createErr != nil {
+		if os.IsExist(createErr) {
+			return WriteFileResult{}, fmt.Errorf("%w: %q already exists; use edit_hashline", ErrFileExists, canon)
+		}
+		return WriteFileResult{}, fmt.Errorf("coding: write %q: %w", canon, createErr)
+	}
+	_, wErr := created.Write([]byte(req.Content))
+	closeErr := created.Close()
+	if wErr != nil {
 		return WriteFileResult{}, fmt.Errorf("coding: write %q: %w", canon, wErr)
+	}
+	if closeErr != nil {
+		return WriteFileResult{}, fmt.Errorf("coding: write %q: %w", canon, closeErr)
 	}
 	tag := hashline.ComputeFileHash(hashline.Normalize(req.Content).Text)
 	return WriteFileResult{Path: canon, Tag: tag}, nil
@@ -751,7 +817,7 @@ func (w *localWorkspace) WriteText(ctx context.Context, path, text string) error
 	if len(text) > w.maxWriteBytes {
 		return fmt.Errorf("coding: write %q: content exceeds %d bytes", canon, w.maxWriteBytes)
 	}
-	return writeResolved(abs, canon, text)
+	return w.writeResolved(abs, canon, text)
 }
 
 // RestoreText writes content back to a file WITHOUT the maxWriteBytes cap. It
@@ -769,19 +835,35 @@ func (w *localWorkspace) RestoreText(ctx context.Context, path, text string) err
 	if err != nil {
 		return err
 	}
-	return writeResolved(abs, canon, text)
+	return w.writeResolved(abs, canon, text)
 }
 
-// writeResolved writes text to an already-resolved absolute path, preserving
-// the existing file's mode when present. Shared by WriteText (capped forward
-// path) and RestoreText (uncapped rollback restore).
-func writeResolved(abs, canon, text string) error {
-	mode := os.FileMode(0o644)
-	if fi, statErr := os.Stat(abs); statErr == nil {
-		mode = fi.Mode().Perm()
+// writeResolved writes text to an already-resolved absolute path after
+// re-checking workspace containment and that the leaf is a regular file.
+// Unix opens use O_NOFOLLOW so a swapped symlink cannot escape the sandbox.
+func (w *localWorkspace) writeResolved(abs, canon, text string) error {
+	resolved, err := w.containResolved(abs, canon)
+	if err != nil {
+		return err
 	}
-	if wErr := os.WriteFile(abs, []byte(text), mode); wErr != nil {
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return fmt.Errorf("coding: write %q: %w", canon, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("coding: write %q: %w", canon, ErrNotRegularFile)
+	}
+	f, err := os.OpenFile(resolved, writeOpenFlags, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("coding: write %q: %w", canon, err)
+	}
+	_, wErr := f.Write([]byte(text))
+	closeErr := f.Close()
+	if wErr != nil {
 		return fmt.Errorf("coding: write %q: %w", canon, wErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("coding: write %q: %w", canon, closeErr)
 	}
 	return nil
 }
