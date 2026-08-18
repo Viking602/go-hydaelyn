@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -117,36 +118,59 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 	if cfg.StdinJSON {
 		command.Stdin = bytes.NewReader(input)
 	}
-	stdout, err := command.StdoutPipe()
+
+	stdoutRead, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	stderr, err := command.StderrPipe()
+	stderrRead, stderrWrite, err := os.Pipe()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, closePipe(stdoutRead), closePipe(stdoutWrite))
 	}
+	command.Stdout = stdoutWrite
+	command.Stderr = stderrWrite
+
 	if err := command.Start(); err != nil {
+		closeErr := errors.Join(closePipe(stdoutRead), closePipe(stdoutWrite), closePipe(stderrRead), closePipe(stderrWrite))
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return nil, errors.Join(ctxErr, closeErr)
 		}
-		return nil, err
+		return nil, errors.Join(err, closeErr)
+	}
+	// Close the parent write ends so Copy sees EOF when the child exits.
+	// Wait() must not own these pipes: StdoutPipe/StderrPipe close them under
+	// the readers and can drop output or wake Copy with a spurious error.
+	if err := errors.Join(closePipe(stdoutWrite), closePipe(stderrWrite)); err != nil {
+		cancel()
+		_ = stdoutRead.Close()
+		_ = stderrRead.Close()
+		return nil, errors.Join(err, command.Wait())
 	}
 
 	output := &limitedOutputBuffer{max: defaultMaxProcessOutputBytes}
 	copyErrs := make(chan error, 2)
-	copyOutput := func(reader io.Reader) {
-		_, err := io.Copy(output, reader)
-		if errors.Is(err, errProcessOutputTooLarge) {
+	copyOutput := func(reader io.ReadCloser) {
+		_, copyErr := io.Copy(output, reader)
+		if ignoredCopyError(copyErr) {
+			copyErr = nil
+		}
+		closeErr := closePipe(reader)
+		if errors.Is(copyErr, errProcessOutputTooLarge) {
 			cancel()
 		}
-		copyErrs <- err
+		copyErrs <- errors.Join(copyErr, closeErr)
 	}
-	go copyOutput(stdout)
-	go copyOutput(stderr)
+	go copyOutput(stdoutRead)
+	go copyOutput(stderrRead)
 
-	waitErr := command.Wait()
-	stdoutErr := <-copyErrs
-	stderrErr := <-copyErrs
+	copyDone := make(chan struct{})
+	var stdoutErr, stderrErr error
+	go func() {
+		stdoutErr = <-copyErrs
+		stderrErr = <-copyErrs
+		close(copyDone)
+	}()
+	waitErr := waitAndUnblockPipes(commandCtx, command, copyDone, stdoutRead, stderrRead)
 	if output.TooLarge() {
 		return output.Bytes(), fmt.Errorf("process output too large: limit %d bytes", defaultMaxProcessOutputBytes)
 	}
@@ -163,6 +187,54 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 		return output.Bytes(), stderrErr
 	}
 	return output.Bytes(), nil
+}
+
+func waitAndUnblockPipes(ctx context.Context, command *exec.Cmd, copyDone <-chan struct{}, stdout, stderr *os.File) error {
+	waitErrs := make(chan error, 1)
+	go func() { waitErrs <- command.Wait() }()
+
+	select {
+	case waitErr := <-waitErrs:
+		select {
+		case <-copyDone:
+			return waitErr
+		case <-time.After(100 * time.Millisecond):
+			// Windows anonymous pipes do not interrupt a blocked Read
+			// with SetReadDeadline. Close the parent read ends instead.
+			_ = stdout.Close()
+			_ = stderr.Close()
+			<-copyDone
+			return waitErr
+		}
+	case <-ctx.Done():
+		_ = stdout.Close()
+		_ = stderr.Close()
+		var waitErr error
+		select {
+		case waitErr = <-waitErrs:
+		case <-time.After(time.Second):
+			waitErr = ctx.Err()
+		}
+		<-copyDone
+		return waitErr
+	}
+}
+
+func ignoredCopyError(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, io.ErrClosedPipe)
+}
+
+func closePipe(closer io.Closer) error {
+	if closer == nil {
+		return nil
+	}
+	err := closer.Close()
+	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 type limitedOutputBuffer struct {
