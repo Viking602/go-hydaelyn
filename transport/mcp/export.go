@@ -4,10 +4,10 @@ import "github.com/Viking602/venat/api"
 
 // ToolDescriptor is the MCP-facing projection of a capability.
 type ToolDescriptor struct {
-	Name        string
-	Description string
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	// godoc-allow-any: JSON Schema is represented as an open object.
-	InputSchema map[string]any
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
 
 // ToolsFromCapabilities projects a capability manifest into MCP tool

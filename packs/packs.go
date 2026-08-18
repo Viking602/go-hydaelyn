@@ -20,6 +20,7 @@ import (
 	"sort"
 
 	"github.com/Viking602/venat/api"
+	"github.com/Viking602/venat/eval"
 )
 
 // Pack is the declarative bundle a vertical pack exports.
@@ -51,6 +52,11 @@ type Pack struct {
 	// field exists so future versions can wire them into a "preset"
 	// catalog without breaking pack authors.
 	Recipes []Recipe
+
+	// Deprecated: eval cases belong in pack tests. Hosts should call
+	// eval.RunSuite from _test.go. The field remains so existing pack
+	// literals compile; shipped packs leave it empty.
+	EvalCases []eval.EvalCase
 }
 
 // Recipe is a minimal descriptor for a documented "how to use this pack"

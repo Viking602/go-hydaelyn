@@ -1,5 +1,15 @@
 # Migration Notes
 
+## Pack eval cases moved to tests
+
+`packs.Pack.EvalCases` remains for existing pack literals but is
+deprecated. Shipped packs leave it empty. Hosts should keep smoke
+suites in `_test.go` and call `eval.RunSuite` there so production pack
+code does not import `eval`.
+
+`transport/mcp.ToolDescriptor` now uses MCP wire names (`name`,
+`description`, `inputSchema`) when serialized as JSON.
+
 ## Coding sandbox rejects FIFOs and replacement links
 
 `coding.Workspace` reads Lstat the leaf before opening it. FIFOs, devices,

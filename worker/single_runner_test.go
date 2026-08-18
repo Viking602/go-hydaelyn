@@ -153,6 +153,11 @@ func TestSingleRunnerStartRetryReturnsExistingDurableState(t *testing.T) {
 	if _, err := coordinator.Start(ctx, changed); !errors.Is(err, api.ErrIdempotencyConflict) {
 		t.Fatalf("Start(conflicting retry) error = %v, want ErrIdempotencyConflict", err)
 	}
+	otherVersion := *coordinator
+	otherVersion.AgentVersion = "v2"
+	if _, err := otherVersion.Start(ctx, request); !errors.Is(err, api.ErrIdempotencyConflict) {
+		t.Fatalf("Start(version conflict) error = %v, want ErrIdempotencyConflict", err)
+	}
 }
 
 func TestSingleRunnerStartRepairsRunCreatedBeforeTask(t *testing.T) {

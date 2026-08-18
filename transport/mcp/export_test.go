@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Viking602/venat/api"
@@ -44,5 +45,25 @@ func TestToolsFromCapabilities_ProjectsManifestCapabilities(t *testing.T) {
 func TestToolsFromCapabilities_EmptyManifest(t *testing.T) {
 	if got := ToolsFromCapabilities(api.CapabilityManifest{}); len(got) != 0 {
 		t.Fatalf("empty manifest tools = %#v", got)
+	}
+}
+
+func TestToolDescriptor_JSONUsesMCPWireNames(t *testing.T) {
+	raw, err := json.Marshal(ToolDescriptor{
+		Name:        "web_search",
+		Description: "Run a keyword query",
+		InputSchema: map[string]any{"type": "object"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"name", "description", "inputSchema"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("missing MCP wire name %q in %s", key, raw)
+		}
 	}
 }
