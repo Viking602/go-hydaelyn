@@ -103,6 +103,19 @@ func TestToolsFromCapabilities_CopiesTypedNestedMapsAndIntSlices(t *testing.T) {
 	}
 }
 
+func TestToolsFromCapabilities_PreservesNilSchemaValues(t *testing.T) {
+	tools := ToolsFromCapabilities(api.CapabilityManifest{
+		Capabilities: []api.Capability{{
+			Name:        "web_search",
+			InputSchema: map[string]any{"type": "object", "default": nil},
+		}},
+	})
+	value, ok := tools[0].InputSchema["default"]
+	if !ok || value != nil {
+		t.Fatalf("nil schema value was dropped: %#v", tools[0].InputSchema)
+	}
+}
+
 func TestToolsFromCapabilities_EmptyManifest(t *testing.T) {
 	if got := ToolsFromCapabilities(api.CapabilityManifest{}); len(got) != 0 {
 		t.Fatalf("empty manifest tools = %#v", got)

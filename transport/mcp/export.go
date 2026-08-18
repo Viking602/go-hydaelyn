@@ -59,7 +59,12 @@ func cloneJSONValue(value any) any {
 		}
 		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
 		for iter := rv.MapRange(); iter.Next(); {
-			out.SetMapIndex(iter.Key(), reflect.ValueOf(cloneJSONValue(iter.Value().Interface())))
+			cloned := cloneJSONValue(iter.Value().Interface())
+			cv := reflect.ValueOf(cloned)
+			if !cv.IsValid() {
+				cv = reflect.Zero(iter.Value().Type())
+			}
+			out.SetMapIndex(iter.Key(), cv)
 		}
 		return out.Interface()
 	case reflect.Slice:
