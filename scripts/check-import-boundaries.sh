@@ -50,16 +50,21 @@ extract_go_imports() {
     /^[[:space:]]*import[[:space:]]*\(/ { inblock = 1; next }
     inblock && /^[[:space:]]*\)/ { inblock = 0; next }
     inblock {
-      if (match($0, /"/)) {
-        rest = substr($0, RSTART + 1)
-        if (match(rest, /"/)) print substr(rest, 1, RSTART - 1)
-      }
+      print_import_path($0)
       next
     }
     /^[[:space:]]*import[[:space:]]+/ {
-      if (match($0, /"/)) {
-        rest = substr($0, RSTART + 1)
+      print_import_path($0)
+    }
+    function print_import_path(line,    rest) {
+      if (match(line, /"/)) {
+        rest = substr(line, RSTART + 1)
         if (match(rest, /"/)) print substr(rest, 1, RSTART - 1)
+        return
+      }
+      if (match(line, /`/)) {
+        rest = substr(line, RSTART + 1)
+        if (match(rest, /`/)) print substr(rest, 1, RSTART - 1)
       }
     }
   ' "$1"

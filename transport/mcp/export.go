@@ -1,6 +1,11 @@
 package mcp
 
-import "github.com/Viking602/venat/api"
+import (
+	"encoding/json"
+	"slices"
+
+	"github.com/Viking602/venat/api"
+)
 
 // ToolDescriptor is the MCP-facing projection of a capability.
 type ToolDescriptor struct {
@@ -49,6 +54,16 @@ func cloneJSONValue(value any) any {
 			out[i] = cloneJSONValue(item)
 		}
 		return out
+	case []string:
+		return slices.Clone(current)
+	case []map[string]any:
+		out := make([]map[string]any, len(current))
+		for i, item := range current {
+			out[i] = cloneAnyMap(item)
+		}
+		return out
+	case json.RawMessage:
+		return append(json.RawMessage(nil), current...)
 	default:
 		return current
 	}

@@ -59,6 +59,21 @@ func TestToolsFromCapabilities_DeepCopiesNestedSchema(t *testing.T) {
 	}
 }
 
+func TestToolsFromCapabilities_CopiesTypedRequiredSlice(t *testing.T) {
+	required := []string{"query"}
+	tools := ToolsFromCapabilities(api.CapabilityManifest{
+		Capabilities: []api.Capability{{
+			Name:        "web_search",
+			InputSchema: map[string]any{"type": "object", "required": required},
+		}},
+	})
+	required[0] = "mutated"
+	got, ok := tools[0].InputSchema["required"].([]string)
+	if !ok || len(got) != 1 || got[0] != "query" {
+		t.Fatalf("typed required slice was not copied: %#v", tools[0].InputSchema["required"])
+	}
+}
+
 func TestToolsFromCapabilities_EmptyManifest(t *testing.T) {
 	if got := ToolsFromCapabilities(api.CapabilityManifest{}); len(got) != 0 {
 		t.Fatalf("empty manifest tools = %#v", got)
