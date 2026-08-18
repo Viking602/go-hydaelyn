@@ -8,7 +8,9 @@ suites in `_test.go` and call `eval.RunSuite` there so production pack
 code does not import `eval`.
 
 `transport/mcp.ToolDescriptor` now uses MCP wire names (`name`,
-`description`, `inputSchema`) when serialized as JSON.
+`description`, `inputSchema`) when serialized as JSON. Capabilities
+without an input schema export `{"type":"object"}` so the required
+MCP field is always present.
 
 ## Coding sandbox rejects FIFOs and replacement links
 

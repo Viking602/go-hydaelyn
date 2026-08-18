@@ -32,7 +32,7 @@ func TestToolsFromCapabilities_ProjectsManifestCapabilities(t *testing.T) {
 	if tools[0].Name != "web_search" || tools[0].Description != "Run a keyword query" {
 		t.Fatalf("first tool = %#v", tools[0])
 	}
-	if tools[1].Name != "fetch_document" || tools[1].InputSchema != nil {
+	if tools[1].Name != "fetch_document" || tools[1].InputSchema["type"] != "object" {
 		t.Fatalf("second tool = %#v", tools[1])
 	}
 
@@ -65,5 +65,18 @@ func TestToolDescriptor_JSONUsesMCPWireNames(t *testing.T) {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("missing MCP wire name %q in %s", key, raw)
 		}
+	}
+}
+
+func TestToolDescriptor_JSONEmitsObjectInputSchemaWhenMissing(t *testing.T) {
+	raw, err := json.Marshal(ToolsFromCapabilities(api.CapabilityManifest{
+		Capabilities: []api.Capability{{Name: "fetch_document"}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"name":"fetch_document","inputSchema":{"type":"object"}}]`
+	if string(raw) != want {
+		t.Fatalf("json.Marshal(tools) = %s, want %s", raw, want)
 	}
 }

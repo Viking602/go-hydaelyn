@@ -58,8 +58,8 @@ Allowed on purpose:
 - `worker/` → root `venat` (integration seam)
 - `agent/` → `api/`, `provider/`, `tool/`, `skill/`, `stream/`
 - `eval/` → `worker/` and the root façade (declared harness bridge)
-- `coding` test files → root façade and `worker/` (named exception for
-  the eval-regression harness in `coding/eval_regression_test.go`)
+- `coding/eval_regression_test.go` only → root façade and `worker/`
+  (named file exception; other coding tests stay banned)
 
 Reverse-edge bans stay even when the five-layer picture is only
 documentation. Sentrux 0.5.7 `layer_direction` stays off. It cannot

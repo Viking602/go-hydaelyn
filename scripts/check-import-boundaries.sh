@@ -25,9 +25,12 @@ is_within() {
   [[ "$imported" == "$prefix" || "$imported" == "$prefix/"* ]]
 }
 
-# Named exception: coding's external eval-regression tests drive the real
-# tool gate through the worker bridge and therefore import the root façade
-# and worker/. Production coding/ code still cannot import either.
+# Named exception: coding/eval_regression_test.go drives the real tool
+# gate through the worker bridge and therefore imports the root façade
+# and worker/. Production coding/ code and other coding tests cannot.
+# go list aggregates TestImports for the whole package, so this only
+# suppresses the package-level hit; check_coding_test_files enforces
+# the file scope.
 is_named_exception() {
   local package="$1"
   local imported="$2"
@@ -39,6 +42,50 @@ is_named_exception() {
     fi
   fi
   return 1
+}
+
+extract_go_imports() {
+  awk '
+    BEGIN { inblock = 0 }
+    /^[[:space:]]*import[[:space:]]*\(/ { inblock = 1; next }
+    inblock && /^[[:space:]]*\)/ { inblock = 0; next }
+    inblock {
+      if (match($0, /"/)) {
+        rest = substr($0, RSTART + 1)
+        if (match(rest, /"/)) print substr(rest, 1, RSTART - 1)
+      }
+      next
+    }
+    /^[[:space:]]*import[[:space:]]+/ {
+      if (match($0, /"/)) {
+        rest = substr($0, RSTART + 1)
+        if (match(rest, /"/)) print substr(rest, 1, RSTART - 1)
+      }
+    }
+  ' "$1"
+}
+
+# File-level coding test scan: only eval_regression_test.go may import
+# the root module or worker/. Other coding tests still cannot.
+check_coding_test_files() {
+  local file imported rel
+  while IFS= read -r -d '' file; do
+    rel="${file#./}"
+    while IFS= read -r imported; do
+      [[ -z "${imported:-}" ]] && continue
+      if [[ "$rel" == "coding/eval_regression_test.go" ]]; then
+        if is_within "$imported" "$module/packs"; then
+          report "coding-no-worker-packs-root" "$rel" "$imported" "test-file"
+        fi
+        continue
+      fi
+      if [[ "$imported" == "$module" ]] ||
+        is_within "$imported" "$module/worker" ||
+        is_within "$imported" "$module/packs"; then
+        report "coding-no-worker-packs-root" "$rel" "$imported" "test-file"
+      fi
+    done < <(extract_go_imports "$file")
+  done < <(find ./coding -name '*_test.go' -print0)
 }
 
 check_import() {
@@ -123,6 +170,7 @@ check_package_set root '.'
 check_package_set worker './worker/...'
 check_package_set packs './packs/...'
 check_package_set coding './coding/...'
+check_coding_test_files
 
 if ((violations > 0)); then
   printf '\nFAIL: %d import boundary violation(s).\n' "$violations" >&2

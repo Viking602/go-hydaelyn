@@ -146,14 +146,17 @@ func runCRUDSuite(t *testing.T, factory ProviderFactory) {
 
 func testSaveAndLoadRun(t *testing.T, factory ProviderFactory) {
 	p := newProvider(t, factory)
-	want := api.Run{ID: "run-crud-1", Status: api.RunStatusCreated, Request: "hello", CreatedAt: time.Now().UTC()}
+	want := api.Run{
+		ID: "run-crud-1", Status: api.RunStatusCreated, Request: "hello",
+		AgentVersion: "agent-v3", CreatedAt: time.Now().UTC(),
+	}
 	withUoW(t, p, func(uow api.UnitOfWork) error { return uow.Runs().SaveRun(context.Background(), want) })
 	withUoW(t, p, func(uow api.UnitOfWork) error {
 		got, err := uow.Runs().LoadRun(context.Background(), want.ID)
 		if err != nil {
 			return err
 		}
-		if got.ID != want.ID || got.Request != want.Request {
+		if got.ID != want.ID || got.Request != want.Request || got.AgentVersion != want.AgentVersion {
 			t.Fatalf("LoadRun mismatch: %+v vs %+v", got, want)
 		}
 		return nil

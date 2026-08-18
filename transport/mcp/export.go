@@ -7,7 +7,7 @@ type ToolDescriptor struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	// godoc-allow-any: JSON Schema is represented as an open object.
-	InputSchema map[string]any `json:"inputSchema,omitempty"`
+	InputSchema map[string]any `json:"inputSchema"`
 }
 
 // ToolsFromCapabilities projects a capability manifest into MCP tool
@@ -18,16 +18,20 @@ func ToolsFromCapabilities(manifest api.CapabilityManifest) []ToolDescriptor {
 		out = append(out, ToolDescriptor{
 			Name:        capability.Name,
 			Description: capability.Description,
-			InputSchema: cloneAnyMap(capability.InputSchema),
+			InputSchema: mcpInputSchema(capability.InputSchema),
 		})
 	}
 	return out
 }
 
-func cloneAnyMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
+func mcpInputSchema(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{"type": "object"}
 	}
+	return cloneAnyMap(in)
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for key, value := range in {
 		out[key] = value
