@@ -1,5 +1,19 @@
 # Migration Notes
 
+## Coding sandbox rejects FIFOs and replacement links
+
+`coding.Workspace` reads Lstat the leaf before opening it. FIFOs, devices,
+sockets, and directories return `ErrNotRegularFile` instead of blocking on
+`os.Open`. In-workspace symlinks are resolved and the target must be a
+regular file inside the workspace.
+
+`WriteFile` creates with `O_EXCL` after re-resolving the parent. In-place
+writes (`WriteText` / `RestoreText`) re-evaluate the path, re-check
+containment, and require a regular file. Unix opens use `O_NOFOLLOW`;
+Windows opens the leaf with `FILE_FLAG_OPEN_REPARSE_POINT` and rejects a
+reparse point so a swapped symlink cannot leave the workspace.
+Hosts do not need to change call sites.
+
 ## ProcessTool owns stdout/stderr pipes
 
 `tool/kit.ProcessTool` now creates parent-owned `os.Pipe` pairs, assigns the
