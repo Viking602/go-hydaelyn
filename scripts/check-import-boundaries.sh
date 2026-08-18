@@ -45,29 +45,44 @@ is_named_exception() {
 }
 
 extract_go_imports() {
-  awk '
-    BEGIN { inblock = 0 }
-    /^[[:space:]]*import[[:space:]]*\(/ { inblock = 1; next }
-    inblock && /^[[:space:]]*\)/ { inblock = 0; next }
-    inblock {
-      print_import_path($0)
-      next
-    }
-    /^[[:space:]]*import[[:space:]]+/ {
-      print_import_path($0)
-    }
-    function print_import_path(line,    rest) {
-      if (match(line, /"/)) {
-        rest = substr(line, RSTART + 1)
-        if (match(rest, /"/)) print substr(rest, 1, RSTART - 1)
-        return
-      }
-      if (match(line, /`/)) {
-        rest = substr(line, RSTART + 1)
-        if (match(rest, /`/)) print substr(rest, 1, RSTART - 1)
-      }
-    }
-  ' "$1"
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+# Drop line comments so a quoted remark cannot steal the import path.
+cleaned = []
+for line in text.splitlines():
+    in_raw = False
+    in_str = False
+    out = []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if not in_str and not in_raw and ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+            break
+        out.append(ch)
+        if ch == "`" and not in_str:
+            in_raw = not in_raw
+        elif ch == '"' and not in_raw:
+            in_str = not in_str
+        elif ch == "\\" and in_str:
+            if i + 1 < len(line):
+                out.append(line[i + 1])
+                i += 1
+        i += 1
+    cleaned.append("".join(out))
+text = "\n".join(cleaned)
+
+paths = []
+for match in re.finditer(r'(?m)^\s*import\s+(?:[A-Za-z_][\w.]*\s+)?(["`])(.+?)\1', text):
+    paths.append(match.group(2))
+for match in re.finditer(r"(?s)import\s*\((.*?)\)", text):
+    for inner in re.finditer(r'(["`])(.+?)\1', match.group(1)):
+        paths.append(inner.group(2))
+for path in paths:
+    print(path)
+PY
 }
 
 # File-level coding test scan: only eval_regression_test.go may import
