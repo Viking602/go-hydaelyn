@@ -42,6 +42,23 @@ func TestToolsFromCapabilities_ProjectsManifestCapabilities(t *testing.T) {
 	}
 }
 
+func TestToolsFromCapabilities_DeepCopiesNestedSchema(t *testing.T) {
+	properties := map[string]any{"q": map[string]any{"type": "string"}}
+	schema := map[string]any{"type": "object", "properties": properties}
+	tools := ToolsFromCapabilities(api.CapabilityManifest{
+		Capabilities: []api.Capability{{Name: "web_search", InputSchema: schema}},
+	})
+	properties["q"] = map[string]any{"type": "mutated"}
+	got, ok := tools[0].InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v", tools[0].InputSchema["properties"])
+	}
+	field, ok := got["q"].(map[string]any)
+	if !ok || field["type"] != "string" {
+		t.Fatalf("nested schema was not copied: %#v", got)
+	}
+}
+
 func TestToolsFromCapabilities_EmptyManifest(t *testing.T) {
 	if got := ToolsFromCapabilities(api.CapabilityManifest{}); len(got) != 0 {
 		t.Fatalf("empty manifest tools = %#v", got)

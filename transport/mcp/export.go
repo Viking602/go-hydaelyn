@@ -34,7 +34,22 @@ func mcpInputSchema(in map[string]any) map[string]any {
 func cloneAnyMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneJSONValue(value)
 	}
 	return out
+}
+
+func cloneJSONValue(value any) any {
+	switch current := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(current)
+	case []any:
+		out := make([]any, len(current))
+		for i, item := range current {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	default:
+		return current
+	}
 }
