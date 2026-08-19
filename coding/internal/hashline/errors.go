@@ -47,12 +47,12 @@ var (
 	// instead combine the edits into one section with multiple operations.
 	ErrDuplicateSection = errors.New("hashline: multiple sections target the same file")
 	// ErrRecoveryConflict is returned by the patcher when a stale edit could
-	// not be auto-recovered because the live file and the re-applied edit
-	// changed the same lines in incompatible ways (the three-way merge
-	// conflicts). It wraps ErrSnapshotMismatch so existing callers that match
+	// not be auto-recovered because its target lines changed, moved by
+	// inconsistent offsets, or could not be mapped unambiguously. It wraps
+	// ErrSnapshotMismatch so existing callers that match
 	// errors.Is(err, ErrSnapshotMismatch) — and the agent-facing re-read
 	// recovery message — still trigger, while callers that want to
-	// distinguish a true conflict from a plain stale tag can match it
-	// directly.
+	// distinguish a true recovery conflict from a missing snapshot can match
+	// it directly.
 	ErrRecoveryConflict = fmt.Errorf("hashline: stale edit conflicts with concurrent changes: %w", ErrSnapshotMismatch)
 )

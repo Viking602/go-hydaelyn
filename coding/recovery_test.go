@@ -26,11 +26,10 @@ func readHeader(t *testing.T, set []tool.Driver, path string) string {
 	return rr.Header
 }
 
-// TestEditHashline_RecoversStaleTagOnDifferentRegion proves the M6 wiring: a
-// read records the file into the shared store; an out-of-band change to a
-// DIFFERENT region makes the read's tag stale; an edit carrying that stale tag
-// is salvaged by a 3-way merge, and BOTH the out-of-band change and the model's
-// edit survive.
+// TestEditHashline_RecoversStaleTagOnDifferentRegion proves the history-backed
+// wiring: a read records the file; an out-of-band change to a DIFFERENT region
+// makes the tag stale; verified unchanged anchors let the edit replay against
+// live content, preserving BOTH the out-of-band change and the model's edit.
 func TestEditHashline_RecoversStaleTagOnDifferentRegion(t *testing.T) {
 	const content = "line1\nline2\nline3\nline4\nline5\n"
 	ws, root := newTestWorkspace(t, map[string]string{"f.txt": content})
@@ -45,8 +44,8 @@ func TestEditHashline_RecoversStaleTagOnDifferentRegion(t *testing.T) {
 		t.Fatalf("external write: %v", err)
 	}
 
-	// 3. Edit line2 using the now-stale header. The change does not touch
-	//    line5, so the 3-way merge is non-conflicting and recovery succeeds.
+	// 3. Edit line2 using the now-stale header. The target anchor is unchanged,
+	//    so it remaps cleanly while the unrelated line5 change survives.
 	res, updates := editWith(t, set, header, "replace 2:\n+LINE2-EDITED\n", false)
 	if res.IsError {
 		t.Fatalf("stale edit on a different region should recover, got: %s", res.Content)
@@ -70,7 +69,7 @@ func TestEditHashline_RecoversStaleTagOnDifferentRegion(t *testing.T) {
 	if len(er.Sections) != 1 || !er.Sections[0].Recovered {
 		t.Errorf("section should be flagged Recovered: %+v", er.Sections)
 	}
-	if !strings.Contains(res.Content, "recovered stale tag via 3-way merge") {
+	if !strings.Contains(res.Content, "recovered stale tag against current content") {
 		t.Errorf("content should announce the recovery:\n%s", res.Content)
 	}
 	if len(updates) == 0 || updates[0].Data["recovered"] != "true" {
@@ -78,10 +77,40 @@ func TestEditHashline_RecoversStaleTagOnDifferentRegion(t *testing.T) {
 	}
 }
 
+// TestEditHashline_RecoversStaleTagInTypicalGoFile covers the common case
+// that the old line-level merge rejects: real Go files repeat blank lines and
+// closing braces. A disjoint insertion before an unchanged target must not
+// force a re-read merely because unrelated line values are duplicated.
+func TestEditHashline_RecoversStaleTagInTypicalGoFile(t *testing.T) {
+	const base = "package sample\n\nfunc first() int {\n\treturn 1\n}\n\nfunc second() int {\n\treturn 2\n}\n"
+	ws, root := newTestWorkspace(t, map[string]string{"sample.go": base})
+	set := NewToolSet(ws)
+	header := readHeader(t, set, "sample.go")
+
+	const live = "// generated file\n" + base
+	if err := os.WriteFile(filepath.Join(root, "sample.go"), []byte(live), 0o644); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+
+	res, _ := editWith(t, set, header, "replace 8:\n+\treturn 3\n", false)
+	if res.IsError {
+		t.Fatalf("stale edit with unchanged anchors should recover despite duplicate lines: %s", res.Content)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "sample.go"))
+	if err != nil {
+		t.Fatalf("read recovered file: %v", err)
+	}
+	const want = "// generated file\npackage sample\n\nfunc first() int {\n\treturn 1\n}\n\nfunc second() int {\n\treturn 3\n}\n"
+	if string(got) != want {
+		t.Fatalf("recovered file = %q, want %q", got, want)
+	}
+}
+
 // TestEditHashline_RejectsStaleTagOnSameLines proves the conflicting-recovery
-// path: a read records the base; an out-of-band change to the SAME lines the
-// model is about to edit makes the tag stale; the 3-way merge conflicts, so the
-// edit is rejected with the re-read message and the file is NOT mutated.
+// path: a read records the base; an out-of-band change to the SAME target line
+// removes its unchanged anchor, so recovery is rejected with a re-read message
+// and the file is NOT mutated.
 func TestEditHashline_RejectsStaleTagOnSameLines(t *testing.T) {
 	const content = "alpha\nbeta\ngamma\n"
 	ws, root := newTestWorkspace(t, map[string]string{"f.txt": content})
@@ -97,7 +126,7 @@ func TestEditHashline_RejectsStaleTagOnSameLines(t *testing.T) {
 
 	res, _ := editWith(t, set, header, "replace 2:\n+BETA-FROM-MODEL\n", false)
 	if !res.IsError {
-		t.Fatal("a stale edit on the same lines must be rejected (3-way merge conflict)")
+		t.Fatal("a stale edit on the same lines must be rejected (target anchor changed)")
 	}
 	if !strings.Contains(res.Content, "re-read") {
 		t.Errorf("conflicting stale edit should instruct a re-read:\n%s", res.Content)
@@ -117,18 +146,15 @@ func TestEditHashline_RejectsStaleTagOnSameLines(t *testing.T) {
 // stale "block 4" lands on a blank line in the live file (no Go block starts
 // there). Block resolution is therefore deferred out of the unconditional
 // preflight path and run against the base the tag referred to inside
-// recoverStale, where line 4 still starts the function — so the edit applies to
-// the base and three-way merges cleanly with the disjoint insertion.
+// recoverStale, where line 4 still starts the function. The resolved range then
+// remaps to the unchanged live function and replays beside the insertion.
 //
 // Before the fix, Preflight resolved block ops against the live file first and
 // aborted with ErrBlockResolve, never reaching recovery; this test asserts the
 // edit instead recovers.
 func TestEditHashline_RecoversStaleBlockEditAgainstBase(t *testing.T) {
-	// Base has no blank line so every base line is distinct (the split's trailing
-	// "" is the only empty line); the merge needs that, since duplicate base lines
-	// make the LCS alignment ambiguous and force a conservative conflict. "func
-	// Add" keyword is line 4; its doc comment is line 3, so "replace block 4"
-	// covers lines 3..6.
+	// "func Add" starts on line 4. Its doc comment starts on line 3, so
+	// "replace block 4" resolves to lines 3..6 against the recorded base.
 	const base = "package calc\nconst anchor = 0\n// Add sums two integers.\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
 	ws, root := newTestWorkspace(t, map[string]string{"calc.go": base})
 	set := NewToolSet(ws)
@@ -182,7 +208,7 @@ func TestEditHashline_RecoversStaleBlockEditAgainstBase(t *testing.T) {
 	if !er.Recovered || len(er.Sections) != 1 || !er.Sections[0].Recovered {
 		t.Errorf("edit should be flagged Recovered: %+v", er)
 	}
-	if !strings.Contains(res.Content, "recovered stale tag via 3-way merge") {
+	if !strings.Contains(res.Content, "recovered stale tag against current content") {
 		t.Errorf("content should announce the recovery:\n%s", res.Content)
 	}
 }

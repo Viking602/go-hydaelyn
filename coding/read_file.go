@@ -63,8 +63,8 @@ func (d readFileDriver) Execute(ctx context.Context, call tool.Call, _ tool.Upda
 		return errorResult(call, "coding.read_file failed: "+err.Error()), nil
 	}
 
-	// Record the full normalized file under its canonical path so a later edit
-	// whose tag is stale can recover via 3-way merge against this version.
+	// Record the full normalized file under its canonical path so a later stale
+	// edit can verify and remap unchanged anchors from this exact version.
 	if d.store != nil {
 		d.store.Record(res.Path, res.Text)
 	}

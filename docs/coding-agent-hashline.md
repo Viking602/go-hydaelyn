@@ -32,7 +32,7 @@ model
   → coding/* tool.Driver      (read_file/search/edit_hashline/write_file/gofmt/go_test/git_diff)
   → coding.Workspace          (path + command sandbox; implements hashline.Filesystem)
   → coding/internal/hashline  (parse → preflight → all-or-nothing commit; tag = hash(live file))
-  → [M6] SnapshotStore history (only 3-way recovery needs it; deferred)
+  → [M6] SnapshotStore history (exact bases for verified stale-anchor recovery)
 ```
 
 Boundaries (unchanged from v1):
@@ -318,28 +318,44 @@ func (p *Patcher) Commit(ctx context.Context, prepared []PreparedSection) (Apply
 func (p *Patcher) Apply(ctx context.Context, patch Patch) (ApplyPatchResult, error)
 ```
 
-`Apply` sequence (no persistent store needed):
+`Apply` sequence:
 
 ```text
 1 parse already done (Patch passed in)
 2 each section: CanonicalPath validation
-3 each section: ReadText live file → ComputeFileHash → compare to section.Tag;
-                 mismatch ⇒ ErrSnapshotMismatch (stale-reject)
-4 each section: Apply in memory; keep new text + original text (rollback buffer)
-5 only after ALL sections succeed: PreflightWrite each, then WriteText each
-6 if any WriteText fails: restore already-written files from the rollback buffer
-                 (via the uncapped restore path so an original above the forward
-                 write cap is still put back); the rollback detaches cancellation
-                 and deadlines from ctx (context.WithoutCancel) so a canceled or
-                 timed-out edit — itself a common cause of the triggering write
-                 failure, since WriteText/RestoreText short-circuit on ctx.Err() —
-                 still restores the saved originals rather than leaving them
-                 modified; fail
-7 build per-section result: new header (recompute tag of new text), compact diff, firstChangedLine
+3 each section: ReadText live file → ComputeFileHash → compare to section.Tag
+4 matching tag: resolve block ops against live content and Apply in memory
+5 stale tag: load the unique recorded base; resolve block ops against that base;
+              map every unchanged target anchor to live content with a bounded
+              Myers line diff; require one uniform offset and unambiguous local
+              context for duplicate values; replay the remapped ops on live text
+6 only after ALL sections succeed: PreflightWrite each, then WriteText each
+7 if any WriteText fails: restore already-written files from the rollback buffer
+              (via the uncapped restore path so an original above the forward
+              write cap is still put back); the rollback detaches cancellation
+              and deadlines from ctx (context.WithoutCancel) so a canceled or
+              timed-out edit — itself a common cause of the triggering write
+              failure, since WriteText/RestoreText short-circuit on ctx.Err() —
+              still restores the saved originals rather than leaving them
+              modified; fail
+8 build per-section result: new header (recompute tag of new text), compact diff,
+              firstChangedLine, and recovered=true when stale anchors replayed
 ```
 
-Stale handling, first release: hash match ⇒ apply; mismatch ⇒ `ErrSnapshotMismatch`
-with a message instructing the agent to re-read. (3-way recovery is M6.)
+Stale recovery authorizes writes only through target-aware anchor replay. Every
+line in a replace/delete range and every before/after insertion anchor must
+remain identical in normalized LF content. Recovery first prefers those exact
+original line numbers; this prevents a longer copied block elsewhere from
+stealing a target that remains unchanged at its original coordinate. Only then
+may a bounded Myers map move the target. A moved target requires two-sided
+nearest non-target context, every moved anchor must keep both neighbors, and all
+anchors must move by one consistent offset. Duplicated braces, blank lines, and
+other repeated values additionally require a contiguous local sequence that
+occurs once in both versions. Head/tail-only additions have no line anchors and
+replay directly because they preserve all live content. Missing history, tag
+collisions, changed or ambiguous targets, inconsistent offsets, and drift beyond
+512 inserted or deleted lines fail closed with `ErrSnapshotMismatch` and
+instruct a re-read.
 
 Duplicate-section guard: two sections that target the same file are rejected up
 front (each is preflighted against the original content, so a second `Commit` write
@@ -349,22 +365,20 @@ implements the optional `identityResolver` (`ResolveIdentity(path) (string, erro
 returning the symlink-resolved absolute path), so two in-root symlink aliases for
 the same file (e.g. `a.go` and `link.go → a.go`) collapse to one key; without that
 capability it falls back to the canonical path. (Rollback uses the same optional-
-capability pattern via `restorer`, see step 6.)
+capability pattern via `restorer`, see step 7.)
 
 ### 4.8 snapshot.go
 
-Define the `SnapshotStore` interface now. For M1–M5 a lazy/no-op implementation is
-sufficient (stale-reject reads live files). `MemorySnapshotStore` with bounded
-per-path history (`maxPaths=64`, `maxVersionsPerPath=8`, LRU) is implemented in M6 to
-back 3-way recovery and `ByHash`. Versions are keyed by exact content, not by tag:
-recording identical content deduplicates, but two distinct contents that collide on
-the 16-bit tag are retained side by side (the index maps a tag to every version
-sharing it, newest last). `ByHash` returns the newest version for a tag, while
-`UniqueByHash` returns a version only when it is the *sole* content recorded under
-the tag — reporting failure both when nothing is recorded and when ≥2 distinct
-contents collide. The fast-path and recovery base lookups use `UniqueByHash`, so an
-ambiguous (collided) tag is treated as unidentifiable and rejected rather than
-applied against an arbitrarily-chosen colliding version.
+`MemorySnapshotStore` keeps bounded per-path history (`maxPaths=64`,
+`maxVersionsPerPath=8`, LRU) for stale-anchor verification and `ByHash`.
+Versions are keyed by exact content, not by tag: recording identical content
+deduplicates, but two distinct contents that collide on the 16-bit tag are
+retained side by side (the index maps a tag to every version sharing it, newest
+last). `ByHash` returns the newest version for a tag, while `UniqueByHash`
+returns a version only when it is the *sole* content recorded under the tag —
+reporting failure both when nothing is recorded and when ≥2 distinct contents
+collide. The fast-path and recovery base lookups use `UniqueByHash`, so an
+ambiguous tag is rejected rather than applied against an arbitrary version.
 
 ## 5. Workspace sandbox (`coding/internal/workspace` + `coding/workspace.go`)
 
@@ -679,7 +693,7 @@ exact `api.AgentDefinition`/`api.CapabilityManifest` field names against
 | M3 | tool metadata + coding.PolicyEngine + GovernedToolBus integration tests + event audit | PR3 |
 | M4 | gofmt (go/format) + go_test + git_diff + command sandbox | PR4 |
 | M5 | AgentClass + _examples/coding_hashline + packs/coding manifest | PR5 |
-| M6 (done) | MemorySnapshotStore history (bounded per-path LRU) + 3-way recovery (line-level, run-grouped; conservative on duplicate-line bases — see §11) + go/ast block edit (`replace block N` / `delete block N`) | — |
+| M6 (done) | MemorySnapshotStore history (bounded per-path LRU) + verified stale-anchor remapping/replay (bounded Myers diff, duplicate-context proof, uniform offset, fail-closed) + go/ast block edit (`replace block N` / `delete block N`) | — |
 | M7 (done) | eval regression via eval.RunSuite + assertions (stale-conflict / path-escape / policy-deny / all-or-nothing), custom `eval.Harness` wiring `coding.NewToolSet` + `coding.PolicyEngine` through `worker.GovernedToolBus` | — |
 
 Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
@@ -690,11 +704,11 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | Risk | Mitigation |
 |---|---|
 | 4-hex tag collision | tag is only the model-facing handle; the fast path (and recovery base) resolve via `UniqueByHash`, which yields a version only when the tag pins to a single recorded content equal to the live file. An out-of-band version that shares the tag but was never recorded, or a tag that maps to two distinct recorded versions (making the edit's line numbers ambiguous), is rejected as stale rather than applied against the wrong version |
-| stale line numbers | stale-reject + prompt rule + tests |
+| stale line numbers | prefer exact unchanged targets at their original coordinates; otherwise use an exact recorded base + bounded Myers unchanged-line map + two-sided neighboring context + one uniform offset; changed, ambiguously copied, split, excessive-drift, and unprovable targets stale-reject |
 | search snapshot ≠ exposed header | `search` records the full text from the same read that minted the header tag and line numbers (carried in `SearchFileResult.Text`), never a second `ReadFile` — so a concurrent change that shares the 16-bit tag cannot make the recorded base diverge from the header the model received (§5.3) |
 | multi-file partial write | preflight all + rollback buffer (§4.7) |
 | duplicate sections aliasing one file | the duplicate-section guard keys on the resolved on-disk identity (`identityResolver.ResolveIdentity`), so two in-root symlink aliases for the same file (e.g. `a.go` and `link.go → a.go`) are rejected up front instead of the second `Commit` write clobbering the first's edit |
-| 3-way merge silent data loss | LCS alignment is only sound on distinct-line bases; trivial cases (one side unchanged / both identical) short-circuit, and an ambiguous duplicate-line base conflicts and falls back to stale-reject rather than mis-merge |
+| duplicate-line recovery ambiguity | duplicated target values require their whole target run plus nearest non-target context to map contiguously and occur exactly once in both the recorded base and live file; otherwise recovery stale-rejects |
 | path escape | resolver + parent-dir symlink check |
 | symlink alias into denied tree | `.git` deny enforced on the canonical resolved target, not just the lexical path, so an alias like `g -> .git` cannot reach `.git/**` |
 | `.git` deny bypass via case variant | the `.git` deny folds case on the leading lexical component (`.GIT/config` rejected on every platform) and the canonical-target containment compare is case-insensitive too, so on a case-insensitive filesystem (default macOS, Windows) a differently-cased path or a `g -> .GIT` alias cannot slip past the sandbox boundary |
@@ -706,14 +720,15 @@ Gates: `make verify` per PR; `make ci-local` (incl. `make architecture-check` /
 | formatter fights hashline | hashline forbids formatting; separate gofmt tool |
 | parser too permissive | strict grammar + typed errors |
 | policy bypass | tools only reachable via GovernedToolBus in the worker path |
-| large files | max bytes, line ranges, search snippets |
+| large files | max bytes, line ranges, search snippets; stale recovery caps the Myers edit distance at 512 and re-reads instead of retaining an unbounded diff trace |
 
 ## 12. Definition of Done (v1 MVP)
 
 1 read/search return `¶PATH#TAG` numbered content. 2 existing files modified only via
-`coding.edit_hashline`. 3 stale-tag edit rejected, no mutation. 4 multi-section patch
-all-or-nothing. 5 edit returns fresh header + compact diff. 6 write tools policy-gated
-+ audited via events. 7 gofmt/go_test/git_diff available and sandboxed. 8 path-escape +
-non-allowlisted commands tested. 9 `_examples/coding_hashline` demonstrates
-read→edit→gofmt→test→diff with no shell access. 10 governance + integration tests pass;
-`make verify` green.
+`coding.edit_hashline`. 3 stale-tag edits replay only after target-aware anchor
+verification; every unverified case rejects without mutation. 4 multi-section patch
+is all-or-nothing. 5 edit returns a fresh header + compact diff. 6 write tools are
+policy-gated + audited via events. 7 gofmt/go_test/git_diff are available and
+sandboxed. 8 path-escape + non-allowlisted commands are tested.
+9 `_examples/coding_hashline` demonstrates read→edit→gofmt→test→diff with no shell
+access. 10 governance + integration tests pass; `make verify` is green.

@@ -5,11 +5,10 @@ import (
 	"time"
 )
 
-// SnapshotStore records file versions so future milestones can do
-// snapshot-by-hash lookups and 3-way recovery. For M1–M5 the patcher only
-// needs stale-reject, which reads live files; a no-op/lazy implementation
-// satisfies the interface. The bounded per-path history implementation
-// (maxPaths=64, maxVersionsPerPath=8, LRU) is deferred to M6.
+// SnapshotStore records file versions for stale-anchor verification and
+// remapping. A no-op/lazy implementation still supports strict stale rejection
+// because the patcher reads live files and compares tags directly. The bounded
+// per-path history implementation retains the exact bases needed for recovery.
 type SnapshotStore interface {
 	// Head returns the most recently recorded snapshot for path.
 	Head(path string) (Snapshot, bool)
@@ -99,8 +98,8 @@ type pathHistory struct {
 	seq      uint64
 }
 
-// MemorySnapshotStore is the M6 in-memory history store backing 3-way
-// recovery and ByHash. It keeps a bounded per-path version history
+// MemorySnapshotStore is the in-memory history backing stale-anchor recovery
+// and ByHash. It keeps a bounded per-path version history
 // (maxVersionsPerPath most recent distinct versions) across at most maxPaths
 // files, evicting the least-recently-used path when full. It is safe for
 // concurrent use; every method takes the mutex.

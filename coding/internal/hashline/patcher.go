@@ -2,6 +2,7 @@ package hashline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -55,8 +56,8 @@ type PreparedSection struct {
 	Diff string
 	// Warnings carries non-fatal advisories from Apply.
 	Warnings []string
-	// Recovered reports that the section's tag was stale and the edit was
-	// salvaged by a three-way merge against recorded history (spec §4.7).
+	// Recovered reports that a stale section was safely replayed against current
+	// content after anchor verification/remapping when required (spec §4.7).
 	Recovered bool
 }
 
@@ -71,8 +72,8 @@ type SectionResult struct {
 	FirstChangedLine int
 	Diff             string
 	Warnings         []string
-	// Recovered reports that the section's tag was stale and the edit was
-	// salvaged by a three-way merge against recorded history (spec §4.7).
+	// Recovered reports that a stale section was safely replayed against current
+	// content after anchor verification/remapping when required (spec §4.7).
 	Recovered bool
 }
 
@@ -184,10 +185,9 @@ func (p *Patcher) Preflight(ctx context.Context, patch Patch) ([]PreparedSection
 			fcl = applied.FirstChangedLine
 			warnings = applied.Warnings
 		} else {
-			// Stale tag. Attempt M6 three-way recovery against history; if the
-			// store has no matching base (the nil/lazy store always falls here),
-			// or the merge conflicts, reject with ErrSnapshotMismatch exactly as
-			// the first release did so the agent re-reads.
+			// Stale tag. Attempt verified anchor remapping against recorded
+			// history; missing bases and unprovable mappings preserve the strict
+			// ErrSnapshotMismatch re-read path.
 			rec, err := p.recoverStale(canon, sec, nf.Text, liveTag)
 			if err != nil {
 				return nil, err
@@ -223,22 +223,17 @@ type recovered struct {
 	warnings         []string
 }
 
-// recoverStale attempts to salvage a stale-tag edit via a line-level
-// three-way merge (spec §4.7). The section's tag did not match the live file
-// (liveTag), so the model edited an older version. If the store still holds
-// that older version (ByHash(path, sec.Tag)), recoverStale:
+// recoverStale attempts to salvage a stale-tag edit by proving that every
+// targeted line still exists unchanged in the live file, remapping the old line
+// anchors to their live positions, and replaying the operation directly on the
+// current content. This preserves unrelated concurrent changes without asking a
+// general-purpose merge to infer the model's target.
 //
-//  1. re-applies the edit to that old base to get the model's desired text;
-//  2. three-way merges base=old, ours=live, theirs=desired;
-//  3. if the merge is non-conflicting and changes the live file, returns the
-//     merged text with a recovery warning.
-//
-// If no unambiguous base is known (including the nil/lazy store, whose
-// UniqueByHash always reports false — preserving the first release's
-// stale-reject — and the ambiguous case where distinct versions collide on the
-// tag, which cannot identify the edit's base), or the merge conflicts, it
-// returns an ErrSnapshotMismatch-wrapping error so the agent re-reads. A merge
-// that reproduces the live file exactly returns ErrNoop.
+// Block operations are resolved against the recorded base first because their
+// line numbers describe that version. Head/tail-only edits have no line anchors
+// and are safe to replay directly. Missing history, changed target lines,
+// inconsistent offsets, ambiguous context, and excessive drift fail closed with
+// ErrSnapshotMismatch so the agent re-reads.
 func (p *Patcher) recoverStale(canon string, sec Section, liveText, liveTag string) (recovered, error) {
 	base, ok := p.store().UniqueByHash(canon, sec.Tag)
 	if !ok {
@@ -246,40 +241,56 @@ func (p *Patcher) recoverStale(canon string, sec Section, liveText, liveTag stri
 			canon, ErrSnapshotMismatch, liveTag, sec.Tag)
 	}
 
-	// Resolve any block ops against the base the tag referred to (block extents
-	// are resolved per file version), then re-apply. A no-op, apply failure, or
-	// unresolvable block against the historical base cannot be recovered.
 	resolvedSec, err := resolveBlockOps(base.Text, sec)
 	if err != nil {
 		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; the block edit no longer resolves against the recorded version, re-read the file before editing)",
 			canon, ErrSnapshotMismatch, liveTag, sec.Tag)
 	}
 
+	// Validate the operation against the version the model actually read. The
+	// desired text is used only for conservative already-applied detection when
+	// anchor remapping fails; recovered writes always replay the original
+	// operation against live content.
 	desired, err := Apply(base.Text, resolvedSec)
 	if err != nil {
 		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; the edit no longer applies to the recorded version, re-read the file before editing)",
 			canon, ErrSnapshotMismatch, liveTag, sec.Tag)
 	}
 
-	merged := threeWayMerge(base.Text, liveText, desired.Text)
-	if merged.Conflict {
-		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; the file changed in the same place you edited, re-read the file before editing)",
+	remapped, ok := remapSectionToLive(base.Text, liveText, resolvedSec)
+	if !ok {
+		// Preserve the no-op contract only when the exact requested result is
+		// already current. General merge work here would defeat the bounded
+		// recovery budget and is never allowed to authorize a write.
+		if desired.Text == liveText {
+			return recovered{}, fmt.Errorf("hashline: section %q: %w", canon, ErrNoop)
+		}
+		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; target anchors changed, moved inconsistently, or could not be mapped unambiguously, re-read the file before editing)",
 			canon, ErrRecoveryConflict, liveTag, sec.Tag)
 	}
 
-	if merged.Text == liveText {
-		// The merge reproduced the live file: the edit is already present (or
-		// otherwise contributes nothing). Treat as a no-op, like a clean apply.
-		return recovered{}, fmt.Errorf("hashline: section %q: %w", canon, ErrNoop)
+	applied, err := Apply(liveText, remapped.section)
+	if err != nil {
+		if errors.Is(err, ErrNoop) {
+			return recovered{}, fmt.Errorf("hashline: section %q: %w", canon, ErrNoop)
+		}
+		return recovered{}, fmt.Errorf("hashline: section %q: %w (live tag %s, edit assumed %s; remapped operations could not be applied safely, re-read the file before editing)",
+			canon, ErrRecoveryConflict, liveTag, sec.Tag)
 	}
 
-	warnings := make([]string, 0, len(desired.Warnings)+1)
-	warnings = append(warnings, desired.Warnings...)
-	warnings = append(warnings, "recovered stale edit via 3-way merge (the file changed since the edit's tag; the edit was re-applied and merged with the current content)")
+	warning := "recovered stale edit via verified anchor replay (target lines remained unchanged in the live file)"
+	if !remapped.anchored {
+		warning = "recovered stale head/tail edit against current content"
+	} else if remapped.offset != 0 {
+		warning = fmt.Sprintf("recovered stale edit via verified anchor remap (%+d lines)", remapped.offset)
+	}
+	warnings := make([]string, 0, len(applied.Warnings)+1)
+	warnings = append(warnings, warning)
+	warnings = append(warnings, applied.Warnings...)
 
 	return recovered{
-		text:             merged.Text,
-		firstChangedLine: firstChangedLine(liveText, merged.Text),
+		text:             applied.Text,
+		firstChangedLine: applied.FirstChangedLine,
 		warnings:         warnings,
 	}, nil
 }

@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-// recoveryWarned reports whether any section carries the 3-way recovery
-// warning surfaced on a successful stale recovery.
+// recoveryWarned reports whether any section carries the warning surfaced on a
+// successful stale-anchor recovery.
 func recoveryWarned(res ApplyPatchResult) bool {
 	for _, s := range res.Sections {
 		for _, w := range s.Warnings {
-			if strings.Contains(w, "3-way merge") {
+			if strings.Contains(w, "recovered stale") {
 				return true
 			}
 		}
@@ -50,7 +50,7 @@ func TestPatcher_Recovery_NonConflicting(t *testing.T) {
 		t.Errorf("merged file = %q, want %q", fs.files["f.go"], want)
 	}
 	if !recoveryWarned(res) {
-		t.Errorf("recovered section must carry a 3-way merge warning: %#v", res.Sections)
+		t.Errorf("recovered section must carry an anchor recovery warning: %#v", res.Sections)
 	}
 	// The result's NewTag must reflect the merged content.
 	if res.Sections[0].NewTag != ComputeFileHash(want) {
@@ -212,10 +212,9 @@ func TestPatcher_Recovery_AfterCommitRecordsHistory(t *testing.T) {
 	}
 }
 
-func TestPatcher_Recovery_MergeReproducesLiveIsNoop(t *testing.T) {
-	// If the model's edit, re-applied to the recorded base and merged with the
-	// live file, reproduces the live file exactly (e.g. the same change was
-	// already made on disk), the recovery is a no-op.
+func TestPatcher_Recovery_DesiredTextAlreadyLiveIsNoop(t *testing.T) {
+	// If applying the model's edit to the recorded base exactly reproduces the
+	// live file, the same change was already made on disk and recovery is a no-op.
 	const base = "a\nb\nc\n"
 	store := NewMemorySnapshotStore()
 	baseTag := store.Record("f.go", base)
@@ -231,7 +230,7 @@ func TestPatcher_Recovery_MergeReproducesLiveIsNoop(t *testing.T) {
 	}}}
 	_, err := p.Apply(context.Background(), patch)
 	if !errors.Is(err, ErrNoop) {
-		t.Fatalf("merge reproducing the live file should be ErrNoop, got %v", err)
+		t.Fatalf("desired text already live should be ErrNoop, got %v", err)
 	}
 	if fs.files["f.go"] != live {
 		t.Errorf("no-op must not mutate: %q", fs.files["f.go"])

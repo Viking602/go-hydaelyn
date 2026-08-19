@@ -29,8 +29,8 @@ type EditSectionResult struct {
 	Diff             string   `json:"diff"`
 	Warnings         []string `json:"warnings,omitempty"`
 	// Recovered reports that this section's ¶PATH#TAG was stale and the edit
-	// was salvaged by a three-way merge against the shared snapshot store
-	// (the file changed since it was read, but the changes did not conflict).
+	// replayed against current content after verifying/remapping target anchors
+	// when present, or directly when it was a head/tail-only insertion.
 	Recovered bool `json:"recovered,omitempty"`
 }
 
@@ -48,8 +48,8 @@ type EditHashlineResult struct {
 	NewTags           []string `json:"newTags"`
 	FirstChangedLines []int    `json:"firstChangedLines"`
 	DiffHash          string   `json:"diffHash"`
-	// Recovered reports that at least one section's stale tag was salvaged by a
-	// three-way merge against the shared snapshot store (see EditSectionResult).
+	// Recovered reports that at least one stale section was safely replayed
+	// against current content (see EditSectionResult).
 	Recovered bool `json:"recovered,omitempty"`
 }
 
@@ -167,7 +167,7 @@ func buildEditResult(dryRun bool, sections []EditSectionResult) EditHashlineResu
 		}
 		b.WriteString(verb + " " + s.Path)
 		if s.Recovered {
-			b.WriteString(" (recovered stale tag via 3-way merge)")
+			b.WriteString(" (recovered stale tag against current content)")
 		}
 		if s.FirstChangedLine > 0 {
 			b.WriteString("\nfirstChangedLine: ")

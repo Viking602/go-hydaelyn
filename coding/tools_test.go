@@ -463,12 +463,11 @@ func TestGofmt_RecordsSnapshot(t *testing.T) {
 	})
 }
 
-// TestEditHashline_RecoversStaleTagAfterWriteFile proves the write_file→edit
-// recording is wired through the default NewToolSet store end-to-end: write_file
-// records the new file's base version, an out-of-band change to a DIFFERENT
-// region makes the minted tag stale, and an edit carrying that tag recovers via
-// a 3-way merge against the recorded base. Without the recording, recoverStale
-// would find no unique base for the tag and reject the edit with a re-read.
+// TestEditHashline_RecoversStaleTagAfterWriteFile proves write_file records the
+// new file's base version in the default tool-set store. After an out-of-band
+// change to a DIFFERENT region, verified unchanged anchors let an edit carrying
+// that stale tag replay against live content. Without the record, recovery
+// finds no unique base and rejects.
 func TestEditHashline_RecoversStaleTagAfterWriteFile(t *testing.T) {
 	ws, root := newTestWorkspace(t, nil)
 	set := NewToolSet(ws)
@@ -489,8 +488,8 @@ func TestEditHashline_RecoversStaleTagAfterWriteFile(t *testing.T) {
 		t.Fatalf("external write: %v", err)
 	}
 
-	// Edit line2 with the now-stale write_file header; disjoint from line5, so the
-	// 3-way merge against the recorded base recovers.
+	// Edit line2 with the now-stale write_file header; its unchanged anchor
+	// remaps against the recorded base while the line5 change survives.
 	edit, _ := editWith(t, set, wr.Header, "replace 2:\n+LINE2-EDITED\n", false)
 	if edit.IsError {
 		t.Fatalf("stale edit after write_file should recover against the recorded base, got: %s", edit.Content)

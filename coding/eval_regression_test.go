@@ -95,11 +95,11 @@ func TestCodingEvalRegressions(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Case 1: stale-edit regression.
 //
-// M6 makes a NON-conflicting stale edit RECOVER via a 3-way merge (see
+// Non-conflicting stale edits recover through verified anchor remapping (see
 // coding.TestEditHashline_RecoversStaleTagOnDifferentRegion), so this case MUST
-// use a CONFLICTING stale edit — an out-of-band change to the SAME line the
-// model edits — which conflicts and is rejected with the re-read message, and
-// the model's intended content must NOT land on disk.
+// use a CONFLICTING stale edit: an out-of-band change to the SAME target line
+// removes the anchor, forces rejection, and ensures the model's intended
+// content never lands on disk.
 // ---------------------------------------------------------------------------
 func staleEditRegression(t *testing.T) eval.EvalCase {
 	const runID = "coding-stale-edit"
@@ -124,8 +124,8 @@ func staleEditRegression(t *testing.T) eval.EvalCase {
 			const live = "alpha\nBETA-FROM-DISK\ngamma\n"
 			h.overwrite(path, live)
 
-			// 3. The model edits line 2 with the now-stale header. The 3-way merge
-			//    conflicts, so the edit must be rejected and disk left untouched.
+			// 3. The model edits line 2 with the now-stale header. Its target
+			//    anchor changed, so the edit is rejected and disk stays untouched.
 			res := h.edit(set, header+"\nreplace 2:\n+BETA-FROM-MODEL\n")
 			if !res.IsError {
 				t.Fatalf("conflicting stale edit must be rejected, got success: %s", res.Content)
