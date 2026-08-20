@@ -236,11 +236,11 @@ func (d skillActivationDriver) Execute(_ context.Context, call tool.Call, _ tool
 		Name string `json:"name"`
 	}
 	if err := decodeSkillToolArguments(call.Arguments, &arguments); err != nil {
-		return tool.Result{}, err
+		return skillToolErrorResult(call, err), nil
 	}
 	current, activated, err := d.runtime.activate(arguments.Name)
 	if err != nil {
-		return tool.Result{}, err
+		return skillToolErrorResult(call, err), nil
 	}
 	if !activated {
 		return tool.Result{ToolCallID: call.ID, Name: call.Name, Content: "Skill already active: " + current.Name}, nil
@@ -289,17 +289,30 @@ func (d skillResourceDriver) Execute(_ context.Context, call tool.Call, _ tool.U
 		Path  string `json:"path"`
 	}
 	if err := decodeSkillToolArguments(call.Arguments, &arguments); err != nil {
-		return tool.Result{}, err
+		return skillToolErrorResult(call, err), nil
 	}
 	current, active := d.runtime.activeSkill(arguments.Skill)
 	if !active {
-		return tool.Result{}, fmt.Errorf("agent: skill %q is not active", arguments.Skill)
+		return skillToolErrorResult(call, fmt.Errorf("agent: skill %q is not active", arguments.Skill)), nil
 	}
 	content, err := skill.ReadResource(current, arguments.Path)
 	if err != nil {
-		return tool.Result{}, err
+		return skillToolErrorResult(call, err), nil
 	}
 	return tool.Result{ToolCallID: call.ID, Name: call.Name, Content: string(content)}, nil
+}
+
+func skillToolErrorResult(call tool.Call, err error) tool.Result {
+	name := call.Name
+	if name == "" {
+		name = readSkillResourceToolName
+	}
+	return tool.Result{
+		ToolCallID: call.ID,
+		Name:       name,
+		Content:    err.Error(),
+		IsError:    true,
+	}
 }
 
 func decodeSkillToolArguments(raw json.RawMessage, destination any) error {

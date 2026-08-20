@@ -246,8 +246,9 @@ func TestSkillResourceToolRequiresActivationAndReadsManifest(t *testing.T) {
 		t.Fatalf("attachTools() error = %v", err)
 	}
 	read := message.ToolCall{ID: "read", Name: readSkillResourceToolName, Arguments: json.RawMessage(`{"skill":"resource-skill","path":"references/guide.md"}`)}
-	if _, err := bus.Execute(context.Background(), read, nil); err == nil || !strings.Contains(err.Error(), "not active") {
-		t.Fatalf("read before activation error = %v, want not active", err)
+	blocked, err := bus.Execute(context.Background(), read, nil)
+	if err != nil || !blocked.IsError || !strings.Contains(blocked.Content, "not active") {
+		t.Fatalf("read before activation = %#v, %v, want error result", blocked, err)
 	}
 	activate := message.ToolCall{ID: "activate", Name: activateSkillToolName, Arguments: json.RawMessage(`{"name":"resource-skill"}`)}
 	if _, err := bus.Execute(context.Background(), activate, nil); err != nil {
@@ -257,7 +258,44 @@ func TestSkillResourceToolRequiresActivationAndReadsManifest(t *testing.T) {
 	if err != nil || result.Content != "resource body" {
 		t.Fatalf("read after activation = %q, %v", result.Content, err)
 	}
+	missing, err := bus.Execute(context.Background(), message.ToolCall{
+		ID: "read-skill-md", Name: readSkillResourceToolName,
+		Arguments: json.RawMessage(`{"skill":"resource-skill","path":"SKILL.md"}`),
+	}, nil)
+	if err != nil || !missing.IsError || !strings.Contains(missing.Content, "SKILL.md") {
+		t.Fatalf("SKILL.md read = %#v, %v, want error result", missing, err)
+	}
 	assertParallelSkillActivationAndRead(t, loaded, activate, read)
+}
+
+func TestRunContinuesAfterUndeclaredSkillResource(t *testing.T) {
+	loaded := loadSkillWithResource(t)
+	driver := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{
+				ID: "read-skill-md", Name: readSkillResourceToolName,
+				Arguments: json.RawMessage(`{"skill":"resource-skill","path":"SKILL.md"}`),
+			}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+		{
+			{Kind: provider.EventTextDelta, Text: "used the activation body instead"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+		},
+	}}
+	result := (Engine{
+		Provider: driver, Model: "test-model", Skills: []skill.Skill{loaded},
+		LoopPolicy: LoopPolicy{MaxIterations: 3},
+	}).Run(context.Background(), api.Task{Goal: "read the skill"}, OutputPolicy{})
+	if result.Failure != nil {
+		t.Fatalf("SKILL.md miss failed the run: %#v", result.Failure)
+	}
+	if result.Text != "used the activation body instead" {
+		t.Fatalf("result text = %q", result.Text)
+	}
+	if len(driver.requests) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(driver.requests))
+	}
 }
 
 func loadSkillWithResource(t *testing.T) skill.Skill {
