@@ -45,12 +45,12 @@ func WithSnapshotStore(store hashline.SnapshotStore) ToolSetOption {
 // WithSnapshotStore) across read_file, search, edit_hashline, write_file, and
 // gofmt: read/search/write/gofmt record the file's full normalized content into
 // the store, so a later edit whose ¶PATH#TAG is stale (the file changed
-// out-of-band, or after an earlier edit) can recover via a three-way merge
-// against that recorded history when the changes do not conflict, and so the
-// tags write_file/gofmt mint are collision-guarded against out-of-band change
-// instead of fast-pathing on the 16-bit hash alone. Conflicting or unrecorded
-// edits still get the stale-reject re-read message. The store is per-tool-set
-// so history does not leak across runs.
+// out-of-band, or after an earlier edit) can replay against the live file after
+// proving that every target anchor remained unchanged and moved by one
+// consistent offset. Tags minted by write_file/gofmt are also collision-guarded
+// instead of fast-pathing on the 16-bit hash alone. Changed, ambiguous,
+// excessively drifted, or unrecorded targets still get the stale-reject re-read
+// message. The store is per-tool-set so history does not leak across runs.
 func NewToolSet(ws Workspace, opts ...ToolSetOption) []tool.Driver {
 	cfg := toolSetConfig{store: hashline.NewMemorySnapshotStore()}
 	for _, opt := range opts {
