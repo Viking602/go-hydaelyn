@@ -26,7 +26,7 @@
 - [Migration Notes](migration.md): version-to-version API changes.
 - [SemVer and Compatibility](semver.md): stability policy.
 - [Product Release Status](product-spec/README.md): shipped and planned surfaces.
-- [v0.14.1 Release Notes](release-notes/v0.14.1.md): latest published release.
+- [v0.14.2 Release Notes](release-notes/v0.14.2.md): latest published release.
 - [Architecture Boundaries](architecture-boundaries.md): live import seams and ownership rules.
 
 ## Package map

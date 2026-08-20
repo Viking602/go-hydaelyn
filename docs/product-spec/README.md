@@ -17,9 +17,10 @@ as a promise.
 | [v0.13.0](../release-notes/v0.13.0.md) | Released 2026-08-01 | Durable execution recovery, typed outcomes, checkpoint restoration, provider reliability, and Responses API support |
 | [v0.14.0](./v0.14.0/) | Released | Executable agent definitions, single-agent lifecycle orchestration, transactional admission, resource claims, granular usage, policy obligations, and storage conformance extensions |
 | [v0.14.1](../release-notes/v0.14.1.md) | Released 2026-08-18 | Fail-closed policy, lease, and read APIs; ProcessTool and coding-sandbox I/O; reserved `hydaelyn.self.*`; `Run.AgentVersion`; MCP capability export; architecture-gate hardening |
+| [v0.14.2](../release-notes/v0.14.2.md) | Released 2026-08-20 | Skill tool misses return `IsError` results; hashline edits recover by current-file anchors |
 | [Future backlog](../plans/future-backlog.md) | Unversioned | Scheduler expansion, memory and artifact work, OpenTelemetry integration, and production pack content |
 
-The latest published release is v0.14.1.
+The latest published release is v0.14.2.
 
 ## Architecture
 
@@ -47,7 +48,7 @@ The historical v0.8.0 architecture record is
 
 ## Reading order
 
-1. Read the [latest released notes](../release-notes/v0.14.1.md).
+1. Read the [latest released notes](../release-notes/v0.14.2.md).
 2. Read the [live architecture boundaries](../architecture-boundaries.md)
    and the [v0.8.0 package structure](./v0.8.0/12-package-structure.md).
 3. Review the [v0.14.0 specification](./v0.14.0/) for the current
