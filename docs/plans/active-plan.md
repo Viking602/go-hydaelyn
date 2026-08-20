@@ -2,18 +2,18 @@
 
 ## Release state
 
-- v0.14.1 is the latest published release.
+- v0.14.2 is the latest published release.
 - Later-minor work (adapter deletion, production pack content,
   OpenTelemetry, artifact backends) stays in the unversioned backlog.
 
 See the [product specification index](../product-spec/README.md), the
 [v0.14.0 specification](../product-spec/v0.14.0/README.md), and the
-[v0.14.1 release notes](../release-notes/v0.14.1.md).
+[v0.14.2 release notes](../release-notes/v0.14.2.md).
 
 ## Current candidate scope
 
-No new minor is open. Hosts should take v0.14.1 for the fail-closed
-runtime and contract alignment that landed after v0.14.0.
+No new minor is open. Hosts should take v0.14.2 for skill-tool error
+results and hashline stale-edit recovery.
 
 ## Release gates
 
