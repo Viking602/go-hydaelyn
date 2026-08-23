@@ -42,4 +42,4 @@ backend under [ADR-013](../adr/ADR-013-memory-kernel-vs-pipeline.md).
 
 The active execution scope is documented in
 [the current plan](./active-plan.md). The latest published release is
-described in [the v0.14.2 notes](../release-notes/v0.14.2.md).
+described in [the v0.15.0 notes](../release-notes/v0.15.0.md).

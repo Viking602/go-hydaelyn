@@ -2,18 +2,19 @@
 
 ## Release state
 
-- v0.14.2 is the latest published release.
-- Later-minor work (adapter deletion, production pack content,
-  OpenTelemetry, artifact backends) stays in the unversioned backlog.
+- v0.15.0 is the latest published release.
+- Later-minor work (production pack content, OpenTelemetry, and artifact
+  backends) stays in the unversioned backlog.
 
 See the [product specification index](../product-spec/README.md), the
-[v0.14.0 specification](../product-spec/v0.14.0/README.md), and the
-[v0.14.2 release notes](../release-notes/v0.14.2.md).
+[v0.14.0 control-plane specification](../product-spec/v0.14.0/README.md), and
+the [v0.15.0 release notes](../release-notes/v0.15.0.md).
 
 ## Current candidate scope
 
-No new minor is open. Hosts should take v0.14.2 for skill-tool error
-results and hashline stale-edit recovery.
+No new minor is open. Hosts should take v0.15.0 for the canonical public API,
+lossless provider messages, governed tools, live turn control, and durable
+subagent scheduler boundary.
 
 ## Release gates
 
