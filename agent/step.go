@@ -88,12 +88,15 @@ func (f StepRecorderFunc) RecordStep(ctx context.Context, step Step) error {
 // allowing a later execution to continue without asking the provider to repeat
 // already completed work.
 type TurnCheckpoint struct {
-	Messages          []message.Message `json:"messages"`
-	Usage             provider.Usage    `json:"usage,omitempty"`
-	Step              Step              `json:"step"`
-	ToolCallsUsed     int               `json:"toolCallsUsed,omitempty"`
-	NextOperationTurn int               `json:"nextOperationTurn,omitempty"`
-	PendingToolCalls  bool              `json:"pendingToolCalls,omitempty"`
+	Messages                 []message.Message `json:"messages"`
+	Usage                    provider.Usage    `json:"usage,omitempty"`
+	Step                     Step              `json:"step"`
+	ExternallyAccountedUsage provider.Usage    `json:"externallyAccountedUsage,omitempty"`
+	ToolCallsUsed            int               `json:"toolCallsUsed,omitempty"`
+	NextOperationTurn        int               `json:"nextOperationTurn,omitempty"`
+	PendingToolCalls         bool              `json:"pendingToolCalls,omitempty"`
+	AppliedControlIDs        []string          `json:"appliedControlIds,omitempty"`
+	ControlAborted           bool              `json:"controlAborted,omitempty"`
 }
 
 // CheckpointRecorder persists a completed turn before the loop advances.

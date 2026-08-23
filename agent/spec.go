@@ -138,47 +138,13 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		driver = provider.ModelFallback(driver, fallback, spec.FallbackModel)
 	}
 
-	var bus *tool.Bus
-	if len(spec.Tools) > 0 {
-		if deps.Tools == nil {
-			return Engine{}, fmt.Errorf("agent: spec lists %d tool(s) but build deps carry no tool bus", len(spec.Tools))
-		}
-		for _, name := range spec.Tools {
-			if _, ok := deps.Tools.Driver(name); !ok {
-				return Engine{}, fmt.Errorf("agent: tool %q named by spec is not registered in build deps", name)
-			}
-		}
-		bus = deps.Tools.Subset(spec.Tools)
+	bus, err := resolveBuildTools(spec.Tools, deps.Tools)
+	if err != nil {
+		return Engine{}, err
 	}
-
-	var activeSkills, availableSkills []skill.Skill
-	if len(spec.Skills) > 0 || len(spec.AvailableSkills) > 0 {
-		if deps.Skills == nil {
-			return Engine{}, fmt.Errorf("%w: spec lists %d skill(s)", ErrSkillRegistryMissing, len(spec.Skills)+len(spec.AvailableSkills))
-		}
-	}
-	if len(spec.Skills) > 0 {
-		activeSkills, err = deps.Skills.Resolve(spec.Skills...)
-		if err != nil {
-			return Engine{}, wrapSkillResolveError(err)
-		}
-	}
-	if len(spec.AvailableSkills) > 0 {
-		availableSkills, err = deps.Skills.Resolve(spec.AvailableSkills...)
-		if err != nil {
-			return Engine{}, wrapSkillResolveError(err)
-		}
-		active := make(map[string]struct{}, len(activeSkills))
-		for _, current := range activeSkills {
-			active[current.Name] = struct{}{}
-		}
-		filtered := availableSkills[:0]
-		for _, current := range availableSkills {
-			if _, alreadyActive := active[current.Name]; !alreadyActive {
-				filtered = append(filtered, current)
-			}
-		}
-		availableSkills = filtered
+	activeSkills, availableSkills, err := resolveBuildSkills(spec.Skills, spec.AvailableSkills, deps.Skills)
+	if err != nil {
+		return Engine{}, err
 	}
 
 	contextManager := deps.ContextManager
@@ -202,6 +168,60 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		StopSequences:   spec.StopSequences,
 		ExtraBody:       spec.ExtraBody,
 	}, nil
+}
+
+func resolveBuildTools(names []string, registry *tool.Bus) (*tool.Bus, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if registry == nil {
+		return nil, fmt.Errorf("agent: spec lists %d tool(s) but build deps carry no tool bus", len(names))
+	}
+	if err := registry.Validate(); err != nil {
+		return nil, fmt.Errorf("agent: invalid tool registry: %w", err)
+	}
+	for _, name := range names {
+		if _, ok := registry.Driver(name); !ok {
+			return nil, fmt.Errorf("agent: tool %q named by spec is not registered in build deps", name)
+		}
+	}
+	subset := registry.Subset(names)
+	if err := subset.Validate(); err != nil {
+		return nil, fmt.Errorf("agent: invalid tool subset: %w", err)
+	}
+	return subset, nil
+}
+
+func resolveBuildSkills(activeNames, availableNames []string, registry *skill.Registry) ([]skill.Skill, []skill.Skill, error) {
+	if len(activeNames) == 0 && len(availableNames) == 0 {
+		return nil, nil, nil
+	}
+	if registry == nil {
+		return nil, nil, fmt.Errorf(
+			"%w: spec lists %d skill(s)",
+			ErrSkillRegistryMissing,
+			len(activeNames)+len(availableNames),
+		)
+	}
+	active, err := registry.Resolve(activeNames...)
+	if err != nil {
+		return nil, nil, wrapSkillResolveError(err)
+	}
+	available, err := registry.Resolve(availableNames...)
+	if err != nil {
+		return nil, nil, wrapSkillResolveError(err)
+	}
+	activeSet := make(map[string]struct{}, len(active))
+	for _, current := range active {
+		activeSet[current.Name] = struct{}{}
+	}
+	filtered := available[:0]
+	for _, current := range available {
+		if _, alreadyActive := activeSet[current.Name]; !alreadyActive {
+			filtered = append(filtered, current)
+		}
+	}
+	return active, filtered, nil
 }
 
 func wrapSkillResolveError(err error) error {

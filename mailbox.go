@@ -35,11 +35,11 @@ func (r *Runner) DispatchTaskFanOut(ctx context.Context, cmd api.FanOutDispatchT
 }
 
 func (r *Runner) AckEnvelope(ctx context.Context, cmd api.AckEnvelopeCommand) error {
-	return r.rt.AckEnvelope(ctx, core.AckEnvelopeCommand{EnvelopeID: cmd.EnvelopeID, HolderID: cmd.HolderID})
+	return r.rt.AckEnvelope(ctx, core.AckEnvelopeCommand(cmd))
 }
 
 func (r *Runner) DeadLetter(ctx context.Context, cmd api.DeadLetterCommand) error {
-	return r.rt.DeadLetter(ctx, core.DeadLetterCommand{EnvelopeID: cmd.EnvelopeID, Reason: cmd.Reason})
+	return r.rt.DeadLetter(ctx, core.DeadLetterCommand(cmd))
 }
 
 func (r *Runner) QueueEnvelope(ctx context.Context, env api.TaskEnvelope) error {

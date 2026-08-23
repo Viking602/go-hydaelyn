@@ -39,11 +39,11 @@ func (r *Runner) AcquireTaskExecutionWithClaims(ctx context.Context, cmd api.Acq
 }
 
 func (r *Runner) HeartbeatTaskExecution(ctx context.Context, cmd api.HeartbeatTaskExecutionCommand) error {
-	return r.rt.HeartbeatTaskExecution(ctx, core.HeartbeatTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID, TTL: cmd.TTL})
+	return r.rt.HeartbeatTaskExecution(ctx, core.HeartbeatTaskExecutionCommand(cmd))
 }
 
 func (r *Runner) ReleaseTaskExecution(ctx context.Context, cmd api.ReleaseTaskExecutionCommand) error {
-	return r.rt.ReleaseTaskExecution(ctx, core.ReleaseTaskExecutionCommand{LeaseID: cmd.LeaseID, HolderID: cmd.HolderID})
+	return r.rt.ReleaseTaskExecution(ctx, core.ReleaseTaskExecutionCommand(cmd))
 }
 
 func usageRecordToModelPointer(record *api.UsageRecord) *api.UsageRecord {
@@ -87,7 +87,7 @@ func (r *Runner) EnforceToolResult(ctx context.Context, request api.ToolResultEn
 }
 
 func (r *Runner) RequestHandoff(ctx context.Context, cmd api.HandoffCommand) error {
-	return r.rt.RequestHandoff(ctx, core.HandoffCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, FromAgentID: cmd.FromAgentID, ToAgentID: cmd.ToAgentID, TaskVersion: cmd.TaskVersion, HandoffContext: cmd.HandoffContext})
+	return r.rt.RequestHandoff(ctx, core.HandoffCommand(cmd))
 }
 
 func (r *Runner) RequestApproval(ctx context.Context, cmd api.RequestApprovalCommand) (api.ApprovalRequest, api.ResumeToken, error) {
@@ -99,11 +99,11 @@ func (r *Runner) RequestApproval(ctx context.Context, cmd api.RequestApprovalCom
 }
 
 func (r *Runner) DecideApproval(ctx context.Context, cmd api.DecideApprovalCommand) error {
-	return r.rt.DecideApproval(ctx, core.DecideApprovalCommand{RunID: cmd.RunID, ApprovalID: cmd.ApprovalID, DecidedBy: cmd.DecidedBy, Decision: cmd.Decision, Reason: cmd.Reason})
+	return r.rt.DecideApproval(ctx, core.DecideApprovalCommand(cmd))
 }
 
 func (r *Runner) RecoverResumeToken(ctx context.Context, cmd api.RecoverResumeTokenCommand) (api.ResumeToken, error) {
-	token, err := r.rt.RecoverResumeToken(ctx, core.RecoverResumeTokenCommand{TokenID: cmd.TokenID})
+	token, err := r.rt.RecoverResumeToken(ctx, core.RecoverResumeTokenCommand(cmd))
 	if err != nil {
 		return api.ResumeToken{}, err
 	}
@@ -171,7 +171,7 @@ func (r *Runner) StartTraceSpan(ctx context.Context, cmd api.StartTraceSpanComma
 }
 
 func (r *Runner) EndTraceSpan(ctx context.Context, cmd api.EndTraceSpanCommand) error {
-	return r.rt.EndTraceSpan(ctx, core.EndTraceSpanCommand{SpanID: cmd.SpanID, Error: cmd.Error})
+	return r.rt.EndTraceSpan(ctx, core.EndTraceSpanCommand(cmd))
 }
 
 func (r *Runner) SaveTraceSpan(ctx context.Context, span api.TraceSpan) error {

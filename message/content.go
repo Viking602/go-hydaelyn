@@ -3,6 +3,7 @@ package message
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 )
 
 // ContentKind identifies one ordered message or tool-result content block.
@@ -44,6 +45,51 @@ type ContentPart struct {
 	Source       *Source         `json:"source,omitempty"`
 	Signature    string          `json:"signature,omitempty"`
 	ProviderData json.RawMessage `json:"providerData,omitempty"`
+}
+
+// ResponseMetadata identifies the provider response that produced a message.
+type ResponseMetadata struct {
+	ID      string            `json:"id,omitempty"`
+	Model   string            `json:"model,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+func CloneResponseMetadata(metadata ResponseMetadata) ResponseMetadata {
+	metadata.Headers = maps.Clone(metadata.Headers)
+	return metadata
+}
+
+func CloneToolResult(result ToolResult) ToolResult {
+	result.Parts = CloneContent(result.Parts)
+	result.Structured = append(json.RawMessage(nil), result.Structured...)
+	return result
+}
+
+func Clone(input Message) Message {
+	input.Content = CloneContent(input.Content)
+	input.ProviderState = append(json.RawMessage(nil), input.ProviderState...)
+	input.Response = CloneResponseMetadata(input.Response)
+	input.ToolCalls = append([]ToolCall(nil), input.ToolCalls...)
+	for index := range input.ToolCalls {
+		input.ToolCalls[index].Arguments = append(json.RawMessage(nil), input.ToolCalls[index].Arguments...)
+	}
+	if input.ToolResult != nil {
+		result := CloneToolResult(*input.ToolResult)
+		input.ToolResult = &result
+	}
+	input.Metadata = maps.Clone(input.Metadata)
+	return input
+}
+
+func CloneMessages(messages []Message) []Message {
+	if messages == nil {
+		return nil
+	}
+	cloned := make([]Message, len(messages))
+	for index, current := range messages {
+		cloned[index] = Clone(current)
+	}
+	return cloned
 }
 
 func TextPart(text string) ContentPart {

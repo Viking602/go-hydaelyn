@@ -58,7 +58,7 @@ func newSkillRuntime(active, available []skill.Skill) *skillRuntime {
 	}
 	availableNames := make([]string, 0, len(available))
 	for _, current := range available {
-		if _, alreadyActive := r.active[current.Name]; alreadyActive {
+		if _, alreadyKnown := r.all[current.Name]; alreadyKnown {
 			continue
 		}
 		r.all[current.Name] = current
@@ -71,10 +71,15 @@ func newSkillRuntime(active, available []skill.Skill) *skillRuntime {
 }
 
 func (r *skillRuntime) attachTools(bus *tool.Bus) (*tool.Bus, error) {
-	wantActivate := len(r.available) > 0
+	wantActivate := len(r.all) > 0
 	wantRead := r.hasResources()
 	if !wantActivate && !wantRead {
 		return bus, nil
+	}
+	if bus != nil {
+		if err := bus.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	cloned := cloneToolBus(bus)
 	for _, name := range []string{activateSkillToolName, readSkillResourceToolName} {
@@ -83,26 +88,20 @@ func (r *skillRuntime) attachTools(bus *tool.Bus) (*tool.Bus, error) {
 		}
 	}
 	if wantActivate {
-		cloned.Register(skillActivationDriver{runtime: r})
+		if err := cloned.Register(skillActivationDriver{runtime: r}); err != nil {
+			return nil, err
+		}
 	}
 	if wantRead {
-		cloned.Register(skillResourceDriver{runtime: r})
+		if err := cloned.Register(skillResourceDriver{runtime: r}); err != nil {
+			return nil, err
+		}
 	}
 	return cloned, nil
 }
 
 func cloneToolBus(bus *tool.Bus) *tool.Bus {
-	if bus == nil {
-		return tool.NewBus()
-	}
-	definitions := bus.Definitions()
-	drivers := make([]tool.Driver, 0, len(definitions))
-	for _, definition := range definitions {
-		if driver, ok := bus.Driver(definition.Name); ok {
-			drivers = append(drivers, driver)
-		}
-	}
-	return tool.NewBus(drivers...)
+	return bus.Clone()
 }
 
 func (r *skillRuntime) hasResources() bool {
@@ -117,7 +116,7 @@ func (r *skillRuntime) hasResources() bool {
 func (r *skillRuntime) activate(name string) (skill.Skill, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	current, ok := r.available[name]
+	current, ok := r.all[name]
 	if !ok {
 		return skill.Skill{}, false, &skill.NotFoundError{Name: name}
 	}
@@ -153,6 +152,17 @@ func (r *skillRuntime) activeSkills() []skill.Skill {
 	return out
 }
 
+func (r *skillRuntime) restoreActivations(messages []message.Message) {
+	present := activationResults(messages)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, content := range present {
+		if current, known := r.all[name]; known && content == skill.Activate(current) {
+			r.active[name] = struct{}{}
+		}
+	}
+}
+
 func (r *skillRuntime) skillsForCompaction(messages []message.Message) []skill.Skill {
 	present := activationResults(messages)
 	r.mu.RLock()
@@ -170,7 +180,7 @@ func (r *skillRuntime) skillsForCompaction(messages []message.Message) []skill.S
 func activationResults(messages []message.Message) map[string]string {
 	present := make(map[string]string)
 	for _, current := range messages {
-		if current.ToolResult == nil || current.ToolResult.Name != activateSkillToolName {
+		if current.ToolResult == nil || current.ToolResult.Name != activateSkillToolName || current.ToolResult.IsError {
 			continue
 		}
 		var result struct {
@@ -210,8 +220,8 @@ type skillActivationDriver struct{ runtime *skillRuntime }
 
 func (d skillActivationDriver) Definition() tool.Definition {
 	d.runtime.mu.RLock()
-	names := make([]string, 0, len(d.runtime.available))
-	for name := range d.runtime.available {
+	names := make([]string, 0, len(d.runtime.all))
+	for name := range d.runtime.all {
 		names = append(names, name)
 	}
 	d.runtime.mu.RUnlock()
@@ -228,8 +238,10 @@ func (d skillActivationDriver) Definition() tool.Definition {
 			Required:             []string{"name"},
 			AdditionalProperties: &additional,
 		},
-		EffectType: tool.EffectReadOnly,
-		Idempotent: true,
+		EffectType:       tool.EffectReadOnly,
+		Idempotent:       true,
+		Concurrency:      tool.ConcurrencySequential,
+		ConcurrencyGroup: "skills",
 	}
 }
 
@@ -282,8 +294,10 @@ func (d skillResourceDriver) Definition() tool.Definition {
 			Required:             []string{"skill", "path"},
 			AdditionalProperties: &additional,
 		},
-		EffectType: tool.EffectReadOnly,
-		Idempotent: true,
+		EffectType:       tool.EffectReadOnly,
+		Idempotent:       true,
+		Concurrency:      tool.ConcurrencySequential,
+		ConcurrencyGroup: "skills",
 	}
 }
 

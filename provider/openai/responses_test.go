@@ -99,7 +99,7 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 		}
 		writer.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = writer.Write([]byte("event: response.completed\n"))
-		_, _ = writer.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6,\"input_tokens_details\":{\"cached_tokens\":2,\"cache_write_tokens\":1}}}}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"model\":\"gpt-test\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6,\"input_tokens_details\":{\"cached_tokens\":2,\"cache_write_tokens\":1}}}}\n\n"))
 	}))
 	defer server.Close()
 
@@ -107,7 +107,6 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 	extraBody, err := (ResponsesOptions{
 		MaxOutputTokens: 4096,
 		Store:           &store,
-		PromptCacheKey:  "tenant:agent:prompt-v2",
 		PromptCacheOptions: &PromptCacheOptions{
 			Mode: PromptCacheModeExplicit,
 			TTL:  PromptCacheTTL30Minutes,
@@ -140,11 +139,15 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 		BaseURL: server.URL,
 		Client:  server.Client(),
 	})
+	parallel := true
 	stream, err := driver.Stream(context.Background(), provider.Request{
-		Model:       "gpt-5.3-codex",
-		Temperature: 0.4,
-		TopP:        0.6,
-		MaxTokens:   2048,
+		Model:             "gpt-5.3-codex",
+		Temperature:       0.4,
+		TopP:              0.6,
+		MaxTokens:         2048,
+		PromptCacheKey:    "typed:cache:key",
+		ServiceTier:       "priority",
+		ParallelToolCalls: &parallel,
 		Messages: []message.Message{
 			stablePrefix,
 			message.NewText(message.RoleUser, "look it up"),
@@ -193,6 +196,9 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 	if events[0].Usage.CachedInputTokens != 2 || events[0].Usage.CacheWriteInputTokens != 1 {
 		t.Fatalf("usage = %#v, want cache read/write tokens", events[0].Usage)
 	}
+	if events[0].Response.ID != "resp-1" || events[0].Response.Model != "gpt-test" {
+		t.Fatalf("response metadata = %#v", events[0].Response)
+	}
 	if capturedPath != "/responses" {
 		t.Fatalf("request path = %q, want /responses", capturedPath)
 	}
@@ -205,7 +211,9 @@ func TestDriverStreamBuildsResponsesRequest(t *testing.T) {
 	requireCapturedField(t, captured, "top_p", 0.6)
 	requireCapturedField(t, captured, "max_output_tokens", 2048.0)
 	requireCapturedField(t, captured, "store", false)
-	requireCapturedField(t, captured, "prompt_cache_key", "tenant:agent:prompt-v2")
+	requireCapturedField(t, captured, "prompt_cache_key", "typed:cache:key")
+	requireCapturedField(t, captured, "service_tier", "priority")
+	requireCapturedField(t, captured, "parallel_tool_calls", true)
 	cacheOptions, _ := captured["prompt_cache_options"].(map[string]any)
 	if cacheOptions["mode"] != "explicit" || cacheOptions["ttl"] != "30m" {
 		t.Fatalf("prompt_cache_options = %#v", cacheOptions)
@@ -378,6 +386,7 @@ func TestResponsesInputBuildsToolResultCacheBoundary(t *testing.T) {
 	}
 
 	result.ToolResult.Content = ""
+	result.ToolResult.Parts = nil
 	if _, err := toResponsesInput([]message.Message{result}); err == nil ||
 		!strings.Contains(err.Error(), "requires non-empty tool result text") {
 		t.Fatalf("empty tool result cache boundary error = %v", err)
@@ -396,7 +405,6 @@ func TestDriverStreamBuildsChatCompletionsCacheBoundary(t *testing.T) {
 	defer server.Close()
 
 	extraBody, err := (ChatCompletionsOptions{
-		PromptCacheKey: "tenant:chat:prompt-v1",
 		PromptCacheOptions: &PromptCacheOptions{
 			Mode: PromptCacheModeExplicit,
 			TTL:  PromptCacheTTL30Minutes,
@@ -414,8 +422,9 @@ func TestDriverStreamBuildsChatCompletionsCacheBoundary(t *testing.T) {
 		WireAPI: WireChatCompletions,
 	})
 	stream, err := driver.Stream(context.Background(), provider.Request{
-		Messages:  []message.Message{stable, message.NewText(message.RoleUser, "task")},
-		ExtraBody: extraBody,
+		Messages:       []message.Message{stable, message.NewText(message.RoleUser, "task")},
+		PromptCacheKey: "tenant:chat:prompt-v1",
+		ExtraBody:      extraBody,
 	})
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
@@ -902,5 +911,28 @@ func newResponsesTestStream(sse string) *responsesStream {
 		body:   body,
 		reader: shared.NewReader(body),
 		items:  make(map[int]*responsesOutputState),
+	}
+}
+
+func TestResponsesInputPreservesCanonicalMultimodalContent(t *testing.T) {
+	items, err := toResponsesInput([]message.Message{{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.FinalAnswerPart("inspect"),
+			{Kind: message.ContentImage, Data: []byte{1, 2, 3}, MediaType: "image/png"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input struct {
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal(items[0], &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Content) != 2 || input.Content[0]["text"] != "inspect" ||
+		input.Content[1]["image_url"] != "data:image/png;base64,AQID" {
+		t.Fatalf("responses multimodal content = %#v", input.Content)
 	}
 }

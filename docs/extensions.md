@@ -143,7 +143,6 @@ store := false
 extraBody, err := (openai.ResponsesOptions{
 	MaxOutputTokens: 4096,
 	Store:           &store,
-	PromptCacheKey:  "tenant:agent:prompt-v2",
 	PromptCacheOptions: &openai.PromptCacheOptions{
 		Mode: openai.PromptCacheModeExplicit,
 		TTL:  openai.PromptCacheTTL30Minutes,
@@ -160,9 +159,10 @@ if err != nil {
 }
 
 result, err := engine.Run(ctx, agent.Input{
-	Model:     "gpt-5.3-codex",
-	Messages:  messages,
-	ExtraBody: extraBody,
+	Model:          "gpt-5.3-codex",
+	Messages:       messages,
+	PromptCacheKey: "tenant:agent:prompt-v2",
+	ExtraBody:      extraBody,
 })
 ```
 
@@ -183,11 +183,12 @@ messages := []message.Message{stable, message.NewText(message.RoleUser, task)}
 ```
 
 Both OpenAI wire protocols serialize the marker on their supported text content
-block. Configure request-wide cache keys, mode, and TTL with
-`openai.ResponsesOptions` or `openai.ChatCompletionsOptions`; older models may
-support only automatic caching and reject explicit controls. The engine rejects
-custom compaction output that deletes or changes the protected prefix, and the
-built-in compactors keep it intact.
+block. Set request-wide cache affinity with `provider.Request.PromptCacheKey`;
+configure provider-specific cache mode and TTL with `openai.ResponsesOptions`
+or `openai.ChatCompletionsOptions`. Older models may support only automatic
+caching and reject explicit controls.
+The engine rejects custom compaction output that deletes or changes the protected
+prefix, and the built-in compactors keep it intact.
 OpenAI may create at most four new cache writes per request; historical
 breakpoints can remain in replayed context, and cache matching considers the
 latest 80 breakpoints in the conversation.

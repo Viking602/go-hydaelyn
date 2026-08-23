@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,17 +15,20 @@ import (
 )
 
 type responsesRequest struct {
-	Model           string              `json:"model"`
-	Input           []json.RawMessage   `json:"input"`
-	Temperature     float64             `json:"temperature,omitempty"`
-	TopP            float64             `json:"top_p,omitempty"`
-	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
-	Include         []string            `json:"include,omitempty"`
-	Tools           []responsesTool     `json:"tools,omitempty"`
-	Stream          bool                `json:"stream"`
-	Store           bool                `json:"store"`
-	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
-	Text            *responsesText      `json:"text,omitempty"`
+	Model             string              `json:"model"`
+	Input             []json.RawMessage   `json:"input"`
+	Temperature       float64             `json:"temperature,omitempty"`
+	TopP              float64             `json:"top_p,omitempty"`
+	MaxOutputTokens   int                 `json:"max_output_tokens,omitempty"`
+	Include           []string            `json:"include,omitempty"`
+	Tools             []responsesTool     `json:"tools,omitempty"`
+	Stream            bool                `json:"stream"`
+	Store             bool                `json:"store"`
+	PromptCacheKey    string              `json:"prompt_cache_key,omitempty"`
+	ServiceTier       string              `json:"service_tier,omitempty"`
+	ParallelToolCalls *bool               `json:"parallel_tool_calls,omitempty"`
+	Reasoning         *responsesReasoning `json:"reasoning,omitempty"`
+	Text              *responsesText      `json:"text,omitempty"`
 }
 
 type responsesTool struct {
@@ -64,6 +68,8 @@ type responsesOutputItem struct {
 }
 
 type responsesResponse struct {
+	ID                string                      `json:"id"`
+	Model             string                      `json:"model"`
 	Output            json.RawMessage             `json:"output"`
 	Usage             responsesUsage              `json:"usage"`
 	IncompleteDetails *responsesIncompleteDetails `json:"incomplete_details"`
@@ -120,15 +126,18 @@ func (d Driver) streamResponses(ctx context.Context, request provider.Request) (
 		return nil, err
 	}
 	body, err := marshalResponsesRequest(responsesRequest{
-		Model:           request.Model,
-		Temperature:     request.Temperature,
-		TopP:            request.TopP,
-		MaxOutputTokens: request.MaxTokens,
-		Input:           input,
-		Tools:           toResponsesTools(request.Tools),
-		Stream:          true,
-		Reasoning:       responsesReasoningFromBudget(request.ThinkingBudget),
-		Text:            responsesTextFromRequest(request.ResponseFormat),
+		Model:             request.Model,
+		Temperature:       request.Temperature,
+		TopP:              request.TopP,
+		MaxOutputTokens:   request.MaxTokens,
+		Input:             input,
+		Tools:             toResponsesTools(request.Tools),
+		Stream:            true,
+		PromptCacheKey:    request.PromptCacheKey,
+		ServiceTier:       request.ServiceTier,
+		ParallelToolCalls: request.ParallelToolCalls,
+		Reasoning:         responsesReasoningFromBudget(request.ThinkingBudget),
+		Text:              responsesTextFromRequest(request.ResponseFormat),
 	}, request.ExtraBody)
 	if err != nil {
 		return nil, err
@@ -266,6 +275,9 @@ var managedResponsesBodyFields = map[string]struct{}{
 	"previous_response_id": {},
 	"conversation":         {},
 	"prompt":               {},
+	"prompt_cache_key":     {},
+	"service_tier":         {},
+	"parallel_tool_calls":  {},
 }
 
 var protectedResponsesModelFields = map[string]struct{}{
@@ -284,7 +296,7 @@ func toResponsesInput(messages []message.Message) ([]json.RawMessage, error) {
 		case message.RoleTool:
 			items, err = appendResponsesToolOutput(items, msg.ToolResult, msg.CacheBoundary)
 		default:
-			items, err = appendResponsesTextMessage(items, msg.Role, msg.Text, msg.CacheBoundary)
+			items, err = appendResponsesTextMessage(items, msg.Role, msg.CanonicalContent(), msg.CacheBoundary)
 		}
 		if err != nil {
 			return nil, err
@@ -305,8 +317,8 @@ func appendResponsesAssistantInput(items []json.RawMessage, msg message.Message)
 		return append(items, stateItems...), nil
 	}
 	var err error
-	if msg.Text != "" || msg.CacheBoundary {
-		items, err = appendResponsesTextMessage(items, message.RoleAssistant, msg.Text, msg.CacheBoundary)
+	if len(msg.CanonicalContent()) > 0 || msg.CacheBoundary {
+		items, err = appendResponsesTextMessage(items, message.RoleAssistant, msg.CanonicalContent(), msg.CacheBoundary)
 		if err != nil {
 			return nil, err
 		}
@@ -325,24 +337,94 @@ func appendResponsesAssistantInput(items []json.RawMessage, msg message.Message)
 	return items, nil
 }
 
-func appendResponsesTextMessage(items []json.RawMessage, role message.Role, text string, cacheBoundary bool) ([]json.RawMessage, error) {
-	var content any = text
-	if cacheBoundary {
-		if text == "" {
-			return nil, fmt.Errorf("openai responses cache boundary requires non-empty text")
-		}
-		content = []map[string]any{{
-			"type": "input_text",
-			"text": text,
-			"prompt_cache_breakpoint": map[string]string{
-				"mode": "explicit",
-			},
-		}}
+func appendResponsesTextMessage(
+	items []json.RawMessage,
+	role message.Role,
+	parts []message.ContentPart,
+	cacheBoundary bool,
+) ([]json.RawMessage, error) {
+	content, err := responsesMessageContent(parts, role, cacheBoundary)
+	if err != nil {
+		return nil, err
 	}
 	return appendResponsesInputItem(items, map[string]any{
 		"role":    role,
 		"content": content,
 	})
+}
+
+func responsesMessageContent(parts []message.ContentPart, role message.Role, cacheBoundary bool) (any, error) {
+	blocks := make([]map[string]any, 0, len(parts))
+	textOnly := true
+	var plain strings.Builder
+	for _, part := range parts {
+		switch part.Kind {
+		case message.ContentText, message.ContentCommentary, message.ContentFinalAnswer:
+			plain.WriteString(part.Text)
+			blocks = append(blocks, map[string]any{"type": "input_text", "text": part.Text})
+		case message.ContentReasoning, message.ContentRedactedReasoning:
+			return nil, fmt.Errorf(
+				"openai responses requires opaque ProviderState to replay %s content for role %s",
+				part.Kind,
+				role,
+			)
+		case message.ContentImage:
+			if role != message.RoleUser {
+				return nil, fmt.Errorf("openai responses image content requires user role")
+			}
+			url, err := contentPartURL(part)
+			if err != nil {
+				return nil, err
+			}
+			textOnly = false
+			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": url})
+		case message.ContentAudio:
+			if role != message.RoleUser || len(part.Data) == 0 {
+				return nil, fmt.Errorf("openai responses audio content requires user-role inline data")
+			}
+			textOnly = false
+			blocks = append(blocks, map[string]any{
+				"type": "input_audio",
+				"input_audio": map[string]any{
+					"data":   base64.StdEncoding.EncodeToString(part.Data),
+					"format": audioFormat(part),
+				},
+			})
+		case message.ContentFile:
+			if role != message.RoleUser {
+				return nil, fmt.Errorf("openai responses file content requires user role")
+			}
+			file, err := chatFilePart(part)
+			if err != nil {
+				return nil, err
+			}
+			textOnly = false
+			block := map[string]any{"type": "input_file", "filename": file.Filename}
+			if file.FileData != "" {
+				block["file_data"] = file.FileData
+			} else {
+				block["file_id"] = file.FileID
+			}
+			blocks = append(blocks, block)
+		case message.ContentSource, message.ContentProviderData:
+			return nil, fmt.Errorf("openai responses cannot serialize %s content", part.Kind)
+		default:
+			return nil, fmt.Errorf("openai responses received unknown content kind %q", part.Kind)
+		}
+	}
+	if cacheBoundary {
+		for index := len(blocks) - 1; index >= 0; index-- {
+			if blocks[index]["type"] == "input_text" && blocks[index]["text"] != "" {
+				blocks[index]["prompt_cache_breakpoint"] = map[string]string{"mode": "explicit"}
+				return blocks, nil
+			}
+		}
+		return nil, fmt.Errorf("openai responses cache boundary requires non-empty text")
+	}
+	if textOnly {
+		return plain.String(), nil
+	}
+	return blocks, nil
 }
 
 func appendResponsesToolOutput(items []json.RawMessage, result *message.ToolResult, cacheBoundary bool) ([]json.RawMessage, error) {
@@ -352,18 +434,12 @@ func appendResponsesToolOutput(items []json.RawMessage, result *message.ToolResu
 		}
 		return items, nil
 	}
-	var output any = result.Content
-	if cacheBoundary {
-		if result.Content == "" {
-			return nil, fmt.Errorf("openai responses cache boundary requires non-empty tool result text")
-		}
-		output = []map[string]any{{
-			"type": "input_text",
-			"text": result.Content,
-			"prompt_cache_breakpoint": map[string]string{
-				"mode": "explicit",
-			},
-		}}
+	if cacheBoundary && result.TextContent() == "" {
+		return nil, fmt.Errorf("openai responses cache boundary requires non-empty tool result text")
+	}
+	output, err := responsesMessageContent(result.CanonicalContent(), message.RoleTool, cacheBoundary)
+	if err != nil {
+		return nil, err
 	}
 	return appendResponsesInputItem(items, map[string]any{
 		"type":    "function_call_output",
@@ -537,7 +613,7 @@ func (s *responsesStream) completed(response responsesResponse) (provider.Event,
 		}
 	}
 	s.finished = true
-	return responsesDoneEvent(response.Usage, stopReason, providerState), true, nil
+	return responsesDoneEvent(response, stopReason, providerState), true, nil
 }
 
 func (s *responsesStream) incomplete(response responsesResponse) (provider.Event, bool, error) {
@@ -555,7 +631,7 @@ func (s *responsesStream) incomplete(response responsesResponse) (provider.Event
 		}
 	}
 	s.finished = true
-	return responsesDoneEvent(response.Usage, stopReason, providerState), true, nil
+	return responsesDoneEvent(response, stopReason, providerState), true, nil
 }
 
 func responsesOutput(raw json.RawMessage) (json.RawMessage, []responsesOutputItem, error) {
@@ -574,7 +650,8 @@ func responsesOutput(raw json.RawMessage) (json.RawMessage, []responsesOutputIte
 	return providerState, output, nil
 }
 
-func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, state json.RawMessage) provider.Event {
+func responsesDoneEvent(response responsesResponse, stopReason provider.StopReason, state json.RawMessage) provider.Event {
+	usage := response.Usage
 	cachedTokens, cacheReported := reportedToken(usage.InputTokensDetails.CachedTokens)
 	cacheWriteTokens, cacheWriteReported := reportedToken(usage.InputTokensDetails.CacheWriteTokens)
 	reasoningTokens, _ := reportedToken(usage.OutputTokensDetails.ReasoningTokens)
@@ -592,6 +669,7 @@ func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, st
 		},
 		StopReason:    stopReason,
 		ProviderState: state,
+		Response:      provider.ResponseMetadata{ID: response.ID, Model: response.Model},
 	}
 }
 

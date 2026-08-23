@@ -44,29 +44,17 @@ func (b GovernedToolBus) ToolBus() *tool.Bus {
 	if b.Bus == nil {
 		return tool.NewBus()
 	}
-	drivers := make([]tool.Driver, 0)
-	for _, def := range b.Bus.Definitions() {
-		driver, ok := b.Bus.Driver(def.Name)
-		if !ok {
-			continue
-		}
+	return b.Bus.MapDrivers(func(def tool.Definition, driver tool.Driver) tool.Driver {
 		b.registerTool(def)
-		drivers = append(drivers, governedToolDriver{bus: b, driver: driver, definition: def})
-	}
-	return tool.NewBus(drivers...)
+		return governedToolDriver{bus: b, driver: driver, definition: def}
+	})
 }
 
 func (b GovernedToolBus) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
 	if b.Bus == nil {
 		return tool.Result{}, tool.ErrToolNotFound
 	}
-	driver, ok := b.Bus.Driver(call.Name)
-	if !ok {
-		return tool.Result{}, tool.ErrToolNotFound
-	}
-	def := driver.Definition()
-	b.registerTool(def)
-	return governedToolDriver{bus: b, driver: driver, definition: def}.Execute(ctx, call, sink)
+	return b.ToolBus().Execute(ctx, call, sink)
 }
 
 type governedToolDriver struct {

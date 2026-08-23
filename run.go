@@ -38,7 +38,7 @@ func (r *Runner) StartRun(ctx context.Context, cmd api.StartRunCommand) (api.Run
 }
 
 func (r *Runner) AdvanceRun(ctx context.Context, cmd api.AdvanceRunCommand) (api.Run, error) {
-	run, err := r.rt.AdvanceRun(ctx, core.AdvanceRunCommand{RunID: cmd.RunID})
+	run, err := r.rt.AdvanceRun(ctx, core.AdvanceRunCommand(cmd))
 	if err != nil {
 		return api.Run{}, err
 	}

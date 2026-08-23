@@ -62,24 +62,35 @@ type ToolRetryPolicy struct {
 	Backoff     time.Duration `json:"backoff,omitempty"`
 }
 
+type ToolConcurrencyMode string
+
+const (
+	ToolConcurrencyParallel   ToolConcurrencyMode = "parallel"
+	ToolConcurrencySequential ToolConcurrencyMode = "sequential"
+	ToolConcurrencyExclusive  ToolConcurrencyMode = "exclusive"
+)
+
 type ToolDefinition struct {
-	Name                string            `json:"name"`
-	Description         string            `json:"description,omitempty"`
-	InputSchema         JSONSchema        `json:"inputSchema"`
-	Terminal            bool              `json:"terminal,omitempty"`
-	Tags                []string          `json:"tags,omitempty"`
-	Metadata            map[string]string `json:"metadata,omitempty"`
-	Origin              string            `json:"origin,omitempty"`
-	Security            ToolSecurity      `json:"security,omitempty"`
-	RequiredPermissions []string          `json:"requiredPermissions,omitempty"`
-	RequiresApproval    bool              `json:"requiresApproval,omitempty"`
-	RiskLevel           string            `json:"riskLevel,omitempty"`
-	EffectType          ToolEffectType    `json:"effectType,omitempty"`
-	RequiresActionTask  bool              `json:"requiresActionTask,omitempty"`
-	Idempotent          bool              `json:"idempotent,omitempty"`
-	Timeout             time.Duration     `json:"timeout,omitempty"`
-	RetryPolicy         ToolRetryPolicy   `json:"retryPolicy,omitempty"`
-	PolicyTags          []string          `json:"policyTags,omitempty"`
+	Name                string              `json:"name"`
+	Description         string              `json:"description,omitempty"`
+	InputSchema         JSONSchema          `json:"inputSchema"`
+	Terminal            bool                `json:"terminal,omitempty"`
+	Tags                []string            `json:"tags,omitempty"`
+	Metadata            map[string]string   `json:"metadata,omitempty"`
+	Origin              string              `json:"origin,omitempty"`
+	Security            ToolSecurity        `json:"security,omitempty"`
+	RequiredPermissions []string            `json:"requiredPermissions,omitempty"`
+	RequiresApproval    bool                `json:"requiresApproval,omitempty"`
+	RiskLevel           string              `json:"riskLevel,omitempty"`
+	EffectType          ToolEffectType      `json:"effectType,omitempty"`
+	RequiresActionTask  bool                `json:"requiresActionTask,omitempty"`
+	Idempotent          bool                `json:"idempotent,omitempty"`
+	Timeout             time.Duration       `json:"timeout,omitempty"`
+	RetryPolicy         ToolRetryPolicy     `json:"retryPolicy,omitempty"`
+	PolicyTags          []string            `json:"policyTags,omitempty"`
+	Concurrency         ToolConcurrencyMode `json:"concurrency,omitempty"`
+	ConcurrencyGroup    string              `json:"concurrencyGroup,omitempty"`
+	MaxConcurrency      int                 `json:"maxConcurrency,omitempty"`
 }
 
 type ToolCall struct {
@@ -124,6 +135,7 @@ type Message struct {
 	// ProviderState carries opaque provider output that must be replayed
 	// verbatim on the next turn. Empty for providers that do not require it.
 	ProviderState json.RawMessage   `json:"providerState,omitempty"`
+	Response      ResponseMetadata  `json:"response,omitempty"`
 	ToolCalls     []ToolCall        `json:"toolCalls,omitempty"`
 	ToolResult    *ToolResult       `json:"toolResult,omitempty"`
 	TeamID        string            `json:"teamId,omitempty"`

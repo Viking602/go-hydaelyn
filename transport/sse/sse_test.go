@@ -192,16 +192,23 @@ func TestWriter_HeartbeatStopsOnClose(t *testing.T) {
 	writer.Heartbeat(ctx, 5*time.Millisecond)
 
 	waitUntil(t, time.Second, func() bool {
+		writer.mu.Lock()
+		defer writer.mu.Unlock()
 		return strings.Contains(rec.Body.String(), ":\n\n")
 	})
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close error = %v", err)
 	}
+	writer.mu.Lock()
 	before := rec.Body.Len()
+	writer.mu.Unlock()
 	stable := 0
 	waitUntil(t, 200*time.Millisecond, func() bool {
-		if rec.Body.Len() != before {
-			t.Fatalf("heartbeat kept writing after Close: before=%d after=%d", before, rec.Body.Len())
+		writer.mu.Lock()
+		after := rec.Body.Len()
+		writer.mu.Unlock()
+		if after != before {
+			t.Fatalf("heartbeat kept writing after Close: before=%d after=%d", before, after)
 		}
 		stable++
 		return stable >= 3

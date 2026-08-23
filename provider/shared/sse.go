@@ -7,10 +7,13 @@ import (
 	"strings"
 )
 
-// MaxSSELineBytes caps a single SSE line so a hostile or buggy upstream
-// cannot grow the process without bound. 8 MiB is large enough for the
-// documented 2 MiB provider payloads and small enough to fail closed.
-const MaxSSELineBytes = 8 << 20
+const (
+	// MaxSSELineBytes caps one physical line.
+	MaxSSELineBytes = 8 << 20
+	// MaxSSEFrameBytes and MaxSSEFrameLines bound aggregate multi-line events.
+	MaxSSEFrameBytes = 16 << 20
+	MaxSSEFrameLines = 4096
+)
 
 // Event represents a parsed Server-Sent Event frame.
 type Event struct {
@@ -42,6 +45,8 @@ func (r *Reader) Next() (Event, error) {
 		id      string
 		comment string
 	)
+	frameBytes := 0
+	frameLines := 0
 	for {
 		line, err := r.readLine()
 		if err != nil {
@@ -49,6 +54,15 @@ func (r *Reader) Next() (Event, error) {
 				break
 			}
 			return Event{}, err
+		}
+		frameBytes += len(line) + 1
+		frameLines++
+		if frameBytes > MaxSSEFrameBytes || frameLines > MaxSSEFrameLines {
+			return Event{}, fmt.Errorf(
+				"sse: frame exceeds %d bytes or %d lines",
+				MaxSSEFrameBytes,
+				MaxSSEFrameLines,
+			)
 		}
 		if strings.TrimSpace(line) == "" {
 			// Empty line terminates a frame. Skip if frame is entirely empty.

@@ -89,7 +89,6 @@ type ResponsesOptions struct {
 	// Store controls provider-side response retention. Nil keeps Venat's
 	// explicit store:false default; true opts into retention.
 	Store              *bool
-	PromptCacheKey     string
 	PromptCacheOptions *PromptCacheOptions
 	Reasoning          *ResponsesReasoningOptions
 	Text               *ResponsesTextOptions
@@ -98,18 +97,17 @@ type ResponsesOptions struct {
 // ChatCompletionsOptions is the typed subset of per-request Chat Completions
 // options used for prompt caching.
 type ChatCompletionsOptions struct {
-	PromptCacheKey     string
 	PromptCacheOptions *PromptCacheOptions
 }
 
-// ExtraBody converts options to the provider-specific map accepted by
-// agent.Input.ExtraBody and agent.Spec.ExtraBody.
+// ExtraBody converts provider-specific cache options to JSON wire fields.
+// Set provider.Request.PromptCacheKey separately for routing affinity.
 func (options ChatCompletionsOptions) ExtraBody() (map[string]any, error) {
 	if err := validatePromptCacheOptions(options.PromptCacheOptions); err != nil {
 		return nil, err
 	}
-	body := make(map[string]any, 2)
-	appendPromptCacheOptions(body, options.PromptCacheKey, options.PromptCacheOptions)
+	body := make(map[string]any, 1)
+	appendPromptCacheOptions(body, options.PromptCacheOptions)
 	if len(body) == 0 {
 		return nil, nil
 	}
@@ -142,7 +140,7 @@ func (options ResponsesOptions) ExtraBody() (map[string]any, error) {
 	if options.Store != nil {
 		body["store"] = *options.Store
 	}
-	appendPromptCacheOptions(body, options.PromptCacheKey, options.PromptCacheOptions)
+	appendPromptCacheOptions(body, options.PromptCacheOptions)
 	if options.Reasoning != nil {
 		reasoning := make(map[string]any, 4)
 		if options.Reasoning.Effort != "" {
@@ -170,10 +168,7 @@ func (options ResponsesOptions) ExtraBody() (map[string]any, error) {
 	return body, nil
 }
 
-func appendPromptCacheOptions(body map[string]any, key string, options *PromptCacheOptions) {
-	if key != "" {
-		body["prompt_cache_key"] = key
-	}
+func appendPromptCacheOptions(body map[string]any, options *PromptCacheOptions) {
 	if options == nil {
 		return
 	}

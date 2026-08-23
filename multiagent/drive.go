@@ -280,6 +280,10 @@ spawnLoop:
 		case <-cctx.Done():
 			break spawnLoop
 		}
+		if cctx.Err() != nil {
+			<-sem
+			break
+		}
 		wg.Add(1)
 		spawned++
 		go func(i int, dispatch Dispatch) {

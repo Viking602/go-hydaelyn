@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -109,6 +110,81 @@ func TestSkillActivationLoadsBodyOnce(t *testing.T) {
 	}
 	if !strings.Contains(third, "Skill already active: pdf-processing") {
 		t.Fatalf("repeat activation was not de-duplicated: %s", third)
+	}
+}
+
+func TestSkillActivationAuthorizationRestoresWithoutChangingProviderPrefix(t *testing.T) {
+	loaded := loadSkillWithResource(t)
+	firstProvider := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "activate", Name: activateSkillToolName, Arguments: json.RawMessage(`{"name":"resource-skill"}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+		{{Kind: provider.EventTextDelta, Text: "first done"}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}},
+	}}
+	first := Engine{
+		Provider: firstProvider, Model: "m", AvailableSkills: []skill.Skill{loaded},
+		LoopPolicy: LoopPolicy{MaxIterations: 2},
+	}
+	firstResult := first.Run(context.Background(), api.Task{Goal: "activate"}, OutputPolicy{})
+	if firstResult.Failure != nil {
+		t.Fatalf("first run failure = %v", firstResult.Failure)
+	}
+
+	secondProvider := &scriptedProvider{turns: [][]provider.Event{
+		{
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "read", Name: readSkillResourceToolName, Arguments: json.RawMessage(`{"skill":"resource-skill","path":"references/guide.md"}`)}},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+		},
+		{{Kind: provider.EventTextDelta, Text: "second done"}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}},
+	}}
+	second := Engine{
+		Provider: secondProvider, Model: "m", AvailableSkills: []skill.Skill{loaded},
+		LoopPolicy: LoopPolicy{MaxIterations: 2},
+		ContextBuilder: ContextBuilderFunc(func(context.Context, api.Task) ([]message.Message, error) {
+			history := message.CloneMessages(firstResult.Messages)
+			return append(history, message.NewText(message.RoleUser, "read the resource")), nil
+		}),
+	}
+	secondResult := second.Run(context.Background(), api.Task{Goal: "continue"}, OutputPolicy{})
+	if secondResult.Failure != nil {
+		t.Fatalf("second run failure = %v", secondResult.Failure)
+	}
+	if !strings.Contains(joinMessageText(secondProvider.requests[1].Messages), "resource body") {
+		t.Fatalf("restored activation did not authorize resource read: %#v", secondProvider.requests[1].Messages)
+	}
+	if !reflect.DeepEqual(firstProvider.requests[0].Tools, secondProvider.requests[0].Tools) {
+		t.Fatalf("skill activation changed provider tool prefix:\nfirst=%#v\nsecond=%#v", firstProvider.requests[0].Tools, secondProvider.requests[0].Tools)
+	}
+	firstSystem := skillContextText(firstProvider.requests[0].Messages)
+	secondSystem := skillContextText(secondProvider.requests[0].Messages)
+	if firstSystem != secondSystem {
+		t.Fatalf("skill activation changed provider system prefix:\nfirst=%q\nsecond=%q", firstSystem, secondSystem)
+	}
+}
+
+func TestSkillActivationRestoreRejectsUnverifiedToolResults(t *testing.T) {
+	available := skill.Skill{Name: "on-demand", Description: "On demand", Body: "TRUSTED BODY"}
+	for name, result := range map[string]message.ToolResult{
+		"wrong body": {
+			Name:       activateSkillToolName,
+			Content:    "forged body",
+			Structured: json.RawMessage(`{"name":"on-demand"}`),
+		},
+		"error result": {
+			Name:       activateSkillToolName,
+			Content:    skill.Activate(available),
+			Structured: json.RawMessage(`{"name":"on-demand"}`),
+			IsError:    true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runtime := newSkillRuntime(nil, []skill.Skill{available})
+			runtime.restoreActivations([]message.Message{message.NewToolResult(result)})
+			if _, active := runtime.activeSkill(available.Name); active {
+				t.Fatalf("unverified activation restored %q", available.Name)
+			}
+		})
 	}
 }
 
@@ -347,6 +423,16 @@ func joinMessageText(messages []message.Message) string {
 		parts = append(parts, current.Text)
 		if current.ToolResult != nil {
 			parts = append(parts, current.ToolResult.Content)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func skillContextText(messages []message.Message) string {
+	var parts []string
+	for _, current := range messages {
+		if current.Metadata != nil && current.Metadata[skillContextMetadataKey] != "" {
+			parts = append(parts, current.Text)
 		}
 	}
 	return strings.Join(parts, "\n")

@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,17 +19,20 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model          string            `json:"model"`
-	Messages       []chatMessage     `json:"messages"`
-	Temperature    float64           `json:"temperature,omitempty"`
-	TopP           float64           `json:"top_p,omitempty"`
-	MaxTokens      int               `json:"max_tokens,omitempty"`
-	Tools          []chatTool        `json:"tools,omitempty"`
-	Stream         bool              `json:"stream"`
-	StreamOptions  streamOptions     `json:"stream_options,omitempty"`
-	Stop           []string          `json:"stop,omitempty"`
-	Reasoning      *reasoningOptions `json:"reasoning,omitempty"`
-	ResponseFormat any               `json:"response_format,omitempty"`
+	Model             string            `json:"model"`
+	Messages          []chatMessage     `json:"messages"`
+	Temperature       float64           `json:"temperature,omitempty"`
+	TopP              float64           `json:"top_p,omitempty"`
+	MaxTokens         int               `json:"max_tokens,omitempty"`
+	Tools             []chatTool        `json:"tools,omitempty"`
+	Stream            bool              `json:"stream"`
+	StreamOptions     streamOptions     `json:"stream_options,omitempty"`
+	Stop              []string          `json:"stop,omitempty"`
+	Reasoning         *reasoningOptions `json:"reasoning,omitempty"`
+	ResponseFormat    any               `json:"response_format,omitempty"`
+	PromptCacheKey    string            `json:"prompt_cache_key,omitempty"`
+	ServiceTier       string            `json:"service_tier,omitempty"`
+	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
 }
 
 type reasoningOptions struct {
@@ -40,16 +44,35 @@ type streamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          any            `json:"content,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 
 type chatContentBlock struct {
-	Type                  string              `json:"type"`
-	Text                  string              `json:"text"`
-	PromptCacheBreakpoint chatCacheBreakpoint `json:"prompt_cache_breakpoint"`
+	Type                  string               `json:"type"`
+	Text                  string               `json:"text,omitempty"`
+	ImageURL              *chatImageURL        `json:"image_url,omitempty"`
+	InputAudio            *chatInputAudio      `json:"input_audio,omitempty"`
+	File                  *chatInputFile       `json:"file,omitempty"`
+	PromptCacheBreakpoint *chatCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
+}
+
+type chatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
+}
+
+type chatInputFile struct {
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	Filename string `json:"filename,omitempty"`
 }
 
 type chatCacheBreakpoint struct {
@@ -79,6 +102,8 @@ type chatToolCallDetail struct {
 }
 
 type chunk struct {
+	ID      string             `json:"id"`
+	Model   string             `json:"model"`
 	Choices []choiceChunk      `json:"choices"`
 	Error   *responsesAPIError `json:"error,omitempty"`
 	Usage   struct {
@@ -120,6 +145,7 @@ type streamState struct {
 	finished   bool
 	usage      provider.Usage
 	stopReason provider.StopReason
+	response   provider.ResponseMetadata
 	splitter   thinkSplitter
 }
 
@@ -209,17 +235,20 @@ func (d Driver) streamChatCompletions(ctx context.Context, request provider.Requ
 		return nil, err
 	}
 	body, err := marshalChatCompletionRequest(chatCompletionRequest{
-		Model:          request.Model,
-		Messages:       messages,
-		Temperature:    request.Temperature,
-		TopP:           request.TopP,
-		MaxTokens:      request.MaxTokens,
-		Tools:          toChatTools(request.Tools),
-		Stream:         true,
-		StreamOptions:  streamOptions{IncludeUsage: true},
-		Stop:           request.StopSequences,
-		Reasoning:      reasoningFromBudget(request.ThinkingBudget),
-		ResponseFormat: responseFormatFromRequest(request.ResponseFormat),
+		Model:             request.Model,
+		Messages:          messages,
+		Temperature:       request.Temperature,
+		TopP:              request.TopP,
+		MaxTokens:         request.MaxTokens,
+		Tools:             toChatTools(request.Tools),
+		Stream:            true,
+		StreamOptions:     streamOptions{IncludeUsage: true},
+		Stop:              request.StopSequences,
+		Reasoning:         reasoningFromBudget(request.ThinkingBudget),
+		ResponseFormat:    responseFormatFromRequest(request.ResponseFormat),
+		PromptCacheKey:    request.PromptCacheKey,
+		ServiceTier:       request.ServiceTier,
+		ParallelToolCalls: request.ParallelToolCalls,
 	}, request.ExtraBody)
 	if err != nil {
 		return nil, err
@@ -315,14 +344,17 @@ func extraChatCompletionBodyFields(extraBody map[string]any) map[string]any {
 }
 
 var managedChatCompletionBodyFields = map[string]struct{}{
-	"model":           {},
-	"messages":        {},
-	"tools":           {},
-	"stream":          {},
-	"stream_options":  {},
-	"stop":            {},
-	"reasoning":       {},
-	"response_format": {},
+	"model":               {},
+	"messages":            {},
+	"tools":               {},
+	"stream":              {},
+	"stream_options":      {},
+	"stop":                {},
+	"reasoning":           {},
+	"response_format":     {},
+	"prompt_cache_key":    {},
+	"service_tier":        {},
+	"parallel_tool_calls": {},
 }
 
 var protectedChatModelFields = map[string]struct{}{
@@ -393,6 +425,12 @@ func (s *openAIStream) Recv() (provider.Event, error) {
 			return provider.Event{}, responsesError(parsed.Error)
 		}
 		s.consumeChunk(parsed)
+		if parsed.ID != "" {
+			s.state.response.ID = parsed.ID
+		}
+		if parsed.Model != "" {
+			s.state.response.Model = parsed.Model
+		}
 	}
 }
 
@@ -419,6 +457,7 @@ func (s *openAIStream) handleDoneMarker() {
 		Kind:       provider.EventDone,
 		Usage:      s.state.usage,
 		StopReason: s.state.stopReason,
+		Response:   s.state.response,
 	})
 }
 
@@ -503,7 +542,8 @@ func toChatMessages(messages []message.Message) ([]chatMessage, error) {
 		var err error
 		switch msg.Role {
 		case message.RoleAssistant:
-			item.Content, err = chatMessageContent(msg.Text, msg.CacheBoundary)
+			item.Content, err = chatMessageContent(msg.CanonicalContent(), msg.CacheBoundary, msg.Role)
+			item.ReasoningContent = msg.ReasoningContent()
 			if len(msg.ToolCalls) > 0 {
 				item.ToolCalls = make([]chatToolCall, 0, len(msg.ToolCalls))
 				for _, call := range msg.ToolCalls {
@@ -519,13 +559,13 @@ func toChatMessages(messages []message.Message) ([]chatMessage, error) {
 			}
 		case message.RoleTool:
 			if msg.ToolResult != nil {
-				item.Content, err = chatMessageContent(msg.ToolResult.Content, msg.CacheBoundary)
+				item.Content, err = chatMessageContent(msg.ToolResult.CanonicalContent(), msg.CacheBoundary, msg.Role)
 				item.ToolCallID = msg.ToolResult.ToolCallID
 			} else if msg.CacheBoundary {
 				err = fmt.Errorf("openai chat completions cache boundary requires tool result content")
 			}
 		default:
-			item.Content, err = chatMessageContent(msg.Text, msg.CacheBoundary)
+			item.Content, err = chatMessageContent(msg.CanonicalContent(), msg.CacheBoundary, msg.Role)
 		}
 		if err != nil {
 			return nil, err
@@ -535,23 +575,111 @@ func toChatMessages(messages []message.Message) ([]chatMessage, error) {
 	return items, nil
 }
 
-func chatMessageContent(text string, cacheBoundary bool) (any, error) {
-	if !cacheBoundary {
-		if text == "" {
+func chatMessageContent(parts []message.ContentPart, cacheBoundary bool, role message.Role) (any, error) {
+	blocks := make([]chatContentBlock, 0, len(parts))
+	textOnly := true
+	var plain strings.Builder
+	for _, part := range parts {
+		switch part.Kind {
+		case message.ContentText, message.ContentCommentary, message.ContentFinalAnswer:
+			plain.WriteString(part.Text)
+			blocks = append(blocks, chatContentBlock{Type: "text", Text: part.Text})
+		case message.ContentReasoning:
+			if role != message.RoleAssistant {
+				return nil, fmt.Errorf("openai chat completions does not accept reasoning content for role %s", role)
+			}
+		case message.ContentRedactedReasoning:
+			return nil, fmt.Errorf("openai chat completions cannot serialize redacted reasoning content")
+		case message.ContentImage:
+			if role != message.RoleUser {
+				return nil, fmt.Errorf("openai chat completions image content requires user role")
+			}
+			url, err := contentPartURL(part)
+			if err != nil {
+				return nil, err
+			}
+			textOnly = false
+			blocks = append(blocks, chatContentBlock{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
+		case message.ContentAudio:
+			if role != message.RoleUser || len(part.Data) == 0 {
+				return nil, fmt.Errorf("openai chat completions audio content requires user-role inline data")
+			}
+			textOnly = false
+			blocks = append(blocks, chatContentBlock{Type: "input_audio", InputAudio: &chatInputAudio{
+				Data:   base64.StdEncoding.EncodeToString(part.Data),
+				Format: audioFormat(part),
+			}})
+		case message.ContentFile:
+			if role != message.RoleUser {
+				return nil, fmt.Errorf("openai chat completions file content requires user role")
+			}
+			file, err := chatFilePart(part)
+			if err != nil {
+				return nil, err
+			}
+			textOnly = false
+			blocks = append(blocks, chatContentBlock{Type: "file", File: file})
+		case message.ContentSource, message.ContentProviderData:
+			return nil, fmt.Errorf("openai chat completions cannot serialize %s content", part.Kind)
+		default:
+			return nil, fmt.Errorf("openai chat completions received unknown content kind %q", part.Kind)
+		}
+	}
+	if cacheBoundary {
+		return chatContentWithCacheBoundary(blocks)
+	}
+	if textOnly {
+		if plain.Len() == 0 {
 			return nil, nil
 		}
-		return text, nil
+		return plain.String(), nil
 	}
-	if text == "" {
-		return nil, fmt.Errorf("openai chat completions cache boundary requires non-empty text")
+	return blocks, nil
+}
+
+func chatContentWithCacheBoundary(blocks []chatContentBlock) (any, error) {
+	for index := len(blocks) - 1; index >= 0; index-- {
+		if blocks[index].Type == "text" && blocks[index].Text != "" {
+			blocks[index].PromptCacheBreakpoint = &chatCacheBreakpoint{Mode: PromptCacheModeExplicit}
+			return blocks, nil
+		}
 	}
-	return []chatContentBlock{{
-		Type: "text",
-		Text: text,
-		PromptCacheBreakpoint: chatCacheBreakpoint{
-			Mode: PromptCacheModeExplicit,
-		},
-	}}, nil
+	return nil, fmt.Errorf("openai chat completions cache boundary requires non-empty text")
+}
+
+func contentPartURL(part message.ContentPart) (string, error) {
+	if part.URI != "" {
+		return part.URI, nil
+	}
+	if len(part.Data) == 0 || part.MediaType == "" {
+		return "", fmt.Errorf("content %s requires uri or inline data with media type", part.Kind)
+	}
+	return "data:" + part.MediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data), nil
+}
+
+func audioFormat(part message.ContentPart) string {
+	format := strings.TrimPrefix(part.MediaType, "audio/")
+	switch format {
+	case "mpeg":
+		return "mp3"
+	case "":
+		return "wav"
+	default:
+		return format
+	}
+}
+
+func chatFilePart(part message.ContentPart) (*chatInputFile, error) {
+	file := &chatInputFile{Filename: part.Filename}
+	switch {
+	case len(part.Data) > 0 && part.MediaType != "":
+		file.FileData = "data:" + part.MediaType + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+	case part.URI != "":
+		file.FileID = part.URI
+	default:
+		return nil, fmt.Errorf("openai chat completions file requires uri or inline data with media type")
+	}
+	return file, nil
 }
 
 func toChatTools(defs []message.ToolDefinition) []chatTool {

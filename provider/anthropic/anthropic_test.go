@@ -41,7 +41,7 @@ func TestDriverStreamParsesMessageSSE(t *testing.T) {
 			t.Fatalf("unexpected path %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = writer.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"usage\":{\"input_tokens\":3,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1}}\n\n"))
+		_, _ = writer.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-test\"},\"usage\":{\"input_tokens\":3,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"lookup\",\"input\":{}}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"ve\"}}\n\n"))
@@ -85,6 +85,9 @@ func TestDriverStreamParsesMessageSSE(t *testing.T) {
 	if last.Usage.InputTokens != 6 || last.Usage.CachedInputTokens != 2 || !last.Usage.CachedInputTokensReported ||
 		last.Usage.CacheWriteInputTokens != 1 || !last.Usage.CacheWriteInputTokensReported {
 		t.Fatalf("expected inclusive cache usage in final event, got %#v", last.Usage)
+	}
+	if last.Response.ID != "msg-1" || last.Response.Model != "claude-test" {
+		t.Fatalf("response metadata = %#v", last.Response)
 	}
 }
 
@@ -174,7 +177,10 @@ func TestToAnthropicRequestThinkingToolRoundTrip(t *testing.T) {
 		message.NewToolResult(message.ToolResult{ToolCallID: "toolu_1", Name: "weather", Content: "sunny"}),
 	}
 
-	system, messages := toAnthropicRequest(history)
+	system, messages, err := toAnthropicRequest(history)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if system != "you are helpful" {
 		t.Fatalf("system = %q, want extracted system text", system)
 	}
@@ -214,7 +220,10 @@ func TestToAnthropicRequestCoalescesToolResults(t *testing.T) {
 		message.NewToolResult(message.ToolResult{ToolCallID: "b", Name: "t", Content: "two", IsError: true}),
 	}
 
-	_, messages := toAnthropicRequest(history)
+	_, messages, err := toAnthropicRequest(history)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(messages) != 2 {
 		t.Fatalf("expected assistant + single coalesced user message, got %d: %#v", len(messages), messages)
 	}
@@ -235,7 +244,10 @@ func TestToAnthropicRequestDropsUnsignedThinking(t *testing.T) {
 		{Role: message.RoleAssistant, Thinking: "no signature here", Text: "answer"},
 	}
 
-	_, messages := toAnthropicRequest(history)
+	_, messages, err := toAnthropicRequest(history)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(messages) != 1 {
 		t.Fatalf("expected one assistant message, got %#v", messages)
 	}
@@ -254,7 +266,10 @@ func TestToAnthropicRequestEmptyToolInput(t *testing.T) {
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "x", Name: "noop"}}},
 	}
 
-	_, messages := toAnthropicRequest(history)
+	_, messages, err := toAnthropicRequest(history)
+	if err != nil {
+		t.Fatal(err)
+	}
 	block := messages[0].Content[0]
 	if block.Type != "tool_use" || string(block.Input) != "{}" {
 		t.Fatalf("expected empty input rendered as {}, got %#v", block)
@@ -265,6 +280,28 @@ func TestToAnthropicRequestEmptyToolInput(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"input":{}`) {
 		t.Fatalf("expected input key present in %s", raw)
+	}
+}
+
+func TestToAnthropicRequestPreservesCanonicalMultimodalContent(t *testing.T) {
+	history := []message.Message{{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.FinalAnswerPart("inspect"),
+			{Kind: message.ContentImage, Data: []byte{1, 2, 3}, MediaType: "image/png"},
+		},
+	}}
+	_, messages, err := toAnthropicRequest(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || len(messages[0].Content) != 2 {
+		t.Fatalf("multimodal messages = %#v", messages)
+	}
+	image := messages[0].Content[1]
+	if image.Type != "image" || image.Source == nil || image.Source.Type != "base64" ||
+		image.Source.MediaType != "image/png" || image.Source.Data != "AQID" {
+		t.Fatalf("anthropic image block = %#v", image)
 	}
 }
 

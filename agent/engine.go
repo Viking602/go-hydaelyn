@@ -61,6 +61,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 			}).WithCause(err),
 		}
 	}
+	runtime.restoreActivations(messages)
 
 	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(task)
 	compact, compactTo := e.compactors(runtime)
@@ -81,6 +82,13 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		StopSequences:       e.StopSequences,
 		ThinkingBudget:      e.ThinkingBudget,
 		ExtraBody:           e.ExtraBody,
+		PromptCacheKey:      e.PromptCacheKey,
+		ServiceTier:         e.ServiceTier,
+		ParallelToolCalls:   cloneBoolPointer(e.ParallelToolCalls),
+		NativeToolHost:      e.NativeToolHost,
+		ContextUsage:        e.ContextUsage,
+		Control:             e.Control,
+		AppliedControlIDs:   append([]string(nil), e.AppliedControlIDs...),
 		OutputGuardrails:    e.OutputGuardrails,
 		OutputRecorder:      e.OutputRecorder,
 		Sink:                sink,
@@ -94,13 +102,14 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
 		return Result{
-			Messages:      output.Messages,
-			Usage:         output.Usage,
-			StopReason:    output.StopReason,
-			Thinking:      output.Thinking,
-			ToolCallsUsed: output.ToolCallsUsed,
-			Steps:         output.Steps,
-			Failure:       loopErrorFailure(runCtx, runErr, budgetDriven),
+			Messages:                 output.Messages,
+			Usage:                    output.Usage,
+			ExternallyAccountedUsage: output.ExternallyAccountedUsage,
+			StopReason:               output.StopReason,
+			Thinking:                 output.Thinking,
+			ToolCallsUsed:            output.ToolCallsUsed,
+			Steps:                    output.Steps,
+			Failure:                  loopErrorFailure(runCtx, runErr, budgetDriven),
 		}
 	}
 
@@ -129,6 +138,7 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 	}
 
 	totalUsage := output.Usage
+	externallyAccountedUsage := output.ExternallyAccountedUsage
 	accumulatedSteps := output.Steps
 	toolCallsUsed := output.ToolCallsUsed
 	for repairCount := 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
@@ -140,6 +150,7 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 		if dimension != "" {
 			result.Usage = totalUsage
 			result.Steps = accumulatedSteps
+			result.ExternallyAccountedUsage = externallyAccountedUsage
 			result.RepairCount = repairCount - 1
 			result.Failure = &AgentFailure{
 				Kind:      FailureKindBudgetExhausted,
@@ -160,19 +171,22 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 		repairOutput, repairErr := e.RunMessages(ctx, repairInput)
 		if repairErr != nil {
 			return Result{
-				Messages:    repairOutput.Messages,
-				Usage:       totalUsage.Add(repairOutput.Usage),
-				StopReason:  repairOutput.StopReason,
-				Thinking:    repairOutput.Thinking,
-				Steps:       appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
-				RepairCount: repairCount,
-				Failure:     loopErrorFailure(ctx, repairErr, budgetDriven),
+				Messages:                 repairOutput.Messages,
+				Usage:                    totalUsage.Add(repairOutput.Usage),
+				ExternallyAccountedUsage: externallyAccountedUsage.Add(repairOutput.ExternallyAccountedUsage),
+				StopReason:               repairOutput.StopReason,
+				Thinking:                 repairOutput.Thinking,
+				Steps:                    appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
+				RepairCount:              repairCount,
+				Failure:                  loopErrorFailure(ctx, repairErr, budgetDriven),
 			}
 		}
 		totalUsage = totalUsage.Add(repairOutput.Usage)
+		externallyAccountedUsage = externallyAccountedUsage.Add(repairOutput.ExternallyAccountedUsage)
 		toolCallsUsed += repairOutput.ToolCallsUsed
 		accumulatedSteps = appendReindexedSteps(accumulatedSteps, repairOutput.Steps)
 		repairOutput.Usage = totalUsage
+		repairOutput.ExternallyAccountedUsage = externallyAccountedUsage
 		repairOutput.Steps = accumulatedSteps
 		output = repairOutput
 		result = resultFromLoopOutput(output, repairCount)
@@ -193,15 +207,16 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 
 func resultFromLoopOutput(output LoopOutput, repairCount int) Result {
 	return Result{
-		Text:          finalAssistantTextFromMessages(output.Messages),
-		Thinking:      output.Thinking,
-		Usage:         output.Usage,
-		StopReason:    output.StopReason,
-		Messages:      output.Messages,
-		Steps:         output.Steps,
-		ToolCallsUsed: output.ToolCallsUsed,
-		Valid:         true,
-		RepairCount:   repairCount,
+		Text:                     finalAssistantTextFromMessages(output.Messages),
+		Thinking:                 output.Thinking,
+		Usage:                    output.Usage,
+		ExternallyAccountedUsage: output.ExternallyAccountedUsage,
+		StopReason:               output.StopReason,
+		Messages:                 output.Messages,
+		Steps:                    output.Steps,
+		ToolCallsUsed:            output.ToolCallsUsed,
+		Valid:                    true,
+		RepairCount:              repairCount,
 	}
 }
 

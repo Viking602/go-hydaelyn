@@ -443,21 +443,23 @@ func TestStateClone_NestedMutationDoesNotLeak(t *testing.T) {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 	if err := uow.Tasks().SaveTask(ctx, api.Task{
-		ID:           "task-1",
-		RunID:        "run-1",
-		Status:       api.TaskStatusCreated,
-		OwnerHistory: []string{"agent-a"},
-		Budget:       &api.TaskBudget{MaxTokens: 10},
-		Result:       &api.TypedReport{Status: api.ReportStatusSuccess, Structured: map[string]any{"ok": true}},
+		ID:            "task-1",
+		RunID:         "run-1",
+		Status:        api.TaskStatusCreated,
+		OwnerHistory:  []string{"agent-a"},
+		ReadSelectors: []api.BlackboardSelector{{Keys: []string{"task-key"}}},
+		Budget:        &api.TaskBudget{MaxTokens: 10},
+		Result:        &api.TypedReport{Status: api.ReportStatusSuccess, Structured: map[string]any{"ok": true}},
 	}); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
 	if err := uow.MailboxOutbox().QueueEnvelope(ctx, api.TaskEnvelope{
-		ID:      "env-1",
-		RunID:   "run-1",
-		TaskID:  "task-1",
-		Status:  "pending",
-		Payload: map[string]any{"n": 1},
+		ID:            "env-1",
+		RunID:         "run-1",
+		TaskID:        "task-1",
+		Status:        "pending",
+		Payload:       map[string]any{"n": 1},
+		ReadSelectors: []api.BlackboardSelector{{Keys: []string{"envelope-key"}}},
 	}); err != nil {
 		t.Fatalf("QueueEnvelope() error = %v", err)
 	}
@@ -486,11 +488,13 @@ func TestStateClone_NestedMutationDoesNotLeak(t *testing.T) {
 	task.OwnerHistory[0] = "mutated"
 	task.Budget.MaxTokens = 99
 	task.Result.Structured["ok"] = false
+	task.ReadSelectors[0].Keys[0] = "mutated"
 	envelope, err := writer.MailboxOutbox().LoadEnvelope(ctx, "env-1")
 	if err != nil {
 		t.Fatalf("LoadEnvelope() error = %v", err)
 	}
 	envelope.Payload["n"] = 99
+	envelope.ReadSelectors[0].Keys[0] = "mutated"
 	if err := writer.Rollback(ctx); err != nil {
 		t.Fatalf("Rollback() error = %v", err)
 	}
@@ -515,15 +519,16 @@ func TestStateClone_NestedMutationDoesNotLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTask(committed) error = %v", err)
 	}
-	if committedTask.OwnerHistory[0] != "agent-a" || committedTask.Budget.MaxTokens != 10 || committedTask.Result.Structured["ok"] != true {
+	if committedTask.OwnerHistory[0] != "agent-a" || committedTask.Budget.MaxTokens != 10 ||
+		committedTask.Result.Structured["ok"] != true || committedTask.ReadSelectors[0].Keys[0] != "task-key" {
 		t.Fatalf("committed task leaked mutation: %#v", committedTask)
 	}
 	committedEnv, err := reader.MailboxOutbox().LoadEnvelope(ctx, "env-1")
 	if err != nil {
 		t.Fatalf("LoadEnvelope(committed) error = %v", err)
 	}
-	if committedEnv.Payload["n"] != 1 {
-		t.Fatalf("committed envelope payload leaked mutation: %#v", committedEnv.Payload)
+	if committedEnv.Payload["n"] != 1 || committedEnv.ReadSelectors[0].Keys[0] != "envelope-key" {
+		t.Fatalf("committed envelope leaked mutation: %#v", committedEnv)
 	}
 }
 

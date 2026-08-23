@@ -14,6 +14,14 @@ func TestReaderRejectsLineOverMax(t *testing.T) {
 	}
 }
 
+func TestReaderRejectsAggregateFrameOverLineLimit(t *testing.T) {
+	frame := strings.Repeat("data: a\n", MaxSSEFrameLines+1) + "\n"
+	reader := NewReader(strings.NewReader(frame))
+	if _, err := reader.Next(); err == nil || !strings.Contains(err.Error(), "frame exceeds") {
+		t.Fatalf("aggregate frame error = %v", err)
+	}
+}
+
 func TestReaderHandlesDataLineLargerThanOneMiB(t *testing.T) {
 	payload := strings.Repeat("a", 2*1024*1024)
 	reader := NewReader(strings.NewReader("data: " + payload + "\n\n"))

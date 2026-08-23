@@ -4,19 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/Viking602/venat/message"
 )
 
 type (
-	Definition  = message.ToolDefinition
-	Schema      = message.JSONSchema
-	Call        = message.ToolCall
-	Result      = message.ToolResult
-	EffectType  = message.ToolEffectType
-	RetryPolicy = message.ToolRetryPolicy
+	Definition      = message.ToolDefinition
+	Schema          = message.JSONSchema
+	Call            = message.ToolCall
+	Result          = message.ToolResult
+	EffectType      = message.ToolEffectType
+	RetryPolicy     = message.ToolRetryPolicy
+	ConcurrencyMode = message.ToolConcurrencyMode
+)
+
+const (
+	DefaultBatchConcurrency = 32
+	MaxBatchCalls           = 1024
 )
 
 // ErrNotExecuted marks a tool error that occurred before the underlying
@@ -27,6 +36,9 @@ const (
 	EffectReadOnly           = message.ToolEffectReadOnly
 	EffectWrite              = message.ToolEffectWrite
 	EffectExternalSideEffect = message.ToolEffectExternalSideEffect
+	ConcurrencyParallel      = message.ToolConcurrencyParallel
+	ConcurrencySequential    = message.ToolConcurrencySequential
+	ConcurrencyExclusive     = message.ToolConcurrencyExclusive
 )
 
 type Mode string
@@ -86,6 +98,61 @@ var ErrToolNotFound = errors.New("tool not found")
 // originated from a panicking driver.
 var ErrToolPanic = errors.New("tool driver panicked")
 
+var (
+	ErrDuplicateToolName     = errors.New("duplicate tool name")
+	ErrInvalidToolDefinition = errors.New("invalid tool definition")
+	ErrTooManyToolCalls      = errors.New("tool batch exceeds safe call limit")
+)
+
+// CallExecutionError attributes one batch failure to its durable tool-call
+// slot. ErrNotExecuted in its chain proves the driver never started.
+type CallExecutionError struct {
+	CallID string
+	Err    error
+}
+
+func (failure CallExecutionError) Error() string {
+	return fmt.Sprintf("tool call %s: %v", failure.CallID, failure.Err)
+}
+
+func (failure CallExecutionError) Unwrap() error { return failure.Err }
+
+// BatchExecutionError preserves every per-call failure from one dispatch.
+type BatchExecutionError struct {
+	Failures []CallExecutionError
+}
+
+func (failure *BatchExecutionError) Error() string {
+	return fmt.Sprintf("%d tool call(s) failed", len(failure.Failures))
+}
+
+func (failure *BatchExecutionError) Unwrap() []error {
+	errors := make([]error, len(failure.Failures))
+	for index := range failure.Failures {
+		errors[index] = failure.Failures[index]
+	}
+	return errors
+}
+
+// NotExecutedCallIDs returns the call slots proven not to have started and
+// whether every batch failure has that proof.
+func NotExecutedCallIDs(err error) (map[string]struct{}, bool) {
+	var batch *BatchExecutionError
+	if !errors.As(err, &batch) || len(batch.Failures) == 0 {
+		return nil, false
+	}
+	ids := make(map[string]struct{})
+	all := true
+	for _, failure := range batch.Failures {
+		if errors.Is(failure.Err, ErrNotExecuted) {
+			ids[failure.CallID] = struct{}{}
+		} else {
+			all = false
+		}
+	}
+	return ids, all
+}
+
 // CallerInfo identifies the agent invoking a tool. It is plumbed via context
 // by the runtime so tools (e.g. send_message) can discover their caller
 // without forcing the LLM to pass teamId/agentId as explicit arguments.
@@ -109,61 +176,223 @@ func CallerFromContext(ctx context.Context) (CallerInfo, bool) {
 	return info, ok
 }
 
+type concurrencyLimiter struct {
+	capacity int
+	permits  chan struct{}
+}
+
+func (limiter *concurrencyLimiter) acquire(ctx context.Context) (func(), error) {
+	if limiter == nil {
+		return func() {}, nil
+	}
+	select {
+	case limiter.permits <- struct{}{}:
+		return func() { <-limiter.permits }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 type Bus struct {
-	mu      sync.RWMutex
-	drivers map[string]Driver
+	mu          sync.RWMutex
+	drivers     map[string]Driver
+	definitions map[string]Definition
+	validations map[string]argumentValidation
+	limiters    map[string]*concurrencyLimiter
+	err         error
 }
 
 func NewBus(drivers ...Driver) *Bus {
-	b := &Bus{
-		drivers: make(map[string]Driver, len(drivers)),
+	bus := &Bus{
+		drivers:     make(map[string]Driver, len(drivers)),
+		definitions: make(map[string]Definition, len(drivers)),
+		validations: make(map[string]argumentValidation, len(drivers)),
+		limiters:    make(map[string]*concurrencyLimiter),
 	}
 	for _, driver := range drivers {
-		b.Register(driver)
+		if err := bus.Register(driver); err != nil {
+			bus.mu.Lock()
+			bus.err = errors.Join(bus.err, err)
+			bus.mu.Unlock()
+		}
 	}
-	return b
+	return bus
 }
 
-func (b *Bus) Register(driver Driver) {
+func (b *Bus) Register(driver Driver) error {
 	if driver == nil {
-		return
+		return fmt.Errorf("%w: driver is nil", ErrInvalidToolDefinition)
+	}
+	definition := driver.Definition()
+	if definition.Name == "" {
+		return fmt.Errorf("%w: name is empty", ErrInvalidToolDefinition)
+	}
+	validation := compileArgumentValidation(definition)
+	if validation.err != nil {
+		return validation.err
+	}
+	limiterKey, limiterCapacity, err := concurrencySpec(definition)
+	if err != nil {
+		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.drivers[driver.Definition().Name] = driver
+	if _, exists := b.drivers[definition.Name]; exists {
+		return fmt.Errorf("%w: %s", ErrDuplicateToolName, definition.Name)
+	}
+	if limiterKey != "" {
+		if existing := b.limiters[limiterKey]; existing != nil && existing.capacity != limiterCapacity {
+			return fmt.Errorf("%w: concurrency group %q has limits %d and %d", ErrInvalidToolDefinition, limiterKey, existing.capacity, limiterCapacity)
+		}
+		if b.limiters[limiterKey] == nil {
+			b.limiters[limiterKey] = &concurrencyLimiter{capacity: limiterCapacity, permits: make(chan struct{}, limiterCapacity)}
+		}
+	}
+	b.drivers[definition.Name] = driver
+	b.definitions[definition.Name] = cloneDefinition(definition)
+	b.validations[definition.Name] = validation
+	return nil
+}
+
+func concurrencySpec(definition Definition) (string, int, error) {
+	mode := definition.Concurrency
+	if mode == "" {
+		mode = ConcurrencyParallel
+	}
+	capacity := definition.MaxConcurrency
+	if capacity < 0 {
+		return "", 0, fmt.Errorf("%w: %s has negative max concurrency", ErrInvalidToolDefinition, definition.Name)
+	}
+	switch mode {
+	case ConcurrencyParallel:
+	case ConcurrencySequential, ConcurrencyExclusive:
+		if capacity > 1 {
+			return "", 0, fmt.Errorf("%w: %s mode %s requires max concurrency 0 or 1", ErrInvalidToolDefinition, definition.Name, mode)
+		}
+		capacity = 1
+	default:
+		return "", 0, fmt.Errorf("%w: %s has concurrency mode %q", ErrInvalidToolDefinition, definition.Name, mode)
+	}
+	if capacity == 0 {
+		return "", 0, nil
+	}
+	group := strings.TrimSpace(definition.ConcurrencyGroup)
+	if group == "" {
+		group = definition.Name
+	}
+	return group, capacity, nil
+}
+
+// Validate reports construction-time registration and schema failures.
+func (b *Bus) Validate() error {
+	if b == nil {
+		return nil
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.err
 }
 
 func (b *Bus) Definitions() []Definition {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	defs := make([]Definition, 0, len(b.drivers))
-	for _, driver := range b.drivers {
-		defs = append(defs, driver.Definition())
+	defs := make([]Definition, 0, len(b.definitions))
+	for _, definition := range b.definitions {
+		defs = append(defs, cloneDefinition(definition))
 	}
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }
 
 func (b *Bus) IsTerminal(name string) bool {
-	driver, ok := b.Driver(name)
-	if !ok {
-		return false
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.definitions[name].Terminal
+}
+
+// Clone returns an independently registerable bus that shares the immutable
+// registered drivers, validation plans, and concurrency limiters. Sharing
+// limiters preserves exclusive and bounded policies across agent runs.
+func (b *Bus) Clone() *Bus {
+	if b == nil {
+		return NewBus()
 	}
-	return driver.Definition().Terminal
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	cloned := &Bus{
+		drivers:     make(map[string]Driver, len(b.drivers)),
+		definitions: make(map[string]Definition, len(b.definitions)),
+		validations: make(map[string]argumentValidation, len(b.validations)),
+		limiters:    make(map[string]*concurrencyLimiter, len(b.limiters)),
+		err:         b.err,
+	}
+	for name, driver := range b.drivers {
+		cloned.drivers[name] = driver
+		cloned.definitions[name] = cloneDefinition(b.definitions[name])
+		cloned.validations[name] = b.validations[name]
+	}
+	maps.Copy(cloned.limiters, b.limiters)
+	return cloned
+}
+
+// MapDrivers returns a policy-preserving bus whose drivers are wrapped by
+// mapper. Definitions, validation plans, and shared concurrency limiters remain
+// those frozen by the source bus.
+func (b *Bus) MapDrivers(mapper func(Definition, Driver) Driver) *Bus {
+	cloned := b.Clone()
+	if b == nil || mapper == nil {
+		return cloned
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for name, driver := range b.drivers {
+		mapped := mapper(cloneDefinition(b.definitions[name]), driver)
+		if mapped == nil {
+			cloned.err = errors.Join(cloned.err, fmt.Errorf("%w: mapped driver %s is nil", ErrInvalidToolDefinition, name))
+			continue
+		}
+		if mapped.Definition().Name != name {
+			cloned.err = errors.Join(cloned.err, fmt.Errorf(
+				"%w: mapped driver renamed %s to %s",
+				ErrInvalidToolDefinition,
+				name,
+				mapped.Definition().Name,
+			))
+			continue
+		}
+		cloned.drivers[name] = mapped
+	}
+	return cloned
 }
 
 func (b *Bus) Subset(names []string) *Bus {
-	if len(names) == 0 {
+	if b == nil || len(names) == 0 {
 		return NewBus()
 	}
-	selected := make([]Driver, 0, len(names))
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	subset := &Bus{
+		drivers:     make(map[string]Driver, len(names)),
+		definitions: make(map[string]Definition, len(names)),
+		validations: make(map[string]argumentValidation, len(names)),
+		limiters:    make(map[string]*concurrencyLimiter, len(b.limiters)),
+		err:         b.err,
+	}
+	maps.Copy(subset.limiters, b.limiters)
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
-		driver, ok := b.Driver(name)
-		if ok {
-			selected = append(selected, driver)
+		if _, duplicate := seen[name]; duplicate {
+			subset.err = errors.Join(subset.err, fmt.Errorf("%w: %s", ErrDuplicateToolName, name))
+			continue
+		}
+		seen[name] = struct{}{}
+		if driver, ok := b.drivers[name]; ok {
+			subset.drivers[name] = driver
+			subset.definitions[name] = cloneDefinition(b.definitions[name])
+			subset.validations[name] = b.validations[name]
 		}
 	}
-	return NewBus(selected...)
+	return subset
 }
 
 func (b *Bus) Driver(name string) (Driver, bool) {
@@ -174,16 +403,43 @@ func (b *Bus) Driver(name string) (Driver, bool) {
 }
 
 func (b *Bus) Execute(ctx context.Context, call Call, sink UpdateSink) (Result, error) {
-	driver, ok := b.Driver(call.Name)
+	if err := b.Validate(); err != nil {
+		return Result{}, err
+	}
+	b.mu.RLock()
+	driver, ok := b.drivers[call.Name]
+	validation := b.validations[call.Name]
+	definition := b.definitions[call.Name]
+	key, _, _ := concurrencySpec(definition)
+	limiter := b.limiters[key]
+	b.mu.RUnlock()
 	if !ok {
 		return Result{}, fmt.Errorf("%w: %s", ErrToolNotFound, call.Name)
 	}
-	definition := driver.Definition()
+	if validation.err != nil {
+		return Result{}, validation.err
+	}
+	if err := validation.validate(call.Arguments); err != nil {
+		result := Result{
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Content:    fmt.Sprintf("%s rejected: %v", call.Name, err),
+			IsError:    true,
+		}
+		result.SyncLegacyContent()
+		return result, nil
+	}
+	definition = cloneDefinition(definition)
 	if definition.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, definition.Timeout)
 		defer cancel()
 	}
+	release, err := limiter.acquire(ctx)
+	if err != nil {
+		return Result{}, errors.Join(ErrNotExecuted, err)
+	}
+	defer release()
 	return driver.Execute(ctx, call, sink)
 }
 
@@ -192,81 +448,139 @@ func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, sink Up
 }
 
 func (b *Bus) ExecuteBatchWithOptions(ctx context.Context, calls []Call, mode Mode, sink UpdateSink, options BatchOptions) ([]Result, error) {
-	if mode == ModeParallel {
+	if len(calls) > MaxBatchCalls {
+		return nil, fmt.Errorf("%w: %d > %d", ErrTooManyToolCalls, len(calls), MaxBatchCalls)
+	}
+	if mode == ModeParallel && !b.requiresSequential(calls) {
 		return b.executeParallel(ctx, calls, sink, options)
 	}
 	results := make([]Result, 0, len(calls))
-	for _, call := range calls {
+	for index, call := range calls {
 		result, err := b.Execute(ctx, call, sink)
 		if err != nil {
-			// Return the results that already ran rather than nil: in sequential mode
-			// every earlier call completed and side-effected before this one failed,
-			// so the caller can record those results and a resuming caller is spared
-			// from replaying them. The failed call and any after it are not included.
-			return results, err
+			failures := make([]CallExecutionError, 0, len(calls)-index)
+			failures = append(failures, CallExecutionError{CallID: call.ID, Err: err})
+			for _, skipped := range calls[index+1:] {
+				failures = append(failures, CallExecutionError{
+					CallID: skipped.ID,
+					Err:    errors.Join(ErrNotExecuted, context.Canceled),
+				})
+			}
+			return results, &BatchExecutionError{Failures: failures}
 		}
 		results = append(results, result)
 	}
 	return results, nil
 }
 
+func (b *Bus) requiresSequential(calls []Call) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, call := range calls {
+		if b.definitions[call.Name].Concurrency == ConcurrencySequential {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink, options BatchOptions) ([]Result, error) {
 	results := make([]Result, len(calls))
 	errs := make([]error, len(calls))
-	var wg sync.WaitGroup
-	var sem chan struct{}
-	if options.MaxConcurrency > 0 {
-		sem = make(chan struct{}, options.MaxConcurrency)
+	workerCount := options.MaxConcurrency
+	if workerCount <= 0 {
+		workerCount = DefaultBatchConcurrency
 	}
-	for idx, call := range calls {
-		wg.Add(1)
-		go func(index int, current Call) {
-			defer wg.Done()
-			// A driver panic on this spawned goroutine cannot reach the
-			// caller's recover, so contain it here and record it as the call's
-			// error; errors.Join then surfaces it like any other tool failure.
-			defer func() {
-				if r := recover(); r != nil {
-					errs[index] = fmt.Errorf("%w: %s: %v", ErrToolPanic, current.Name, r)
+	workerCount = min(workerCount, len(calls))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				current := calls[index]
+				if err := ctx.Err(); err != nil {
+					errs[index] = errors.Join(ErrNotExecuted, err)
+					continue
 				}
-			}()
-			if sem != nil {
-				select {
-				case sem <- struct{}{}:
-					defer func() { <-sem }()
-				case <-ctx.Done():
-					errs[index] = ctx.Err()
-					return
-				}
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							errs[index] = fmt.Errorf("%w: %s: %v", ErrToolPanic, current.Name, recovered)
+						}
+					}()
+					results[index], errs[index] = b.Execute(ctx, current, sink)
+				}()
 			}
-			results[index], errs[index] = b.Execute(ctx, current, sink)
-		}(idx, call)
+		}()
 	}
-	wg.Wait()
-	// errors.Join preserves call order and surfaces every failure rather
-	// than racing on whichever goroutine happened to enqueue first.
-	if err := errors.Join(errs...); err != nil {
-		// Return the results from the slots that ran to completion rather than
-		// nil: those tools side-effected, so the caller can record them and a
-		// resuming caller is spared from replaying them. Slots that errored,
-		// panicked, or never started leave errs[index] non-nil and carry no
-		// result, so excluding them keeps the survivors in call order.
-		succeeded := make([]Result, 0, len(results))
-		for index := range results {
-			if errs[index] == nil {
-				result := results[index]
-				// Preserve the original call slot before compacting survivors.
-				// Callers cannot recover this mapping from the compacted index.
-				if result.ToolCallID == "" {
-					result.ToolCallID = calls[index].ID
-				}
-				if result.Name == "" {
-					result.Name = calls[index].Name
-				}
-				succeeded = append(succeeded, result)
+dispatch:
+	for index := range calls {
+		if ctx.Err() != nil {
+			for skipped := index; skipped < len(calls); skipped++ {
+				errs[skipped] = errors.Join(ErrNotExecuted, ctx.Err())
 			}
+			break
 		}
-		return succeeded, err
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			for skipped := index; skipped < len(calls); skipped++ {
+				errs[skipped] = errors.Join(ErrNotExecuted, ctx.Err())
+			}
+			break dispatch
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	failures := make([]CallExecutionError, 0)
+	succeeded := make([]Result, 0, len(results))
+	for index, result := range results {
+		if errs[index] != nil {
+			failures = append(failures, CallExecutionError{CallID: calls[index].ID, Err: errs[index]})
+			continue
+		}
+		if result.ToolCallID == "" {
+			result.ToolCallID = calls[index].ID
+		}
+		if result.Name == "" {
+			result.Name = calls[index].Name
+		}
+		succeeded = append(succeeded, result)
+	}
+	if len(failures) > 0 {
+		return succeeded, &BatchExecutionError{Failures: failures}
 	}
 	return results, nil
+}
+
+func cloneDefinition(definition Definition) Definition {
+	definition.InputSchema = cloneSchema(definition.InputSchema)
+	definition.Tags = slices.Clone(definition.Tags)
+	definition.Metadata = maps.Clone(definition.Metadata)
+	definition.Security.RequiredPermissions = slices.Clone(definition.Security.RequiredPermissions)
+	definition.RequiredPermissions = slices.Clone(definition.RequiredPermissions)
+	definition.PolicyTags = slices.Clone(definition.PolicyTags)
+	return definition
+}
+
+func cloneSchema(schema Schema) Schema {
+	schema.Required = slices.Clone(schema.Required)
+	schema.Enum = slices.Clone(schema.Enum)
+	if schema.Properties != nil {
+		schema.Properties = maps.Clone(schema.Properties)
+		for name, child := range schema.Properties {
+			schema.Properties[name] = cloneSchema(child)
+		}
+	}
+	if schema.Items != nil {
+		item := cloneSchema(*schema.Items)
+		schema.Items = &item
+	}
+	if schema.AdditionalProperties != nil {
+		additional := *schema.AdditionalProperties
+		schema.AdditionalProperties = &additional
+	}
+	return schema
 }

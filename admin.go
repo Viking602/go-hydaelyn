@@ -68,16 +68,7 @@ func (r *Runner) StoreCapabilities(ctx context.Context) (api.StoreCapabilities, 
 	if err != nil {
 		return api.StoreCapabilities{}, err
 	}
-	return api.StoreCapabilities{
-		SupportsTransactions:          capabilities.SupportsTransactions,
-		SupportsBlackboardSubscribe:   capabilities.SupportsBlackboardSubscribe,
-		SupportsListPending:           capabilities.SupportsListPending,
-		SupportsConcurrentWriters:     capabilities.SupportsConcurrentWriters,
-		SupportsDeadLetterRequeue:     capabilities.SupportsDeadLetterRequeue,
-		SupportsDefinitionSnapshots:   capabilities.SupportsDefinitionSnapshots,
-		SupportsAdmissionReservations: capabilities.SupportsAdmissionReservations,
-		SupportsResourceClaims:        capabilities.SupportsResourceClaims,
-	}, nil
+	return api.StoreCapabilities(capabilities), nil
 }
 
 func (r *Runner) Close(ctx context.Context) error {

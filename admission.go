@@ -36,9 +36,5 @@ func (r *Runner) ListAdmissionReservations(ctx context.Context, selector api.Adm
 	if err != nil {
 		return nil, err
 	}
-	out := make([]api.AdmissionReservation, 0, len(reservations))
-	for _, reservation := range reservations {
-		out = append(out, reservation)
-	}
-	return out, nil
+	return append([]api.AdmissionReservation(nil), reservations...), nil
 }

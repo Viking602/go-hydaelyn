@@ -71,6 +71,7 @@ func (a *Accumulator) Message() (message.Message, error) {
 		Kind:      message.KindStandard,
 		Content:   message.CloneContent(response.Content),
 		ToolCalls: response.ToolCalls,
+		Response:  message.CloneResponseMetadata(response.Response),
 	}
 	result.SyncLegacyContent()
 	return result, nil
@@ -125,6 +126,9 @@ func mergeNormalizedResponse(target *provider.NormalizedResponse, source provide
 	}
 	if len(source.ProviderState) > 0 {
 		target.ProviderState = append(target.ProviderState[:0], source.ProviderState...)
+	}
+	if source.Response.ID != "" || source.Response.Model != "" || len(source.Response.Headers) > 0 {
+		target.Response = message.CloneResponseMetadata(source.Response)
 	}
 }
 

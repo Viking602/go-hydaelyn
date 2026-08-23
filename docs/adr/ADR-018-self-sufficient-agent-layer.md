@@ -114,9 +114,13 @@ type SubagentDef struct {
     Name        string
     Description string
     InputSchema tool.Schema
-    MaxDepth    int            // 0 → DefaultSubagentMaxDepth (4)
+    MaxDepth    int             // 0 → DefaultSubagentMaxDepth (4)
     Budget      *api.TaskBudget
     Effect      tool.EffectType // optional floor; aggregation can only raise it
+}
+
+type SubagentScheduler interface {
+    RunSubagent(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error)
 }
 ```
 
@@ -129,8 +133,8 @@ team member (*agent-as-peer, independent*). The two relationships share the
 | | subagent (`agent.AsTool`) | team member (`multiagent`) |
 |---|---|---|
 | Relationship | subordinate (a tool) | peer (scheduled) |
-| Identity | none | `AgentInstance` + lease |
-| Control | parent retains it | scheduler holds it |
+| Identity | deterministic parent tool-slot execution ID | `AgentInstance` + lease |
+| Control | parent retains it through the child scheduler | scheduler holds it |
 | Visibility | one tool call in the parent's trace | blackboard / `TypedReport` |
 | Budget / failure | subordinate to the parent | governed by the scheduler |
 
@@ -139,6 +143,22 @@ contact.** It depends only on `Engine`, `tool`, and `api` — never on `Spec`,
 `AgentClass`, or anything under `multiagent/`. It consumes a materialized
 `Engine`, not a declaration, so the subagent path works in an app that never
 imports the multi-agent layer.
+
+An application that needs restart-safe child work sets
+`Engine.SubagentScheduler`. `AsTool` then submits a `SubagentRequest` whose ID is
+deterministic from the parent caller and stable operation slot. The scheduler
+owns admission, persistence, execution, and replay, and must return the stored
+terminal execution for a completed ID. `ParentUsageAccounted` is true only when
+the scheduler already recorded the child usage against the parent task's
+durable budget; the parent still charges those tokens in memory but suppresses
+the duplicate usage record. A proven pre-start failure wraps
+`ErrSubagentNotStarted` and becomes a recoverable tool result. Every other
+scheduler error is an unknown outcome and crosses as
+`ErrSubagentOutcomeUnknown` for durable reconciliation, never as a model-visible
+retry. Small embedded applications may leave the scheduler nil and retain the
+synchronous in-process path. Both routes use the same request, depth, budget,
+usage, and failure mapping; this prevents a second subagent execution contract
+from growing beside the durable host runtime.
 
 The third discipline: **a subagent's budget, failure, and observability are
 subordinate to the parent.** Concretely:
@@ -168,6 +188,8 @@ subordinate to the parent.** Concretely:
   counter; exceeding it returns an error tool result rather than recursing.
 - The child runs under `SubagentDef.Budget` when set, else its own `Engine`
   `LoopPolicy`.
+- `SubagentRequest.Depth` and `WithSubagentDepth` restore the recursion guard
+  when a durable child resumes under a fresh process context.
 
 A subagent must also be **no safer to the parent's governance than its child.**
 `AsTool.Definition()` aggregates the governance metadata of every tool the child

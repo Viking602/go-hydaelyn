@@ -38,7 +38,7 @@ func TestDriverStreamParsesChatCompletionSSE(t *testing.T) {
 			t.Fatalf("unexpected path %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello \"}}]}\n\n"))
+		_, _ = writer.Write([]byte("data: {\"id\":\"chat-1\",\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello \"}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"world\"}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"query\\\":\\\"ve\"}}]}}]}\n\n"))
 		_, _ = writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"nat\\\"}\"}}]}}]}\n\n"))
@@ -80,6 +80,9 @@ func TestDriverStreamParsesChatCompletionSSE(t *testing.T) {
 	if last.Usage.TotalTokens != 8 || last.Usage.CachedInputTokens != 2 || !last.Usage.CachedInputTokensReported ||
 		last.Usage.CacheWriteInputTokens != 1 || !last.Usage.CacheWriteInputTokensReported || last.Usage.ReasoningTokens != 3 {
 		t.Fatalf("expected usage in final event, got %#v", last)
+	}
+	if last.Response.ID != "chat-1" || last.Response.Model != "gpt-test" {
+		t.Fatalf("response metadata = %#v", last.Response)
 	}
 }
 
@@ -241,13 +244,20 @@ func TestDriverStreamForwardsExtraBody(t *testing.T) {
 	defer server.Close()
 
 	driver := New(Config{APIKey: "test", BaseURL: server.URL, Client: server.Client(), WireAPI: WireChatCompletions})
+	parallel := true
 	stream, err := driver.Stream(context.Background(), provider.Request{
-		Model:    "qwen",
-		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
+		Model:             "qwen",
+		Messages:          []message.Message{message.NewText(message.RoleUser, "hi")},
+		PromptCacheKey:    "typed-cache",
+		ServiceTier:       "priority",
+		ParallelToolCalls: &parallel,
 		ExtraBody: map[string]any{
 			"chat_template_kwargs": map[string]any{"thinking": true},
 			"temperature":          0.2,
 			"stream":               false,
+			"prompt_cache_key":     "untyped-cache",
+			"service_tier":         "default",
+			"parallel_tool_calls":  false,
 		},
 	})
 	if err != nil {
@@ -263,6 +273,9 @@ func requireOpenAIExtraBody(t *testing.T, captured map[string]any) {
 	requireChatTemplateThinkingEnabled(t, captured)
 	requireCapturedField(t, captured, "temperature", 0.2)
 	requireCapturedField(t, captured, "stream", true)
+	requireCapturedField(t, captured, "prompt_cache_key", "typed-cache")
+	requireCapturedField(t, captured, "service_tier", "priority")
+	requireCapturedField(t, captured, "parallel_tool_calls", true)
 }
 
 func requireChatTemplateThinkingEnabled(t *testing.T, captured map[string]any) {
@@ -295,4 +308,22 @@ func collectEvents(t *testing.T, stream provider.Stream) []provider.Event {
 		events = append(events, event)
 	}
 	return events
+}
+
+func TestChatMessagesPreserveCanonicalMultimodalContent(t *testing.T) {
+	items, err := toChatMessages([]message.Message{{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.CommentaryPart("inspect"),
+			{Kind: message.ContentImage, Data: []byte{1, 2, 3}, MediaType: "image/png"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, ok := items[0].Content.([]chatContentBlock)
+	if !ok || len(blocks) != 2 || blocks[0].Text != "inspect" ||
+		blocks[1].ImageURL == nil || blocks[1].ImageURL.URL != "data:image/png;base64,AQID" {
+		t.Fatalf("chat multimodal content = %#v", items[0].Content)
+	}
 }

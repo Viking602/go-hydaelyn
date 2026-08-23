@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Viking602/venat/api"
@@ -16,8 +18,9 @@ import (
 
 func TestAsTool_DefinitionAdvertisesIdentityAndSchema(t *testing.T) {
 	child := Engine{Provider: singleTurnProvider("ok"), Model: "child"}
-	schema := tool.Schema{Type: "object"}
+	schema := tool.Schema{Type: "object", Properties: map[string]tool.Schema{"input": {Type: "string"}}}
 	driver := AsTool(child, SubagentDef{Name: "researcher", Description: "delegates research", InputSchema: schema})
+	schema.Properties["input"] = tool.Schema{Type: "integer"}
 
 	def := driver.Definition()
 	if def.Name != "researcher" {
@@ -29,10 +32,138 @@ func TestAsTool_DefinitionAdvertisesIdentityAndSchema(t *testing.T) {
 	if def.InputSchema.Type != "object" {
 		t.Fatalf("Definition().InputSchema.Type = %q, want object", def.InputSchema.Type)
 	}
+	if def.InputSchema.Properties["input"].Type != "string" {
+		t.Fatalf("AsTool retained caller-owned schema: %#v", def.InputSchema)
+	}
+	def.InputSchema.Properties["input"] = tool.Schema{Type: "boolean"}
+	if current := driver.Definition().InputSchema.Properties["input"].Type; current != "string" {
+		t.Fatalf("Definition returned mutable schema ownership: %q", current)
+	}
 	// A tool-less, pure-reasoning child aggregates to read-only — the genuinely
 	// safe case. Children that can call side-effecting tools are covered below.
 	if def.EffectType != tool.EffectReadOnly {
 		t.Fatalf("Definition().EffectType = %q, want read_only", def.EffectType)
+	}
+}
+
+func TestAsToolRoutesThroughDurableSchedulerWithStableIdentity(t *testing.T) {
+	cache := make(map[string]SubagentExecution)
+	var requests []SubagentRequest
+	childRuns := 0
+	updates := 0
+	scheduler := SubagentSchedulerFunc(func(
+		ctx context.Context,
+		request SubagentRequest,
+		sink tool.UpdateSink,
+	) (SubagentExecution, error) {
+		requests = append(requests, request)
+		if SubagentDepth(ctx) != request.Depth || request.Depth != 1 {
+			t.Fatalf("scheduler depth context=%d request=%d", SubagentDepth(ctx), request.Depth)
+		}
+		if sink != nil {
+			if err := sink(tool.Update{Kind: "scheduled"}); err != nil {
+				return SubagentExecution{}, err
+			}
+		}
+		if prior, ok := cache[request.ID]; ok {
+			return prior, nil
+		}
+		childRuns++
+		execution := SubagentExecution{
+			Result:               Result{Text: "durable child answer", Usage: provider.Usage{OutputTokens: 7, TotalTokens: 7}},
+			ParentUsageAccounted: true,
+		}
+		cache[request.ID] = execution
+		return execution, nil
+	})
+	child := Engine{Provider: singleTurnProvider("must not run"), Model: "child", SubagentScheduler: scheduler}
+	driver := AsTool(child, SubagentDef{Name: "researcher"})
+	parent := tool.CallerInfo{SessionID: "session-1", TaskID: "task-1", AgentID: "main"}
+	ctx := tool.WithCaller(context.Background(), parent)
+	ctx = withParentUsageSink(ctx, func(usage, externallyAccounted provider.Usage) {
+		if usage.TotalTokens != 7 || externallyAccounted.TotalTokens != 7 {
+			t.Fatalf("reported child usage = %#v external=%#v", usage, externallyAccounted)
+		}
+	})
+	call := tool.Call{ID: "call-1", OperationID: "turn-1:0", Name: "researcher", Arguments: json.RawMessage(`{"input":"inspect"}`)}
+	sink := func(tool.Update) error {
+		updates++
+		return nil
+	}
+	first, err := driver.Execute(ctx, call, sink)
+	if err != nil || first.IsError || first.Content != "durable child answer" {
+		t.Fatalf("first scheduled result = %#v, %v", first, err)
+	}
+	second, err := driver.Execute(ctx, call, sink)
+	if err != nil || second.IsError || second.Content != first.Content {
+		t.Fatalf("replayed scheduled result = %#v, %v", second, err)
+	}
+	if len(requests) != 2 || requests[0].ID == "" || requests[0].ID != requests[1].ID {
+		t.Fatalf("stable scheduler requests = %#v", requests)
+	}
+	if requests[0].Parent != parent || requests[0].Task.Goal != "inspect" || requests[0].Call.OperationID != "turn-1:0" {
+		t.Fatalf("scheduler request lost parent/task/call identity: %#v", requests[0])
+	}
+	if childRuns != 1 || updates != 2 {
+		t.Fatalf("durable child runs=%d updates=%d, want 1 and 2", childRuns, updates)
+	}
+	if same := ComputeSubagentID(parent, tool.Call{ID: "call-2", Name: "researcher"}); same == requests[0].ID {
+		t.Fatal("different parent tool-call slots produced the same subagent ID")
+	}
+	if sameSlot := ComputeSubagentID(parent, tool.Call{
+		ID: "provider-retry-id", OperationID: "turn-1:0", Name: "researcher",
+	}); sameSlot != requests[0].ID {
+		t.Fatalf("stable operation slot changed subagent id: %q != %q", sameSlot, requests[0].ID)
+	}
+}
+
+func TestAsToolUnknownSchedulerFailureRequiresDurableReconciliation(t *testing.T) {
+	child := Engine{
+		SubagentScheduler: SubagentSchedulerFunc(func(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error) {
+			return SubagentExecution{}, errors.New("reply lost after child start")
+		}),
+	}
+	result, err := AsTool(child, SubagentDef{Name: "researcher"}).Execute(
+		tool.WithCaller(context.Background(), tool.CallerInfo{SessionID: "session"}),
+		tool.Call{ID: "call", Name: "researcher", Arguments: json.RawMessage(`{}`)},
+		nil,
+	)
+	if !errors.Is(err, ErrSubagentOutcomeUnknown) || result.Name != "" {
+		t.Fatalf("unknown scheduler outcome result=%#v err=%v", result, err)
+	}
+}
+
+func TestAsToolNotStartedSchedulerFailureIsRecoverableToolResult(t *testing.T) {
+	child := Engine{
+		SubagentScheduler: SubagentSchedulerFunc(func(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error) {
+			return SubagentExecution{}, fmt.Errorf("%w: admission unavailable", ErrSubagentNotStarted)
+		}),
+	}
+	result, err := AsTool(child, SubagentDef{Name: "researcher"}).Execute(
+		tool.WithCaller(context.Background(), tool.CallerInfo{SessionID: "session"}),
+		tool.Call{ID: "call", Name: "researcher", Arguments: json.RawMessage(`{}`)},
+		nil,
+	)
+	if err != nil || !result.IsError || !strings.Contains(result.Content, "admission unavailable") {
+		t.Fatalf("not-started scheduler result=%#v err=%v", result, err)
+	}
+}
+
+func TestAsToolDurableSchedulerRequiresParentNamespace(t *testing.T) {
+	invoked := false
+	child := Engine{
+		SubagentScheduler: SubagentSchedulerFunc(func(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error) {
+			invoked = true
+			return SubagentExecution{Result: Result{Text: "unexpected"}}, nil
+		}),
+	}
+	result, err := AsTool(child, SubagentDef{Name: "researcher"}).Execute(
+		context.Background(),
+		tool.Call{ID: "call", Name: "researcher", Arguments: json.RawMessage(`{}`)},
+		nil,
+	)
+	if err != nil || invoked || !result.IsError || !strings.Contains(result.Content, "durable parent identity is missing") {
+		t.Fatalf("missing parent identity result=%#v invoked=%v err=%v", result, invoked, err)
 	}
 }
 
@@ -210,6 +341,48 @@ func TestAsTool_FoldsChildUsageIntoParentLoop(t *testing.T) {
 	}
 	if output.Usage.TotalTokens < 10 {
 		t.Fatalf("parent usage = %#v, want child tokens folded in", output.Usage)
+	}
+}
+
+func TestAsToolParallelChildrenShareParentTokenReservation(t *testing.T) {
+	scheduler := SubagentSchedulerFunc(func(
+		_ context.Context,
+		request SubagentRequest,
+		_ tool.UpdateSink,
+	) (SubagentExecution, error) {
+		return SubagentExecution{Result: Result{
+			Text:  "done",
+			Usage: provider.Usage{InputTokens: int(request.Task.Budget.MaxTokens)},
+		}}, nil
+	})
+	driver := AsTool(Engine{SubagentScheduler: scheduler}, SubagentDef{Name: "child"})
+	ctx := tool.WithCaller(context.Background(), tool.CallerInfo{SessionID: "session"})
+	ctx = withParentTokenBudget(ctx, 10)
+	var group sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, id := range []string{"one", "two"} {
+		group.Add(1)
+		go func(id string) {
+			defer group.Done()
+			_, err := driver.Execute(ctx, tool.Call{ID: id, Name: "child", Arguments: json.RawMessage(`{}`)}, nil)
+			errs <- err
+		}(id)
+	}
+	group.Wait()
+	close(errs)
+	successes, exhausted := 0, 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrBudgetExhausted):
+			exhausted++
+		default:
+			t.Fatalf("parallel child error = %v", err)
+		}
+	}
+	if successes != 1 || exhausted != 1 {
+		t.Fatalf("parallel child outcomes success=%d exhausted=%d", successes, exhausted)
 	}
 }
 

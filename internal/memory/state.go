@@ -243,7 +243,7 @@ func cloneBlackboardItem(item api.BlackboardItem) api.BlackboardItem {
 
 func cloneEnvelope(envelope api.TaskEnvelope) api.TaskEnvelope {
 	envelope.Payload = maps.Clone(envelope.Payload)
-	envelope.ReadSelectors = slices.Clone(envelope.ReadSelectors)
+	envelope.ReadSelectors = cloneBlackboardSelectors(envelope.ReadSelectors)
 	envelope.WriteTargets = slices.Clone(envelope.WriteTargets)
 	return envelope
 }
@@ -259,9 +259,9 @@ func cloneTask(task api.Task) api.Task {
 	task.Tags = slices.Clone(task.Tags)
 	task.CompletionCriteria = slices.Clone(task.CompletionCriteria)
 	task.DependsOn = slices.Clone(task.DependsOn)
-	task.ReadSelectors = slices.Clone(task.ReadSelectors)
+	task.ReadSelectors = cloneBlackboardSelectors(task.ReadSelectors)
 	task.WriteTargets = slices.Clone(task.WriteTargets)
-	task.PolicyDecisions = slices.Clone(task.PolicyDecisions)
+	task.PolicyDecisions = clonePolicyDecisions(task.PolicyDecisions)
 	task.InputSchema = append([]byte(nil), task.InputSchema...)
 	task.OutputSchema = append([]byte(nil), task.OutputSchema...)
 	task.ResourceClaims = slices.Clone(task.ResourceClaims)
@@ -280,11 +280,43 @@ func cloneTask(task api.Task) api.Task {
 		if result.Handoff != nil {
 			handoff := *result.Handoff
 			handoff.ContextReferences = slices.Clone(handoff.ContextReferences)
-			handoff.ContextSelectors = slices.Clone(handoff.ContextSelectors)
+			handoff.ContextSelectors = cloneBlackboardSelectors(handoff.ContextSelectors)
 			handoff.Metadata = maps.Clone(handoff.Metadata)
 			result.Handoff = &handoff
 		}
 		task.Result = &result
 	}
 	return task
+}
+
+func cloneBlackboardSelectors(selectors []api.BlackboardSelector) []api.BlackboardSelector {
+	cloned := slices.Clone(selectors)
+	for index := range cloned {
+		cloned[index].ItemTypes = slices.Clone(cloned[index].ItemTypes)
+		cloned[index].SourceTypes = slices.Clone(cloned[index].SourceTypes)
+		cloned[index].SourceIDs = slices.Clone(cloned[index].SourceIDs)
+		//lint:ignore SA1019 The deprecated selector field remains part of the public wire contract.
+		cloned[index].SourceAgentIDs = slices.Clone(cloned[index].SourceAgentIDs)
+		cloned[index].Tags = slices.Clone(cloned[index].Tags)
+		cloned[index].Keys = slices.Clone(cloned[index].Keys)
+	}
+	return cloned
+}
+
+func clonePolicyDecisions(decisions []api.PolicyDecision) []api.PolicyDecision {
+	cloned := slices.Clone(decisions)
+	for index := range cloned {
+		cloned[index].Redactions = slices.Clone(cloned[index].Redactions)
+		cloned[index].Metadata = maps.Clone(cloned[index].Metadata)
+		cloned[index].Obligations = slices.Clone(cloned[index].Obligations)
+		for obligationIndex := range cloned[index].Obligations {
+			selector := cloned[index].Obligations[obligationIndex].Selector
+			if selector == nil {
+				continue
+			}
+			selectorClone := cloneBlackboardSelectors([]api.BlackboardSelector{*selector})[0]
+			cloned[index].Obligations[obligationIndex].Selector = &selectorClone
+		}
+	}
+	return cloned
 }

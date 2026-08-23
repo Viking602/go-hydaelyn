@@ -77,16 +77,7 @@ func (p *Provider) Capabilities(ctx context.Context) (api.StoreCapabilities, err
 	if err != nil {
 		return api.StoreCapabilities{}, err
 	}
-	return api.StoreCapabilities{
-		SupportsTransactions:          caps.SupportsTransactions,
-		SupportsBlackboardSubscribe:   caps.SupportsBlackboardSubscribe,
-		SupportsListPending:           caps.SupportsListPending,
-		SupportsConcurrentWriters:     caps.SupportsConcurrentWriters,
-		SupportsDeadLetterRequeue:     caps.SupportsDeadLetterRequeue,
-		SupportsDefinitionSnapshots:   caps.SupportsDefinitionSnapshots,
-		SupportsAdmissionReservations: caps.SupportsAdmissionReservations,
-		SupportsResourceClaims:        caps.SupportsResourceClaims,
-	}, nil
+	return api.StoreCapabilities(caps), nil
 }
 
 // Close releases provider-scoped resources. State is GC'd once Provider

@@ -12,7 +12,7 @@ func (r *Runner) SubmitTypedReport(ctx context.Context, cmd api.SubmitTypedRepor
 }
 
 func (r *Runner) SubmitUserInput(ctx context.Context, cmd api.SubmitUserInputCommand) error {
-	return r.rt.SubmitUserInput(ctx, core.SubmitUserInputCommand{RunID: cmd.RunID, TaskID: cmd.TaskID, Input: cmd.Input})
+	return r.rt.SubmitUserInput(ctx, core.SubmitUserInputCommand(cmd))
 }
 
 func (r *Runner) SubmitResponseOutput(ctx context.Context, cmd api.SubmitResponseOutputCommand) error {
@@ -20,7 +20,7 @@ func (r *Runner) SubmitResponseOutput(ctx context.Context, cmd api.SubmitRespons
 }
 
 func (r *Runner) PublishResponse(ctx context.Context, cmd api.PublishResponseCommand) error {
-	return r.rt.PublishResponse(ctx, core.PublishResponseCommand{RunID: cmd.RunID, MessageID: cmd.MessageID})
+	return r.rt.PublishResponse(ctx, core.PublishResponseCommand(cmd))
 }
 
 func (r *Runner) DrainResponseOutbox(ctx context.Context) (int, error) {

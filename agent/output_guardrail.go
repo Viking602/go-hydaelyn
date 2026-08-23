@@ -193,10 +193,5 @@ func normalizeOutputGuardrailResult(result OutputGuardrailResult) (OutputGuardra
 }
 
 func cloneMessages(messages []message.Message) []message.Message {
-	if len(messages) == 0 {
-		return nil
-	}
-	cloned := make([]message.Message, len(messages))
-	copy(cloned, messages)
-	return cloned
+	return message.CloneMessages(messages)
 }

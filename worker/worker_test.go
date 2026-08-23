@@ -20,6 +20,20 @@ import (
 	"github.com/Viking602/venat/tool"
 )
 
+func TestWorkerCallerInfoNamespacesDurableSubagents(t *testing.T) {
+	info := workerCallerInfo(
+		api.Task{RunID: "run-1", ID: "task-1", OwnerAgentID: "owner", AssignedAgentID: "assigned"},
+		api.TaskExecutionLease{HolderID: "holder"},
+	)
+	if info.TeamRunID != "run-1" || info.TaskID != "task-1" || info.AgentID != "owner" {
+		t.Fatalf("worker caller info = %#v", info)
+	}
+	fallback := workerCallerInfo(api.Task{RunID: "run-2", ID: "task-2"}, api.TaskExecutionLease{HolderID: "holder"})
+	if fallback.AgentID != "holder" {
+		t.Fatalf("worker caller holder fallback = %#v", fallback)
+	}
+}
+
 func TestAgentWorkerExecutesEnvelope(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
@@ -709,6 +723,28 @@ func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 	}
 	if completed.Result.Structured == nil || completed.Result.Structured["summary"] != "done" {
 		t.Fatalf("validated structured output dropped from report: %#v", completed.Result)
+	}
+}
+
+func TestGovernedToolBusKeepsSourceValidationOnDirectExecute(t *testing.T) {
+	additional := false
+	driver := &recordingTool{definition: tool.Definition{
+		Name: "lookup",
+		InputSchema: tool.Schema{
+			Type:                 "object",
+			Properties:           map[string]tool.Schema{"query": {Type: "string"}},
+			Required:             []string{"query"},
+			AdditionalProperties: &additional,
+		},
+	}}
+	bus := GovernedToolBus{Bus: tool.NewBus(driver)}
+	result, err := bus.Execute(
+		context.Background(),
+		tool.Call{ID: "call", Name: "lookup", Arguments: json.RawMessage(`{"query":"a","query":"b"}`)},
+		nil,
+	)
+	if err != nil || !result.IsError || driver.called {
+		t.Fatalf("governed validation result=%#v called=%v err=%v", result, driver.called, err)
 	}
 }
 

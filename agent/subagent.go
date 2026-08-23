@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
@@ -18,6 +21,18 @@ import (
 // recursion (an agent that calls a subagent that calls back into an equivalent
 // subagent), not a feature limit; raise it per SubagentDef.MaxDepth when a
 // workload genuinely needs deeper delegation.
+
+var (
+	// ErrSubagentNotStarted marks a scheduler failure proven to have occurred
+	// before child execution or persistence began. It is safe to expose as a
+	// recoverable tool result.
+	ErrSubagentNotStarted = errors.New("subagent execution was not started")
+	// ErrSubagentOutcomeUnknown marks a scheduler failure after execution may
+	// have begun. It must cross as a Go error so durable recovery reconciles the
+	// stable request ID instead of asking the model to create another child.
+	ErrSubagentOutcomeUnknown = errors.New("subagent execution outcome is unknown")
+)
+
 const DefaultSubagentMaxDepth = 4
 
 // SubagentDef is the parent-facing declaration of a subagent: the tool name and
@@ -66,13 +81,91 @@ type SubagentDef struct {
 	Effect tool.EffectType
 }
 
+// SubagentRequest is the stable host boundary for an agent-as-tool execution.
+// ID is deterministic for the parent caller and tool-call slot, allowing a
+// durable scheduler to return a previously completed child instead of
+// duplicating side effects after retry or process restart.
+type SubagentRequest struct {
+	ID         string
+	Parent     tool.CallerInfo
+	Call       tool.Call
+	Definition SubagentDef
+	Task       api.Task
+	Depth      int
+	Engine     Engine
+}
+
+// SubagentExecution distinguishes child usage already persisted against the
+// parent task's durable budget from usage the parent worker must record.
+type SubagentExecution struct {
+	Result               Result
+	ParentUsageAccounted bool
+}
+
+// SubagentScheduler owns persistence, admission, execution, and replay for
+// child agents. Implementations must treat request.ID as idempotent and return
+// the same terminal execution when a completed request is presented again.
+type SubagentScheduler interface {
+	RunSubagent(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error)
+}
+
+// SubagentSchedulerFunc adapts a function to SubagentScheduler.
+type SubagentSchedulerFunc func(context.Context, SubagentRequest, tool.UpdateSink) (SubagentExecution, error)
+
+// RunSubagent delegates to the function.
+func (function SubagentSchedulerFunc) RunSubagent(
+	ctx context.Context,
+	request SubagentRequest,
+	sink tool.UpdateSink,
+) (SubagentExecution, error) {
+	return function(ctx, request, sink)
+}
+
+// ComputeSubagentID returns the deterministic execution identity for one
+// parent tool-call slot. Durable callers should populate CallerInfo with their
+// session/task/run identity. OperationID is the stable slot across provider
+// retries; the provider call ID is used only when no operation ID exists.
+func ComputeSubagentID(parent tool.CallerInfo, call tool.Call) string {
+	slot := call.OperationID
+	if slot == "" {
+		slot = call.ID
+	}
+	digest := sha256.New()
+	for _, part := range []string{
+		parent.TeamRunID,
+		parent.AgentID,
+		parent.TaskID,
+		parent.SessionID,
+		slot,
+		call.Name,
+	} {
+		_, _ = digest.Write([]byte(part))
+		_, _ = digest.Write([]byte{0})
+	}
+	return fmt.Sprintf("subagent-%x", digest.Sum(nil)[:16])
+}
+
+type localSubagentScheduler struct{}
+
+func (localSubagentScheduler) RunSubagent(
+	ctx context.Context,
+	request SubagentRequest,
+	_ tool.UpdateSink,
+) (SubagentExecution, error) {
+	return SubagentExecution{
+		Result: request.Engine.Run(ctx, request.Task, OutputPolicy{}),
+	}, nil
+}
+
 // AsTool wraps an already-materialized child Engine as a tool.Driver the parent
 // agent can invoke from within its own loop. The child Engine is built
 // independently (e.g. via Build) and may run on a different model than the
 // parent; AsTool consumes the Engine, not a declaration, so the subagent path
 // has zero dependency on Spec, AgentClass, or the multiagent layer.
 //
-// The returned driver runs the child synchronously and in-memory:
+// The returned driver submits through child.SubagentScheduler when configured;
+// otherwise it uses the synchronous in-process fallback. Both paths share the
+// same deterministic request identity, depth, budget, failure, and usage rules:
 //
 //   - The parent's tool-call arguments map to the child task's goal. When the
 //     arguments are a JSON object with a string "input" field, that field is
@@ -94,7 +187,7 @@ type SubagentDef struct {
 //   - Nesting past the effective MaxDepth returns an error tool result rather
 //     than recursing.
 func AsTool(child Engine, def SubagentDef) tool.Driver {
-	return &subagentTool{child: child, def: def}
+	return &subagentTool{child: child, def: cloneSubagentDef(def)}
 }
 
 type subagentTool struct {
@@ -107,13 +200,43 @@ func (s *subagentTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:               s.def.Name,
 		Description:        s.def.Description,
-		InputSchema:        s.def.InputSchema,
+		InputSchema:        cloneSubagentSchema(s.def.InputSchema),
 		EffectType:         risk.effect,
 		RequiresApproval:   risk.requiresApproval,
 		RequiresActionTask: risk.requiresActionTask,
 		RiskLevel:          risk.riskLevel,
 		PolicyTags:         risk.policyTags,
 	}
+}
+
+func cloneSubagentDef(definition SubagentDef) SubagentDef {
+	definition.InputSchema = cloneSubagentSchema(definition.InputSchema)
+	if definition.Budget != nil {
+		budget := *definition.Budget
+		definition.Budget = &budget
+	}
+	return definition
+}
+
+func cloneSubagentSchema(schema tool.Schema) tool.Schema {
+	schema.Required = slices.Clone(schema.Required)
+	schema.Enum = slices.Clone(schema.Enum)
+	if schema.Properties != nil {
+		properties := make(map[string]tool.Schema, len(schema.Properties))
+		for name, child := range schema.Properties {
+			properties[name] = cloneSubagentSchema(child)
+		}
+		schema.Properties = properties
+	}
+	if schema.Items != nil {
+		item := cloneSubagentSchema(*schema.Items)
+		schema.Items = &item
+	}
+	if schema.AdditionalProperties != nil {
+		additional := *schema.AdditionalProperties
+		schema.AdditionalProperties = &additional
+	}
+	return schema
 }
 
 // childRisk aggregates the governance-relevant metadata of every tool the child
@@ -207,12 +330,13 @@ func riskLevelRank(level string) int {
 	}
 }
 
-func (s *subagentTool) Execute(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+func (s *subagentTool) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
 	maxDepth := s.def.MaxDepth
 	if maxDepth <= 0 {
 		maxDepth = DefaultSubagentMaxDepth
 	}
-	if depth := subagentDepth(ctx); depth >= maxDepth {
+	depth := subagentDepth(ctx)
+	if depth >= maxDepth {
 		return subagentErrorResult(call, s.def.Name,
 			fmt.Sprintf("subagent %q refused: max nesting depth %d reached", s.def.Name, maxDepth)), nil
 	}
@@ -221,18 +345,60 @@ func (s *subagentTool) Execute(ctx context.Context, call tool.Call, _ tool.Updat
 		return subagentErrorResult(call, s.def.Name,
 			fmt.Sprintf("subagent %q input rejected: %v", s.def.Name, err)), nil
 	}
-
+	parent, _ := tool.CallerFromContext(ctx)
+	if s.child.SubagentScheduler != nil &&
+		parent.TeamRunID == "" && parent.TaskID == "" && parent.SessionID == "" {
+		return subagentErrorResult(
+			call,
+			s.def.Name,
+			fmt.Sprintf("subagent %q scheduling failed: durable parent identity is missing", s.def.Name),
+		), nil
+	}
+	childBudget, settleBudget, budgetErr := reserveParentTokenBudget(ctx, s.def.Budget)
+	if budgetErr != nil {
+		return tool.Result{}, budgetErr
+	}
+	defer settleBudget(nil)
 	task := api.Task{
 		Goal:   subagentGoal(call.Arguments),
-		Budget: capBudgetToParentRemaining(ctx, s.def.Budget),
+		Budget: childBudget,
 	}
-	childCtx := withSubagentDepth(ctx, subagentDepth(ctx)+1)
-	result := s.child.Run(childCtx, task, OutputPolicy{})
-	reportChildUsage(ctx, result.Usage)
-	if result.Failure != nil {
-		return subagentFailureResult(call, s.def.Name, result.Failure), nil
+	requestCall := call
+	requestCall.Arguments = slices.Clone(call.Arguments)
+	request := SubagentRequest{
+		ID:         ComputeSubagentID(parent, call),
+		Parent:     parent,
+		Call:       requestCall,
+		Definition: cloneSubagentDef(s.def),
+		Task:       task,
+		Depth:      depth + 1,
+		Engine:     s.child,
 	}
-	return s.subagentSuccessResult(call, result), nil
+	scheduler := s.child.SubagentScheduler
+	if scheduler == nil {
+		scheduler = localSubagentScheduler{}
+	}
+	childCtx := withSubagentDepth(ctx, request.Depth)
+	execution, scheduleErr := scheduler.RunSubagent(childCtx, request, sink)
+	if scheduleErr != nil {
+		if errors.Is(scheduleErr, ErrSubagentNotStarted) {
+			zero := provider.Usage{}
+			settleBudget(&zero)
+			return subagentErrorResult(call, s.def.Name,
+				fmt.Sprintf("subagent %q scheduling failed before execution: %v", s.def.Name, scheduleErr)), nil
+		}
+		return tool.Result{}, fmt.Errorf("%w for %q: %v", ErrSubagentOutcomeUnknown, s.def.Name, scheduleErr)
+	}
+	settleBudget(&execution.Result.Usage)
+	externallyAccounted := execution.Result.ExternallyAccountedUsage
+	if execution.ParentUsageAccounted {
+		externallyAccounted = execution.Result.Usage
+	}
+	reportChildUsage(ctx, execution.Result.Usage, externallyAccounted)
+	if execution.Result.Failure != nil {
+		return subagentFailureResult(call, s.def.Name, execution.Result.Failure), nil
+	}
+	return s.subagentSuccessResult(call, execution.Result), nil
 }
 
 // validateArguments checks the parent's arguments against the input schema when
@@ -380,21 +546,39 @@ func subagentErrorResult(call tool.Call, name, reason string) tool.Result {
 // counter through every call signature.
 type subagentDepthKey struct{}
 
-func subagentDepth(ctx context.Context) int {
+// SubagentDepth returns the current nested child depth carried by ctx.
+func SubagentDepth(ctx context.Context) int {
 	if depth, ok := ctx.Value(subagentDepthKey{}).(int); ok {
 		return depth
 	}
 	return 0
 }
 
-func withSubagentDepth(ctx context.Context, depth int) context.Context {
+// WithSubagentDepth restores a durable child's nesting depth when execution
+// resumes under a new process context.
+func WithSubagentDepth(ctx context.Context, depth int) context.Context {
 	return context.WithValue(ctx, subagentDepthKey{}, depth)
 }
 
-type parentUsageSinkKey struct{}
-type parentTokenBudgetKey struct{}
+func subagentDepth(ctx context.Context) int {
+	return SubagentDepth(ctx)
+}
 
-func withParentUsageSink(ctx context.Context, add func(provider.Usage)) context.Context {
+func withSubagentDepth(ctx context.Context, depth int) context.Context {
+	return WithSubagentDepth(ctx, depth)
+}
+
+type (
+	parentUsageSinkKey   struct{}
+	parentTokenBudgetKey struct{}
+)
+
+type parentTokenBudget struct {
+	gate      chan struct{}
+	remaining int64
+}
+
+func withParentUsageSink(ctx context.Context, add func(provider.Usage, provider.Usage)) context.Context {
 	if add == nil {
 		return ctx
 	}
@@ -402,31 +586,61 @@ func withParentUsageSink(ctx context.Context, add func(provider.Usage)) context.
 }
 
 func withParentTokenBudget(ctx context.Context, remaining int64) context.Context {
-	return context.WithValue(ctx, parentTokenBudgetKey{}, remaining)
+	return context.WithValue(ctx, parentTokenBudgetKey{}, &parentTokenBudget{
+		gate:      make(chan struct{}, 1),
+		remaining: max(0, remaining),
+	})
 }
 
-func reportChildUsage(ctx context.Context, usage provider.Usage) {
-	add, ok := ctx.Value(parentUsageSinkKey{}).(func(provider.Usage))
+func reportChildUsage(ctx context.Context, usage, externallyAccounted provider.Usage) {
+	add, ok := ctx.Value(parentUsageSinkKey{}).(func(provider.Usage, provider.Usage))
 	if !ok || add == nil {
 		return
 	}
-	add(usage)
+	add(usage, externallyAccounted)
 }
 
-func capBudgetToParentRemaining(ctx context.Context, budget *api.TaskBudget) *api.TaskBudget {
-	remaining, ok := ctx.Value(parentTokenBudgetKey{}).(int64)
-	if !ok {
-		return budget
+func reserveParentTokenBudget(
+	ctx context.Context,
+	budget *api.TaskBudget,
+) (*api.TaskBudget, func(*provider.Usage), error) {
+	tracker, ok := ctx.Value(parentTokenBudgetKey{}).(*parentTokenBudget)
+	if !ok || tracker == nil {
+		if budget == nil {
+			return nil, func(*provider.Usage) {}, nil
+		}
+		cloned := *budget
+		return &cloned, func(*provider.Usage) {}, nil
 	}
-	if remaining < 0 {
-		remaining = 0
+	select {
+	case tracker.gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
 	}
-	if budget == nil {
-		return &api.TaskBudget{MaxTokens: remaining}
+	if tracker.remaining <= 0 {
+		<-tracker.gate
+		return nil, nil, fmt.Errorf("%w: parent token budget", ErrBudgetExhausted)
 	}
-	capped := *budget
-	if capped.MaxTokens <= 0 || capped.MaxTokens > remaining {
-		capped.MaxTokens = remaining
+	claim := tracker.remaining
+	capped := api.TaskBudget{}
+	if budget != nil {
+		capped = *budget
+		if capped.MaxTokens > 0 {
+			claim = min(claim, capped.MaxTokens)
+		}
 	}
-	return &capped
+	capped.MaxTokens = claim
+	tracker.remaining -= claim
+	var once sync.Once
+	settle := func(usage *provider.Usage) {
+		once.Do(func() {
+			if usage != nil {
+				normalized := provider.Usage{}.Add(*usage)
+				spent := min(claim, int64(normalized.TotalTokens))
+				tracker.remaining += claim - spent
+			}
+			<-tracker.gate
+		})
+	}
+	return &capped, settle, nil
 }

@@ -178,6 +178,17 @@ func TestBuild_UnknownToolFailsAtConstruction(t *testing.T) {
 	}
 }
 
+func TestBuild_DuplicateToolSubsetFailsAtConstruction(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	_, err := Build(
+		Spec{Model: "m", Tools: []string{"lookup", "lookup"}},
+		BuildDeps{Providers: provider.Single(driver), Tools: tool.NewBus(mustTool(t, "lookup"))},
+	)
+	if !errors.Is(err, tool.ErrDuplicateToolName) {
+		t.Fatalf("duplicate subset error = %v", err)
+	}
+}
+
 func TestBuild_SelectsOnlyTheNamedToolSubset(t *testing.T) {
 	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
 	master := tool.NewBus(mustTool(t, "lookup"), mustTool(t, "search"))

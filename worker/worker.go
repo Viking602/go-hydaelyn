@@ -261,15 +261,26 @@ func (w AgentWorker) runCheckpointedTask(
 	sink stream.Sink,
 	started time.Time,
 ) (agent.Result, error) {
+	ctx = tool.WithCaller(ctx, workerCallerInfo(task, lease))
 	baseContextBuilder := engine.ContextBuilder
 	if hasCheckpoint {
 		engine.OperationTurn = max(engine.OperationTurn, checkpoint.Checkpoint.NextOperationTurn)
+		engine.AppliedControlIDs = append([]string(nil), checkpoint.Checkpoint.AppliedControlIDs...)
+		if engine.Control != nil && len(engine.AppliedControlIDs) > 0 {
+			if err := engine.Control.Acknowledge(ctx, engine.AppliedControlIDs); err != nil {
+				return agent.Result{}, fmt.Errorf("worker: acknowledge checkpointed turn controls: %w", err)
+			}
+			engine.AppliedControlIDs = nil
+		}
 	}
 	resumeMessages := checkpoint.Checkpoint.Messages
 	engine.ContextBuilder = workerContextBuilder{
 		worker: w, run: run, inner: baseContextBuilder, extra: messages, resume: resumeMessages,
 	}
 	engine.StepRecorder = w.stepRecorder(task, lease, started, engine, engine.StepRecorder)
+	if hasCheckpoint && checkpoint.Checkpoint.ControlAborted {
+		return resultFromControlAbortCheckpoint(checkpoint.Checkpoint), agent.ErrTurnControlAbort
+	}
 	engine.CheckpointRecorder = w.checkpointRecorder(task, lease, engine.CheckpointRecorder)
 	recoveredTerminal := hasCheckpoint &&
 		!checkpoint.Checkpoint.PendingToolCalls &&
@@ -503,6 +514,7 @@ func (w AgentWorker) appendPartialModelUsage(ctx context.Context, task api.Task,
 			TotalTokens: step.ModelCall.TotalTokens,
 		})
 	}
+	recorded = recorded.Add(result.ExternallyAccountedUsage)
 	inputTokens := max(0, result.Usage.InputTokens-recorded.InputTokens)
 	cachedInputTokens := max(0, result.Usage.CachedInputTokens-recorded.CachedInputTokens)
 	cacheWriteInputTokens := max(0, result.Usage.CacheWriteInputTokens-recorded.CacheWriteInputTokens)
@@ -888,6 +900,18 @@ func pendingToolCallCount(messages []message.Message) int {
 	return len(pendingToolCalls(messages))
 }
 
+func resultFromControlAbortCheckpoint(checkpoint agent.TurnCheckpoint) agent.Result {
+	return agent.Result{
+		Valid:                    false,
+		Steps:                    []agent.Step{checkpoint.Step},
+		Usage:                    checkpoint.Usage,
+		ExternallyAccountedUsage: checkpoint.ExternallyAccountedUsage,
+		ToolCallsUsed:            checkpoint.ToolCallsUsed,
+		StopReason:               provider.StopReasonAborted,
+		Messages:                 message.CloneMessages(checkpoint.Messages),
+	}
+}
+
 func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint, schema json.RawMessage) (agent.Result, error) {
 	text := ""
 	thinking := ""
@@ -905,14 +929,15 @@ func resultFromTerminalCheckpoint(checkpoint agent.TurnCheckpoint, schema json.R
 		stopReason = checkpoint.Step.ModelCall.StopReason
 	}
 	result := agent.Result{
-		Text:          text,
-		Valid:         true,
-		Steps:         []agent.Step{checkpoint.Step},
-		Usage:         checkpoint.Usage,
-		ToolCallsUsed: checkpoint.ToolCallsUsed,
-		StopReason:    stopReason,
-		Messages:      append([]message.Message(nil), checkpoint.Messages...),
-		Thinking:      thinking,
+		Text:                     text,
+		Valid:                    true,
+		Steps:                    []agent.Step{checkpoint.Step},
+		Usage:                    checkpoint.Usage,
+		ExternallyAccountedUsage: checkpoint.ExternallyAccountedUsage,
+		ToolCallsUsed:            checkpoint.ToolCallsUsed,
+		StopReason:               stopReason,
+		Messages:                 append([]message.Message(nil), checkpoint.Messages...),
+		Thinking:                 thinking,
 	}
 	if len(schema) == 0 {
 		return result, nil
@@ -955,6 +980,21 @@ func pendingToolCalls(messages []message.Message) []tool.Call {
 		}
 	}
 	return pending
+}
+
+func workerCallerInfo(task api.Task, lease api.TaskExecutionLease) tool.CallerInfo {
+	agentID := task.OwnerAgentID
+	if agentID == "" {
+		agentID = task.AssignedAgentID
+	}
+	if agentID == "" {
+		agentID = lease.HolderID
+	}
+	return tool.CallerInfo{
+		TeamRunID: task.RunID,
+		AgentID:   agentID,
+		TaskID:    task.ID,
+	}
 }
 
 func (w AgentWorker) runEngineWithHeartbeat(ctx context.Context, engine agent.Engine, task api.Task, sink stream.Sink) (agent.Result, error) {

@@ -1,3 +1,5 @@
+//lint:file-ignore SA1019 This compatibility smoke test intentionally imports deprecated alias packages.
+
 package venat
 
 import (

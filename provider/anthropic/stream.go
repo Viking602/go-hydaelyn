@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,19 +47,28 @@ type contentBlock struct {
 	Type string `json:"type"`
 	// text
 	Text string `json:"text,omitempty"`
+	// image / document
+	Source *anthropicContentSource `json:"source,omitempty"`
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	// tool_result
 	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Content   any    `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
 	// thinking
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
 	// redacted_thinking
 	Data string `json:"data,omitempty"`
+}
+
+type anthropicContentSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 type anthropicTool struct {
@@ -68,8 +78,12 @@ type anthropicTool struct {
 }
 
 type eventEnvelope struct {
-	Type         string `json:"type"`
-	Index        int    `json:"index"`
+	Type    string `json:"type"`
+	Index   int    `json:"index"`
+	Message struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+	} `json:"message"`
 	ContentBlock struct {
 		Type string `json:"type"`
 		ID   string `json:"id"`
@@ -104,6 +118,7 @@ type streamState struct {
 	pending    []provider.Event
 	finished   bool
 	usage      provider.Usage
+	response   provider.ResponseMetadata
 	stopReason provider.StopReason
 	toolCalls  map[int]provider.ToolCallDelta
 }
@@ -123,7 +138,10 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if request.MaxTokens > 0 {
 		maxTokens = request.MaxTokens
 	}
-	system, messages := toAnthropicRequest(request.Messages)
+	system, messages, err := toAnthropicRequest(request.Messages)
+	if err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(requestBody{
 		Model:         request.Model,
 		MaxTokens:     maxTokens,
@@ -219,6 +237,7 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 			s.state.usage.CachedInputTokensReported = cacheReadReported
 			s.state.usage.CacheWriteInputTokens = cacheWriteTokens
 			s.state.usage.CacheWriteInputTokensReported = cacheWriteReported
+			s.state.response = provider.ResponseMetadata{ID: parsed.Message.ID, Model: parsed.Message.Model}
 		case "content_block_start":
 			switch parsed.ContentBlock.Type {
 			case "tool_use":
@@ -280,6 +299,7 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 				Kind:       provider.EventDone,
 				Usage:      s.state.usage,
 				StopReason: s.state.stopReason,
+				Response:   s.state.response,
 			}, nil
 		case "error":
 			return provider.Event{}, anthropicError(parsed.Error.Type, parsed.Error.Message)
@@ -321,89 +341,163 @@ func (s *anthropicStream) Close() error {
 // turn's reasoning into a single string, so interleaved multi-block thinking
 // is not represented here. A thinking block is only emitted when its
 // signature is present, since the API rejects unsigned thinking blocks.
-func toAnthropicRequest(messages []message.Message) (string, []anthropicMessage) {
+func toAnthropicRequest(messages []message.Message) (string, []anthropicMessage, error) {
 	var systemParts []string
 	items := make([]anthropicMessage, 0, len(messages))
 	var pendingToolResults []contentBlock
-
 	flush := func() {
 		if len(pendingToolResults) > 0 {
 			items = append(items, anthropicMessage{Role: "user", Content: pendingToolResults})
 			pendingToolResults = nil
 		}
 	}
-
 	for _, msg := range messages {
 		switch msg.Role {
 		case message.RoleSystem:
 			flush()
-			if msg.Text != "" {
-				systemParts = append(systemParts, msg.Text)
+			text, err := anthropicSystemText(msg.CanonicalContent())
+			if err != nil {
+				return "", nil, err
+			}
+			if text != "" {
+				systemParts = append(systemParts, text)
 			}
 		case message.RoleTool:
 			if msg.ToolResult != nil {
-				pendingToolResults = append(pendingToolResults, toolResultBlock(*msg.ToolResult))
+				block, err := toolResultBlock(*msg.ToolResult)
+				if err != nil {
+					return "", nil, err
+				}
+				pendingToolResults = append(pendingToolResults, block)
 			}
 		case message.RoleAssistant:
 			flush()
-			if blocks := assistantBlocks(msg); len(blocks) > 0 {
+			blocks, err := assistantBlocks(msg)
+			if err != nil {
+				return "", nil, err
+			}
+			if len(blocks) > 0 {
 				items = append(items, anthropicMessage{Role: "assistant", Content: blocks})
 			}
 		default:
 			flush()
-			if msg.Text != "" {
-				items = append(items, anthropicMessage{
-					Role:    "user",
-					Content: []contentBlock{{Type: "text", Text: msg.Text}},
-				})
+			blocks, err := anthropicInputBlocks(msg.CanonicalContent(), msg.Role)
+			if err != nil {
+				return "", nil, err
+			}
+			if len(blocks) > 0 {
+				items = append(items, anthropicMessage{Role: "user", Content: blocks})
 			}
 		}
 	}
 	flush()
-	return strings.Join(systemParts, "\n\n"), items
+	return strings.Join(systemParts, "\n\n"), items, nil
 }
 
-// assistantBlocks renders an assistant message as an ordered block array.
-// Thinking must precede tool_use, and a thinking block requires its signature,
-// so an unsigned thinking string is dropped rather than sent (which the API
-// would reject).
-func assistantBlocks(msg message.Message) []contentBlock {
-	blocks := make([]contentBlock, 0, 2+len(msg.ToolCalls))
-	if msg.Thinking != "" && msg.ThinkingSignature != "" {
-		blocks = append(blocks, contentBlock{
-			Type:      "thinking",
-			Thinking:  msg.Thinking,
-			Signature: msg.ThinkingSignature,
-		})
+func anthropicSystemText(parts []message.ContentPart) (string, error) {
+	var text strings.Builder
+	for _, part := range parts {
+		switch part.Kind {
+		case message.ContentText, message.ContentCommentary, message.ContentFinalAnswer:
+			text.WriteString(part.Text)
+		default:
+			return "", fmt.Errorf("anthropic system message cannot serialize %s content", part.Kind)
+		}
 	}
-	if msg.RedactedThinking != "" {
-		blocks = append(blocks, contentBlock{Type: "redacted_thinking", Data: msg.RedactedThinking})
-	}
-	if msg.Text != "" {
-		blocks = append(blocks, contentBlock{Type: "text", Text: msg.Text})
+	return text.String(), nil
+}
+
+func assistantBlocks(msg message.Message) ([]contentBlock, error) {
+	parts := msg.CanonicalContent()
+	blocks := make([]contentBlock, 0, len(parts)+len(msg.ToolCalls))
+	sawVisible := false
+	for _, part := range parts {
+		switch part.Kind {
+		case message.ContentReasoning:
+			if part.Signature == "" {
+				continue
+			}
+			if sawVisible {
+				return nil, fmt.Errorf("anthropic signed thinking must precede visible assistant content")
+			}
+			blocks = append(blocks, contentBlock{Type: "thinking", Thinking: part.Text, Signature: part.Signature})
+		case message.ContentRedactedReasoning:
+			if sawVisible {
+				return nil, fmt.Errorf("anthropic redacted thinking must precede visible assistant content")
+			}
+			blocks = append(blocks, contentBlock{Type: "redacted_thinking", Data: string(part.Data)})
+		case message.ContentText, message.ContentCommentary, message.ContentFinalAnswer:
+			sawVisible = true
+			blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
+		default:
+			return nil, fmt.Errorf("anthropic assistant message cannot serialize %s content", part.Kind)
+		}
 	}
 	for _, call := range msg.ToolCalls {
 		input := json.RawMessage(call.Arguments)
 		if len(input) == 0 {
 			input = json.RawMessage("{}")
 		}
-		blocks = append(blocks, contentBlock{
-			Type:  "tool_use",
-			ID:    call.ID,
-			Name:  call.Name,
-			Input: input,
-		})
+		blocks = append(blocks, contentBlock{Type: "tool_use", ID: call.ID, Name: call.Name, Input: input})
 	}
-	return blocks
+	return blocks, nil
 }
 
-func toolResultBlock(result message.ToolResult) contentBlock {
+func anthropicInputBlocks(parts []message.ContentPart, role message.Role) ([]contentBlock, error) {
+	blocks := make([]contentBlock, 0, len(parts))
+	for _, part := range parts {
+		switch part.Kind {
+		case message.ContentText, message.ContentCommentary, message.ContentFinalAnswer:
+			blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
+		case message.ContentImage:
+			source, err := anthropicSource(part)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, contentBlock{Type: "image", Source: source})
+		case message.ContentFile:
+			source, err := anthropicSource(part)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, contentBlock{Type: "document", Source: source})
+		default:
+			return nil, fmt.Errorf("anthropic %s message cannot serialize %s content", role, part.Kind)
+		}
+	}
+	return blocks, nil
+}
+
+func anthropicSource(part message.ContentPart) (*anthropicContentSource, error) {
+	if part.URI != "" {
+		return &anthropicContentSource{Type: "url", URL: part.URI}, nil
+	}
+	if len(part.Data) == 0 || part.MediaType == "" {
+		return nil, fmt.Errorf("anthropic %s content requires uri or inline data with media type", part.Kind)
+	}
+	return &anthropicContentSource{
+		Type:      "base64",
+		MediaType: part.MediaType,
+		Data:      base64.StdEncoding.EncodeToString(part.Data),
+	}, nil
+}
+
+func toolResultBlock(result message.ToolResult) (contentBlock, error) {
+	parts := result.CanonicalContent()
+	blocks, err := anthropicInputBlocks(parts, message.RoleTool)
+	if err != nil {
+		return contentBlock{}, err
+	}
+	var content any = blocks
+	if len(blocks) == 1 && blocks[0].Type == "text" {
+		content = blocks[0].Text
+	}
 	return contentBlock{
 		Type:      "tool_result",
 		ToolUseID: result.ToolCallID,
-		Content:   result.Content,
+		Content:   content,
 		IsError:   result.IsError,
-	}
+	}, nil
 }
 
 func toAnthropicTools(defs []message.ToolDefinition) []anthropicTool {
