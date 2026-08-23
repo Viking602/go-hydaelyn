@@ -53,7 +53,10 @@ func TestRuntime_ExecutesEnvelopesFromChannel(t *testing.T) {
 		if n == 3 {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-time.After(time.Millisecond):
+		case <-ctx.Done():
+		}
 	}
 
 	cancel()
@@ -92,7 +95,10 @@ func TestRuntime_OnErrorReceivesExecutorErrors(t *testing.T) {
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) && atomic.LoadInt32(&errCount) == 0 {
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-time.After(time.Millisecond):
+		case <-ctx.Done():
+		}
 	}
 	cancel()
 	<-done
@@ -103,10 +109,12 @@ func TestRuntime_OnErrorReceivesExecutorErrors(t *testing.T) {
 
 func TestRuntime_StopDrainsInFlight(t *testing.T) {
 	p := worker.NewChannelPoller(2)
+	started := make(chan struct{})
 	release := make(chan struct{})
 	var finished int32
 	rt := worker.NewRuntime(p,
 		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
+			close(started)
 			<-release
 			atomic.AddInt32(&finished, 1)
 			return worker.ExecutionOutcome{State: worker.ExecutionCompleted}, nil
@@ -120,19 +128,45 @@ func TestRuntime_StopDrainsInFlight(t *testing.T) {
 	ctx := context.Background()
 	go rt.Run(ctx)
 	_ = p.Submit(ctx, api.TaskEnvelope{ID: "slow"})
-
-	// Let the worker start.
-	time.Sleep(100 * time.Millisecond)
-
-	// Concurrently call Stop and release the executor; Stop must wait for drain.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(release)
-	}()
+	<-started
+	go close(release)
 	if err := rt.Stop(); err != nil {
 		t.Fatalf("Stop returned: %v", err)
 	}
 	if atomic.LoadInt32(&finished) != 1 {
 		t.Fatalf("expected drained executor to finish, got %d", atomic.LoadInt32(&finished))
+	}
+}
+
+func TestRuntime_StopTimeoutCancelsInFlight(t *testing.T) {
+	p := worker.NewChannelPoller(1)
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	rt := worker.NewRuntime(p,
+		worker.ExecutorFunc(func(ctx context.Context, req worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
+			close(started)
+			<-ctx.Done()
+			close(cancelled)
+			return worker.ExecutionOutcome{}, ctx.Err()
+		}),
+		worker.RuntimeOptions{
+			Concurrency:          1,
+			PollInterval:         10 * time.Millisecond,
+			ShutdownDrainTimeout: 30 * time.Millisecond,
+		})
+
+	ctx := context.Background()
+	go rt.Run(ctx)
+	if err := p.Submit(ctx, api.TaskEnvelope{ID: "stuck"}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-started
+	if err := rt.Stop(); err == nil {
+		t.Fatal("expected drain timeout")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("in-flight work was not cancelled after drain timeout")
 	}
 }

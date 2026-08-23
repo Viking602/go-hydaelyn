@@ -212,6 +212,17 @@ func TestWaitForBlackboardSatisfiedByExisting(t *testing.T) {
 	}
 }
 
+func TestAppendUniqueBlackboardItemsCapsAnonymousIDs(t *testing.T) {
+	seen := map[string]struct{}{}
+	var acc []BlackboardItem
+	for i := 0; i < maxAnonymousBlackboardWaitItems+16; i++ {
+		acc = appendUniqueBlackboardItems(acc, seen, BlackboardItem{Type: BlackboardItemClaim})
+	}
+	if len(acc) != maxAnonymousBlackboardWaitItems {
+		t.Fatalf("anonymous items = %d, want cap %d", len(acc), maxAnonymousBlackboardWaitItems)
+	}
+}
+
 type recordingSubscriberStoreProvider struct {
 	uow        *recordingUnitOfWork
 	ch         chan BlackboardItem

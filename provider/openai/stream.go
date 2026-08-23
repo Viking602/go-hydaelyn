@@ -244,10 +244,7 @@ func (d Driver) apiKey() (string, error) {
 
 func (d Driver) postEventStream(ctx context.Context, path string, body []byte, apiKey string) (io.ReadCloser, error) {
 	endpoint := strings.TrimRight(d.config.BaseURL, "/") + path
-	client := d.config.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
+	client := shared.ClientOrDefault(d.config.Client, defaultResponseHeaderTimeout)
 	idempotencyKey, err := shared.NewIdempotencyKey()
 	if err != nil {
 		return nil, fmt.Errorf("openai: generate idempotency key: %w", err)

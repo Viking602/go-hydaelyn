@@ -1,5 +1,34 @@
 # Migration Notes
 
+## v0.14 → v0.15 — architecture program
+
+v0.15 starts the structural repair recorded in
+[ADR-020](adr/ADR-020-v015-architecture-program.md). Source breaks in
+this drop:
+
+- No-context Runner helpers are gone. Use `RunEvents`, `ReplayContext`,
+  `ReplayRunStateContext`, `ReadyTasksContext`,
+  `ActiveLeaseCountContext`, `ListTraceSpans`, and
+  `ResponseOutboxContext`.
+- `memory.Memory[T]` is deprecated. New code implements
+  `api.Memory[T api.Identified]` (`Write` / `Read` / `Forget`).
+- `flow/` and `blackboard/` are deprecated aliases of `api` types.
+- `ExecuteCommand` remains but is deprecated; prefer typed Runner
+  methods.
+- Domain sub-façades are available: `Runner.Admin()`,
+  `Runner.Governance()`, `Runner.Blackboard()`.
+- `api.ArtifactStore` exists as a contract only. The framework ships no
+  blob backend (ADR-027 / Position D).
+- `api.UnitOfWork` now embeds capability interfaces (`RunStores`,
+  `CollaborationStores`, …). Full providers do not need to change.
+
+`internal/core/adapter` is still present. Dual-model deletion is
+incremental (ADR-023) and is not part of this drop.
+
+The default `New` / `NewDevelopment` store remains process-local memory
+and is not crash-durable.
+
+
 ## Pack eval cases moved to tests
 
 `packs.Pack.EvalCases` remains for existing pack literals but is

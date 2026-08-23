@@ -2,6 +2,8 @@
 // and messaging layers.
 package gate
 
+import "sync"
+
 // FlushGate gates message writes during an initial flush so that new
 // messages do not interleave with historical ones.
 //
@@ -12,6 +14,7 @@ package gate
 //   - Deactivate() → Clears the active flag without dropping items
 //     (useful when the transport is replaced and the new transport will drain).
 type FlushGate[T any] struct {
+	mu      sync.Mutex
 	active  bool
 	pending []T
 }
@@ -21,6 +24,8 @@ func (g *FlushGate[T]) Active() bool {
 	if g == nil {
 		return false
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	return g.active
 }
 
@@ -29,6 +34,8 @@ func (g *FlushGate[T]) PendingCount() int {
 	if g == nil {
 		return 0
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	return len(g.pending)
 }
 
@@ -37,6 +44,8 @@ func (g *FlushGate[T]) Start() {
 	if g == nil {
 		return
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.active = true
 }
 
@@ -46,6 +55,8 @@ func (g *FlushGate[T]) End() []T {
 	if g == nil {
 		return nil
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.active = false
 	items := g.pending
 	g.pending = nil
@@ -56,7 +67,12 @@ func (g *FlushGate[T]) End() []T {
 // If active, it returns true. Otherwise it returns false and the caller
 // should send the items directly.
 func (g *FlushGate[T]) Enqueue(items ...T) bool {
-	if g == nil || !g.active {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.active {
 		return false
 	}
 	g.pending = append(g.pending, items...)
@@ -69,6 +85,8 @@ func (g *FlushGate[T]) Drop() int {
 	if g == nil {
 		return 0
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.active = false
 	n := len(g.pending)
 	g.pending = g.pending[:0]
@@ -81,5 +99,7 @@ func (g *FlushGate[T]) Deactivate() {
 	if g == nil {
 		return
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.active = false
 }

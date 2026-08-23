@@ -2,6 +2,12 @@ package api
 
 import "testing"
 
+func TestDefaultConfigIsEmpty(t *testing.T) {
+	if DefaultConfig().StoreProvider != nil || DefaultConfig().PolicyEngine != nil {
+		t.Fatal("DefaultConfig should be empty")
+	}
+}
+
 func TestDefaultStoreCapabilitiesFailClosed(t *testing.T) {
 	if got := DefaultStoreCapabilities(); got != (StoreCapabilities{}) {
 		t.Fatalf("DefaultStoreCapabilities() = %+v, want all capabilities disabled", got)

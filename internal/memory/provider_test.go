@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -417,5 +418,260 @@ func TestMemoryLeaseStore_ExtendLease(t *testing.T) {
 	}
 	if missing {
 		t.Fatalf("expected ExtendLease(missing) to return false")
+	}
+}
+
+func TestStateClone_NestedMutationDoesNotLeak(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := uow.Runs().SaveRun(ctx, model.Run{
+		ID:       "run-1",
+		Status:   model.RunStatusCreated,
+		Metadata: map[string]string{"k": "v"},
+	}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	if err := uow.Events().AppendEvent(ctx, model.Event{
+		RunID:   "run-1",
+		Type:    model.EventRunStarted,
+		Payload: map[string]any{"step": "start"},
+	}); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	if err := uow.Tasks().SaveTask(ctx, model.Task{
+		ID:           "task-1",
+		RunID:        "run-1",
+		Status:       model.TaskStatusCreated,
+		OwnerHistory: []string{"agent-a"},
+		Budget:       &model.TaskBudget{MaxTokens: 10},
+		Result:       &model.TypedReport{Status: model.ReportStatusSuccess, Structured: map[string]any{"ok": true}},
+	}); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+	if err := uow.MailboxOutbox().QueueEnvelope(ctx, model.TaskEnvelope{
+		ID:      "env-1",
+		RunID:   "run-1",
+		TaskID:  "task-1",
+		Status:  "pending",
+		Payload: map[string]any{"n": 1},
+	}); err != nil {
+		t.Fatalf("QueueEnvelope() error = %v", err)
+	}
+	if err := uow.Commit(ctx); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	writer, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin(writer) error = %v", err)
+	}
+	run, err := writer.Runs().LoadRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("LoadRun() error = %v", err)
+	}
+	run.Metadata["k"] = "mutated"
+	events, err := writer.Events().ListEvents(ctx, "run-1")
+	if err != nil || len(events) != 1 {
+		t.Fatalf("ListEvents() = %#v err=%v", events, err)
+	}
+	events[0].Payload["step"] = "mutated"
+	task, err := writer.Tasks().LoadTask(ctx, "run-1", "task-1")
+	if err != nil {
+		t.Fatalf("LoadTask() error = %v", err)
+	}
+	task.OwnerHistory[0] = "mutated"
+	task.Budget.MaxTokens = 99
+	task.Result.Structured["ok"] = false
+	envelope, err := writer.MailboxOutbox().LoadEnvelope(ctx, "env-1")
+	if err != nil {
+		t.Fatalf("LoadEnvelope() error = %v", err)
+	}
+	envelope.Payload["n"] = 99
+	if err := writer.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+
+	reader, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin(reader) error = %v", err)
+	}
+	defer func() { _ = reader.Rollback(ctx) }()
+	committed, err := reader.Runs().LoadRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("LoadRun(committed) error = %v", err)
+	}
+	if committed.Metadata["k"] != "v" {
+		t.Fatalf("committed run metadata leaked mutation: %#v", committed.Metadata)
+	}
+	committedEvents, err := reader.Events().ListEvents(ctx, "run-1")
+	if err != nil || committedEvents[0].Payload["step"] != "start" {
+		t.Fatalf("committed event payload leaked mutation: %#v", committedEvents)
+	}
+	committedTask, err := reader.Tasks().LoadTask(ctx, "run-1", "task-1")
+	if err != nil {
+		t.Fatalf("LoadTask(committed) error = %v", err)
+	}
+	if committedTask.OwnerHistory[0] != "agent-a" || committedTask.Budget.MaxTokens != 10 || committedTask.Result.Structured["ok"] != true {
+		t.Fatalf("committed task leaked mutation: %#v", committedTask)
+	}
+	committedEnv, err := reader.MailboxOutbox().LoadEnvelope(ctx, "env-1")
+	if err != nil {
+		t.Fatalf("LoadEnvelope(committed) error = %v", err)
+	}
+	if committedEnv.Payload["n"] != 1 {
+		t.Fatalf("committed envelope payload leaked mutation: %#v", committedEnv.Payload)
+	}
+}
+
+func TestUnitOfWorkDoubleRollbackIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if err := uow.Rollback(ctx); err != nil {
+		t.Fatalf("second Rollback() error = %v", err)
+	}
+	next, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() after double rollback error = %v", err)
+	}
+	if err := next.Rollback(ctx); err != nil {
+		t.Fatalf("cleanup Rollback() error = %v", err)
+	}
+}
+
+func TestBeginReadDoesNotTakeWriteGate(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	writer, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	reader, err := provider.BeginRead(ctx)
+	if err != nil {
+		t.Fatalf("BeginRead() while writer open error = %v", err)
+	}
+	if err := reader.Commit(ctx); !errors.Is(err, model.ErrInvalidCommand) {
+		t.Fatalf("read-only Commit() error = %v, want ErrInvalidCommand", err)
+	}
+	if err := reader.Rollback(ctx); err != nil {
+		t.Fatalf("read-only Rollback() error = %v", err)
+	}
+	if err := writer.Rollback(ctx); err != nil {
+		t.Fatalf("writer Rollback() error = %v", err)
+	}
+}
+
+func TestListRunsFiltersAgentMetadata(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := uow.Runs().SaveRun(ctx, model.Run{
+		ID: "run-a", Status: model.RunStatusCreated,
+		Metadata: map[string]string{"agentId": "agent-1", "agentVersion": "v1"},
+	}); err != nil {
+		t.Fatalf("SaveRun(a) error = %v", err)
+	}
+	if err := uow.Runs().SaveRun(ctx, model.Run{
+		ID: "run-b", Status: model.RunStatusCreated,
+		Metadata: map[string]string{"agentId": "agent-2", "agentVersion": "v2"},
+	}); err != nil {
+		t.Fatalf("SaveRun(b) error = %v", err)
+	}
+	if err := uow.Commit(ctx); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	reader, err := provider.BeginRead(ctx)
+	if err != nil {
+		t.Fatalf("BeginRead() error = %v", err)
+	}
+	defer func() { _ = reader.Rollback(ctx) }()
+	got, err := reader.Runs().ListRuns(ctx, model.RunSelector{AgentID: "agent-1", AgentVersion: "v1"})
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "run-a" {
+		t.Fatalf("ListRuns() = %#v, want run-a", got)
+	}
+}
+
+func TestProviderEnforcesEventLimit(t *testing.T) {
+	ctx := context.Background()
+	provider := NewProviderWithLimits(Limits{MaxEventsPerRun: 1})
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: "run-1", Type: model.EventRunStarted}); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: "run-1", Type: model.EventRunStatusChanged}); !errors.Is(err, model.ErrInvalidCommand) {
+		t.Fatalf("second AppendEvent() error = %v, want limit", err)
+	}
+	_ = uow.Rollback(ctx)
+}
+
+func TestSubscribeRespectsContextAndCountsDrops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := NewProvider()
+	ch, stop, err := provider.Subscribe(ctx, "run-1", model.BlackboardSelector{})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	cancel()
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("expected subscription channel to close after cancel")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscription did not close after cancel")
+	}
+	if err := stop(); err != nil {
+		t.Fatalf("stop() after cancel error = %v", err)
+	}
+
+	live, liveStop, err := provider.Subscribe(context.Background(), "run-1", model.BlackboardSelector{})
+	if err != nil {
+		t.Fatalf("Subscribe(live) error = %v", err)
+	}
+	defer func() { _ = liveStop() }()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 64; j++ {
+				provider.Notify([]model.BlackboardItem{{
+					ID:    "item",
+					RunID: "run-1",
+					Type:  model.BlackboardItemEvidence,
+				}})
+			}
+		}()
+	}
+	wg.Wait()
+	if provider.DroppedCount() == 0 {
+		t.Fatal("expected overflowed subscriber to increment DroppedCount")
+	}
+	// Drain so the test does not leak a blocked goroutine.
+	for {
+		select {
+		case <-live:
+		default:
+			return
+		}
 	}
 }

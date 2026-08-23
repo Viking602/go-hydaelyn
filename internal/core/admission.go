@@ -29,8 +29,8 @@ func (r *Runtime) PreviewAdmission(ctx context.Context, request model.AdmissionR
 }
 
 // ReserveAdmission atomically evaluates aggregate limits and records capacity.
-func (r *Runtime) ReserveAdmission(ctx context.Context, request model.AdmissionRequest) (model.AdmissionDecision, error) {
-	request, err := admissionRequestAtTrustedTime(request)
+func (r *Runtime) ReserveAdmission(ctx context.Context, request model.AdmissionRequest) (decision model.AdmissionDecision, err error) {
+	request, err = admissionRequestAtTrustedTime(request)
 	if err != nil {
 		return model.AdmissionDecision{}, err
 	}
@@ -39,20 +39,16 @@ func (r *Runtime) ReserveAdmission(ctx context.Context, request model.AdmissionR
 		return model.AdmissionDecision{}, err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	store, err := r.admissionStore(ctx, uow)
 	if err != nil {
 		return model.AdmissionDecision{}, err
 	}
-	decision, err := store.ReserveAdmission(ctx, request)
+	decision, err = store.ReserveAdmission(ctx, request)
 	if err != nil {
-		return model.AdmissionDecision{}, err
+		return decision, err
 	}
-	if err := uow.Commit(ctx); err != nil {
+	if err = uow.Commit(ctx); err != nil {
 		return model.AdmissionDecision{}, err
 	}
 	committed = true
@@ -60,8 +56,8 @@ func (r *Runtime) ReserveAdmission(ctx context.Context, request model.AdmissionR
 }
 
 // TransitionAdmission applies one expected-version reservation transition.
-func (r *Runtime) TransitionAdmission(ctx context.Context, transition model.AdmissionTransition) (model.AdmissionDecision, error) {
-	transition, err := admissionTransitionAtTrustedTime(transition)
+func (r *Runtime) TransitionAdmission(ctx context.Context, transition model.AdmissionTransition) (decision model.AdmissionDecision, err error) {
+	transition, err = admissionTransitionAtTrustedTime(transition)
 	if err != nil {
 		return model.AdmissionDecision{}, err
 	}
@@ -70,11 +66,7 @@ func (r *Runtime) TransitionAdmission(ctx context.Context, transition model.Admi
 		return model.AdmissionDecision{}, err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	store, err := r.admissionStore(ctx, uow)
 	if err != nil {
 		return model.AdmissionDecision{}, err
@@ -99,7 +91,7 @@ func (r *Runtime) TransitionAdmission(ctx context.Context, transition model.Admi
 		}
 		transition.Failed = failed
 	}
-	decision, err := store.TransitionAdmission(ctx, transition)
+	decision, err = store.TransitionAdmission(ctx, transition)
 	if err != nil {
 		return model.AdmissionDecision{}, err
 	}

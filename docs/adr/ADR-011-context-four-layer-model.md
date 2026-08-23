@@ -4,6 +4,10 @@
 
 Accepted — enforced from v0.8.0 onward. Anchor document: `docs/product-spec/v0.8.0/07-context.md`. Companion ADR-013 covers why Memory in the kernel is storage-only.
 
+**Amended 2026-08-15 (ADR-027):** `api.ArtifactStore` is a Position D
+contract only. The framework does not ship `artifact/filesystem` or
+`artifact/inmem` backends. Applications implement the interface.
+
 ## Context
 
 By v0.7.x the only structured context surface was Blackboard. Several distinct categories of "context" were being shoved into it and onto each other:

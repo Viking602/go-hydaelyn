@@ -726,8 +726,8 @@ func TestTeamRunnerResumeStopsAfterRecoveryQuarantine(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("StartActionAttempt() error = %v", err)
 	}
-	if wait := time.Until(lease.ExpiresAt) + time.Millisecond; wait > 0 {
-		time.Sleep(wait)
+	for time.Now().Before(lease.ExpiresAt.Add(time.Millisecond)) {
+		time.Sleep(time.Millisecond)
 	}
 	envelopesBefore := listTeamEnvelopes(t, runner, run.ID)
 	teamRunner := TeamRunner{

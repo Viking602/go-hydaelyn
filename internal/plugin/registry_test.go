@@ -53,3 +53,12 @@ func TestRegistryAllowsSameNameAcrossDifferentTypes(t *testing.T) {
 		t.Fatalf("expected observer plugin to exist")
 	}
 }
+
+func TestNewRegistryPanicsOnInvalidSpec(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected NewRegistry to panic on an invalid spec")
+		}
+	}()
+	_ = NewRegistry(Spec{Type: TypeProvider, Name: ""})
+}

@@ -42,10 +42,10 @@
 | `transport/` | MCP, cron, webhook, SSE, and event integrations |
 | `provider/` | Anthropic, OpenAI, and scripted provider drivers |
 | `tool/`, `hook/`, `policy/`, `message/` | Tool execution, hooks, policy, and messages |
-| `memory/` | Optional `Memory[T]` plugin contract; no backend ships |
-| `worker/` | Optional bridge from task envelopes to `agent.Engine` |
-| `coding/` | Sandboxed coding-agent runtime; hosts bind pack manifests to it |
-| `packs/` | Vertical pack skeletons (eval suites live in pack tests) |
+| `memory/` | Deprecated compatibility Memory surface; use `api.Memory[T]` (ADR-021) |
+| `worker/` | Integration layer: poll, lease, execute, team drive |
+| `coding/` | Domain coding runtime; packs must not import it |
+| `packs/` | Vertical pack skeletons |
 | `eval/` | Evaluation cases, assertions, matchers, and reporters |
 | `contract/` | Storage conformance tests |
 

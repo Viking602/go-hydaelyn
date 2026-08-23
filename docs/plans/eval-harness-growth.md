@@ -77,7 +77,7 @@ Verified Runner façade methods available to back assertions/harness:
 `Run(ctx, runID) (api.Run, error)`, `RunEvents(ctx, runID) ([]api.Event, error)`,
 `ListEvents`, `RegisterAgent(api.AgentProfile)`, `RegisterTool(api.Tool)`,
 `SelectItems(ctx, runID, api.BlackboardSelector)`, `InvokeTool`,
-`RequestApproval`, `StartActionAttempt`, `TraceSpans(runID) []api.TraceSpan`.
+`RequestApproval`, `StartActionAttempt`, `ListTraceSpans(ctx, runID)`.
 
 Deterministic provider:
 `provider/scripted.New([]provider.Event) *ScriptedProvider` and

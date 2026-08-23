@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestScopedToolDefinitionsDoNotOverwriteAcrossConcurrentTasks(t *testing.T) 
 		registrations.Add(1)
 		go func() {
 			defer registrations.Done()
-			rt.RegisterToolForInvocation("run-1", taskID, model.HolderAgent, "agent-a", definition)
+			_ = rt.RegisterToolForInvocation("run-1", taskID, model.HolderAgent, "agent-a", definition)
 		}()
 	}
 	registrations.Wait()
@@ -50,8 +51,8 @@ func TestScopedToolDefinitionsDoNotOverwriteAcrossConcurrentTasks(t *testing.T) 
 
 func TestAgentScopedLookupDoesNotUseGlobalOrOtherTaskTool(t *testing.T) {
 	rt := NewMemoryRuntime()
-	rt.RegisterTool(model.Tool{Name: "shared", EffectType: model.ToolEffectReadOnly})
-	rt.RegisterToolForInvocation("run-1", "task-1", model.HolderAgent, "agent-a", model.Tool{
+	_ = rt.RegisterTool(model.Tool{Name: "shared", EffectType: model.ToolEffectReadOnly})
+	_ = rt.RegisterToolForInvocation("run-1", "task-1", model.HolderAgent, "agent-a", model.Tool{
 		Name: "shared", EffectType: model.ToolEffectExternalSideEffect,
 	})
 	if _, ok := rt.toolForInvocation("run-1", "task-2", model.HolderAgent, "agent-a", "shared"); ok {
@@ -64,8 +65,8 @@ func TestAgentScopedLookupDoesNotUseGlobalOrOtherTaskTool(t *testing.T) {
 
 func TestRemoveToolsForInvocationLeavesOtherTaskDefinitionsIntact(t *testing.T) {
 	rt := NewMemoryRuntime()
-	rt.RegisterToolForInvocation("run-1", "task-1", model.HolderAgent, "agent-a", model.Tool{Name: "shared"})
-	rt.RegisterToolForInvocation("run-1", "task-2", model.HolderAgent, "agent-a", model.Tool{Name: "shared"})
+	_ = rt.RegisterToolForInvocation("run-1", "task-1", model.HolderAgent, "agent-a", model.Tool{Name: "shared"})
+	_ = rt.RegisterToolForInvocation("run-1", "task-2", model.HolderAgent, "agent-a", model.Tool{Name: "shared"})
 
 	rt.RemoveToolsForInvocation("run-1", "task-1", model.HolderAgent, "agent-a")
 
@@ -74,5 +75,18 @@ func TestRemoveToolsForInvocationLeavesOtherTaskDefinitionsIntact(t *testing.T) 
 	}
 	if _, ok := rt.toolForInvocation("run-1", "task-2", model.HolderAgent, "agent-a", "shared"); !ok {
 		t.Fatal("removing one invocation removed another task's metadata")
+	}
+}
+
+func TestRegisterRejectsEmptyIdentity(t *testing.T) {
+	rt := NewMemoryRuntime()
+	if err := rt.RegisterAgent(AgentProfile{}); !errors.Is(err, model.ErrInvalidCommand) {
+		t.Fatalf("RegisterAgent() error = %v, want ErrInvalidCommand", err)
+	}
+	if err := rt.RegisterTool(model.Tool{}); !errors.Is(err, model.ErrInvalidCommand) {
+		t.Fatalf("RegisterTool() error = %v, want ErrInvalidCommand", err)
+	}
+	if err := rt.RegisterToolForInvocation("", "task", model.HolderAgent, "agent", model.Tool{Name: "t"}); !errors.Is(err, model.ErrInvalidCommand) {
+		t.Fatalf("RegisterToolForInvocation() error = %v, want ErrInvalidCommand", err)
 	}
 }

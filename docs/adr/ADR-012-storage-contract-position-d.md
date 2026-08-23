@@ -1,4 +1,4 @@
-# ADR-012 Storage Contract and Position C — the framework owns the contract, not production storage
+# ADR-012 Storage Contract and Position D — the framework owns the contract, not production storage
 
 ## Status
 

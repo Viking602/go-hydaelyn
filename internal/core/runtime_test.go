@@ -284,7 +284,7 @@ func TestActionToolAndClarificationContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	rt.RegisterTool(Tool{
+	_ = rt.RegisterTool(Tool{
 		Name:               "deploy",
 		EffectType:         ToolEffectExternalSideEffect,
 		RequiresActionTask: true,

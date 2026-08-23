@@ -3,12 +3,36 @@ package kit
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/Viking602/venat/tool"
 	"github.com/Viking602/venat/tool/tooltest"
 )
+
+func TestSchemaForRecursiveTypeDoesNotOverflow(t *testing.T) {
+	type Node struct {
+		Name string `json:"name"`
+		Next *Node  `json:"next,omitempty"`
+	}
+	schema, err := schemaFor(reflect.TypeOf(Node{}))
+	if err != nil {
+		t.Fatalf("schemaFor() error = %v", err)
+	}
+	if schema.Type != "object" {
+		t.Fatalf("schema type = %q, want object", schema.Type)
+	}
+}
+
+func TestDecodeInputRequiresFields(t *testing.T) {
+	type input struct {
+		Query string `json:"query"`
+	}
+	if _, err := decodeInput(reflect.TypeOf(input{}), json.RawMessage(`{}`)); err == nil {
+		t.Fatal("expected missing required field error")
+	}
+}
 
 func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {
 	type input struct {

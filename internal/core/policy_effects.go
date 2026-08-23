@@ -46,7 +46,7 @@ func (r *Runtime) authorizeUoW(ctx context.Context, uow ports.UnitOfWork, reques
 		}
 	}
 	if engineErr != nil {
-		return decision, commitWithError(fmt.Errorf("%w: policy engine: %v", ErrPolicyDenied, engineErr))
+		return decision, commitWithError(fmt.Errorf("%w: policy engine: %w", ErrPolicyDenied, engineErr))
 	}
 	if normalizationErr != nil {
 		return decision, commitWithError(normalizationErr)
@@ -84,7 +84,7 @@ func normalizePolicyDecision(request model.PolicyRequest, decision *model.Policy
 	for _, obligation := range decision.Obligations {
 		if err := validatePolicyObligationForOperation(request.Operation, obligation); err != nil {
 			if obligationErr == nil {
-				obligationErr = fmt.Errorf("%w: %v", model.ErrPolicyObligationFailed, err)
+				obligationErr = fmt.Errorf("%w: %w", model.ErrPolicyObligationFailed, err)
 			}
 			decision.Effect = model.PolicyEffectDeny
 			decision.Reason = err.Error()

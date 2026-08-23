@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 
@@ -14,11 +15,11 @@ type toolHolderKey struct {
 	holderID   string
 }
 
-func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType model.HolderType, holderID string, tool model.Tool) {
+func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType model.HolderType, holderID string, tool model.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if runID == "" || taskID == "" || holderType == "" || holderID == "" || tool.Name == "" {
-		return
+		return fmt.Errorf("%w: scoped tool registration requires run, task, holder, and tool name", model.ErrInvalidCommand)
 	}
 	if tool.EffectType == "" {
 		tool.EffectType = model.ToolEffectReadOnly
@@ -28,6 +29,7 @@ func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType mod
 		r.scopedTools[key] = make(map[string]model.Tool)
 	}
 	r.scopedTools[key][tool.Name] = cloneTool(tool)
+	return nil
 }
 
 func (r *Runtime) RemoveToolsForInvocation(runID, taskID string, holderType model.HolderType, holderID string) {
@@ -44,16 +46,17 @@ func (r *Runtime) toolForInvocation(runID, taskID string, holderType model.Holde
 	return cloneTool(tool), ok
 }
 
-func (r *Runtime) RegisterAgent(profile AgentProfile) {
+func (r *Runtime) RegisterAgent(profile AgentProfile) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if profile.ID == "" {
-		return
+		return fmt.Errorf("%w: agent id is required", model.ErrInvalidCommand)
 	}
 	if _, exists := r.agents[profile.ID]; !exists {
 		r.agentOrder = append(r.agentOrder, profile.ID)
 	}
 	r.agents[profile.ID] = cloneAgentProfile(profile)
+	return nil
 }
 
 func (r *Runtime) Agents() []AgentProfile {
@@ -75,16 +78,17 @@ func cloneAgentProfile(profile AgentProfile) AgentProfile {
 	return clone
 }
 
-func (r *Runtime) RegisterTool(tool model.Tool) {
+func (r *Runtime) RegisterTool(tool model.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if tool.Name == "" {
-		return
+		return fmt.Errorf("%w: tool name is required", model.ErrInvalidCommand)
 	}
 	if tool.EffectType == "" {
 		tool.EffectType = model.ToolEffectReadOnly
 	}
 	r.tools[tool.Name] = cloneTool(tool)
+	return nil
 }
 
 func (r *Runtime) tool(name string) (model.Tool, bool) {

@@ -2,6 +2,10 @@ package api
 
 import "context"
 
+// PipelineComponents are optional AdvanceRun customization hooks. They
+// compile intent into tasks through the existing Runner; they are not a
+// second durable runtime (ADR-008 Principle 2, ADR-027).
+
 type IntentAnalyzer interface {
 	AnalyzeIntent(context.Context, Run) (Intent, error)
 }

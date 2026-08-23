@@ -46,9 +46,9 @@ func TestResolveRecipientsErrors(t *testing.T) {
 func TestDispatchTaskFanOutWritesEnvelopePerRecipient(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
-	rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
-	rt.RegisterAgent(AgentProfile{ID: "reviewer-a", Role: "reviewer"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "reviewer-a", Role: "reviewer"})
 
 	run := mustStartRun(ctx, t, rt, "run-fanout")
 	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
@@ -88,8 +88,8 @@ func TestDispatchTaskFanOutWritesEnvelopePerRecipient(t *testing.T) {
 func TestDispatchTaskFanOutRecipientCanAcquireAndSubmit(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
-	rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "monitor-a", Role: "monitor"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "monitor-b", Role: "monitor"})
 
 	run := mustStartRun(ctx, t, rt, "run-fanout-claim")
 	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
@@ -138,7 +138,7 @@ func TestDispatchTaskFanOutRecipientCanAcquireAndSubmit(t *testing.T) {
 
 func TestAgentsReturnsDeepCopies(t *testing.T) {
 	rt := NewMemoryRuntime()
-	rt.RegisterAgent(AgentProfile{
+	_ = rt.RegisterAgent(AgentProfile{
 		ID:       "agent-a",
 		Role:     "monitor",
 		Groups:   []string{"alpha"},
@@ -161,7 +161,7 @@ func TestAgentsReturnsDeepCopies(t *testing.T) {
 func TestDispatchTaskFanOutNoRecipients(t *testing.T) {
 	ctx := context.Background()
 	rt := NewMemoryRuntime()
-	rt.RegisterAgent(AgentProfile{ID: "lone", Role: "x"})
+	_ = rt.RegisterAgent(AgentProfile{ID: "lone", Role: "x"})
 	run := mustStartRun(ctx, t, rt, "run-fanout-empty")
 	task := mustCreateTask(ctx, t, rt, CreateTaskCommand{
 		RunID:        run.ID,

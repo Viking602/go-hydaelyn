@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Superseded — 2026-08-15. The Exchange / Claim / Finding / Evidence types
+in `internal/blackboard` were removed. The live path is generic
+`api.BlackboardItem` plus `internal/blackboard` handler/service. See
+ADR-027. This record is kept for history.
 
 ## Context
 

@@ -84,12 +84,12 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 	if cmd.Event.Type == model.EventExecutionCheckpointed {
 		encoded, err := json.Marshal(cmd.Event)
 		if err != nil {
-			return nil, fmt.Errorf("%w: encode checkpoint: %v", model.ErrCheckpointLimitExceeded, err)
+			return nil, fmt.Errorf("%w: encode checkpoint: %w", model.ErrCheckpointLimitExceeded, err)
 		}
 		if len(encoded) > maxExecutionCheckpointBytes {
 			return nil, fmt.Errorf("%w: checkpoint is %d bytes (maximum %d)", model.ErrCheckpointLimitExceeded, len(encoded), maxExecutionCheckpointBytes)
 		}
-		events, err := uow.Events().ListEvents(ctx, cmd.RunID)
+		events, err := uow.Events().ListAfter(ctx, cmd.RunID, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +101,7 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 			count++
 			previous, err := json.Marshal(event)
 			if err != nil {
-				return nil, fmt.Errorf("%w: encode stored checkpoint: %v", model.ErrCheckpointLimitExceeded, err)
+				return nil, fmt.Errorf("%w: encode stored checkpoint: %w", model.ErrCheckpointLimitExceeded, err)
 			}
 			total += len(previous)
 		}

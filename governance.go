@@ -11,13 +11,6 @@ import (
 	"github.com/Viking602/venat/internal/core/model"
 )
 
-// Deprecated: use ActiveLeaseCountContext so cancellation and storage errors
-// are observable. A count of 0 means the store confirmed there is no active
-// lease; store failures are returned as errors, not collapsed to 0.
-func (r *Runner) ActiveLeaseCount(runID, taskID string) (int, error) {
-	return r.ActiveLeaseCountContext(context.Background(), runID, taskID)
-}
-
 func (r *Runner) ActiveLeaseCountContext(ctx context.Context, runID, taskID string) (int, error) {
 	count, err := r.rt.ActiveLeaseCount(ctx, runID, taskID)
 	if err != nil {
@@ -119,13 +112,6 @@ func (r *Runner) RecoverResumeToken(ctx context.Context, cmd api.RecoverResumeTo
 	return adapter.ResumeTokenFromModel(token), nil
 }
 
-// Deprecated: use PendingResumeTokens. Store failures are returned instead of
-// an empty map. The snapshot is loaded from the configured store via
-// PendingResumeTokens, not from the in-memory development provider.
-func (r *Runner) ResumeTokens() (map[string]api.ResumeToken, error) {
-	return r.ResumeTokensContext(context.Background())
-}
-
 func (r *Runner) ResumeTokensContext(ctx context.Context) (map[string]api.ResumeToken, error) {
 	tokens, err := r.rt.ResumeTokens(ctx)
 	if err != nil {
@@ -188,11 +174,6 @@ func (r *Runner) StartTraceSpan(ctx context.Context, cmd api.StartTraceSpanComma
 
 func (r *Runner) EndTraceSpan(ctx context.Context, cmd api.EndTraceSpanCommand) error {
 	return adapter.ErrorToAPI(r.rt.EndTraceSpan(ctx, core.EndTraceSpanCommand{SpanID: cmd.SpanID, Error: cmd.Error}))
-}
-
-// Deprecated: use ListTraceSpans so cancellation and storage errors are observable.
-func (r *Runner) TraceSpans(runID string) []api.TraceSpan {
-	return adapter.TraceSpansFromModel(r.rt.TraceSpans(context.Background(), runID))
 }
 
 func (r *Runner) SaveTraceSpan(ctx context.Context, span api.TraceSpan) error {

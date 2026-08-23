@@ -32,7 +32,7 @@ func DialStdioWithOptions(ctx context.Context, cfg StdioConfig, options Options)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
 	if cfg.InheritEnv {
 		cmd.Env = append(os.Environ(), cfg.Env...)

@@ -190,7 +190,7 @@ The **durable runner** is what makes the upper layers safe to operate. The root
 (`RequestApproval` / `DecideApproval` with resume tokens), idempotent side
 effects (`StartActionAttempt` / `CompleteActionAttempt`), trace spans, the
 blackboard, and the task-envelope mailbox. Storage sits behind a contract
-([ADR-012](docs/adr/ADR-012-storage-contract-position-c.md)); the default runner
+([ADR-012](docs/adr/ADR-012-storage-contract-position-d.md)); the default runner
 keeps everything in memory so you can
 start without provisioning anything, and you swap in your own backend for
 production by implementing the store interfaces.
@@ -243,6 +243,8 @@ Browse the [_examples directory](_examples/) for the complete set.
 - [Public API](docs/public-api.md): exported contracts and stability.
 - [Documentation index](docs/index.md): runtime concepts, extensions,
   compatibility, architecture, and the package map.
+- [Architecture boundaries](docs/architecture-boundaries.md): five layers
+  and import seams.
 - [Contributing](CONTRIBUTING.md): development workflow and verification gates.
 
 ## Scope & status

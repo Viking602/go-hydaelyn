@@ -10,17 +10,13 @@ import (
 // It is the write half of the UsageStore contract; the worker runtime
 // calls it after every engine run so the metering ledger reflects real
 // token consumption.
-func (r *Runtime) AppendUsage(ctx context.Context, record model.UsageRecord) error {
+func (r *Runtime) AppendUsage(ctx context.Context, record model.UsageRecord) (err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	if err := uow.UsageRecords().AppendUsage(ctx, record); err != nil {
 		return err
 	}

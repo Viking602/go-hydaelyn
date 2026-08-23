@@ -49,9 +49,9 @@ type SubagentDef struct {
 	MaxDepth int
 
 	// Budget, when set, is the explicit per-call budget the child Engine.Run is
-	// bound by. When nil, the child runs under its own Engine LoopPolicy. The
-	// child's token spend is bounded here but is not folded back into the
-	// parent's token budget (see ADR-018 §"Known limitation").
+	// bound by. When nil, the child inherits the parent's remaining token
+	// budget when the parent loop has MaxTokens set. The child's token spend
+	// is folded back into the parent's usage after the tool returns.
 	Budget *api.TaskBudget
 
 	// Effect raises the advertised effect floor for the delegation. AsTool
@@ -224,10 +224,11 @@ func (s *subagentTool) Execute(ctx context.Context, call tool.Call, _ tool.Updat
 
 	task := api.Task{
 		Goal:   subagentGoal(call.Arguments),
-		Budget: s.def.Budget,
+		Budget: capBudgetToParentRemaining(ctx, s.def.Budget),
 	}
 	childCtx := withSubagentDepth(ctx, subagentDepth(ctx)+1)
 	result := s.child.Run(childCtx, task, OutputPolicy{})
+	reportChildUsage(ctx, result.Usage)
 	if result.Failure != nil {
 		return subagentFailureResult(call, s.def.Name, result.Failure), nil
 	}
@@ -388,4 +389,44 @@ func subagentDepth(ctx context.Context) int {
 
 func withSubagentDepth(ctx context.Context, depth int) context.Context {
 	return context.WithValue(ctx, subagentDepthKey{}, depth)
+}
+
+type parentUsageSinkKey struct{}
+type parentTokenBudgetKey struct{}
+
+func withParentUsageSink(ctx context.Context, add func(provider.Usage)) context.Context {
+	if add == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, parentUsageSinkKey{}, add)
+}
+
+func withParentTokenBudget(ctx context.Context, remaining int64) context.Context {
+	return context.WithValue(ctx, parentTokenBudgetKey{}, remaining)
+}
+
+func reportChildUsage(ctx context.Context, usage provider.Usage) {
+	add, ok := ctx.Value(parentUsageSinkKey{}).(func(provider.Usage))
+	if !ok || add == nil {
+		return
+	}
+	add(usage)
+}
+
+func capBudgetToParentRemaining(ctx context.Context, budget *api.TaskBudget) *api.TaskBudget {
+	remaining, ok := ctx.Value(parentTokenBudgetKey{}).(int64)
+	if !ok {
+		return budget
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	if budget == nil {
+		return &api.TaskBudget{MaxTokens: remaining}
+	}
+	capped := *budget
+	if capped.MaxTokens <= 0 || capped.MaxTokens > remaining {
+		capped.MaxTokens = remaining
+	}
+	return &capped
 }

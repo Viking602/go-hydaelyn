@@ -66,13 +66,26 @@ func (r *Runtime) WaitForBlackboard(
 	}
 }
 
+const maxAnonymousBlackboardWaitItems = 1024
+
 func appendUniqueBlackboardItems(acc []model.BlackboardItem, seen map[string]struct{}, items ...model.BlackboardItem) []model.BlackboardItem {
+	anonymous := 0
+	for _, existing := range acc {
+		if existing.ID == "" {
+			anonymous++
+		}
+	}
 	for _, item := range items {
 		if item.ID != "" {
 			if _, ok := seen[item.ID]; ok {
 				continue
 			}
 			seen[item.ID] = struct{}{}
+		} else {
+			if anonymous >= maxAnonymousBlackboardWaitItems {
+				continue
+			}
+			anonymous++
 		}
 		acc = append(acc, item)
 	}

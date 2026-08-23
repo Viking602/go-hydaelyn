@@ -207,14 +207,12 @@ selection uses `class.ToSpec()` + `agent.Build` with a `Resolver` to build the
 member engine; `ToSpec` is the seam that makes this possible without the
 scheduler knowing about providers.
 
-### Known limitation (deferred)
+### Child usage accounting
 
-A subagent's **token** usage is bounded by its own budget but is **not** folded
-back into the parent's `MaxTokens`. The parent's loop accounting charges the
-delegation as one tool call, not as the child's token spend, because the loop's
-budget accounting is per-turn at the parent level and has no channel to absorb a
-nested run's `Usage`. Cross-level token accounting is deferred; until then,
-bound a subagent explicitly with `SubagentDef.Budget` when its cost matters.
+A subagent's token usage is folded back into the parent's loop `Usage` after
+the tool returns. When the parent has `MaxTokens` set, the child also inherits
+the remaining parent budget unless `SubagentDef.Budget` is tighter. The
+delegation still counts as one parent tool call.
 
 ## Consequences
 
@@ -244,8 +242,8 @@ bound a subagent explicitly with `SubagentDef.Budget` when its cost matters.
   preserved. `ToSpec` lives in `multiagent/` (which already imports `agent/`),
   not the reverse. The scheduler stays pure; `ToSpec` is only a projection.
 - **ADR-009 (public-any)** — observed; see Consequences.
-- **ADR-010 (budget composition)** — the subagent token-accounting gap is
-  recorded above as a deferred limitation, not a silent divergence.
+- **ADR-010 (budget composition)** — child token usage is folded into the
+  parent loop; `SubagentDef.Budget` may still tighten the child ceiling.
 - **ADR-014 (agent ontology)** — a subagent has no identity, persona, or
   self-model; it is a tool. No ontology red line is crossed.
 

@@ -88,16 +88,16 @@ func (s TeamState) reportForClass(className string) *api.TypedReport {
 
 // reportInput marshals a finished class's report into the Input payload for
 // the next dispatched agent, threading one step's output into the next.
-func (s TeamState) reportInput(className string) json.RawMessage {
+func (s TeamState) reportInput(className string) (json.RawMessage, error) {
 	report := s.reportForClass(className)
 	if report == nil {
-		return nil
+		return nil, nil
 	}
 	raw, err := json.Marshal(report)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("marshal report for class %q: %w", className, err)
 	}
-	return raw
+	return raw, nil
 }
 
 // buildDispatch assembles a Dispatch for class as the step-th agent in a run.

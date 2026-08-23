@@ -2,18 +2,14 @@ package core
 
 import "context"
 
-func (r *Runtime) executeUoWCommand(ctx context.Context, command RuntimeCommand) (any, error) {
+func (r *Runtime) executeUoWCommand(ctx context.Context, command RuntimeCommand) (result any, err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return nil, err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
-	result, err := r.commandBus.Execute(ctx, uow, command)
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
+	result, err = r.commandBus.Execute(ctx, uow, command)
 	if err != nil {
 		if isCommitCommandError(err) {
 			if commitErr := uow.Commit(ctx); commitErr != nil {

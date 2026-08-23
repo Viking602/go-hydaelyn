@@ -67,27 +67,12 @@ func (r *Runner) RunEvents(ctx context.Context, runID string) ([]api.Event, erro
 	return adapter.EventsFromModel(events), nil
 }
 
-// Deprecated: use RunEvents so cancellation and storage errors are observable.
-func (r *Runner) Events(runID string) []api.Event {
-	return adapter.EventsFromModel(r.rt.Events(context.Background(), runID))
-}
-
-// Deprecated: use ReplayContext.
-func (r *Runner) Replay(runID string, mode api.ReplayMode) (api.Projection, error) {
-	return r.ReplayContext(context.Background(), runID, mode)
-}
-
 func (r *Runner) ReplayContext(ctx context.Context, runID string, mode api.ReplayMode) (api.Projection, error) {
 	projection, err := r.rt.Replay(ctx, runID, model.ReplayMode(mode))
 	if err != nil {
 		return api.Projection{}, adapter.ErrorToAPI(err)
 	}
 	return adapter.ProjectionFromModel(projection), nil
-}
-
-// Deprecated: use ReplayRunStateContext.
-func (r *Runner) ReplayRunState(runID string) (api.Projection, error) {
-	return r.ReplayRunStateContext(context.Background(), runID)
 }
 
 func (r *Runner) ReplayRunStateContext(ctx context.Context, runID string) (api.Projection, error) {

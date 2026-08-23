@@ -50,9 +50,7 @@ func New(config Config) Driver {
 		config.MaxTokens = 1024
 	}
 	if config.Client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.ResponseHeaderTimeout = defaultResponseHeaderTimeout
-		config.Client = &http.Client{Transport: transport}
+		config.Client = shared.NewHTTPClient(defaultResponseHeaderTimeout)
 	}
 	return Driver{config: config}
 }

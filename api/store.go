@@ -241,27 +241,65 @@ type AgentDefinitionUnitOfWork interface {
 	AgentDefinitions() AgentDefinitionStore
 }
 
-type UnitOfWork interface {
+// RunStores is the durable run / task / event surface of a UnitOfWork.
+// Spec anchor: ADR-022.
+type RunStores interface {
 	Runs() RunStore
 	Tasks() TaskStore
 	Events() EventStore
+}
+
+// CollaborationStores is the multi-agent collaboration surface.
+// Spec anchor: ADR-022, ADR-016 §6.
+type CollaborationStores interface {
 	Blackboard() BlackboardReadWriter
-	MailboxOutbox() MailboxOutboxStore
-	UserMessages() UserMessageStore
-	Trace() TraceStore
-	Leases() LeaseStore
-	Approvals() ApprovalStore
-	ResumeTokens() ResumeTokenStore
-	ActionAttempts() ActionAttemptStore
-	AgentProfiles() AgentProfileStore
-	CapabilityCatalog() CapabilityStore
-	UsageRecords() UsageStore
-	DeadLetters() DeadLetterStore
-	// v0.8.0 multi-agent stores — required members, not capability-gated
-	// (spec 07 §"New store contracts"; ADR-016 §6).
 	Handoffs() HandoffStore
 	TeamStates() TeamStateStore
 	AgentInstances() AgentInstanceStore
+}
+
+// MessagingStores is the mailbox and user-message surface.
+// Spec anchor: ADR-022.
+type MessagingStores interface {
+	MailboxOutbox() MailboxOutboxStore
+	UserMessages() UserMessageStore
+}
+
+// GovernanceStores is the approval, resume, action-attempt, usage, and
+// dead-letter surface.
+// Spec anchor: ADR-022.
+type GovernanceStores interface {
+	Approvals() ApprovalStore
+	ResumeTokens() ResumeTokenStore
+	ActionAttempts() ActionAttemptStore
+	UsageRecords() UsageStore
+	DeadLetters() DeadLetterStore
+}
+
+// IdentityStores is the agent-profile and capability catalog surface.
+// Spec anchor: ADR-022.
+type IdentityStores interface {
+	AgentProfiles() AgentProfileStore
+	CapabilityCatalog() CapabilityStore
+}
+
+// ObservabilityStores is the trace and lease surface.
+// Spec anchor: ADR-022.
+type ObservabilityStores interface {
+	Trace() TraceStore
+	Leases() LeaseStore
+}
+
+// UnitOfWork is the composite store transaction. It embeds the capability
+// interfaces so callers may accept a narrower type. Host providers still
+// implement the full composite. Spec anchor: ADR-022.
+type UnitOfWork interface {
+	RunStores
+	CollaborationStores
+	MessagingStores
+	GovernanceStores
+	IdentityStores
+	ObservabilityStores
 	Commit(context.Context) error
 	Rollback(context.Context) error
 }

@@ -176,7 +176,7 @@ func TestPolicyAppliesToRuntimeBoundaries(t *testing.T) {
 	if err := rt.WriteItem(ctx, BlackboardItem{RunID: run.ID, TaskID: task.ID, Source: SourceIdentity{Type: SourceAgent, ID: "agent-a"}}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("blackboard write should be policy denied, got %v", err)
 	}
-	rt.RegisterTool(Tool{Name: "readonly", EffectType: ToolEffectReadOnly})
+	_ = rt.RegisterTool(Tool{Name: "readonly", EffectType: ToolEffectReadOnly})
 	if _, err := rt.InvokeTool(ctx, ToolInvocation{RunID: run.ID, TaskID: task.ID, ToolName: "readonly"}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("tool call should be policy denied, got %v", err)
 	}
@@ -244,7 +244,7 @@ func TestPolicyRequireApprovalAndPauseEffectsBlockSensitiveOperations(t *testing
 	toolRun := mustStartRun(ctx, t, toolRT, "run-policy-tool")
 	toolTask := mustCreateTask(ctx, t, toolRT, CreateTaskCommand{RunID: toolRun.ID, TaskID: "tool", Type: TaskTypeWorker, AllowsAction: true, OwnerAgentID: "agent-a"})
 	toolLease := leaseTask(ctx, t, toolRT, toolRun.ID, toolTask.ID, HolderAgent, "agent-a")
-	toolRT.RegisterToolForInvocation(toolRun.ID, toolTask.ID, HolderAgent, "agent-a", Tool{Name: "deploy", EffectType: ToolEffectWrite})
+	_ = toolRT.RegisterToolForInvocation(toolRun.ID, toolTask.ID, HolderAgent, "agent-a", Tool{Name: "deploy", EffectType: ToolEffectWrite})
 	if _, err := toolRT.InvokeTool(ctx, ToolInvocation{RunID: toolRun.ID, TaskID: toolTask.ID, LeaseID: toolLease.ID, HolderType: HolderAgent, HolderID: "agent-a", TaskVersion: toolTask.Version, ToolName: "deploy"}); !errors.Is(err, ErrPolicyDenied) {
 		t.Fatalf("tool_call pause should block command, got %v", err)
 	}

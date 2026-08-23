@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -268,7 +269,7 @@ func TestEngineRunPreparesContextAfterToolResult(t *testing.T) {
 	cm := &recordingTargetContextManager{}
 	driver := &scriptedProvider{turns: [][]provider.Event{
 		{
-			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup"}},
+			{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"query":"x"}`)}},
 			{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
 		},
 		{

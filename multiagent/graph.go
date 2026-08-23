@@ -298,7 +298,7 @@ func inputFor(active []graphEdge, state TeamState) (json.RawMessage, error) {
 		return mappedInput(active, state)
 	}
 	if len(active) == 1 {
-		return state.reportInput(active[0].from), nil
+		return state.reportInput(active[0].from)
 	}
 	froms := make([]string, 0, len(active))
 	for _, e := range active {

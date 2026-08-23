@@ -71,14 +71,22 @@ func (a apiStoreProviderSubscriberAdapter) Subscribe(ctx context.Context, runID 
 	if err != nil {
 		return nil, nil, ErrorToCore(err)
 	}
+	fwd, stopFwd := context.WithCancel(ctx)
 	out := make(chan model.BlackboardItem)
 	go func() {
 		defer close(out)
 		for item := range items {
-			out <- BlackboardItemToModel(item)
+			select {
+			case out <- BlackboardItemToModel(item):
+			case <-fwd.Done():
+				return
+			}
 		}
 	}()
-	return out, func() error { return ErrorToCore(cancel()) }, nil
+	return out, func() error {
+		stopFwd()
+		return ErrorToCore(cancel())
+	}, nil
 }
 
 func UnitOfWorkToCore(inner api.UnitOfWork) ports.UnitOfWork {

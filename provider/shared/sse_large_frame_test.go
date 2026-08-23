@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestReaderRejectsLineOverMax(t *testing.T) {
+	payload := strings.Repeat("a", MaxSSELineBytes+1)
+	reader := NewReader(strings.NewReader("data: " + payload + "\n\n"))
+	if _, err := reader.Next(); err == nil {
+		t.Fatal("expected oversized line error")
+	}
+}
+
 func TestReaderHandlesDataLineLargerThanOneMiB(t *testing.T) {
 	payload := strings.Repeat("a", 2*1024*1024)
 	reader := NewReader(strings.NewReader("data: " + payload + "\n\n"))

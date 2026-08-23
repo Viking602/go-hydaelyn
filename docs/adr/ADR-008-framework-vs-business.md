@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted — enforced starting from the v2.0 roadmap (plan file: `/Users/viking/.claude/plans/sunny-hugging-goose.md`).
+Accepted — enforced starting from the v2.0 roadmap.
+
+**Revised 2026-08-15:** directory names below that still say `orchestrator/**`,
+`legacy/**`, or `flow/` as framework roots are historical. The current tree
+is recorded in *Current package map*. Import seams are enforced by
+`scripts/check-import-boundaries.sh` and documented in
+`docs/architecture-boundaries.md` (ADR-024).
 
 **Revised 2026-05-24:** v0.8.0 reconstruction (master spec `docs/superpowers/specs/2026-05-24-agent-layer-business-stance.md`, ADR-016) introduces a first-class `multiagent/` kernel package whose vocabulary includes terms like `Scheduler`, `Supervisor`, `Voting`, `Debate`. These are *framework primitives* for multi-agent coordination, not business vocabulary, and are explicitly exempted from the ban below. See *Revised — multi-agent primitive exception list* at the bottom of this ADR.
 
@@ -115,6 +121,28 @@ The original §1/§2/§3 split holds:
 - §3 (immediately-effective hard constraints) — narrowed only by the closed exception list above. All other bans hold.
 
 The intent of ADR-008 — "framework primitives are mechanism, business concepts are policy" — is unchanged. The revision recognizes that multi-agent coordination *is* a framework mechanism, and gives it vocabulary accordingly.
+
+## Current package map (2026-08-15)
+
+The live tree (ADR-024 five layers):
+
+```
+api/                 public contracts; no Venat imports
+agent/               agent loop; must not import multiagent/
+multiagent/          scheduler layer; must not import root, worker, internal/
+worker/              integration layer; may import root; must not import packs/ or coding/
+coding/              domain runtime; must not import worker/, packs/, or root
+packs/               domain manifests; must not import coding/, worker/, or root
+memory/              deprecated Memory compatibility surface (ADR-021)
+flow/, blackboard/   deprecated api aliases (ADR-027)
+internal/core        durable runner composition root
+internal/memory      process-local development/test StoreProvider; not Position D
+internal/*           domain services behind the runner
+contract/            public StoreProvider conformance suite
+```
+
+`legacy/` and `orchestrator/` are gone. `internal/memory` is the default
+development store and is not a shipped production backend.
 
 ## References
 

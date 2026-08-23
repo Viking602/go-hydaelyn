@@ -53,5 +53,9 @@ func (s RouterScheduler) Next(_ context.Context, state TeamState) ([]Dispatch, e
 	if finished[target.Name] {
 		return nil, nil
 	}
-	return []Dispatch{state.buildDispatch(target, state.reportInput(s.Entry.Name))}, nil
+	input, err := state.reportInput(s.Entry.Name)
+	if err != nil {
+		return nil, err
+	}
+	return []Dispatch{state.buildDispatch(target, input)}, nil
 }

@@ -74,7 +74,11 @@ func (s SupervisorScheduler) Next(_ context.Context, state TeamState) ([]Dispatc
 		if finished[worker.Name] {
 			return nil, nil
 		}
-		return []Dispatch{state.buildDispatch(worker, state.reportInput(s.Supervisor.Name))}, nil
+		input, err := state.reportInput(s.Supervisor.Name)
+		if err != nil {
+			return nil, err
+		}
+		return []Dispatch{state.buildDispatch(worker, input)}, nil
 	case SupervisorActionRetry:
 		return []Dispatch{state.buildDispatch(s.Supervisor, nil)}, nil
 	case SupervisorActionAccept, SupervisorActionAbort, SupervisorActionEscalate:

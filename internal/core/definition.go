@@ -9,17 +9,13 @@ import (
 )
 
 // SaveAgentDefinitionSnapshot persists one immutable definition revision.
-func (r *Runtime) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot model.AgentDefinitionSnapshot) error {
+func (r *Runtime) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot model.AgentDefinitionSnapshot) (err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	store, err := r.agentDefinitionStore(ctx, uow)
 	if err != nil {
 		return err

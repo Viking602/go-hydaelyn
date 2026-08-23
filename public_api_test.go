@@ -25,6 +25,9 @@ func (allowAPIEngine) Authorize(context.Context, api.PolicyRequest) (api.PolicyD
 func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.Engine
 	var _ agent.AgentProfile
+	var _ api.BlackboardItem
+	var _ api.BlackboardSelector
+	var _ api.Flow
 	var _ blackboard.Item
 	var _ blackboard.Selector
 	var _ flow.Flow

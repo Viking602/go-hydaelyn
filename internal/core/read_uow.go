@@ -22,6 +22,13 @@ func joinReadCleanup(err *error, done func() error) {
 	*err = errors.Join(*err, done())
 }
 
+func rollbackIfNotCommitted(ctx context.Context, uow ports.UnitOfWork, committed *bool, err *error) {
+	if committed == nil || *committed || uow == nil {
+		return
+	}
+	*err = errors.Join(*err, uow.Rollback(ctx))
+}
+
 func (r *Runtime) beginWriteUoW(ctx context.Context) (ports.UnitOfWork, error) {
 	if r.storeProvider == nil {
 		return r.memProvider.Begin(ctx)

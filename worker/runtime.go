@@ -117,6 +117,7 @@ type Runtime struct {
 	runStarted atomic.Bool
 	runDone    chan struct{}
 	runErr     error
+	cancel     atomic.Value // context.CancelFunc set by Run
 }
 
 // NewRuntime wires a poller + executor with options. Both arguments are
@@ -161,7 +162,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return ErrRuntimeAlreadyStarted
 	}
 	defer close(r.runDone)
-	err := r.run(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	r.cancel.Store(cancel)
+	defer cancel()
+	err := r.run(runCtx)
 	r.runErr = err
 	return err
 }
@@ -242,7 +246,14 @@ func (r *Runtime) Stop() error {
 	case <-r.runDone:
 		return r.runErr
 	case <-time.After(r.opts.ShutdownDrainTimeout):
+		r.cancelInFlight()
 		return fmt.Errorf("worker: drain timed out after %s", r.opts.ShutdownDrainTimeout)
+	}
+}
+
+func (r *Runtime) cancelInFlight() {
+	if cancel, ok := r.cancel.Load().(context.CancelFunc); ok && cancel != nil {
+		cancel()
 	}
 }
 
@@ -263,6 +274,7 @@ func (r *Runtime) waitDrain(timeout time.Duration) error {
 	case <-done:
 		return nil
 	case <-time.After(timeout):
+		r.cancelInFlight()
 		return fmt.Errorf("worker: drain timed out after %s", timeout)
 	}
 }
@@ -326,6 +338,8 @@ func (c *ChannelPoller) Submit(ctx context.Context, env api.TaskEnvelope) error 
 func (c *ChannelPoller) Poll(ctx context.Context, batchSize int) ([]api.TaskEnvelope, error) {
 	out := make([]api.TaskEnvelope, 0, batchSize)
 	// First read: block briefly so callers don't tight-loop on an empty channel.
+	timer := time.NewTimer(50 * time.Millisecond)
+	defer timer.Stop()
 	select {
 	case env, ok := <-c.Ch:
 		if !ok {
@@ -334,7 +348,7 @@ func (c *ChannelPoller) Poll(ctx context.Context, batchSize int) ([]api.TaskEnve
 		out = append(out, env)
 	case <-ctx.Done():
 		return out, ctx.Err()
-	case <-time.After(50 * time.Millisecond):
+	case <-timer.C:
 		return out, nil
 	}
 	for len(out) < batchSize {

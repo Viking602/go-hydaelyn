@@ -138,10 +138,7 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 		return nil, err
 	}
 	endpoint := strings.TrimRight(d.config.BaseURL, "/") + "/messages"
-	client := d.config.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
+	client := shared.ClientOrDefault(d.config.Client, defaultResponseHeaderTimeout)
 	idempotencyKey, err := shared.NewIdempotencyKey()
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: generate idempotency key: %w", err)
@@ -166,10 +163,15 @@ func (d Driver) Stream(ctx context.Context, request provider.Request) (provider.
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
-		payload, _ := io.ReadAll(resp.Body)
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return nil, provider.NewHTTPError("anthropic", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	if !shared.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
+		defer func() { _ = resp.Body.Close() }()
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("anthropic api returned unexpected content type %q: %s", resp.Header.Get("Content-Type"), strings.TrimSpace(string(payload)))
 	}
 	return &anthropicStream{
 		body: resp.Body,
@@ -198,6 +200,9 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 		current, err := s.state.reader.Next()
 		if err != nil {
 			return provider.Event{}, err
+		}
+		if strings.TrimSpace(current.Data) == "" {
+			continue
 		}
 		var parsed eventEnvelope
 		if err := json.Unmarshal([]byte(current.Data), &parsed); err != nil {

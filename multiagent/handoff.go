@@ -3,6 +3,8 @@ package multiagent
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/Viking602/venat/api"
 )
 
 // Handoff is the typed vocabulary multiagent schedulers will use to move work
@@ -27,4 +29,36 @@ type Handoff struct {
 	EvidenceIDs          []string        `json:"evidenceIds,omitempty"`
 	RequiredOutputSchema json.RawMessage `json:"requiredOutputSchema,omitempty"`
 	CreatedAt            time.Time       `json:"createdAt"`
+}
+
+// Record maps this scheduler-side handoff onto the durable store row.
+// Spec anchor: ADR-026.
+func (h Handoff) Record() api.HandoffRecord {
+	return api.HandoffRecord{
+		ID:                   h.ID,
+		RunID:                h.RunID,
+		From:                 h.From,
+		To:                   h.To,
+		Reason:               h.Reason,
+		Payload:              append(json.RawMessage(nil), h.Payload...),
+		EvidenceIDs:          append([]string(nil), h.EvidenceIDs...),
+		RequiredOutputSchema: append(json.RawMessage(nil), h.RequiredOutputSchema...),
+		CreatedAt:            h.CreatedAt,
+	}
+}
+
+// HandoffFromRecord reconstructs a scheduler-side handoff from a store row.
+// Spec anchor: ADR-026.
+func HandoffFromRecord(record api.HandoffRecord) Handoff {
+	return Handoff{
+		ID:                   record.ID,
+		RunID:                record.RunID,
+		From:                 record.From,
+		To:                   record.To,
+		Reason:               record.Reason,
+		Payload:              append(json.RawMessage(nil), record.Payload...),
+		EvidenceIDs:          append([]string(nil), record.EvidenceIDs...),
+		RequiredOutputSchema: append(json.RawMessage(nil), record.RequiredOutputSchema...),
+		CreatedAt:            record.CreatedAt,
+	}
 }

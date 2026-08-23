@@ -3,7 +3,7 @@
 This package is the **public** validation gate for any Venat ecosystem adapter
 that implements a kernel interface. Spec anchor:
 [`docs/product-spec/v0.8.0/07-storage.md`](../docs/product-spec/v0.8.0/07-storage.md)
-§"Contract test suite" + [ADR-012](../docs/adr/ADR-012-storage-contract-position-c.md).
+§"Contract test suite" + [ADR-012](../docs/adr/ADR-012-storage-contract-position-d.md).
 
 ## Position D in one sentence
 
@@ -14,7 +14,7 @@ that implements a kernel interface. Spec anchor:
 If your provider passes `contract.RunStoreProviderContractTests`, it is correct
 as far as Venat is concerned. The framework runs the same suite on every PR
 via a non-exported in-memory adapter at `contract/internal/inmemfake/`; see
-[ADR-012 (revised, Position D)](../docs/adr/ADR-012-storage-contract-position-c.md).
+[ADR-012 (revised, Position D)](../docs/adr/ADR-012-storage-contract-position-d.md).
 
 ## Usage from an external adapter
 

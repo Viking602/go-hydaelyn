@@ -12,17 +12,13 @@ import (
 	"github.com/Viking602/venat/internal/execution"
 )
 
-func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string) error {
+func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string) (err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	tasks, err := uow.Tasks().ListTasks(ctx, runID)
 	if err != nil {
 		return err
@@ -38,7 +34,7 @@ func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string
 	if err != nil {
 		return err
 	}
-	events, err := uow.Events().ListEvents(ctx, runID)
+	attempts, err := uow.ActionAttempts().ListActionAttempts(ctx, model.ActionAttemptSelector{RunID: runID})
 	if err != nil {
 		return err
 	}
@@ -48,7 +44,7 @@ func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string
 		runID:      runID,
 		now:        time.Now().UTC(),
 		envelopes:  recoverableEnvelopes(envelopes),
-		unresolved: unresolvedActionAttempts(events),
+		unresolved: unresolvedActionAttempts(attempts),
 	}
 	changed := false
 	for _, task := range tasks {
@@ -259,26 +255,25 @@ func recoverableEnvelopes(envelopes []model.TaskEnvelope) map[string]model.TaskE
 	return byTask
 }
 
-func unresolvedActionAttempts(events []model.Event) map[string][]string {
-	type attempt struct {
-		taskID string
-	}
-	running := make(map[string]attempt)
-	for _, event := range events {
-		attemptID, _ := event.Payload["attemptId"].(string)
-		if attemptID == "" {
+func unresolvedActionAttempts(attempts []model.ActionAttempt) map[string][]string {
+	byTask := make(map[string][]string)
+	for _, attempt := range attempts {
+		if !isUnresolvedActionAttempt(attempt) {
 			continue
 		}
-		switch event.Type {
-		case model.EventActionAttemptStarted:
-			running[attemptID] = attempt{taskID: event.TaskID}
-		case model.EventActionAttemptUpdated:
-			delete(running, attemptID)
-		}
-	}
-	byTask := make(map[string][]string)
-	for attemptID, entry := range running {
-		byTask[entry.taskID] = append(byTask[entry.taskID], attemptID)
+		byTask[attempt.TaskID] = append(byTask[attempt.TaskID], attempt.AttemptID)
 	}
 	return byTask
+}
+
+func isUnresolvedActionAttempt(attempt model.ActionAttempt) bool {
+	if attempt.RequiresReconcile {
+		return true
+	}
+	switch attempt.Status {
+	case model.ActionAttemptRunning, model.ActionAttemptCreated, model.ActionAttemptUnknown:
+		return true
+	default:
+		return false
+	}
 }

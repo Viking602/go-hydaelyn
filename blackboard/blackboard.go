@@ -1,5 +1,8 @@
 // Package blackboard exposes only the stable item and selector contracts used
 // by the Venat runtime.
+//
+// Deprecated: import github.com/Viking602/venat/api and use the api.Blackboard*
+// types. This alias package will be removed in a later minor (ADR-027).
 package blackboard
 
 import "github.com/Viking602/venat/api"

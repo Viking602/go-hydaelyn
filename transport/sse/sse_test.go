@@ -26,6 +26,18 @@ func newTestWriter(t *testing.T) (*Writer, *httptest.ResponseRecorder) {
 	return writer, rec
 }
 
+func waitUntil(t *testing.T, timeout time.Duration, pred func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if pred() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
+}
+
 func TestWriterEmitsServerSentEvents(t *testing.T) {
 	writer, rec := newTestWriter(t)
 	ctx := context.Background()
@@ -133,32 +145,39 @@ func TestWriter_HeartbeatEmitsComments(t *testing.T) {
 	defer cancel()
 	writer.Heartbeat(ctx, 5*time.Millisecond)
 
-	// Wait long enough for at least two ticks.
-	time.Sleep(40 * time.Millisecond)
+	waitUntil(t, time.Second, func() bool {
+		writer.mu.Lock()
+		defer writer.mu.Unlock()
+		return strings.Count(rec.Body.String(), ":\n\n") >= 2
+	})
 	cancel()
-	// Give the goroutine a moment to observe cancellation.
-	time.Sleep(20 * time.Millisecond)
+	waitUntil(t, time.Second, func() bool {
+		writer.mu.Lock()
+		defer writer.mu.Unlock()
+		return strings.Count(rec.Body.String(), ":\n\n") >= 2
+	})
 
 	writer.mu.Lock()
 	body := rec.Body.String()
 	count := strings.Count(body, ":\n\n")
+	before := rec.Body.Len()
 	writer.mu.Unlock()
 	if count < 2 {
 		t.Fatalf("expected at least 2 heartbeat comments, got %d in body:\n%s", count, body)
 	}
-
-	// After cancel, no further comments should be written. Snapshot
-	// the count, wait, and confirm it doesn't grow.
-	writer.mu.Lock()
-	before := rec.Body.Len()
-	writer.mu.Unlock()
-	time.Sleep(40 * time.Millisecond)
-	writer.mu.Lock()
-	after := rec.Body.Len()
-	writer.mu.Unlock()
-	if after != before {
-		t.Fatalf("heartbeat kept writing after ctx cancel: before=%d after=%d", before, after)
-	}
+	stable := 0
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		writer.mu.Lock()
+		after := rec.Body.Len()
+		writer.mu.Unlock()
+		if after == before {
+			stable++
+			return stable >= 3
+		}
+		before = after
+		stable = 0
+		return false
+	})
 }
 
 // TestWriter_HeartbeatStopsOnClose verifies the heartbeat goroutine
@@ -172,15 +191,21 @@ func TestWriter_HeartbeatStopsOnClose(t *testing.T) {
 	defer cancel()
 	writer.Heartbeat(ctx, 5*time.Millisecond)
 
-	time.Sleep(30 * time.Millisecond)
+	waitUntil(t, time.Second, func() bool {
+		return strings.Contains(rec.Body.String(), ":\n\n")
+	})
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close error = %v", err)
 	}
 	before := rec.Body.Len()
-	time.Sleep(40 * time.Millisecond)
-	if rec.Body.Len() != before {
-		t.Fatalf("heartbeat kept writing after Close: before=%d after=%d", before, rec.Body.Len())
-	}
+	stable := 0
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		if rec.Body.Len() != before {
+			t.Fatalf("heartbeat kept writing after Close: before=%d after=%d", before, rec.Body.Len())
+		}
+		stable++
+		return stable >= 3
+	})
 }
 
 // TestWriter_EmitHonorsEngineCtxCancelled verifies that when the engine
@@ -214,10 +239,8 @@ func TestWriter_ConcurrentEmitAndHeartbeat(t *testing.T) {
 		}
 	}()
 
-	// Let the heartbeat and emitter run together briefly.
-	time.Sleep(20 * time.Millisecond)
-	cancel() // stop the heartbeat
-	<-done   // wait for emitter to finish
+	<-done
+	cancel()
 	_ = writer.Close()
 
 	// The body should contain well-formed SSE records and comments with

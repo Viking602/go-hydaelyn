@@ -2,6 +2,7 @@ package gate
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 )
 
@@ -97,4 +98,28 @@ func TestFlushGateNilSafety(t *testing.T) {
 	}
 	g.Deactivate() // should not panic
 	g.Start()      // should not panic
+}
+
+func TestFlushGateConcurrentEnqueue(t *testing.T) {
+	g := &FlushGate[int]{}
+	g.Start()
+	var wg sync.WaitGroup
+	failed := make(chan int, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(v int) {
+			defer wg.Done()
+			if !g.Enqueue(v) {
+				failed <- v
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(failed)
+	if n := len(failed); n > 0 {
+		t.Fatalf("%d Enqueue calls failed while active", n)
+	}
+	if g.PendingCount() != 32 {
+		t.Fatalf("PendingCount() = %d, want 32", g.PendingCount())
+	}
 }

@@ -107,3 +107,19 @@ func TestDispatchRejectsUnmetDependencies(t *testing.T) {
 		t.Fatalf("Dispatch() error = %v, want ErrDependencyUnmet", err)
 	}
 }
+
+func TestLoadDispatchTargetRejectsTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	provider := memory.NewProvider()
+	uow, err := provider.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-1", Status: model.RunStatusCompleted}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	if _, _, err := mailbox.LoadDispatchTarget(ctx, uow, "run-1", "task-1"); !errors.Is(err, model.ErrTerminalState) {
+		t.Fatalf("LoadDispatchTarget() error = %v, want ErrTerminalState", err)
+	}
+}

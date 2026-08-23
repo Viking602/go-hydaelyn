@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Viking602/venat/internal/core/model"
@@ -171,7 +172,7 @@ func (d *Delegates) ListEnvelopes(ctx context.Context, runID string) ([]model.Ta
 	return uow.MailboxOutbox().ListEnvelopes(ctx, runID)
 }
 
-func (d *Delegates) withWrite(ctx context.Context, fn func(ports.UnitOfWork) error) error {
+func (d *Delegates) withWrite(ctx context.Context, fn func(ports.UnitOfWork) error) (err error) {
 	uow, err := d.openWrite(ctx)
 	if err != nil {
 		return err
@@ -179,10 +180,10 @@ func (d *Delegates) withWrite(ctx context.Context, fn func(ports.UnitOfWork) err
 	committed := false
 	defer func() {
 		if !committed {
-			_ = uow.Rollback(ctx)
+			err = errors.Join(err, uow.Rollback(ctx))
 		}
 	}()
-	if err := fn(uow); err != nil {
+	if err = fn(uow); err != nil {
 		return err
 	}
 	if err := uow.Commit(ctx); err != nil {

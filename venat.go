@@ -16,6 +16,10 @@ import (
 
 // New constructs an in-memory development runner.
 //
+// The default store is process-local memory: it is not crash-durable and
+// does not survive process restart. Do not use New as a production
+// persistence backend.
+//
 // Deprecated: use NewDevelopment for local/test use or NewProduction for a
 // runner that rejects missing durable storage and policy dependencies.
 func New(configs ...api.Config) *Runner {
@@ -24,6 +28,8 @@ func New(configs ...api.Config) *Runner {
 
 // NewDevelopment constructs a runner with in-memory storage and allow-all
 // policy defaults. It is intended for tests, examples, and local development.
+// Like New, the default store is process-local memory and is not
+// crash-durable.
 func NewDevelopment(configs ...api.Config) *Runner {
 	cfg := resolveConfig(configs...)
 	return newRunner(cfg, api.RuntimeModeDevelopment)

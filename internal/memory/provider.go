@@ -1,3 +1,9 @@
+// Package memory is the process-local development and test StoreProvider.
+//
+// It is not crash-durable and is not a Position D reference
+// implementation (ADR-012). Production hosts must supply their own
+// api.StoreProvider. Optional Limits only cap per-run growth inside one
+// process.
 package memory
 
 import (
@@ -30,8 +36,17 @@ func (g transactionGate) release() {
 	select {
 	case g <- struct{}{}:
 	default:
-		panic("memory provider transaction gate released twice")
+		// Idempotent: a panicked or double-closed UoW must not deadlock
+		// later writers, and must not crash the process.
 	}
+}
+
+// Limits optionally bounds per-run in-memory growth. Zero means unlimited.
+// The memory provider is process-local and not crash-durable; these caps
+// only protect a single process from unbounded event/trace accumulation.
+type Limits struct {
+	MaxEventsPerRun     int
+	MaxTraceSpansPerRun int
 }
 
 type Provider struct {
@@ -39,13 +54,19 @@ type Provider struct {
 	stateLock sync.RWMutex
 	committed *State
 	hub       *subscriptionHub
+	limits    Limits
 }
 
 func NewProvider() *Provider {
+	return NewProviderWithLimits(Limits{})
+}
+
+func NewProviderWithLimits(limits Limits) *Provider {
 	return &Provider{
 		txGate:    newTransactionGate(),
 		committed: NewState(),
 		hub:       newSubscriptionHub(),
+		limits:    limits,
 	}
 }
 
@@ -57,6 +78,21 @@ func (p *Provider) Begin(ctx context.Context) (ports.UnitOfWork, error) {
 	staged := p.committed.Clone()
 	p.stateLock.RUnlock()
 	return &UnitOfWork{provider: p, staged: staged}, nil
+}
+
+// BeginRead opens a snapshot UoW that does not take the write gate, so
+// readers do not serialize behind writers. Commit is rejected.
+func (p *Provider) BeginRead(context.Context) (ports.UnitOfWork, error) {
+	p.stateLock.RLock()
+	staged := p.committed.Clone()
+	p.stateLock.RUnlock()
+	return &UnitOfWork{provider: p, staged: staged, readOnly: true}, nil
+}
+
+// DroppedCount is the number of blackboard fan-out items discarded because
+// a subscriber buffer was full.
+func (p *Provider) DroppedCount() uint64 {
+	return p.hub.DroppedCount()
 }
 
 func (p *Provider) SelectItems(_ context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
@@ -108,6 +144,7 @@ type UnitOfWork struct {
 	staged   *State
 	pending  []model.BlackboardItem
 	closed   bool
+	readOnly bool
 }
 
 var _ ports.UnitOfWork = (*UnitOfWork)(nil)
@@ -153,6 +190,9 @@ func (u *UnitOfWork) Commit(context.Context) error {
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
+	if u.readOnly {
+		return fmt.Errorf("memory unit of work is read-only: %w", model.ErrInvalidCommand)
+	}
 	u.provider.stateLock.Lock()
 	u.provider.committed = u.staged
 	pending := append([]model.BlackboardItem{}, u.pending...)
@@ -170,7 +210,9 @@ func (u *UnitOfWork) Rollback(context.Context) error {
 	u.closed = true
 	u.staged = nil
 	u.pending = nil
-	u.provider.txGate.release()
+	if !u.readOnly {
+		u.provider.txGate.release()
+	}
 	return nil
 }
 

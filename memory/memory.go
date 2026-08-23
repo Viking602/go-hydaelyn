@@ -1,28 +1,27 @@
-// Package memory is the optional-plugin memory surface for v0.8.0+.
-// The framework ships the interface only; backends (vector DB / KV /
-// file / in-memory) live in user code per ADR-013.
+// Package memory is a deprecated compatibility surface.
 //
-// Spec anchor: docs/product-spec/v0.8.0/15-memory-optional-plugin.md.
+// The canonical optional-plugin contract is api.Memory[T api.Identified]
+// (Write / Read / Forget, isolation by Scope + SubjectID). See ADR-013
+// and ADR-021. This package keeps the historical Put / Get / Query /
+// Delete verbs so existing importers compile. It will be removed in a
+// later minor.
 //
-// The pre-existing api.Memory[T] interface (api/memory.go) remains
-// untouched for backward compatibility — it is a Write/Read/Forget
-// shape bound to api.ContextScope identity. The memory package's
-// Memory[T] is the v0.8.0+ canonical surface targeted by the design
-// docs and the Phase 4 recipes (recipe/memory-pyramid,
-// recipe/memory-retrieval); applications choose either surface.
+// The framework still ships no Memory backend (ADR-012 Position D).
 package memory
 
 import "context"
 
-// Identified is the constraint Memory entities must satisfy: each item
-// must expose a stable ID for Get / Delete.
+// Identified is the historical ID-only constraint.
+//
+// Deprecated: implement api.Identified (ID, Scope, SubjectID) and use
+// api.Memory.
 type Identified interface {
 	ID() string
 }
 
-// Memory[T] is the verb surface for storing and retrieving items of
-// type T. The framework owns the interface; backends live in user
-// code per ADR-013 (Memory as optional plugin).
+// Memory is the historical verb surface.
+//
+// Deprecated: use api.Memory.
 type Memory[T Identified] interface {
 	Put(ctx context.Context, item T) error
 	Get(ctx context.Context, id string) (T, error)
@@ -30,9 +29,12 @@ type Memory[T Identified] interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// Query parameters supported by all backends. Backends MAY ignore
-// fields they cannot implement (e.g. EmbeddingMatch on a pure KV
-// backend) but MUST document the omission.
+// Query is the historical retrieval parameter bag. Retrieval stays an
+// application or recipe concern under ADR-013; this type exists only
+// for the deprecated Memory[T] surface.
+//
+// Deprecated: use api.MemorySelector or an application-specific query
+// type.
 type Query struct {
 	TextSearch     string          `json:"textSearch,omitempty"`
 	Filter         map[string]any  `json:"filter,omitempty"`
@@ -41,9 +43,9 @@ type Query struct {
 	Offset         int             `json:"offset,omitempty"`
 }
 
-// EmbeddingMatch parameterizes vector-similarity backends. Threshold is
-// in the [0, 1] cosine-similarity range; backends that use a different
-// metric MUST document their interpretation.
+// EmbeddingMatch parameterizes historical vector-similarity backends.
+//
+// Deprecated: keep embedding search in application or recipe code.
 type EmbeddingMatch struct {
 	Vector    []float32 `json:"vector,omitempty"`
 	Threshold float32   `json:"threshold,omitempty"`

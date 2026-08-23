@@ -311,8 +311,9 @@ func (p *Patcher) Commit(ctx context.Context, prepared []PreparedSection) (Apply
 	for _, ps := range prepared {
 		out := ps.normalized.Restore(ps.newText)
 		if err := p.FS.WriteText(ctx, ps.Path, out); err != nil {
-			// Roll back everything written so far, in reverse order.
-			p.rollback(ctx, written)
+			if rbErr := p.rollback(ctx, written); rbErr != nil {
+				return ApplyPatchResult{}, fmt.Errorf("hashline: write %q: %w", ps.Path, errors.Join(err, rbErr))
+			}
 			return ApplyPatchResult{}, fmt.Errorf("hashline: write %q: %w", ps.Path, err)
 		}
 		written = append(written, ps)
@@ -378,15 +379,21 @@ type restorer interface {
 // the earlier sections modified, breaking Commit's all-or-nothing contract. The
 // restore writes are synchronous and bounded, so dropping cancellation here
 // cannot hang the rollback.
-func (p *Patcher) rollback(ctx context.Context, written []PreparedSection) {
+func (p *Patcher) rollback(ctx context.Context, written []PreparedSection) error {
 	ctx = context.WithoutCancel(ctx)
+	var errs []error
 	for i := len(written) - 1; i >= 0; i-- {
+		var err error
 		if r, ok := p.FS.(restorer); ok {
-			_ = r.RestoreText(ctx, written[i].Path, written[i].originalRaw)
-			continue
+			err = r.RestoreText(ctx, written[i].Path, written[i].originalRaw)
+		} else {
+			err = p.FS.WriteText(ctx, written[i].Path, written[i].originalRaw)
 		}
-		_ = p.FS.WriteText(ctx, written[i].Path, written[i].originalRaw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("restore %q: %w", written[i].Path, err))
+		}
 	}
+	return errors.Join(errs...)
 }
 
 // Apply runs the full parse-validated → live-hash compare → in-memory

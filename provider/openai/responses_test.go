@@ -592,6 +592,18 @@ func TestDriverStreamRejectsInvalidResponsesProviderState(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamSkipsKeepaliveFrames(t *testing.T) {
+	stream := newResponsesTestStream(`:keepalive
+
+data: {"type":"response.completed","response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}
+
+`)
+	events := collectEvents(t, stream)
+	if len(events) == 0 || events[len(events)-1].Kind != provider.EventDone {
+		t.Fatalf("keepalive should be skipped, got %#v", events)
+	}
+}
+
 func TestResponsesStreamDecodesTypedEvents(t *testing.T) {
 	stream := newResponsesTestStream(`data: {"type":"response.created","response":{"output":[]}}
 

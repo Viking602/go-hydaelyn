@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Viking602/venat/api"
 )
@@ -209,6 +210,47 @@ func TestDriveStopsAtMaxTicks(t *testing.T) {
 	_, err := Drive(context.Background(), "run-1", endless, executor, DriveOptions{MaxTicks: 3})
 	if !errors.Is(err, ErrMaxTicksExceeded) {
 		t.Fatalf("Drive error = %v, want ErrMaxTicksExceeded", err)
+	}
+}
+
+func TestDriveSemaphoreAcquireRespectsCancel(t *testing.T) {
+	var ran atomic.Int32
+	held := make(chan struct{}, 2)
+	hold := make(chan struct{})
+	scheduler := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		return []Dispatch{
+			buildDispatch(state.RunID, AgentClass{Name: "a"}, 0, nil),
+			buildDispatch(state.RunID, AgentClass{Name: "b"}, 1, nil),
+			buildDispatch(state.RunID, AgentClass{Name: "c"}, 2, nil),
+		}, nil
+	})
+	executor := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		ran.Add(1)
+		held <- struct{}{}
+		<-hold
+		return api.TypedReport{Status: api.ReportStatusSuccess}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := Drive(ctx, "run-sem-cancel", scheduler, executor, DriveOptions{MaxConcurrency: 2})
+		done <- err
+	}()
+	<-held
+	<-held
+	cancel()
+	// The third acquire is parked on the full semaphore. Give the
+	// cancelled select a chance to observe Done before slots free.
+	time.Sleep(20 * time.Millisecond)
+	close(hold)
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Drive() error = %v", err)
+	}
+	if got := ran.Load(); got != 2 {
+		t.Fatalf("executed %d dispatches after cancel, want 2", got)
 	}
 }
 

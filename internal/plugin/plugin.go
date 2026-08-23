@@ -46,7 +46,9 @@ func NewRegistry(specs ...Spec) *Registry {
 		items: map[Type]map[string]Spec{},
 	}
 	for _, spec := range specs {
-		_ = registry.Register(spec)
+		if err := registry.Register(spec); err != nil {
+			panic(err)
+		}
 	}
 	return registry
 }

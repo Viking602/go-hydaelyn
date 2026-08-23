@@ -74,6 +74,38 @@ func TestSaveAndLoadRun(t *testing.T) {
 	}
 }
 
+func TestListRunsFiltersAgentMetadata(t *testing.T) {
+	r := newTestRunner(t)
+	ctx := context.Background()
+	run, _, err := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	run.Metadata = map[string]string{"agentId": "agent-1", "agentVersion": "v1"}
+	if err := r.SaveRun(ctx, run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	uow, err := r.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer func() { _ = uow.Rollback(ctx) }()
+	got, err := uow.Runs().ListRuns(ctx, api.RunSelector{AgentID: "agent-1", AgentVersion: "v1"})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != run.ID {
+		t.Fatalf("ListRuns = %#v, want %s", got, run.ID)
+	}
+	miss, err := uow.Runs().ListRuns(ctx, api.RunSelector{AgentID: "other"})
+	if err != nil {
+		t.Fatalf("ListRuns(miss): %v", err)
+	}
+	if len(miss) != 0 {
+		t.Fatalf("ListRuns(other) = %#v, want empty", miss)
+	}
+}
+
 func TestAppendAndListEvents(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()

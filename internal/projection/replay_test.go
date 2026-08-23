@@ -90,3 +90,43 @@ func TestProjectPreservesRunAgentVersion(t *testing.T) {
 		t.Fatalf("projected AgentVersion = %q, want def-v3", projection.Run.AgentVersion)
 	}
 }
+
+func TestProjectEmptyEvents(t *testing.T) {
+	if _, err := Project(nil); err != model.ErrNotFound {
+		t.Fatalf("Project(nil) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestProjectAppliesRunStatusAndDispatch(t *testing.T) {
+	now := time.Now().UTC()
+	events := []model.Event{
+		{RunID: "run-1", Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(model.Run{ID: "run-1", Status: model.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
+		{RunID: "run-1", Type: model.EventRunStatusChanged, Payload: map[string]any{"to": string(model.RunStatusCompleted)}},
+		{RunID: "run-1", TaskID: "task-1", Type: model.EventTaskCreated, Payload: eventpayload.Task(model.Task{ID: "task-1", RunID: "run-1", Status: model.TaskStatusCreated})},
+		{RunID: "run-1", TaskID: "task-1", Type: model.EventTaskDispatched, Payload: map[string]any{"envelope": map[string]any{"taskId": "task-1"}}},
+	}
+	projection, err := Project(events)
+	if err != nil {
+		t.Fatalf("Project() error = %v", err)
+	}
+	if projection.Run.Status != model.RunStatusCompleted {
+		t.Fatalf("run status = %q, want completed", projection.Run.Status)
+	}
+	if projection.Tasks["task-1"].Status != model.TaskStatusDispatched {
+		t.Fatalf("task status = %q, want dispatched", projection.Tasks["task-1"].Status)
+	}
+}
+
+func TestTimelineIncludesVisibleEvents(t *testing.T) {
+	items := Timeline([]model.Event{
+		{Type: model.EventRunStatusChanged, Payload: map[string]any{"from": "running", "to": "completed"}},
+		{Type: model.EventTaskDispatched, TaskID: "task-1"},
+		{Type: model.EventTraceSpanStarted},
+	})
+	if len(items) != 2 {
+		t.Fatalf("Timeline() = %#v, want 2 visible items", items)
+	}
+	if items[0].Kind != model.RunTimelineKindControl || items[1].Kind != model.RunTimelineKindWork {
+		t.Fatalf("timeline kinds = %#v", items)
+	}
+}

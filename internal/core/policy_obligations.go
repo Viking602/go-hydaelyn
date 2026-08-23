@@ -38,7 +38,7 @@ func (r *Runtime) enforceBlackboardReadUoW(
 		return enforcedSelector, enforcedItems, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, selector.RunID, "", decision, err); eventErr != nil {
-		return model.BlackboardSelector{}, nil, fmt.Errorf("%w: record obligation failure: %v", err, eventErr)
+		return model.BlackboardSelector{}, nil, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
 	return model.BlackboardSelector{}, nil, commitWithError(err)
 }
@@ -54,7 +54,7 @@ func (r *Runtime) enforceBlackboardWriteUoW(
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, item.RunID, item.TaskID, decision, err); eventErr != nil {
-		return model.BlackboardItem{}, fmt.Errorf("%w: record obligation failure: %v", err, eventErr)
+		return model.BlackboardItem{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
 	return model.BlackboardItem{}, commitWithError(err)
 }
@@ -65,21 +65,17 @@ func (r *Runtime) EnforceToolResult(
 	taskID string,
 	decision model.PolicyDecision,
 	result json.RawMessage,
-) (json.RawMessage, error) {
+) (enforced json.RawMessage, err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return nil, err
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = uow.Rollback(ctx)
-		}
-	}()
+	defer rollbackIfNotCommitted(ctx, uow, &committed, &err)
 	enforced, enforcementErr := r.currentPolicyEnforcer().EnforceToolResult(ctx, decision, result)
 	if enforcementErr != nil {
-		if err := appendPolicyObligationFailure(ctx, uow, runID, taskID, decision, enforcementErr); err != nil {
-			return nil, fmt.Errorf("%w: record obligation failure: %v", enforcementErr, err)
+		if eventErr := appendPolicyObligationFailure(ctx, uow, runID, taskID, decision, enforcementErr); eventErr != nil {
+			return nil, fmt.Errorf("%w: record obligation failure: %w", enforcementErr, eventErr)
 		}
 	}
 	if err := uow.Commit(ctx); err != nil {
@@ -103,7 +99,7 @@ func (r *Runtime) enforceHandoffUoW(
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, handoff.RunID, handoff.TaskID, decision, err); eventErr != nil {
-		return model.HandoffRequest{}, fmt.Errorf("%w: record obligation failure: %v", err, eventErr)
+		return model.HandoffRequest{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
 	return model.HandoffRequest{}, commitWithError(err)
 }
@@ -119,7 +115,7 @@ func (r *Runtime) enforceResponseUoW(
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, message.RunID, message.TaskID, decision, err); eventErr != nil {
-		return model.UserMessage{}, fmt.Errorf("%w: record obligation failure: %v", err, eventErr)
+		return model.UserMessage{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
 	return model.UserMessage{}, err
 }
@@ -136,7 +132,7 @@ func (r *Runtime) enforceTraceSpansUoW(
 		enforced, visible, err := r.currentPolicyEnforcer().EnforceTrace(ctx, decision, span)
 		if err != nil {
 			if eventErr := appendPolicyObligationFailure(ctx, uow, runID, span.TaskID, decision, err); eventErr != nil {
-				return nil, fmt.Errorf("%w: record obligation failure: %v", err, eventErr)
+				return nil, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 			}
 			return nil, commitWithError(err)
 		}
@@ -275,7 +271,7 @@ func (defaultPolicyObligationEnforcer) EnforceToolResult(
 		}
 		out, err = json.Marshal(fields)
 		if err != nil {
-			return nil, fmt.Errorf("%w: encode enforced tool result: %v", model.ErrPolicyObligationFailed, err)
+			return nil, fmt.Errorf("%w: encode enforced tool result: %w", model.ErrPolicyObligationFailed, err)
 		}
 	}
 	return out, nil
@@ -601,7 +597,7 @@ func setPolicyToolResultString(fields map[string]json.RawMessage, name, value st
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("%w: encode enforced tool result field %q: %v", model.ErrPolicyObligationFailed, name, err)
+		return fmt.Errorf("%w: encode enforced tool result field %q: %w", model.ErrPolicyObligationFailed, name, err)
 	}
 	fields[name] = encoded
 	return nil

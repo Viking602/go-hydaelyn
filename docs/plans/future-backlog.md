@@ -21,7 +21,7 @@ date or version commitment.
   are available.
 
 Venat does not plan to ship a general storage backend under
-[ADR-012](../adr/ADR-012-storage-contract-position-c.md), or a framework memory
+[ADR-012](../adr/ADR-012-storage-contract-position-d.md), or a framework memory
 backend under [ADR-013](../adr/ADR-013-memory-kernel-vs-pipeline.md).
 
 ## Observability

@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Viking602/venat/internal/core/model"
 )
@@ -13,22 +15,27 @@ type subscription struct {
 	runID  string
 	filter model.BlackboardSelector
 	ch     chan model.BlackboardItem
+	done   <-chan struct{}
 	once   sync.Once
 }
 
 type subscriptionHub struct {
-	mu     sync.Mutex
-	nextID uint64
-	subs   map[string][]*subscription
+	mu      sync.Mutex
+	nextID  uint64
+	dropped uint64
+	subs    map[string][]*subscription
 }
 
 func newSubscriptionHub() *subscriptionHub {
 	return &subscriptionHub{subs: map[string][]*subscription{}}
 }
 
-func (h *subscriptionHub) Subscribe(_ context.Context, runID string, filter model.BlackboardSelector) (<-chan model.BlackboardItem, func() error, error) {
+func (h *subscriptionHub) Subscribe(ctx context.Context, runID string, filter model.BlackboardSelector) (<-chan model.BlackboardItem, func() error, error) {
 	if runID == "" {
 		return nil, nil, model.ErrInvalidCommand
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -38,9 +45,30 @@ func (h *subscriptionHub) Subscribe(_ context.Context, runID string, filter mode
 		runID:  runID,
 		filter: filter,
 		ch:     make(chan model.BlackboardItem, 32),
+		done:   ctx.Done(),
 	}
 	h.subs[runID] = append(h.subs[runID], sub)
-	return sub.ch, func() error { return h.unsubscribe(sub) }, nil
+	stop := context.AfterFunc(ctx, func() { _ = h.unsubscribe(sub) })
+	var stopped atomic.Bool
+	return sub.ch, func() error {
+		stop()
+		err := h.unsubscribe(sub)
+		if stopped.CompareAndSwap(false, true) {
+			if errors.Is(err, model.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		return err
+	}, nil
+}
+
+// DroppedCount is the number of fan-out items discarded because a
+// subscriber buffer was full.
+func (h *subscriptionHub) DroppedCount() uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.dropped
 }
 
 func (h *subscriptionHub) unsubscribe(sub *subscription) error {
@@ -67,16 +95,25 @@ func (h *subscriptionHub) Notify(items []model.BlackboardItem) {
 			if !matchesBlackboardSelector(item, sub.filter) {
 				continue
 			}
+			if sub.done != nil {
+				select {
+				case <-sub.done:
+					continue
+				default:
+				}
+			}
 			select {
 			case sub.ch <- item:
 			default:
 				select {
 				case <-sub.ch:
+					h.dropped++
 				default:
 				}
 				select {
 				case sub.ch <- item:
 				default:
+					h.dropped++
 				}
 			}
 		}

@@ -100,11 +100,16 @@ func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.R
 		if !sel.Until.IsZero() && run.CreatedAt.After(sel.Until) {
 			continue
 		}
-		if sel.AgentVersion != "" && run.AgentVersion != sel.AgentVersion {
+		if sel.AgentID != "" && runMetadata(run, "agentId", "agentID") != sel.AgentID {
 			continue
 		}
-		// AgentID is not stamped on Run yet; keep the selector field for
-		// callers that already filter by version or identity metadata.
+		agentVersion := run.AgentVersion
+		if agentVersion == "" {
+			agentVersion = runMetadata(run, "agentVersion")
+		}
+		if sel.AgentVersion != "" && agentVersion != sel.AgentVersion {
+			continue
+		}
 		out = append(out, run)
 	}
 	slices.SortFunc(out, func(a, b model.Run) int {
@@ -165,9 +170,16 @@ func (s *eventStore) AppendEvent(_ context.Context, event model.Event) error {
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
+	if limit := u.provider.limits.MaxEventsPerRun; limit > 0 && len(u.staged.Events[event.RunID]) >= limit {
+		return fmt.Errorf("memory event limit exceeded: %w", model.ErrInvalidCommand)
+	}
 	if event.Sequence == 0 {
 		u.staged.Seq[event.RunID]++
-		event.Sequence = u.staged.Seq[event.RunID]
+		seq := u.staged.Seq[event.RunID]
+		if seq > uint64(int(^uint(0)>>1)) {
+			return fmt.Errorf("event sequence overflow: %w", model.ErrInvalidCommand)
+		}
+		event.Sequence = int(seq)
 	}
 	if event.RecordedAt.IsZero() {
 		event.RecordedAt = time.Now().UTC()
@@ -192,13 +204,11 @@ func (s *eventStore) ListAfter(_ context.Context, runID string, afterSeq uint64)
 		return nil, err
 	}
 	all := u.staged.Events[runID]
-	var out []model.Event
-	for _, ev := range all {
-		if uint64(ev.Sequence) > afterSeq {
-			out = append(out, ev)
-		}
+	i := 0
+	for i < len(all) && uint64(all[i].Sequence) <= afterSeq {
+		i++
 	}
-	return out, nil
+	return slices.Clone(all[i:]), nil
 }
 
 func (s *blackboardStore) WriteItem(_ context.Context, item model.BlackboardItem) error {
@@ -424,6 +434,9 @@ func (s *traceStore) SaveTraceSpan(_ context.Context, span model.TraceSpan) erro
 	}
 	if span.Status == "" {
 		span.Status = model.TraceSpanStarted
+	}
+	if limit := u.provider.limits.MaxTraceSpansPerRun; limit > 0 && len(u.staged.TraceSpans[span.RunID]) >= limit {
+		return fmt.Errorf("memory trace limit exceeded: %w", model.ErrInvalidCommand)
 	}
 	u.staged.TraceSpans[span.RunID] = append(u.staged.TraceSpans[span.RunID], span)
 	return nil
@@ -823,4 +836,16 @@ func cmpString(a, b string) int {
 
 func activeLeaseKey(runID, taskID string) string {
 	return runID + "\x00" + taskID
+}
+
+func runMetadata(run model.Run, keys ...string) string {
+	if run.Metadata == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value := run.Metadata[key]; value != "" {
+			return value
+		}
+	}
+	return ""
 }

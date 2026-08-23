@@ -267,6 +267,7 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 	)
 
 	spawned := 0
+spawnLoop:
 	for i, dispatch := range work {
 		// Fail-fast: once a dispatch has errored (or ctx was cancelled
 		// externally) stop launching the rest of this tick rather than
@@ -274,8 +275,12 @@ func applyConcurrent(ctx context.Context, runID string, state TeamState, work []
 		if cctx.Err() != nil {
 			break
 		}
+		select {
+		case sem <- struct{}{}:
+		case <-cctx.Done():
+			break spawnLoop
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		spawned++
 		go func(i int, dispatch Dispatch) {
 			defer wg.Done()
@@ -330,19 +335,19 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 	if agentClassName == "" {
 		agentClassName = className
 	}
-	var report api.TypedReport
-	execErr := ValidateDispatch(dispatch)
-	if execErr == nil {
-		report, execErr = runDispatch(ctx, dispatch, executor, sink, className)
-	}
 	instance := AgentInstance{
 		ID:             dispatch.To,
 		ClassName:      className,
 		AgentClassName: agentClassName,
 		RunID:          runID,
 		TaskID:         dispatch.Task.ID,
-		State:          InstanceStateFinished,
+		State:          InstanceStateRunning,
 		CreatedAt:      time.Now().UTC(),
+	}
+	var report api.TypedReport
+	execErr := ValidateDispatch(dispatch)
+	if execErr == nil {
+		report, execErr = runDispatch(ctx, dispatch, executor, sink, className)
 	}
 	task := dispatch.Task
 	var suspension *ExecutionSuspendedError
@@ -359,6 +364,7 @@ func executeDispatch(ctx context.Context, runID string, dispatch Dispatch, execu
 		task.Error = execErr.Error()
 		return instance, task, execErr
 	}
+	instance.State = InstanceStateFinished
 	stored := report
 	task.Status = api.TaskStatusCompleted
 	task.Result = &stored

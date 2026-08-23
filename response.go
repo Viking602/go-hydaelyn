@@ -30,13 +30,6 @@ func (r *Runner) DrainResponseOutbox(ctx context.Context) (int, error) {
 	return published, adapter.ErrorToAPI(err)
 }
 
-// Deprecated: use ResponseOutboxContext so cancellation and storage errors
-// are observable. An empty slice means the store confirmed there are no
-// messages; store failures are returned as errors, not collapsed to nil.
-func (r *Runner) ResponseOutbox(runID string) ([]api.UserMessage, error) {
-	return r.ResponseOutboxContext(context.Background(), runID)
-}
-
 func (r *Runner) ResponseOutboxContext(ctx context.Context, runID string) ([]api.UserMessage, error) {
 	messages, err := r.rt.ResponseOutbox(ctx, runID)
 	if err != nil {

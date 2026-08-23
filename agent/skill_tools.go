@@ -209,10 +209,12 @@ func (r *skillRuntime) availableSkills() []skill.Skill {
 type skillActivationDriver struct{ runtime *skillRuntime }
 
 func (d skillActivationDriver) Definition() tool.Definition {
+	d.runtime.mu.RLock()
 	names := make([]string, 0, len(d.runtime.available))
 	for name := range d.runtime.available {
 		names = append(names, name)
 	}
+	d.runtime.mu.RUnlock()
 	sort.Strings(names)
 	additional := false
 	return tool.Definition{
@@ -260,10 +262,12 @@ func (d skillActivationDriver) Execute(_ context.Context, call tool.Call, _ tool
 type skillResourceDriver struct{ runtime *skillRuntime }
 
 func (d skillResourceDriver) Definition() tool.Definition {
+	d.runtime.mu.RLock()
 	names := make([]string, 0, len(d.runtime.all))
 	for name := range d.runtime.all {
 		names = append(names, name)
 	}
+	d.runtime.mu.RUnlock()
 	sort.Strings(names)
 	additional := false
 	return tool.Definition{

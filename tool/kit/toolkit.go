@@ -280,18 +280,56 @@ func decodeInput(target reflect.Type, payload json.RawMessage) (reflect.Value, e
 		}
 		return value.Elem(), nil
 	}
+	if err := requireJSONFields(target, payload); err != nil {
+		return reflect.Value{}, err
+	}
 	if err := json.Unmarshal(payload, value.Interface()); err != nil {
 		return reflect.Value{}, err
 	}
 	return value.Elem(), nil
 }
 
+func requireJSONFields(target reflect.Type, payload json.RawMessage) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return err
+	}
+	for idx := 0; idx < target.NumField(); idx++ {
+		field := target.Field(idx)
+		if !field.IsExported() {
+			continue
+		}
+		name := field.Tag.Get("json")
+		name = strings.Split(name, ",")[0]
+		if name == "" {
+			name = lowerCamel(field.Name)
+		}
+		if name == "-" || strings.Contains(field.Tag.Get("json"), "omitempty") {
+			continue
+		}
+		if _, ok := raw[name]; !ok {
+			return fmt.Errorf("missing required field %q", name)
+		}
+	}
+	return nil
+}
+
 func schemaFor(current reflect.Type) (message.JSONSchema, error) {
+	return schemaForVisited(current, map[reflect.Type]struct{}{})
+}
+
+func schemaForVisited(current reflect.Type, visiting map[reflect.Type]struct{}) (message.JSONSchema, error) {
 	for current.Kind() == reflect.Pointer {
 		current = current.Elem()
 	}
 	switch current.Kind() {
 	case reflect.Struct:
+		if _, seen := visiting[current]; seen {
+			additional := true
+			return message.JSONSchema{Type: "object", AdditionalProperties: &additional}, nil
+		}
+		visiting[current] = struct{}{}
+		defer delete(visiting, current)
 		properties := map[string]message.JSONSchema{}
 		required := make([]string, 0, current.NumField())
 		for idx := 0; idx < current.NumField(); idx++ {
@@ -307,7 +345,7 @@ func schemaFor(current reflect.Type) (message.JSONSchema, error) {
 			if name == "-" {
 				continue
 			}
-			child, err := schemaFor(field.Type)
+			child, err := schemaForVisited(field.Type, visiting)
 			if err != nil {
 				return message.JSONSchema{}, err
 			}
@@ -327,7 +365,7 @@ func schemaFor(current reflect.Type) (message.JSONSchema, error) {
 			AdditionalProperties: &additional,
 		}, nil
 	case reflect.Slice, reflect.Array:
-		items, err := schemaFor(current.Elem())
+		items, err := schemaForVisited(current.Elem(), visiting)
 		if err != nil {
 			return message.JSONSchema{}, err
 		}

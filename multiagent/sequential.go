@@ -32,7 +32,11 @@ func (s SequentialScheduler) Next(_ context.Context, state TeamState) ([]Dispatc
 		}
 		var input []byte
 		if index > 0 {
-			input = state.reportInput(s.Classes[index-1].Name)
+			var err error
+			input, err = state.reportInput(s.Classes[index-1].Name)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return []Dispatch{state.buildDispatch(class, input)}, nil
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
@@ -435,6 +436,9 @@ func (s *responsesStream) Recv() (provider.Event, error) {
 				return provider.Event{}, io.ErrUnexpectedEOF
 			}
 			return provider.Event{}, err
+		}
+		if strings.TrimSpace(frame.Data) == "" {
+			continue
 		}
 		var event responsesStreamEvent
 		if err := json.Unmarshal([]byte(frame.Data), &event); err != nil {

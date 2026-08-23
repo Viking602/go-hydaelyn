@@ -9,7 +9,7 @@ import (
 )
 
 func (r *Runner) RegisterAgent(profile api.AgentProfile) {
-	r.rt.RegisterAgent(adapter.AgentProfileToModel(profile))
+	_ = r.rt.RegisterAgent(adapter.AgentProfileToModel(profile))
 }
 
 func (r *Runner) Agents() []api.AgentProfile {
@@ -17,14 +17,14 @@ func (r *Runner) Agents() []api.AgentProfile {
 }
 
 func (r *Runner) RegisterTool(tool api.Tool) {
-	r.rt.RegisterTool(adapter.ToolToModel(tool))
+	_ = r.rt.RegisterTool(adapter.ToolToModel(tool))
 }
 
 // RegisterToolForInvocation scopes governed tool metadata to one run, task,
 // holder, and tool name. RegisterTool remains the legacy global registration
 // API for direct non-agent callers.
 func (r *Runner) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) {
-	r.rt.RegisterToolForInvocation(runID, taskID, model.HolderType(holderType), holderID, adapter.ToolToModel(tool))
+	_ = r.rt.RegisterToolForInvocation(runID, taskID, model.HolderType(holderType), holderID, adapter.ToolToModel(tool))
 }
 
 // RemoveToolsForInvocation releases all scoped tool metadata for one exact
@@ -59,6 +59,8 @@ func (r *Runner) SetPipeline(components api.PipelineComponents) {
 	r.rt.SetPipeline(adapter.PipelineToCore(components))
 }
 
+// StoreProvider returns the configured provider. Prefer Admin() when
+// passing the raw store into host helpers (ADR-025).
 func (r *Runner) StoreProvider() api.StoreProvider {
 	return adapter.StoreProviderFromCore(r.rt.StoreProvider())
 }
@@ -84,6 +86,8 @@ func (r *Runner) Close(ctx context.Context) error {
 	return adapter.ErrorToAPI(r.rt.Close(ctx))
 }
 
+// Begin opens a host-owned UnitOfWork. Prefer Admin() for raw store
+// access (ADR-025).
 func (r *Runner) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	uow, err := r.rt.Begin(ctx)
 	if err != nil {
@@ -92,6 +96,8 @@ func (r *Runner) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	return adapter.UnitOfWorkFromCore(uow), nil
 }
 
+// SaveRun writes a run row through the configured provider. Prefer
+// QueueRun / StartRun for application lifecycle (ADR-025).
 func (r *Runner) SaveRun(ctx context.Context, run api.Run) error {
 	return adapter.ErrorToAPI(r.rt.SaveRun(ctx, adapter.RunToModel(run)))
 }

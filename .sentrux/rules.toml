@@ -1,31 +1,35 @@
 # Venat architectural rules — enforced via `sentrux check`.
-# See ADR-008 for the framework-vs-business boundary that motivates these rules.
+# See ADR-008 and ADR-024 for the framework-vs-business and five-layer
+# boundaries that motivate these rules.
 #
 # Strategy notes:
-# - Layers were intentionally NOT modeled here. Sentrux 0.5.7's layer_direction
-#   forbids any cross-layer import once layers are declared, which is too coarse
-#   for our boundaries (e.g., orchestrator façade → internal/core).
-# - The legacy/* tree was deleted in M6 (v2.0); historical legacy code is
-#   preserved on the archive/legacy-v1 branch, not in main.
-#
-# Sentrux 0.5.7 enforces the graph-wide constraints below, but cannot express
-# these path-scoped import rules precisely. They are enforced from the compiled
-# package graph by scripts/check-import-boundaries.sh instead:
+# - Layers are documented as five (Packs → Worker integration →
+#   Multi-Agent → Agent Loop → Durable Runner) but are NOT modeled with
+#   Sentrux layer_direction. Sentrux 0.5.7 forbids any cross-layer import
+#   once layers are declared, which is too coarse for the façade →
+#   internal/core composition root and for worker → root integration.
+# - Path-scoped import seams are enforced by
+#   scripts/check-import-boundaries.sh from the compiled package graph:
 #
 #   api                    — no Venat imports
 #   agent                  — no multiagent imports
 #   multiagent             — no root, worker, or internal imports
 #   root package facade    — no multiagent imports
+#   worker                 — no packs or coding imports (may import root)
+#   packs                  — no coding, worker, or root imports
+#   coding                 — no worker, packs, or root imports
 #
 # multiagent → stream is intentionally allowed: stream is a runtime-neutral
 # collaboration primitive, not an upward dependency on the durable Runner.
+# worker → root is the integration seam (ADR-024).
 #
 #   internal/core/model      — stdlib only; no internal/core/* imports
 #   internal/core/ports      — model only
-#   internal/memory          — model + ports only; no service packages
+#   internal/memory          — development/test StoreProvider; not a
+#                              Position D reference implementation
 #   internal/core/state      — model only; pure functions
 #   internal/command         — model + ports only
-#   internal/blackboard      — model + ports (service struct injection)
+#   internal/blackboard      — handler/service over generic BlackboardItem
 #   service/domain packages  — model, ports, state, other services
 #                              NO root internal/core import
 #                              NO venat / orchestrator / worker import
@@ -37,7 +41,7 @@
 # Script-based gates run in CI and `make architecture-check`:
 #   scripts/check-business-words.sh  — framework/business vocabulary boundary
 #   scripts/check-public-any.sh      — public []any return and any-field contract
-#   scripts/check-import-boundaries.sh — four path-scoped import seams via go list
+#   scripts/check-import-boundaries.sh — path-scoped import seams via go list
 
 [constraints]
 # Acyclic always.

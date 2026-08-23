@@ -381,7 +381,7 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		}
 		var stop bool
 		out, stop, err = e.runToolStep(
-			ctx, &input, &current, assistant, modelCall, totalUsage, &steps, iteration, &toolCallsUsed,
+			ctx, &input, &current, assistant, modelCall, &totalUsage, &steps, iteration, &toolCallsUsed,
 		)
 		if stop {
 			return out, err
@@ -435,7 +435,7 @@ func (e Engine) runToolStep(
 	current *[]message.Message,
 	assistant message.Message,
 	modelCall *ModelCall,
-	totalUsage provider.Usage,
+	totalUsage *provider.Usage,
 	steps *[]Step,
 	iteration int,
 	toolCallsUsed *int,
@@ -449,12 +449,12 @@ func (e Engine) runToolStep(
 	// A completed tool-use turn is only a request for side effects. Refuse to
 	// dispatch it when cancellation landed after the provider's terminal event.
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, ctxErr
+		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, ctxErr
 	}
 
 	// Reserve the whole batch before hooks or drivers run. This prevents one
 	// side-effecting batch from crossing a token or tool-call ceiling.
-	if dimension := preDispatchBudgetBlock(*input, totalUsage, *toolCallsUsed, len(*steps), len(assistant.ToolCalls)); dimension != "" {
+	if dimension := preDispatchBudgetBlock(*input, *totalUsage, *toolCallsUsed, len(*steps), len(assistant.ToolCalls)); dimension != "" {
 		*steps = append(*steps, Step{
 			Index:      iteration,
 			ModelCall:  modelCall,
@@ -462,9 +462,9 @@ func (e Engine) runToolStep(
 			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
 		})
 		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, *steps); recordErr != nil {
-			return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, recordErr
+			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, recordErr
 		}
-		out, err := budgetAbort(*current, totalUsage, *steps, iteration+1, *toolCallsUsed, dimension)
+		out, err := budgetAbort(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed, dimension)
 		return out, true, err
 	}
 
@@ -473,22 +473,34 @@ func (e Engine) runToolStep(
 	// under-report usage.
 	prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
 	if prepErr != nil {
-		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, prepErr
+		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, prepErr
 	}
 	*toolCallsUsed += len(assistant.ToolCalls)
-	results, dispatchErr := e.dispatchPreparedTools(ctx, prepared, input.ToolMode)
+	var childUsage provider.Usage
+	toolCtx := withParentUsageSink(ctx, func(usage provider.Usage) {
+		childUsage = childUsage.Add(usage)
+	})
+	if input.MaxTokens > 0 {
+		remaining := input.MaxTokens - int64(totalUsage.TotalTokens)
+		if remaining < 0 {
+			remaining = 0
+		}
+		toolCtx = withParentTokenBudget(toolCtx, remaining)
+	}
+	results, dispatchErr := e.dispatchPreparedTools(toolCtx, prepared, input.ToolMode)
+	*totalUsage = totalUsage.Add(childUsage)
 
 	// Preserve every result that ran before reporting the dispatch error. This
 	// keeps resume from replaying a side effect whose result was already emitted.
 	appendErr := appendToolResults(ctx, current, results, input.Sink)
 	if dispatchErr != nil {
-		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, dispatchErr
+		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, dispatchErr
 	}
 	if appendErr != nil {
-		return loopErrorOutput(*current, totalUsage, *steps, iteration+1, *toolCallsUsed), true, appendErr
+		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, appendErr
 	}
 	nextSteps, out, stop, err := finalizeToolStep(
-		ctx, *input, *current, totalUsage, *steps, assistant, modelCall,
+		ctx, *input, *current, *totalUsage, *steps, assistant, modelCall,
 		results, terminal, iteration, *toolCallsUsed,
 	)
 	*steps = nextSteps

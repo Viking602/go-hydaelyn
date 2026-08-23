@@ -2,9 +2,15 @@ package shared
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strings"
 )
+
+// MaxSSELineBytes caps a single SSE line so a hostile or buggy upstream
+// cannot grow the process without bound. 8 MiB is large enough for the
+// documented 2 MiB provider payloads and small enough to fail closed.
+const MaxSSELineBytes = 8 << 20
 
 // Event represents a parsed Server-Sent Event frame.
 type Event struct {
@@ -89,16 +95,28 @@ func (r *Reader) Next() (Event, error) {
 }
 
 func (r *Reader) readLine() (string, error) {
-	line, err := r.reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
+	var buf []byte
+	for {
+		chunk, err := r.reader.ReadSlice('\n')
+		if len(buf)+len(chunk) > MaxSSELineBytes {
+			return "", fmt.Errorf("sse: line exceeds %d bytes", MaxSSELineBytes)
+		}
+		if err == bufio.ErrBufferFull {
+			buf = append(buf, chunk...)
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		if err == io.EOF && len(chunk) == 0 && len(buf) == 0 {
+			return "", io.EOF
+		}
+		buf = append(buf, chunk...)
+		line := string(buf)
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		return line, nil
 	}
-	if err == io.EOF && len(line) == 0 {
-		return "", io.EOF
-	}
-	line = strings.TrimSuffix(line, "\n")
-	line = strings.TrimSuffix(line, "\r")
-	return line, nil
 }
 
 // parseSSELine splits an SSE field line into (field, value).

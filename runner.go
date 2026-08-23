@@ -34,7 +34,8 @@ func (r *Runner) Mode() api.RuntimeMode { return r.mode }
 // that produce a single domain value return that value directly.
 //
 // Deprecated: use the typed Runner methods so result shapes are checked at
-// compile time.
+// compile time. Removal is scheduled after those tools have typed
+// equivalents (ADR-025).
 func (r *Runner) ExecuteCommand(ctx context.Context, command api.Command) (any, error) {
 	coreCommand, ok := adapter.CommandToCore(command)
 	if !ok {

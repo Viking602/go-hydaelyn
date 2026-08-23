@@ -18,6 +18,7 @@ import (
 
 const (
 	defaultHTTPTimeout           = 30 * time.Second
+	defaultProcessTimeout        = 30 * time.Second
 	defaultMaxResponseBytes      = 1 << 20
 	defaultMaxProcessOutputBytes = 1 << 20
 )
@@ -39,6 +40,11 @@ func HTTPTool(name string, schema tool.Schema, cfg HTTPToolConfig, options ...To
 	driver := staticDriver{
 		definition: definitionFromConfig(name, schema, config),
 		execute: func(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
+			if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, defaultHTTPTimeout)
+				defer cancel()
+			}
 			client := cfg.Client
 			if client == nil {
 				client = &http.Client{Timeout: defaultHTTPTimeout}
@@ -70,6 +76,10 @@ func HTTPTool(name string, schema tool.Schema, cfg HTTPToolConfig, options ...To
 	return driver
 }
 
+// ProcessToolConfig describes an unsandboxed local process. Prefer
+// coding.Workspace command tools when the caller is a model: this helper
+// does not apply an argv allowlist. When Env is empty the child receives a
+// minimal PATH/HOME/LANG environment instead of the parent process env.
 type ProcessToolConfig struct {
 	Command   string
 	Args      []string
@@ -95,6 +105,16 @@ func ProcessTool(name string, schema tool.Schema, cfg ProcessToolConfig, options
 	}
 }
 
+func minimalProcessEnv() []string {
+	out := make([]string, 0, 6)
+	for _, key := range []string{"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TMP"} {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			out = append(out, key+"="+value)
+		}
+	}
+	return out
+}
+
 func readLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
 	if err != nil {
@@ -108,12 +128,17 @@ func readLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
 
 func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byte, error) {
 	commandCtx, cancel := context.WithCancel(ctx)
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		commandCtx, cancel = context.WithTimeout(ctx, defaultProcessTimeout)
+	}
 	defer cancel()
 
 	command := exec.CommandContext(commandCtx, cfg.Command, cfg.Args...)
 	command.Dir = cfg.Dir
 	if len(cfg.Env) > 0 {
-		command.Env = append(command.Env, cfg.Env...)
+		command.Env = append([]string{}, cfg.Env...)
+	} else {
+		command.Env = minimalProcessEnv()
 	}
 	if cfg.StdinJSON {
 		command.Stdin = bytes.NewReader(input)

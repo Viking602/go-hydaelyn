@@ -178,6 +178,41 @@ func TestAsTool_EffectFloorNeverLowersChildRisk(t *testing.T) {
 	}
 }
 
+func TestAsTool_FoldsChildUsageIntoParentLoop(t *testing.T) {
+	child := Engine{
+		Provider: &scriptedProvider{turns: [][]provider.Event{{
+			{Kind: provider.EventTextDelta, Text: "child"},
+			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 4, OutputTokens: 2, TotalTokens: 6}},
+		}}},
+		Model: "child",
+	}
+	parent := Engine{
+		Provider: &scriptedProvider{turns: [][]provider.Event{
+			{
+				{Kind: provider.EventToolCall, ToolCall: &message.ToolCall{ID: "call-1", Name: "researcher", Arguments: json.RawMessage(`{"input":"q"}`)}},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse, Usage: provider.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}},
+			},
+			{
+				{Kind: provider.EventTextDelta, Text: "done"},
+				{Kind: provider.EventDone, StopReason: provider.StopReasonComplete, Usage: provider.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}},
+			},
+		}},
+		Model: "parent",
+		Tools: tool.NewBus(AsTool(child, SubagentDef{Name: "researcher"})),
+	}
+	output, err := parent.RunMessages(context.Background(), LoopInput{
+		Model:     "parent",
+		Messages:  []message.Message{message.NewText(message.RoleUser, "go")},
+		MaxTokens: 100,
+	})
+	if err != nil {
+		t.Fatalf("parent RunMessages error = %v", err)
+	}
+	if output.Usage.TotalTokens < 10 {
+		t.Fatalf("parent usage = %#v, want child tokens folded in", output.Usage)
+	}
+}
+
 func TestAsTool_SuccessMapsTextAndCarriesIdentifiers(t *testing.T) {
 	child := Engine{Provider: singleTurnProvider("child answer"), Model: "child"}
 	driver := AsTool(child, SubagentDef{Name: "researcher", Description: "d"})

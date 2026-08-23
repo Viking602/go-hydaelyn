@@ -48,7 +48,7 @@ framework backend.
 
 - [v0.8.0 architecture boundaries](../v0.8.0/11-boundaries.md)
 - [v0.8.0 package structure](../v0.8.0/12-package-structure.md)
-- [ADR-012 storage contract](../../adr/ADR-012-storage-contract-position-c.md)
+- [ADR-012 storage contract](../../adr/ADR-012-storage-contract-position-d.md)
 - [ADR-013 optional memory](../../adr/ADR-013-memory-kernel-vs-pipeline.md)
 - [ADR-016 multi-agent scheduler](../../adr/ADR-016-explicit-multi-agent-scheduler.md)
 - [ADR-017 durable runner boundary](../../adr/ADR-017-durable-runner-boundary.md)
