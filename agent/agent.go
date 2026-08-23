@@ -366,6 +366,35 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		}
 		assistant, usage, stopReason, identity, opened, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
+			var streamInterrupt *StreamRuleInterruptError
+			if errors.As(turnErr, &streamInterrupt) {
+				if streamInterrupt.KeepPartial {
+					current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+				} else {
+					totalUsage = totalUsage.Add(usage)
+					turnsRun = max(turnsRun, iteration+1)
+				}
+				if opened {
+					steps = append(steps, Step{
+						Index: iteration,
+						ModelCall: &ModelCall{
+							Provider: identity.Provider.Name, Model: identity.Model,
+							InputTokens: usage.InputTokens, CachedInputTokens: usage.CachedInputTokens,
+							CachedInputTokensReported:     usage.CachedInputTokensReported,
+							CacheWriteInputTokens:         usage.CacheWriteInputTokens,
+							CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
+							OutputTokens:                  usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens,
+							TotalTokens: usage.TotalTokens, StopReason: provider.StopReasonAborted,
+						},
+						Decision:   StepDecisionContinue,
+						BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+					})
+					if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+						return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), errors.Join(turnErr, recordErr)
+					}
+				}
+				continue
+			}
 			// A turn can fail after its stream opens: preserve a failed ModelCall
 			// with the selected stream identity so durable usage cannot fall back
 			// to the wrapper's primary metadata.

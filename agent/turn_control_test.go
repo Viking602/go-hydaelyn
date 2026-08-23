@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
@@ -93,6 +95,65 @@ func controlledProviderTurns() [][]provider.Event {
 			{Kind: provider.EventTextDelta, TextPhase: provider.TextPhaseFinalAnswer, Text: "corrected answer"},
 			{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 		},
+	}
+}
+
+type streamRuleInterruptHook struct {
+	queue       *ControlQueue
+	keepPartial bool
+	triggered   atomic.Bool
+}
+
+func (watcher *streamRuleInterruptHook) TransformContext(_ context.Context, messages []message.Message) ([]message.Message, error) {
+	return messages, nil
+}
+func (*streamRuleInterruptHook) BeforeModelCall(context.Context, *provider.Request) error { return nil }
+func (*streamRuleInterruptHook) BeforeToolCall(context.Context, *tool.Call) error         { return nil }
+func (*streamRuleInterruptHook) AfterToolCall(context.Context, *tool.Result) error        { return nil }
+func (watcher *streamRuleInterruptHook) OnEvent(_ context.Context, event provider.Event) error {
+	if event.Kind != provider.EventTextDelta || !strings.Contains(event.Text, "forbidden") || !watcher.triggered.CompareAndSwap(false, true) {
+		return nil
+	}
+	if err := watcher.queue.Enqueue(ControlMessage{ID: "stream-rule", Kind: ControlSteer, Message: message.NewText(message.RoleSystem, "Apply stream rule: do not emit forbidden text.")}); err != nil {
+		return err
+	}
+	return &StreamRuleInterruptError{Reason: "forbidden-output", KeepPartial: watcher.keepPartial}
+}
+
+func TestStreamRuleInterruptContinuesThroughDurableControl(t *testing.T) {
+	for _, keepPartial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("keep-partial-%t", keepPartial), func(t *testing.T) {
+			queue := NewControlQueue()
+			watcher := &streamRuleInterruptHook{queue: queue, keepPartial: keepPartial}
+			engine := Engine{
+				Provider: &scriptedProvider{turns: [][]provider.Event{
+					{{Kind: provider.EventTextDelta, Text: "partial forbidden output"}},
+					{{Kind: provider.EventTextDelta, Text: "corrected answer"}, {Kind: provider.EventDone, StopReason: provider.StopReasonComplete}},
+				}},
+				Hooks: hook.NewChain(watcher),
+			}
+			output, err := engine.RunMessages(context.Background(), LoopInput{
+				Model: "model", Messages: []message.Message{message.NewText(message.RoleUser, "start")},
+				MaxIterations: 3, Control: queue,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered := make([]string, len(output.Messages))
+			for index, current := range output.Messages {
+				rendered[index] = current.Text
+			}
+			history := strings.Join(rendered, "\n")
+			if !strings.Contains(history, "Apply stream rule") || !strings.Contains(history, "corrected answer") {
+				t.Fatalf("stream-rule history = %q", history)
+			}
+			if strings.Contains(history, "partial forbidden output") != keepPartial {
+				t.Fatalf("keepPartial=%v history=%q", keepPartial, history)
+			}
+			if len(output.Steps) != 2 || output.Steps[0].Decision != StepDecisionContinue || output.Steps[0].ModelCall.StopReason != provider.StopReasonAborted {
+				t.Fatalf("stream-rule steps = %#v", output.Steps)
+			}
+		})
 	}
 }
 

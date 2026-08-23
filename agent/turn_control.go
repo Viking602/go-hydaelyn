@@ -30,6 +30,24 @@ const (
 
 var ErrTurnControlAbort = errors.New("agent turn aborted by control channel")
 
+// StreamRuleInterruptError stops one open provider stream after a host rule
+// matches generated text, thinking, or tool arguments. The host queues the
+// corresponding ControlMessage before returning this error from a stream hook;
+// the loop then continues and drains that control at the next model boundary.
+// KeepPartial controls whether already generated assistant content remains in
+// model history. Usage is always retained.
+type StreamRuleInterruptError struct {
+	Reason      string
+	KeepPartial bool
+}
+
+func (err *StreamRuleInterruptError) Error() string {
+	if err == nil || err.Reason == "" {
+		return "provider stream interrupted by host rule"
+	}
+	return "provider stream interrupted by host rule: " + err.Reason
+}
+
 const (
 	controlIDMetadataKey   = "venat.control.id"
 	controlKindMetadataKey = "venat.control.kind"
