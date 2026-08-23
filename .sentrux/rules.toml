@@ -23,19 +23,18 @@
 # collaboration primitive, not an upward dependency on the durable Runner.
 # worker → root is the integration seam (ADR-024).
 #
-#   internal/core/model      — stdlib only; no internal/core/* imports
-#   internal/core/ports      — model only
+#   api                      — sole persisted/runtime contract model
+#   internal/core/ports      — aliases api contracts plus narrow runtime-only extensions
 #   internal/memory          — development/test StoreProvider; not a
 #                              Position D reference implementation
-#   internal/core/state      — model only; pure functions
-#   internal/command         — model + ports only
-#   internal/blackboard      — handler/service over generic BlackboardItem
-#   service/domain packages  — model, ports, state, other services
+#   internal/core/state      — api only; pure transition functions
+#   internal/command         — api command bus contracts
+#   service/domain packages  — api, ports, state, other services
 #                              NO root internal/core import
 #                              NO venat / orchestrator / worker import
 #                              NO internal/core/application import
 #   internal/core            — Runtime façade/composition root; wires domain
-#                              packages and keeps public compatibility aliases
+#                              packages without a duplicate model or adapter
 #   internal/{run,report,...} — domain behavior packages
 #
 # Script-based gates run in CI and `make architecture-check`:

@@ -5,13 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type agentProfileStore UnitOfWork
@@ -33,36 +34,36 @@ func (s *deadLetterStore) uow() *UnitOfWork      { return (*UnitOfWork)(s) }
 
 // AgentProfileStore
 
-func (s *agentProfileStore) SaveAgentProfile(_ context.Context, profile model.AgentProfile) error {
+func (s *agentProfileStore) SaveAgentProfile(_ context.Context, profile api.AgentProfile) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(profile.ID) == "" {
-		return fmt.Errorf("agent profile ID required: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("agent profile ID required: %w", api.ErrInvalidCommand)
 	}
 	u.staged.AgentProfiles[profile.ID] = profile
 	return nil
 }
 
-func (s *agentProfileStore) LoadAgentProfile(_ context.Context, id string) (model.AgentProfile, error) {
+func (s *agentProfileStore) LoadAgentProfile(_ context.Context, id string) (api.AgentProfile, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.AgentProfile{}, err
+		return api.AgentProfile{}, err
 	}
 	profile, ok := u.staged.AgentProfiles[id]
 	if !ok {
-		return model.AgentProfile{}, model.ErrNotFound
+		return api.AgentProfile{}, api.ErrNotFound
 	}
 	return profile, nil
 }
 
-func (s *agentProfileStore) ListAgentProfiles(_ context.Context, sel model.AgentSelector) ([]model.AgentProfile, error) {
+func (s *agentProfileStore) ListAgentProfiles(_ context.Context, sel api.AgentSelector) ([]api.AgentProfile, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	var out []model.AgentProfile
+	var out []api.AgentProfile
 	for _, profile := range u.staged.AgentProfiles {
 		if !matchAgentSelector(profile, sel) {
 			continue
@@ -72,13 +73,13 @@ func (s *agentProfileStore) ListAgentProfiles(_ context.Context, sel model.Agent
 			break
 		}
 	}
-	slices.SortFunc(out, func(a, b model.AgentProfile) int {
+	slices.SortFunc(out, func(a, b api.AgentProfile) int {
 		return strings.Compare(a.ID, b.ID)
 	})
 	return out, nil
 }
 
-func matchAgentSelector(p model.AgentProfile, sel model.AgentSelector) bool {
+func matchAgentSelector(p api.AgentProfile, sel api.AgentSelector) bool {
 	if len(sel.IDs) > 0 && !slices.Contains(sel.IDs, p.ID) {
 		return false
 	}
@@ -104,36 +105,36 @@ func matchAgentSelector(p model.AgentProfile, sel model.AgentSelector) bool {
 
 func capabilityKey(name, agentID string) string { return name + "|" + agentID }
 
-func (s *capabilityStore) SaveCapability(_ context.Context, capability model.Capability) error {
+func (s *capabilityStore) SaveCapability(_ context.Context, capability api.Capability) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
-	if err := model.ValidateCapabilityName(capability.Name); err != nil {
+	if err := api.ValidateCapabilityName(capability.Name); err != nil {
 		return err
 	}
 	u.staged.Capabilities[capabilityKey(capability.Name, capability.AgentID)] = capability
 	return nil
 }
 
-func (s *capabilityStore) LoadCapability(_ context.Context, name string, agentID string) (model.Capability, error) {
+func (s *capabilityStore) LoadCapability(_ context.Context, name string, agentID string) (api.Capability, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.Capability{}, err
+		return api.Capability{}, err
 	}
 	capability, ok := u.staged.Capabilities[capabilityKey(name, agentID)]
 	if !ok {
-		return model.Capability{}, model.ErrNotFound
+		return api.Capability{}, api.ErrNotFound
 	}
 	return capability, nil
 }
 
-func (s *capabilityStore) ListCapabilities(_ context.Context, sel model.CapabilitySelector) ([]model.Capability, error) {
+func (s *capabilityStore) ListCapabilities(_ context.Context, sel api.CapabilitySelector) ([]api.Capability, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	var out []model.Capability
+	var out []api.Capability
 	for _, cap := range u.staged.Capabilities {
 		if !matchCapabilitySelector(cap, sel) {
 			continue
@@ -143,7 +144,7 @@ func (s *capabilityStore) ListCapabilities(_ context.Context, sel model.Capabili
 			break
 		}
 	}
-	slices.SortFunc(out, func(a, b model.Capability) int {
+	slices.SortFunc(out, func(a, b api.Capability) int {
 		if c := strings.Compare(a.Name, b.Name); c != 0 {
 			return c
 		}
@@ -152,7 +153,7 @@ func (s *capabilityStore) ListCapabilities(_ context.Context, sel model.Capabili
 	return out, nil
 }
 
-func matchCapabilitySelector(c model.Capability, sel model.CapabilitySelector) bool {
+func matchCapabilitySelector(c api.Capability, sel api.CapabilitySelector) bool {
 	if len(sel.Names) > 0 && !slices.Contains(sel.Names, c.Name) {
 		return false
 	}
@@ -180,73 +181,80 @@ func agentDefinitionKey(definitionID, version string) string {
 	return definitionID + "\x00" + version
 }
 
-func (s *agentDefinitionStore) SaveAgentDefinitionSnapshot(_ context.Context, snapshot model.AgentDefinitionSnapshot) error {
+func (s *agentDefinitionStore) SaveAgentDefinitionSnapshot(_ context.Context, snapshot api.AgentDefinitionSnapshot) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(snapshot.DefinitionID) == "" || strings.TrimSpace(snapshot.Version) == "" {
-		return fmt.Errorf("agent definition ID and version required: %w", model.ErrInvalidCommand)
+	definitionID := strings.TrimSpace(snapshot.Definition.ID)
+	version := strings.TrimSpace(snapshot.Definition.Version)
+	if definitionID == "" || version == "" {
+		return fmt.Errorf("agent definition ID and version required: %w", api.ErrInvalidCommand)
 	}
-	if len(snapshot.Definition) == 0 {
-		return fmt.Errorf("agent definition payload required: %w", model.ErrInvalidCommand)
+	payload, err := json.Marshal(snapshot.Definition)
+	if err != nil {
+		return fmt.Errorf("encode agent definition: %w", err)
 	}
-	sum := sha256.Sum256(snapshot.Definition)
+	sum := sha256.Sum256(payload)
 	if snapshot.Digest != hex.EncodeToString(sum[:]) {
-		return fmt.Errorf("agent definition digest mismatch: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("agent definition digest mismatch: %w", api.ErrInvalidCommand)
 	}
-	key := agentDefinitionKey(snapshot.DefinitionID, snapshot.Version)
+	key := agentDefinitionKey(definitionID, version)
 	if existing, ok := u.staged.AgentDefinitions[key]; ok {
-		if existing.Digest == snapshot.Digest && bytes.Equal(existing.Definition, snapshot.Definition) {
+		existingPayload, marshalErr := json.Marshal(existing.Definition)
+		if marshalErr != nil {
+			return fmt.Errorf("encode stored agent definition: %w", marshalErr)
+		}
+		if existing.Digest == snapshot.Digest && bytes.Equal(existingPayload, payload) {
 			return nil
 		}
-		return model.ErrDefinitionVersionConflict
+		return api.ErrDefinitionVersionConflict
 	}
 	if snapshot.CreatedAt.IsZero() {
 		snapshot.CreatedAt = time.Now().UTC()
 	}
-	snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+	snapshot.Definition = cloneAgentDefinition(snapshot.Definition)
 	u.staged.AgentDefinitions[key] = snapshot
 	return nil
 }
 
-func (s *agentDefinitionStore) LoadAgentDefinitionSnapshot(_ context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error) {
+func (s *agentDefinitionStore) LoadAgentDefinitionSnapshot(_ context.Context, definitionID, version string) (api.AgentDefinitionSnapshot, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.AgentDefinitionSnapshot{}, err
+		return api.AgentDefinitionSnapshot{}, err
 	}
 	snapshot, ok := u.staged.AgentDefinitions[agentDefinitionKey(definitionID, version)]
 	if !ok {
-		return model.AgentDefinitionSnapshot{}, model.ErrNotFound
+		return api.AgentDefinitionSnapshot{}, api.ErrNotFound
 	}
-	snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+	snapshot.Definition = cloneAgentDefinition(snapshot.Definition)
 	return snapshot, nil
 }
 
-func (s *agentDefinitionStore) ListAgentDefinitionSnapshots(_ context.Context, selector model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error) {
+func (s *agentDefinitionStore) ListAgentDefinitionSnapshots(_ context.Context, selector api.AgentDefinitionSnapshotSelector) ([]api.AgentDefinitionSnapshot, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	out := make([]model.AgentDefinitionSnapshot, 0, len(u.staged.AgentDefinitions))
+	out := make([]api.AgentDefinitionSnapshot, 0, len(u.staged.AgentDefinitions))
 	for _, snapshot := range u.staged.AgentDefinitions {
-		if len(selector.DefinitionIDs) > 0 && !slices.Contains(selector.DefinitionIDs, snapshot.DefinitionID) {
+		if len(selector.DefinitionIDs) > 0 && !slices.Contains(selector.DefinitionIDs, snapshot.Definition.ID) {
 			continue
 		}
-		if len(selector.Versions) > 0 && !slices.Contains(selector.Versions, snapshot.Version) {
+		if len(selector.Versions) > 0 && !slices.Contains(selector.Versions, snapshot.Definition.Version) {
 			continue
 		}
 		if !selector.Since.IsZero() && snapshot.CreatedAt.Before(selector.Since) {
 			continue
 		}
-		snapshot.Definition = append([]byte(nil), snapshot.Definition...)
+		snapshot.Definition = cloneAgentDefinition(snapshot.Definition)
 		out = append(out, snapshot)
 	}
-	slices.SortFunc(out, func(a, b model.AgentDefinitionSnapshot) int {
-		if byID := strings.Compare(a.DefinitionID, b.DefinitionID); byID != 0 {
+	slices.SortFunc(out, func(a, b api.AgentDefinitionSnapshot) int {
+		if byID := strings.Compare(a.Definition.ID, b.Definition.ID); byID != 0 {
 			return byID
 		}
-		return strings.Compare(a.Version, b.Version)
+		return strings.Compare(a.Definition.Version, b.Definition.Version)
 	})
 	if selector.Limit > 0 && len(out) > selector.Limit {
 		out = out[:selector.Limit]
@@ -256,7 +264,7 @@ func (s *agentDefinitionStore) ListAgentDefinitionSnapshots(_ context.Context, s
 
 // UsageStore
 
-func (s *usageStore) AppendUsage(_ context.Context, rec model.UsageRecord) error {
+func (s *usageStore) AppendUsage(_ context.Context, rec api.UsageRecord) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -273,7 +281,7 @@ func (s *usageStore) AppendUsage(_ context.Context, rec model.UsageRecord) error
 		if reflect.DeepEqual(existing, rec) {
 			return nil
 		}
-		return model.ErrIdempotencyConflict
+		return api.ErrIdempotencyConflict
 	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
@@ -282,26 +290,26 @@ func (s *usageStore) AppendUsage(_ context.Context, rec model.UsageRecord) error
 	return nil
 }
 
-func normalizeUsageRecord(rec model.UsageRecord) model.UsageRecord {
+func normalizeUsageRecord(rec api.UsageRecord) api.UsageRecord {
 	if rec.Kind == "" {
-		rec.Kind = model.UsageKindLegacyExecution
+		rec.Kind = api.UsageKindLegacyExecution
 	}
 	return rec
 }
 
-func (s *usageStore) QueryUsage(_ context.Context, sel model.UsageSelector) ([]model.UsageRecord, error) {
+func (s *usageStore) QueryUsage(_ context.Context, sel api.UsageSelector) ([]api.UsageRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	var out []model.UsageRecord
+	var out []api.UsageRecord
 	for _, rec := range u.staged.UsageRecords {
 		if !matchUsageSelector(rec, sel) {
 			continue
 		}
 		out = append(out, rec)
 	}
-	slices.SortFunc(out, func(a, b model.UsageRecord) int {
+	slices.SortFunc(out, func(a, b api.UsageRecord) int {
 		if a.CreatedAt.Before(b.CreatedAt) {
 			return -1
 		}
@@ -316,7 +324,7 @@ func (s *usageStore) QueryUsage(_ context.Context, sel model.UsageSelector) ([]m
 	return out, nil
 }
 
-func (s *usageStore) SumCredits(ctx context.Context, sel model.UsageSelector) (int64, error) {
+func (s *usageStore) SumCredits(ctx context.Context, sel api.UsageSelector) (int64, error) {
 	sel.Limit = 0
 	records, err := s.QueryUsage(ctx, sel)
 	if err != nil {
@@ -329,7 +337,7 @@ func (s *usageStore) SumCredits(ctx context.Context, sel model.UsageSelector) (i
 	return sum, nil
 }
 
-func matchUsageSelector(r model.UsageRecord, sel model.UsageSelector) bool {
+func matchUsageSelector(r api.UsageRecord, sel api.UsageSelector) bool {
 	if sel.RunID != "" && r.RunID != sel.RunID {
 		return false
 	}
@@ -359,7 +367,7 @@ func matchUsageSelector(r model.UsageRecord, sel model.UsageSelector) bool {
 
 // DeadLetterStore
 
-func (s *deadLetterStore) AppendDeadLetter(_ context.Context, entry model.DeadLetterEntry) error {
+func (s *deadLetterStore) AppendDeadLetter(_ context.Context, entry api.DeadLetterEntry) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -374,12 +382,12 @@ func (s *deadLetterStore) AppendDeadLetter(_ context.Context, entry model.DeadLe
 	return nil
 }
 
-func (s *deadLetterStore) ListDeadLetters(_ context.Context, sel model.DeadLetterSelector) ([]model.DeadLetterEntry, error) {
+func (s *deadLetterStore) ListDeadLetters(_ context.Context, sel api.DeadLetterSelector) ([]api.DeadLetterEntry, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	var out []model.DeadLetterEntry
+	var out []api.DeadLetterEntry
 	for _, e := range u.staged.DeadLetters {
 		if sel.RunID != "" && e.RunID != sel.RunID {
 			continue
@@ -395,7 +403,7 @@ func (s *deadLetterStore) ListDeadLetters(_ context.Context, sel model.DeadLette
 		}
 		out = append(out, e)
 	}
-	slices.SortFunc(out, func(a, b model.DeadLetterEntry) int {
+	slices.SortFunc(out, func(a, b api.DeadLetterEntry) int {
 		if a.CreatedAt.Before(b.CreatedAt) {
 			return -1
 		}
@@ -415,5 +423,5 @@ func (s *deadLetterStore) ListDeadLetters(_ context.Context, sel model.DeadLette
 // here is the contracted behavior for providers that don't implement
 // re-queue.
 func (s *deadLetterStore) Requeue(context.Context, string) error {
-	return fmt.Errorf("memory provider: dead-letter requeue not supported: %w", model.ErrInvalidCommand)
+	return fmt.Errorf("memory provider: dead-letter requeue not supported: %w", api.ErrInvalidCommand)
 }

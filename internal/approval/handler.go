@@ -6,15 +6,15 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
 	"github.com/Viking602/venat/internal/lifecycle"
 )
 
-type Factory func(model.Task, string, string) (model.ApprovalRequest, model.ResumeToken)
+type Factory func(api.Task, string, string) (api.ApprovalRequest, api.ResumeToken)
 
 type IDGenerator func(string) string
 
@@ -27,8 +27,8 @@ type HandlerOptions struct {
 // Replacing the previous []any tuple keeps multi-value returns type-safe
 // across the command-bus boundary.
 type RequestApprovalResult struct {
-	Approval model.ApprovalRequest
-	Token    model.ResumeToken
+	Approval api.ApprovalRequest
+	Token    api.ResumeToken
 }
 
 func RegisterHandlers(bus *commandbus.Bus, options HandlerOptions) {
@@ -38,10 +38,10 @@ func RegisterHandlers(bus *commandbus.Bus, options HandlerOptions) {
 }
 
 type decideApprovalResult struct {
-	Approval      model.ApprovalRequest
-	Task          model.Task
-	Run           model.Run
-	Envelope      model.TaskEnvelope
+	Approval      api.ApprovalRequest
+	Task          api.Task
+	Run           api.Run
+	Envelope      api.TaskEnvelope
 	TaskResumed   bool
 	RunTransition bool
 }
@@ -57,7 +57,7 @@ func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork
 	}
 	approvalFactory := h.options.NewApproval
 	if approvalFactory == nil {
-		approvalFactory = func(task model.Task, reason, requester string) (model.ApprovalRequest, model.ResumeToken) {
+		approvalFactory = func(task api.Task, reason, requester string) (api.ApprovalRequest, api.ResumeToken) {
 			return lifecycle.NewApprovalPair(func(prefix string) string { return prefix }, task, reason, requester)
 		}
 	}
@@ -75,7 +75,7 @@ func (h requestApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork
 	if err := appendResumeTokenCreatedEvent(ctx, uow, token); err != nil {
 		return nil, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: model.EventApprovalRequested, Payload: map[string]any{"approvalId": approval.ApprovalID, "resumeToken": token.TokenID, "reason": approval.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: api.EventApprovalRequested, Payload: map[string]any{"approvalId": approval.ApprovalID, "resumeToken": token.TokenID, "reason": approval.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
 		return nil, err
 	}
 	return RequestApprovalResult{Approval: approval, Token: token}, nil
@@ -91,21 +91,21 @@ func (h decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork,
 		return nil, err
 	}
 	if approval.RunID != cmd.RunID {
-		return nil, model.ErrNotFound
+		return nil, api.ErrNotFound
 	}
 	approval.Status = cmd.Decision
 	if err := uow.Approvals().SaveApproval(ctx, approval); err != nil {
 		return nil, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: approval.RunID, TaskID: approval.TaskID, Type: model.EventApprovalDecided, Payload: map[string]any{"approvalId": approval.ApprovalID, "decidedBy": cmd.DecidedBy, "decision": cmd.Decision, "reason": cmd.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: approval.RunID, TaskID: approval.TaskID, Type: api.EventApprovalDecided, Payload: map[string]any{"approvalId": approval.ApprovalID, "decidedBy": cmd.DecidedBy, "decision": cmd.Decision, "reason": cmd.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
 		return nil, err
 	}
 	result := decideApprovalResult{Approval: approval}
 	if cmd.Decision != "approved" {
 		return result, nil
 	}
-	if task, err := uow.Tasks().LoadTask(ctx, approval.RunID, approval.TaskID); err == nil && task.Status == model.TaskStatusPaused {
-		nextTask, err := corestate.TransitionTask(task, model.TaskStatusDispatched, true)
+	if task, err := uow.Tasks().LoadTask(ctx, approval.RunID, approval.TaskID); err == nil && task.Status == api.TaskStatusPaused {
+		nextTask, err := corestate.TransitionTask(task, api.TaskStatusDispatched, true)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +116,7 @@ func (h decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork,
 		if h.options.NewID != nil {
 			envelopeID = h.options.NewID("env")
 		}
-		envelope := model.TaskEnvelope{
+		envelope := api.TaskEnvelope{
 			ID:              envelopeID,
 			RunID:           nextTask.RunID,
 			TaskID:          nextTask.ID,
@@ -133,8 +133,8 @@ func (h decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork,
 		if err := uow.MailboxOutbox().QueueEnvelope(ctx, envelope); err != nil {
 			return nil, err
 		}
-		if err := uow.Events().AppendEvent(ctx, model.Event{
-			RunID: envelope.RunID, TaskID: envelope.TaskID, Type: model.EventTaskDispatched,
+		if err := uow.Events().AppendEvent(ctx, api.Event{
+			RunID: envelope.RunID, TaskID: envelope.TaskID, Type: api.EventTaskDispatched,
 			Payload:    map[string]any{"reason": "approval_resolved", "task": eventpayload.Task(nextTask), "envelope": eventpayload.Envelope(envelope)},
 			RecordedAt: time.Now().UTC(),
 		}); err != nil {
@@ -146,15 +146,15 @@ func (h decideApprovalHandler) Handle(ctx context.Context, uow ports.UnitOfWork,
 	} else if err != nil {
 		return nil, err
 	}
-	if run, err := uow.Runs().LoadRun(ctx, approval.RunID); err == nil && run.Status == model.RunStatusWaitingApproval {
-		nextRun, err := corestate.TransitionRun(run, model.RunStatusRunning)
+	if run, err := uow.Runs().LoadRun(ctx, approval.RunID); err == nil && run.Status == api.RunStatusWaitingApproval {
+		nextRun, err := corestate.TransitionRun(run, api.RunStatusRunning)
 		if err != nil {
 			return nil, err
 		}
 		if err := uow.Runs().SaveRun(ctx, nextRun); err != nil {
 			return nil, err
 		}
-		if err := uow.Events().AppendEvent(ctx, model.Event{RunID: nextRun.ID, TaskID: nextRun.RootTaskID, Type: model.EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(nextRun.Status), "run": runPayload(nextRun)}, RecordedAt: time.Now().UTC()}); err != nil {
+		if err := uow.Events().AppendEvent(ctx, api.Event{RunID: nextRun.ID, TaskID: nextRun.RootTaskID, Type: api.EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(nextRun.Status), "run": runPayload(nextRun)}, RecordedAt: time.Now().UTC()}); err != nil {
 			return nil, err
 		}
 		result.Run = nextRun
@@ -175,15 +175,15 @@ func (recoverResumeTokenHandler) Handle(ctx context.Context, uow ports.UnitOfWor
 		return nil, err
 	}
 	if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(time.Now().UTC()) {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	return token, nil
 }
 
-func appendResumeTokenCreatedEvent(ctx context.Context, uow ports.UnitOfWork, token model.ResumeToken) error {
-	return uow.Events().AppendEvent(ctx, model.Event{RunID: token.RunID, TaskID: token.TaskID, Type: model.EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
+func appendResumeTokenCreatedEvent(ctx context.Context, uow ports.UnitOfWork, token api.ResumeToken) error {
+	return uow.Events().AppendEvent(ctx, api.Event{RunID: token.RunID, TaskID: token.TaskID, Type: api.EventResumeTokenCreated, Payload: map[string]any{"tokenId": token.TokenID, "approvalId": token.ApprovalID, "expiresAt": token.ExpiresAt}, RecordedAt: time.Now().UTC()})
 }
 
-func runPayload(run model.Run) map[string]any {
+func runPayload(run api.Run) map[string]any {
 	return map[string]any{"runId": run.ID, "rootTaskId": run.RootTaskID, "status": string(run.Status), "request": run.Request, "createdAt": run.CreatedAt, "updatedAt": run.UpdatedAt}
 }

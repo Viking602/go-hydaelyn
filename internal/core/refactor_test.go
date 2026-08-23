@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -347,7 +347,7 @@ func TestMailboxOutboxRetriesBeforeDeadLetter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	entries, err := uow.DeadLetters().ListDeadLetters(ctx, model.DeadLetterSelector{RunID: run.ID, TaskID: task.ID})
+	entries, err := uow.DeadLetters().ListDeadLetters(ctx, api.DeadLetterSelector{RunID: run.ID, TaskID: task.ID})
 	if err != nil {
 		t.Fatalf("ListDeadLetters() error = %v", err)
 	}

@@ -1,41 +1,13 @@
 package ports
 
-import (
-	"context"
+import "github.com/Viking602/venat/api"
 
-	"github.com/Viking602/venat/internal/core/model"
+type (
+	IntentAnalyzer     = api.IntentAnalyzer
+	Planner            = api.Planner
+	PlanValidator      = api.PlanValidator
+	TaskRouter         = api.TaskRouter
+	Dispatcher         = api.Dispatcher
+	TaskMonitor        = api.TaskMonitor
+	PipelineComponents = api.PipelineComponents
 )
-
-type IntentAnalyzer interface {
-	AnalyzeIntent(context.Context, model.Run) (model.Intent, error)
-}
-
-type Planner interface {
-	CreatePlan(context.Context, model.Intent) (model.TodoPlan, error)
-}
-
-type PlanValidator interface {
-	ValidatePlan(context.Context, model.TodoPlan) error
-}
-
-type TaskRouter interface {
-	RouteTasks(context.Context, model.TodoPlan) (model.RoutingPlan, error)
-}
-
-type Dispatcher interface {
-	Dispatch(context.Context, model.RoutingPlan) ([]model.TaskEnvelope, error)
-}
-
-type TaskMonitor interface {
-	Advance(context.Context, model.Run) error
-	DecideDeadLetter(context.Context, model.TaskEnvelope, string) (model.TaskMonitorDecision, error)
-}
-
-type PipelineComponents struct {
-	IntentAnalyzer IntentAnalyzer
-	Planner        Planner
-	Validator      PlanValidator
-	Router         TaskRouter
-	Dispatcher     Dispatcher
-	TaskMonitor    TaskMonitor
-}

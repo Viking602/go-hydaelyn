@@ -3,205 +3,205 @@ package state
 import (
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-var allowedRunTransitions = map[model.RunStatus]map[model.RunStatus]bool{
-	model.RunStatusCreated: {
-		model.RunStatusPlanning:          true,
-		model.RunStatusWaitingUserInput:  true,
-		model.RunStatusWaitingApproval:   true,
-		model.RunStatusReconcileRequired: true,
-		model.RunStatusBlocked:           true,
-		model.RunStatusCancelled:         true,
-		model.RunStatusFailed:            true,
+var allowedRunTransitions = map[api.RunStatus]map[api.RunStatus]bool{
+	api.RunStatusCreated: {
+		api.RunStatusPlanning:          true,
+		api.RunStatusWaitingUserInput:  true,
+		api.RunStatusWaitingApproval:   true,
+		api.RunStatusReconcileRequired: true,
+		api.RunStatusBlocked:           true,
+		api.RunStatusCancelled:         true,
+		api.RunStatusFailed:            true,
 	},
-	model.RunStatusPlanning: {
-		model.RunStatusValidating: true,
-		model.RunStatusBlocked:    true,
-		model.RunStatusFailed:     true,
-		model.RunStatusCancelled:  true,
+	api.RunStatusPlanning: {
+		api.RunStatusValidating: true,
+		api.RunStatusBlocked:    true,
+		api.RunStatusFailed:     true,
+		api.RunStatusCancelled:  true,
 	},
-	model.RunStatusValidating: {
-		model.RunStatusRouting:   true,
-		model.RunStatusBlocked:   true,
-		model.RunStatusFailed:    true,
-		model.RunStatusCancelled: true,
+	api.RunStatusValidating: {
+		api.RunStatusRouting:   true,
+		api.RunStatusBlocked:   true,
+		api.RunStatusFailed:    true,
+		api.RunStatusCancelled: true,
 	},
-	model.RunStatusRouting: {
-		model.RunStatusDispatching: true,
-		model.RunStatusBlocked:     true,
-		model.RunStatusFailed:      true,
-		model.RunStatusCancelled:   true,
+	api.RunStatusRouting: {
+		api.RunStatusDispatching: true,
+		api.RunStatusBlocked:     true,
+		api.RunStatusFailed:      true,
+		api.RunStatusCancelled:   true,
 	},
-	model.RunStatusDispatching: {
-		model.RunStatusRunning:   true,
-		model.RunStatusBlocked:   true,
-		model.RunStatusFailed:    true,
-		model.RunStatusCancelled: true,
+	api.RunStatusDispatching: {
+		api.RunStatusRunning:   true,
+		api.RunStatusBlocked:   true,
+		api.RunStatusFailed:    true,
+		api.RunStatusCancelled: true,
 	},
-	model.RunStatusRunning: {
-		model.RunStatusExecuting:         true,
-		model.RunStatusComposingResponse: true,
-		model.RunStatusWaitingUserInput:  true,
-		model.RunStatusWaitingApproval:   true,
-		model.RunStatusReconcileRequired: true,
-		model.RunStatusBlocked:           true,
-		model.RunStatusFailed:            true,
-		model.RunStatusCancelled:         true,
+	api.RunStatusRunning: {
+		api.RunStatusExecuting:         true,
+		api.RunStatusComposingResponse: true,
+		api.RunStatusWaitingUserInput:  true,
+		api.RunStatusWaitingApproval:   true,
+		api.RunStatusReconcileRequired: true,
+		api.RunStatusBlocked:           true,
+		api.RunStatusFailed:            true,
+		api.RunStatusCancelled:         true,
 	},
-	model.RunStatusWaitingApproval: {
-		model.RunStatusExecuting:         true,
-		model.RunStatusRunning:           true,
-		model.RunStatusReconcileRequired: true,
-		model.RunStatusBlocked:           true,
-		model.RunStatusCancelled:         true,
+	api.RunStatusWaitingApproval: {
+		api.RunStatusExecuting:         true,
+		api.RunStatusRunning:           true,
+		api.RunStatusReconcileRequired: true,
+		api.RunStatusBlocked:           true,
+		api.RunStatusCancelled:         true,
 	},
-	model.RunStatusWaitingUserInput: {
-		model.RunStatusRunning:   true,
-		model.RunStatusBlocked:   true,
-		model.RunStatusCancelled: true,
-		model.RunStatusFailed:    true,
+	api.RunStatusWaitingUserInput: {
+		api.RunStatusRunning:   true,
+		api.RunStatusBlocked:   true,
+		api.RunStatusCancelled: true,
+		api.RunStatusFailed:    true,
 	},
-	model.RunStatusReconcileRequired: {
-		model.RunStatusExecuting: true,
-		model.RunStatusRunning:   true,
-		model.RunStatusBlocked:   true,
-		model.RunStatusCancelled: true,
-		model.RunStatusFailed:    true,
+	api.RunStatusReconcileRequired: {
+		api.RunStatusExecuting: true,
+		api.RunStatusRunning:   true,
+		api.RunStatusBlocked:   true,
+		api.RunStatusCancelled: true,
+		api.RunStatusFailed:    true,
 	},
-	model.RunStatusExecuting: {
-		model.RunStatusComposingResponse: true,
-		model.RunStatusWaitingApproval:   true,
-		model.RunStatusReconcileRequired: true,
-		model.RunStatusBlocked:           true,
-		model.RunStatusFailed:            true,
-		model.RunStatusCancelled:         true,
+	api.RunStatusExecuting: {
+		api.RunStatusComposingResponse: true,
+		api.RunStatusWaitingApproval:   true,
+		api.RunStatusReconcileRequired: true,
+		api.RunStatusBlocked:           true,
+		api.RunStatusFailed:            true,
+		api.RunStatusCancelled:         true,
 	},
-	model.RunStatusComposingResponse: {
-		model.RunStatusCompleted: true,
-		model.RunStatusBlocked:   true,
-		model.RunStatusFailed:    true,
-		model.RunStatusCancelled: true,
+	api.RunStatusComposingResponse: {
+		api.RunStatusCompleted: true,
+		api.RunStatusBlocked:   true,
+		api.RunStatusFailed:    true,
+		api.RunStatusCancelled: true,
 	},
-	model.RunStatusBlocked: {
-		model.RunStatusComposingResponse: true,
-		model.RunStatusRunning:           true,
-		model.RunStatusCancelled:         true,
-		model.RunStatusFailed:            true,
-	},
-}
-
-var allowedTaskTransitions = map[model.TaskStatus]map[model.TaskStatus]bool{
-	model.TaskStatusCreated: {
-		model.TaskStatusPlanned:    true,
-		model.TaskStatusPaused:     true,
-		model.TaskStatusCancelled:  true,
-		model.TaskStatusFailed:     true,
-		model.TaskStatusDispatched: true,
-	},
-	model.TaskStatusPlanned: {
-		model.TaskStatusValidated: true,
-		model.TaskStatusPaused:    true,
-		model.TaskStatusBlocked:   true,
-		model.TaskStatusCancelled: true,
-		model.TaskStatusFailed:    true,
-	},
-	model.TaskStatusValidated: {
-		model.TaskStatusRouted:            true,
-		model.TaskStatusWaitingDependency: true,
-		model.TaskStatusPaused:            true,
-		model.TaskStatusBlocked:           true,
-		model.TaskStatusCancelled:         true,
-		model.TaskStatusFailed:            true,
-	},
-	model.TaskStatusRouted: {
-		model.TaskStatusWaitingDependency: true,
-		model.TaskStatusDispatched:        true,
-		model.TaskStatusPaused:            true,
-		model.TaskStatusBlocked:           true,
-		model.TaskStatusCancelled:         true,
-		model.TaskStatusFailed:            true,
-	},
-	model.TaskStatusWaitingDependency: {
-		model.TaskStatusDispatched: true,
-		model.TaskStatusPaused:     true,
-		model.TaskStatusBlocked:    true,
-		model.TaskStatusCancelled:  true,
-		model.TaskStatusFailed:     true,
-	},
-	model.TaskStatusDispatched: {
-		model.TaskStatusRunning:   true,
-		model.TaskStatusPaused:    true,
-		model.TaskStatusBlocked:   true,
-		model.TaskStatusCancelled: true,
-		model.TaskStatusFailed:    true,
-	},
-	model.TaskStatusRunning: {
-		model.TaskStatusDispatched:        true,
-		model.TaskStatusPaused:            true,
-		model.TaskStatusWaitingUserInput:  true,
-		model.TaskStatusReconcileRequired: true,
-		model.TaskStatusBlocked:           true,
-		model.TaskStatusCompleted:         true,
-		model.TaskStatusFailed:            true,
-		model.TaskStatusCancelled:         true,
-	},
-	model.TaskStatusPaused: {
-		model.TaskStatusDispatched:       true,
-		model.TaskStatusRunning:          true,
-		model.TaskStatusWaitingUserInput: true,
-		model.TaskStatusBlocked:          true,
-		model.TaskStatusCancelled:        true,
-		model.TaskStatusFailed:           true,
-	},
-	model.TaskStatusWaitingUserInput: {
-		model.TaskStatusDispatched: true,
-		model.TaskStatusRunning:    true,
-		model.TaskStatusBlocked:    true,
-		model.TaskStatusCancelled:  true,
-		model.TaskStatusFailed:     true,
-	},
-	model.TaskStatusReconcileRequired: {
-		model.TaskStatusDispatched: true,
-		model.TaskStatusRunning:    true,
-		model.TaskStatusBlocked:    true,
-		model.TaskStatusCancelled:  true,
-		model.TaskStatusFailed:     true,
-	},
-	model.TaskStatusBlocked: {
-		model.TaskStatusDispatched: true,
-		model.TaskStatusRunning:    true,
-		model.TaskStatusPaused:     true,
-		model.TaskStatusCancelled:  true,
-		model.TaskStatusFailed:     true,
+	api.RunStatusBlocked: {
+		api.RunStatusComposingResponse: true,
+		api.RunStatusRunning:           true,
+		api.RunStatusCancelled:         true,
+		api.RunStatusFailed:            true,
 	},
 }
 
-func TransitionRun(run model.Run, to model.RunStatus) (model.Run, error) {
+var allowedTaskTransitions = map[api.TaskStatus]map[api.TaskStatus]bool{
+	api.TaskStatusCreated: {
+		api.TaskStatusPlanned:    true,
+		api.TaskStatusPaused:     true,
+		api.TaskStatusCancelled:  true,
+		api.TaskStatusFailed:     true,
+		api.TaskStatusDispatched: true,
+	},
+	api.TaskStatusPlanned: {
+		api.TaskStatusValidated: true,
+		api.TaskStatusPaused:    true,
+		api.TaskStatusBlocked:   true,
+		api.TaskStatusCancelled: true,
+		api.TaskStatusFailed:    true,
+	},
+	api.TaskStatusValidated: {
+		api.TaskStatusRouted:            true,
+		api.TaskStatusWaitingDependency: true,
+		api.TaskStatusPaused:            true,
+		api.TaskStatusBlocked:           true,
+		api.TaskStatusCancelled:         true,
+		api.TaskStatusFailed:            true,
+	},
+	api.TaskStatusRouted: {
+		api.TaskStatusWaitingDependency: true,
+		api.TaskStatusDispatched:        true,
+		api.TaskStatusPaused:            true,
+		api.TaskStatusBlocked:           true,
+		api.TaskStatusCancelled:         true,
+		api.TaskStatusFailed:            true,
+	},
+	api.TaskStatusWaitingDependency: {
+		api.TaskStatusDispatched: true,
+		api.TaskStatusPaused:     true,
+		api.TaskStatusBlocked:    true,
+		api.TaskStatusCancelled:  true,
+		api.TaskStatusFailed:     true,
+	},
+	api.TaskStatusDispatched: {
+		api.TaskStatusRunning:   true,
+		api.TaskStatusPaused:    true,
+		api.TaskStatusBlocked:   true,
+		api.TaskStatusCancelled: true,
+		api.TaskStatusFailed:    true,
+	},
+	api.TaskStatusRunning: {
+		api.TaskStatusDispatched:        true,
+		api.TaskStatusPaused:            true,
+		api.TaskStatusWaitingUserInput:  true,
+		api.TaskStatusReconcileRequired: true,
+		api.TaskStatusBlocked:           true,
+		api.TaskStatusCompleted:         true,
+		api.TaskStatusFailed:            true,
+		api.TaskStatusCancelled:         true,
+	},
+	api.TaskStatusPaused: {
+		api.TaskStatusDispatched:       true,
+		api.TaskStatusRunning:          true,
+		api.TaskStatusWaitingUserInput: true,
+		api.TaskStatusBlocked:          true,
+		api.TaskStatusCancelled:        true,
+		api.TaskStatusFailed:           true,
+	},
+	api.TaskStatusWaitingUserInput: {
+		api.TaskStatusDispatched: true,
+		api.TaskStatusRunning:    true,
+		api.TaskStatusBlocked:    true,
+		api.TaskStatusCancelled:  true,
+		api.TaskStatusFailed:     true,
+	},
+	api.TaskStatusReconcileRequired: {
+		api.TaskStatusDispatched: true,
+		api.TaskStatusRunning:    true,
+		api.TaskStatusBlocked:    true,
+		api.TaskStatusCancelled:  true,
+		api.TaskStatusFailed:     true,
+	},
+	api.TaskStatusBlocked: {
+		api.TaskStatusDispatched: true,
+		api.TaskStatusRunning:    true,
+		api.TaskStatusPaused:     true,
+		api.TaskStatusCancelled:  true,
+		api.TaskStatusFailed:     true,
+	},
+}
+
+func TransitionRun(run api.Run, to api.RunStatus) (api.Run, error) {
 	if run.Status == to {
 		return run, nil
 	}
 	if IsTerminalRun(run.Status) {
-		return model.Run{}, model.ErrTerminalState
+		return api.Run{}, api.ErrTerminalState
 	}
 	if !allowedRunTransitions[run.Status][to] {
-		return model.Run{}, model.ErrInvalidTransition
+		return api.Run{}, api.ErrInvalidTransition
 	}
 	run.Status = to
 	run.UpdatedAt = time.Now().UTC()
 	return run, nil
 }
 
-func TransitionTask(task model.Task, to model.TaskStatus, bumpVersion bool) (model.Task, error) {
+func TransitionTask(task api.Task, to api.TaskStatus, bumpVersion bool) (api.Task, error) {
 	if task.Status == to {
 		return task, nil
 	}
 	if IsTerminalTask(task.Status) {
-		return model.Task{}, model.ErrTerminalState
+		return api.Task{}, api.ErrTerminalState
 	}
 	if !allowedTaskTransitions[task.Status][to] {
-		return model.Task{}, model.ErrInvalidTransition
+		return api.Task{}, api.ErrInvalidTransition
 	}
 	task.Status = to
 	if bumpVersion {
@@ -211,7 +211,7 @@ func TransitionTask(task model.Task, to model.TaskStatus, bumpVersion bool) (mod
 	return task, nil
 }
 
-func DependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, fatal bool) {
+func DependencyGate(task api.Task, tasks map[string]api.Task) (ready bool, fatal bool) {
 	if len(task.DependsOn) == 0 {
 		return true, false
 	}
@@ -222,24 +222,24 @@ func DependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, f
 			continue
 		}
 		switch depTask.Status {
-		case model.TaskStatusCompleted:
+		case api.TaskStatusCompleted:
 			completed++
-		case model.TaskStatusFailed, model.TaskStatusCancelled:
+		case api.TaskStatusFailed, api.TaskStatusCancelled:
 			failed++
 		}
 	}
 	if failed > 0 {
 		switch task.OnDependencyFailed {
-		case model.OnDependencyFailedFail:
+		case api.OnDependencyFailedFail:
 			return false, true
-		case model.OnDependencyFailedSkip:
+		case api.OnDependencyFailedSkip:
 			completed += failed
 		}
 	}
 	switch task.AwaitMode {
-	case model.AwaitModeAny:
+	case api.AwaitModeAny:
 		return completed >= 1, false
-	case model.AwaitModeQuorum:
+	case api.AwaitModeQuorum:
 		threshold := task.AwaitQuorum
 		if threshold <= 0 {
 			threshold = 1
@@ -250,19 +250,19 @@ func DependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, f
 	}
 }
 
-func TaskCanBecomeReady(status model.TaskStatus) bool {
+func TaskCanBecomeReady(status api.TaskStatus) bool {
 	switch status {
-	case model.TaskStatusCreated, model.TaskStatusPlanned, model.TaskStatusValidated, model.TaskStatusRouted, model.TaskStatusWaitingDependency:
+	case api.TaskStatusCreated, api.TaskStatusPlanned, api.TaskStatusValidated, api.TaskStatusRouted, api.TaskStatusWaitingDependency:
 		return true
 	default:
 		return false
 	}
 }
 
-func IsTerminalTask(status model.TaskStatus) bool {
-	return status == model.TaskStatusCompleted || status == model.TaskStatusFailed || status == model.TaskStatusCancelled
+func IsTerminalTask(status api.TaskStatus) bool {
+	return status == api.TaskStatusCompleted || status == api.TaskStatusFailed || status == api.TaskStatusCancelled
 }
 
-func IsTerminalRun(status model.RunStatus) bool {
-	return status == model.RunStatusCompleted || status == model.RunStatusFailed || status == model.RunStatusCancelled
+func IsTerminalRun(status api.RunStatus) bool {
+	return status == api.RunStatusCompleted || status == api.RunStatusFailed || status == api.RunStatusCancelled
 }

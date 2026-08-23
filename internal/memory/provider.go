@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -95,19 +95,19 @@ func (p *Provider) DroppedCount() uint64 {
 	return p.hub.DroppedCount()
 }
 
-func (p *Provider) SelectItems(_ context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
+func (p *Provider) SelectItems(_ context.Context, runID string, selector api.BlackboardSelector) ([]api.BlackboardItem, error) {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
 	return selectBlackboardItems(p.committed, runID, selector), nil
 }
 
-func (p *Provider) Subscribe(ctx context.Context, runID string, filter model.BlackboardSelector) (<-chan model.BlackboardItem, func() error, error) {
+func (p *Provider) Subscribe(ctx context.Context, runID string, filter api.BlackboardSelector) (<-chan api.BlackboardItem, func() error, error) {
 	return p.hub.Subscribe(ctx, runID, filter)
 }
 
 // Notify fans out items to hub subscribers. Used by the external store path
 // to emit blackboard notifications after an external commit.
-func (p *Provider) Notify(items []model.BlackboardItem) {
+func (p *Provider) Notify(items []api.BlackboardItem) {
 	p.hub.Notify(items)
 }
 
@@ -142,7 +142,7 @@ func (p *Provider) Close(context.Context) error { return nil }
 type UnitOfWork struct {
 	provider *Provider
 	staged   *State
-	pending  []model.BlackboardItem
+	pending  []api.BlackboardItem
 	closed   bool
 	readOnly bool
 }
@@ -181,7 +181,7 @@ func (u *UnitOfWork) ResourceClaims() ports.ResourceClaimStore {
 
 func (u *UnitOfWork) ensureOpen() error {
 	if u.closed {
-		return fmt.Errorf("memory unit of work closed: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("memory unit of work closed: %w", api.ErrInvalidCommand)
 	}
 	return nil
 }
@@ -191,11 +191,11 @@ func (u *UnitOfWork) Commit(context.Context) error {
 		return err
 	}
 	if u.readOnly {
-		return fmt.Errorf("memory unit of work is read-only: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("memory unit of work is read-only: %w", api.ErrInvalidCommand)
 	}
 	u.provider.stateLock.Lock()
 	u.provider.committed = u.staged
-	pending := append([]model.BlackboardItem{}, u.pending...)
+	pending := append([]api.BlackboardItem{}, u.pending...)
 	u.closed = true
 	u.provider.stateLock.Unlock()
 	u.provider.txGate.release()

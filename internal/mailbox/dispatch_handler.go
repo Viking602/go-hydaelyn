@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
-type AgentProvider func() []model.AgentProfile
+type AgentProvider func() []api.AgentProfile
 
-type Authorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
+type Authorizer func(context.Context, ports.UnitOfWork, api.PolicyRequest) (api.PolicyDecision, error)
 
 type DispatchHandlerOptions struct {
 	NewID       IDGenerator
@@ -38,7 +38,7 @@ func (h dispatchTaskHandler) Handle(ctx context.Context, uow ports.UnitOfWork, c
 		return nil, err
 	}
 	if h.options.Authorize != nil {
-		if _, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationDispatch, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: model.SourceIdentity{Type: model.SourceComponent, ID: "dispatcher"}, Metadata: map[string]string{"targetAgentId": cmd.TargetAgentID, "targetComponent": cmd.TargetComponent}}); err != nil {
+		if _, err := h.options.Authorize(ctx, uow, api.PolicyRequest{Operation: api.PolicyOperationDispatch, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: api.SourceIdentity{Type: api.SourceComponent, ID: "dispatcher"}, Metadata: map[string]string{"targetAgentId": cmd.TargetAgentID, "targetComponent": cmd.TargetComponent}}); err != nil {
 			return nil, err
 		}
 	}
@@ -67,7 +67,7 @@ func (h fanOutDispatchTaskHandler) Handle(ctx context.Context, uow ports.UnitOfW
 		return nil, err
 	}
 	if h.options.Authorize != nil {
-		if _, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationDispatch, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: model.SourceIdentity{Type: model.SourceComponent, ID: "dispatcher"}, Metadata: map[string]string{"addressKind": string(cmd.To.Kind), "recipients": strings.Join(recipients, ",")}}); err != nil {
+		if _, err := h.options.Authorize(ctx, uow, api.PolicyRequest{Operation: api.PolicyOperationDispatch, RunID: cmd.RunID, TaskID: cmd.TaskID, Actor: api.SourceIdentity{Type: api.SourceComponent, ID: "dispatcher"}, Metadata: map[string]string{"addressKind": string(cmd.To.Kind), "recipients": strings.Join(recipients, ",")}}); err != nil {
 			return nil, err
 		}
 	}

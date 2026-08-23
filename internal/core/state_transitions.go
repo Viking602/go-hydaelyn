@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	tasksvc "github.com/Viking602/venat/internal/task"
 )
 
@@ -21,10 +21,10 @@ func registerStateUoWCommandHandlers(runtime *Runtime) {
 	tasksvc.RegisterHandlers(runtime.commandBus)
 }
 
-func transitionRunPure(run model.Run, to model.RunStatus) (model.Run, error) {
+func transitionRunPure(run api.Run, to api.RunStatus) (api.Run, error) {
 	return tasksvc.PureRunTransition(run, to)
 }
 
-func transitionTaskPure(task model.Task, to model.TaskStatus, bumpVersion bool) (model.Task, error) {
+func transitionTaskPure(task api.Task, to api.TaskStatus, bumpVersion bool) (api.Task, error) {
 	return tasksvc.PureTaskTransition(task, to, bumpVersion)
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/mailbox"
 	"github.com/Viking602/venat/internal/memory"
 	runsvc "github.com/Viking602/venat/internal/run"
@@ -37,14 +37,14 @@ func TestDispatchCopiesTaskDataflowIntoEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	task := model.Task{
+	task := api.Task{
 		ID:             "task-1",
 		RunID:          run.ID,
-		Status:         model.TaskStatusRouted,
+		Status:         api.TaskStatusRouted,
 		Version:        4,
-		ReadSelectors:  []model.BlackboardSelector{{Keys: []string{"brief"}}},
+		ReadSelectors:  []api.BlackboardSelector{{Keys: []string{"brief"}}},
 		WriteTargets:   []string{"findings"},
-		RetryPolicy:    model.RetryPolicy{MaxAttempts: 2},
+		RetryPolicy:    api.RetryPolicy{MaxAttempts: 2},
 		OwnerAgentID:   "agent-1",
 		OwnerComponent: "worker",
 	}
@@ -73,7 +73,7 @@ func TestDispatchCopiesTaskDataflowIntoEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if events[len(events)-1].Type != model.EventTaskDispatched {
+	if events[len(events)-1].Type != api.EventTaskDispatched {
 		t.Fatalf("last event = %#v", events[len(events)-1])
 	}
 }
@@ -95,15 +95,15 @@ func TestDispatchRejectsUnmetDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if err := uow.Tasks().SaveTask(ctx, model.Task{ID: "dep-1", RunID: run.ID, Status: model.TaskStatusRunning, Version: 1}); err != nil {
+	if err := uow.Tasks().SaveTask(ctx, api.Task{ID: "dep-1", RunID: run.ID, Status: api.TaskStatusRunning, Version: 1}); err != nil {
 		t.Fatalf("SaveTask(dep) error = %v", err)
 	}
-	if err := uow.Tasks().SaveTask(ctx, model.Task{ID: "task-1", RunID: run.ID, Status: model.TaskStatusWaitingDependency, Version: 1, DependsOn: []string{"dep-1"}}); err != nil {
+	if err := uow.Tasks().SaveTask(ctx, api.Task{ID: "task-1", RunID: run.ID, Status: api.TaskStatusWaitingDependency, Version: 1, DependsOn: []string{"dep-1"}}); err != nil {
 		t.Fatalf("SaveTask(task) error = %v", err)
 	}
 
 	_, err = mailbox.Dispatch(ctx, uow, mailboxIDGenerator(), mailbox.DispatchInput{RunID: run.ID, TaskID: "task-1"})
-	if !errors.Is(err, model.ErrDependencyUnmet) {
+	if !errors.Is(err, api.ErrDependencyUnmet) {
 		t.Fatalf("Dispatch() error = %v, want ErrDependencyUnmet", err)
 	}
 }
@@ -116,10 +116,10 @@ func TestLoadDispatchTargetRejectsTerminalRun(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-1", Status: model.RunStatusCompleted}); err != nil {
+	if err := uow.Runs().SaveRun(ctx, api.Run{ID: "run-1", Status: api.RunStatusCompleted}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
-	if _, _, err := mailbox.LoadDispatchTarget(ctx, uow, "run-1", "task-1"); !errors.Is(err, model.ErrTerminalState) {
+	if _, _, err := mailbox.LoadDispatchTarget(ctx, uow, "run-1", "task-1"); !errors.Is(err, api.ErrTerminalState) {
 		t.Fatalf("LoadDispatchTarget() error = %v, want ErrTerminalState", err)
 	}
 }

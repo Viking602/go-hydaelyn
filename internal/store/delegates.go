@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -30,37 +30,37 @@ func NewDelegates(options Options) *Delegates {
 	}
 }
 
-func (d *Delegates) SaveRun(ctx context.Context, run model.Run) error {
+func (d *Delegates) SaveRun(ctx context.Context, run api.Run) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.Runs().SaveRun(ctx, run)
 	})
 }
 
-func (d *Delegates) LoadRun(ctx context.Context, runID string) (model.Run, error) {
+func (d *Delegates) LoadRun(ctx context.Context, runID string) (api.Run, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.Runs().LoadRun(ctx, runID)
 }
 
-func (d *Delegates) SaveTask(ctx context.Context, task model.Task) error {
+func (d *Delegates) SaveTask(ctx context.Context, task api.Task) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.Tasks().SaveTask(ctx, task)
 	})
 }
 
-func (d *Delegates) LoadTask(ctx context.Context, runID, taskID string) (model.Task, error) {
+func (d *Delegates) LoadTask(ctx context.Context, runID, taskID string) (api.Task, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
 }
 
-func (d *Delegates) ListTasks(ctx context.Context, runID string) ([]model.Task, error) {
+func (d *Delegates) ListTasks(ctx context.Context, runID string) ([]api.Task, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -69,13 +69,13 @@ func (d *Delegates) ListTasks(ctx context.Context, runID string) ([]model.Task, 
 	return uow.Tasks().ListTasks(ctx, runID)
 }
 
-func (d *Delegates) AppendEvent(ctx context.Context, event model.Event) error {
+func (d *Delegates) AppendEvent(ctx context.Context, event api.Event) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.Events().AppendEvent(ctx, event)
 	})
 }
 
-func (d *Delegates) ListEvents(ctx context.Context, runID string) ([]model.Event, error) {
+func (d *Delegates) ListEvents(ctx context.Context, runID string) ([]api.Event, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -84,13 +84,13 @@ func (d *Delegates) ListEvents(ctx context.Context, runID string) ([]model.Event
 	return uow.Events().ListEvents(ctx, runID)
 }
 
-func (d *Delegates) SaveTraceSpan(ctx context.Context, span model.TraceSpan) error {
+func (d *Delegates) SaveTraceSpan(ctx context.Context, span api.TraceSpan) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.Trace().SaveTraceSpan(ctx, span)
 	})
 }
 
-func (d *Delegates) ListTraceSpans(ctx context.Context, runID string) ([]model.TraceSpan, error) {
+func (d *Delegates) ListTraceSpans(ctx context.Context, runID string) ([]api.TraceSpan, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -99,28 +99,28 @@ func (d *Delegates) ListTraceSpans(ctx context.Context, runID string) ([]model.T
 	return uow.Trace().ListTraceSpans(ctx, runID)
 }
 
-func (d *Delegates) QueueMessage(ctx context.Context, message model.UserMessage) error {
+func (d *Delegates) QueueMessage(ctx context.Context, message api.UserMessage) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.UserMessages().QueueMessage(ctx, message)
 	})
 }
 
-func (d *Delegates) LoadMessage(ctx context.Context, runID, messageID string) (model.UserMessage, error) {
+func (d *Delegates) LoadMessage(ctx context.Context, runID, messageID string) (api.UserMessage, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.UserMessages().LoadMessage(ctx, runID, messageID)
 }
 
-func (d *Delegates) UpdateMessage(ctx context.Context, message model.UserMessage) error {
+func (d *Delegates) UpdateMessage(ctx context.Context, message api.UserMessage) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.UserMessages().UpdateMessage(ctx, message)
 	})
 }
 
-func (d *Delegates) ListMessages(ctx context.Context, runID string) ([]model.UserMessage, error) {
+func (d *Delegates) ListMessages(ctx context.Context, runID string) ([]api.UserMessage, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (d *Delegates) ListMessages(ctx context.Context, runID string) ([]model.Use
 	return uow.UserMessages().ListMessages(ctx, runID)
 }
 
-func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]model.UserMessage, error) {
+func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]api.UserMessage, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -137,33 +137,33 @@ func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]model.UserMessage
 	defer func() { _ = done() }()
 	scanner, ok := uow.UserMessages().(ports.UserMessageOutboxScanner)
 	if !ok {
-		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", api.ErrInvalidConfiguration)
 	}
 	return scanner.ListQueuedMessages(ctx)
 }
 
-func (d *Delegates) QueueEnvelope(ctx context.Context, env model.TaskEnvelope) error {
+func (d *Delegates) QueueEnvelope(ctx context.Context, env api.TaskEnvelope) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.MailboxOutbox().QueueEnvelope(ctx, env)
 	})
 }
 
-func (d *Delegates) LoadEnvelope(ctx context.Context, envelopeID string) (model.TaskEnvelope, error) {
+func (d *Delegates) LoadEnvelope(ctx context.Context, envelopeID string) (api.TaskEnvelope, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
-		return model.TaskEnvelope{}, err
+		return api.TaskEnvelope{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.MailboxOutbox().LoadEnvelope(ctx, envelopeID)
 }
 
-func (d *Delegates) UpdateEnvelope(ctx context.Context, env model.TaskEnvelope) error {
+func (d *Delegates) UpdateEnvelope(ctx context.Context, env api.TaskEnvelope) error {
 	return d.withWrite(ctx, func(uow ports.UnitOfWork) error {
 		return uow.MailboxOutbox().UpdateEnvelope(ctx, env)
 	})
 }
 
-func (d *Delegates) ListEnvelopes(ctx context.Context, runID string) ([]model.TaskEnvelope, error) {
+func (d *Delegates) ListEnvelopes(ctx context.Context, runID string) ([]api.TaskEnvelope, error) {
 	uow, done, err := d.openRead(ctx)
 	if err != nil {
 		return nil, err
@@ -195,14 +195,14 @@ func (d *Delegates) withWrite(ctx context.Context, fn func(ports.UnitOfWork) err
 
 func (d *Delegates) openWrite(ctx context.Context) (ports.UnitOfWork, error) {
 	if d == nil || d.beginWrite == nil {
-		return nil, fmt.Errorf("store delegates missing write unit of work: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("store delegates missing write unit of work: %w", api.ErrInvalidConfiguration)
 	}
 	return d.beginWrite(ctx)
 }
 
 func (d *Delegates) openRead(ctx context.Context) (ports.UnitOfWork, func() error, error) {
 	if d == nil {
-		return nil, nil, fmt.Errorf("store delegates missing read unit of work: %w", model.ErrInvalidConfiguration)
+		return nil, nil, fmt.Errorf("store delegates missing read unit of work: %w", api.ErrInvalidConfiguration)
 	}
 	if d.beginRead != nil {
 		return d.beginRead(ctx)

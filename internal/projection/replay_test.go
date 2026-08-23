@@ -6,45 +6,45 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/eventpayload"
 )
 
 func TestProjectPreservesSerializedTaskFields(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Nanosecond)
-	report := model.TypedReport{Status: model.ReportStatusSuccess, Summary: "done"}
-	task := model.Task{
+	report := api.TypedReport{Status: api.ReportStatusSuccess, Summary: "done"}
+	task := api.Task{
 		ID:                 "task-1",
 		RunID:              "run-1",
-		Type:               model.TaskTypeWorker,
+		Type:               api.TaskTypeWorker,
 		Goal:               "deploy",
 		OwnerAgentID:       "agent-1",
-		Status:             model.TaskStatusCompleted,
+		Status:             api.TaskStatusCompleted,
 		Version:            3,
 		AllowsAction:       true,
 		Tags:               []string{"critical"},
 		WriteTargets:       []string{"result"},
-		RetryPolicy:        model.RetryPolicy{MaxAttempts: 2, Backoff: time.Second},
+		RetryPolicy:        api.RetryPolicy{MaxAttempts: 2, Backoff: time.Second},
 		Result:             &report,
-		Budget:             &model.TaskBudget{MaxTokens: 100},
+		Budget:             &api.TaskBudget{MaxTokens: 100},
 		InputSchema:        json.RawMessage(`{"type":"object"}`),
 		OutputSchema:       json.RawMessage(`{"type":"string"}`),
 		CompletionCriteria: []string{"approved"},
-		ResourceClaims: []model.ResourceClaimSpec{{
-			ID: "workspace", Key: "repo", Mode: model.ResourceClaimExclusive,
+		ResourceClaims: []api.ResourceClaimSpec{{
+			ID: "workspace", Key: "repo", Mode: api.ResourceClaimExclusive,
 		}},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	events := []model.Event{
-		{RunID: "run-1", Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(model.Run{ID: "run-1", Status: model.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
-		{RunID: "run-1", TaskID: task.ID, Type: model.EventTaskCreated, Payload: eventpayload.Task(task)},
+	events := []api.Event{
+		{RunID: "run-1", Type: api.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(api.Run{ID: "run-1", Status: api.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
+		{RunID: "run-1", TaskID: task.ID, Type: api.EventTaskCreated, Payload: eventpayload.Task(task)},
 	}
 	raw, err := json.Marshal(events)
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	var serialized []model.Event
+	var serialized []api.Event
 	if err := json.Unmarshal(raw, &serialized); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
@@ -66,19 +66,19 @@ func TestProjectPreservesSerializedTaskFields(t *testing.T) {
 
 func TestProjectPreservesRunAgentVersion(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Nanosecond)
-	run := model.Run{
-		ID: "run-version", Status: model.RunStatusRunning,
+	run := api.Run{
+		ID: "run-version", Status: api.RunStatusRunning,
 		Request: "hello", RootTaskID: "root", AgentVersion: "def-v3",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	events := []model.Event{
-		{RunID: run.ID, Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(run)}},
+	events := []api.Event{
+		{RunID: run.ID, Type: api.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(run)}},
 	}
 	raw, err := json.Marshal(events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var serialized []model.Event
+	var serialized []api.Event
 	if err := json.Unmarshal(raw, &serialized); err != nil {
 		t.Fatal(err)
 	}
@@ -92,41 +92,41 @@ func TestProjectPreservesRunAgentVersion(t *testing.T) {
 }
 
 func TestProjectEmptyEvents(t *testing.T) {
-	if _, err := Project(nil); err != model.ErrNotFound {
+	if _, err := Project(nil); err != api.ErrNotFound {
 		t.Fatalf("Project(nil) error = %v, want ErrNotFound", err)
 	}
 }
 
 func TestProjectAppliesRunStatusAndDispatch(t *testing.T) {
 	now := time.Now().UTC()
-	events := []model.Event{
-		{RunID: "run-1", Type: model.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(model.Run{ID: "run-1", Status: model.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
-		{RunID: "run-1", Type: model.EventRunStatusChanged, Payload: map[string]any{"to": string(model.RunStatusCompleted)}},
-		{RunID: "run-1", TaskID: "task-1", Type: model.EventTaskCreated, Payload: eventpayload.Task(model.Task{ID: "task-1", RunID: "run-1", Status: model.TaskStatusCreated})},
-		{RunID: "run-1", TaskID: "task-1", Type: model.EventTaskDispatched, Payload: map[string]any{"envelope": map[string]any{"taskId": "task-1"}}},
+	events := []api.Event{
+		{RunID: "run-1", Type: api.EventRunStarted, Payload: map[string]any{"run": eventpayload.Run(api.Run{ID: "run-1", Status: api.RunStatusRunning, CreatedAt: now, UpdatedAt: now})}},
+		{RunID: "run-1", Type: api.EventRunStatusChanged, Payload: map[string]any{"to": string(api.RunStatusCompleted)}},
+		{RunID: "run-1", TaskID: "task-1", Type: api.EventTaskCreated, Payload: eventpayload.Task(api.Task{ID: "task-1", RunID: "run-1", Status: api.TaskStatusCreated})},
+		{RunID: "run-1", TaskID: "task-1", Type: api.EventTaskDispatched, Payload: map[string]any{"envelope": map[string]any{"taskId": "task-1"}}},
 	}
 	projection, err := Project(events)
 	if err != nil {
 		t.Fatalf("Project() error = %v", err)
 	}
-	if projection.Run.Status != model.RunStatusCompleted {
+	if projection.Run.Status != api.RunStatusCompleted {
 		t.Fatalf("run status = %q, want completed", projection.Run.Status)
 	}
-	if projection.Tasks["task-1"].Status != model.TaskStatusDispatched {
+	if projection.Tasks["task-1"].Status != api.TaskStatusDispatched {
 		t.Fatalf("task status = %q, want dispatched", projection.Tasks["task-1"].Status)
 	}
 }
 
 func TestTimelineIncludesVisibleEvents(t *testing.T) {
-	items := Timeline([]model.Event{
-		{Type: model.EventRunStatusChanged, Payload: map[string]any{"from": "running", "to": "completed"}},
-		{Type: model.EventTaskDispatched, TaskID: "task-1"},
-		{Type: model.EventTraceSpanStarted},
+	items := Timeline([]api.Event{
+		{Type: api.EventRunStatusChanged, Payload: map[string]any{"from": "running", "to": "completed"}},
+		{Type: api.EventTaskDispatched, TaskID: "task-1"},
+		{Type: api.EventTraceSpanStarted},
 	})
 	if len(items) != 2 {
 		t.Fatalf("Timeline() = %#v, want 2 visible items", items)
 	}
-	if items[0].Kind != model.RunTimelineKindControl || items[1].Kind != model.RunTimelineKindWork {
+	if items[0].Kind != api.RunTimelineKindControl || items[1].Kind != api.RunTimelineKindWork {
 		t.Fatalf("timeline kinds = %#v", items)
 	}
 }

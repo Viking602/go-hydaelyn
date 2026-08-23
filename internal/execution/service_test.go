@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/execution"
 	"github.com/Viking602/venat/internal/memory"
 	runsvc "github.com/Viking602/venat/internal/run"
@@ -38,14 +38,14 @@ func TestAcquireReturnsExistingActiveLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	root.Status = model.TaskStatusDispatched
+	root.Status = api.TaskStatusDispatched
 	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
 		t.Fatalf("SaveTask(root) error = %v", err)
 	}
 	first, err := execution.Acquire(ctx, uow, executionIDGenerator(), execution.AcquireInput{
 		RunID:      run.ID,
 		TaskID:     root.ID,
-		HolderType: model.HolderComponent,
+		HolderType: api.HolderComponent,
 		HolderID:   "orchestrator",
 		TTL:        time.Hour,
 	})
@@ -55,7 +55,7 @@ func TestAcquireReturnsExistingActiveLease(t *testing.T) {
 	second, err := execution.Acquire(ctx, uow, executionIDGenerator(), execution.AcquireInput{
 		RunID:      run.ID,
 		TaskID:     root.ID,
-		HolderType: model.HolderComponent,
+		HolderType: api.HolderComponent,
 		HolderID:   "orchestrator",
 		TTL:        time.Hour,
 	})
@@ -84,14 +84,14 @@ func TestAcquireSynchronizesLeaseExpiryFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	root.Status = model.TaskStatusDispatched
+	root.Status = api.TaskStatusDispatched
 	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
 		t.Fatalf("SaveTask(root) error = %v", err)
 	}
 	acquired, err := execution.Acquire(ctx, uow, executionIDGenerator(), execution.AcquireInput{
 		RunID:      run.ID,
 		TaskID:     root.ID,
-		HolderType: model.HolderComponent,
+		HolderType: api.HolderComponent,
 		HolderID:   "orchestrator",
 		TTL:        time.Hour,
 	})
@@ -111,13 +111,13 @@ func TestHeartbeatSynchronizesLeaseExpiryFields(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	lease := model.TaskExecutionLease{
+	lease := api.TaskExecutionLease{
 		ID:         "lease-heartbeat",
 		RunID:      "run-heartbeat",
 		TaskID:     "task-heartbeat",
-		HolderType: model.HolderAgent,
+		HolderType: api.HolderAgent,
 		HolderID:   "agent-1",
-		Status:     model.LeaseStatusActive,
+		Status:     api.LeaseStatusActive,
 		ExpiresAt:  time.Now().Add(time.Minute),
 	}
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
@@ -130,7 +130,7 @@ func TestHeartbeatSynchronizesLeaseExpiryFields(t *testing.T) {
 	if got.ExpiresAt.IsZero() || got.Expiry.IsZero() || !got.ExpiresAt.Equal(got.Expiry) {
 		t.Fatalf("heartbeat expiry fields not synchronized: %+v", got)
 	}
-	if _, err := execution.Heartbeat(ctx, uow, lease.ID, "agent-2", time.Hour); !errors.Is(err, model.ErrLeaseHolderMismatch) {
+	if _, err := execution.Heartbeat(ctx, uow, lease.ID, "agent-2", time.Hour); !errors.Is(err, api.ErrLeaseHolderMismatch) {
 		t.Fatalf("Heartbeat(wrong holder) error = %v, want ErrLeaseHolderMismatch", err)
 	}
 }
@@ -143,13 +143,13 @@ func TestReleaseIsIdempotent(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	lease := model.TaskExecutionLease{
+	lease := api.TaskExecutionLease{
 		ID:         "lease-release",
 		RunID:      "run-release",
 		TaskID:     "task-release",
-		HolderType: model.HolderAgent,
+		HolderType: api.HolderAgent,
 		HolderID:   "agent-1",
-		Status:     model.LeaseStatusActive,
+		Status:     api.LeaseStatusActive,
 	}
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		t.Fatalf("SaveLease() error = %v", err)
@@ -164,7 +164,7 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if len(events) != 1 || events[0].Type != model.EventTaskExecutionReleased {
+	if len(events) != 1 || events[0].Type != api.EventTaskExecutionReleased {
 		t.Fatalf("release events = %#v, want one TaskExecutionReleased", events)
 	}
 }
@@ -186,18 +186,18 @@ func TestAcquireReplacesExpiredLeaseWithMonotonicVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	root.Status = model.TaskStatusDispatched
+	root.Status = api.TaskStatusDispatched
 	root.OwnerComponent = "orchestrator"
 	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
 		t.Fatalf("SaveTask(root) error = %v", err)
 	}
-	if err := uow.Leases().SaveLease(ctx, model.TaskExecutionLease{
+	if err := uow.Leases().SaveLease(ctx, api.TaskExecutionLease{
 		ID:         "lease-expired",
 		RunID:      run.ID,
 		TaskID:     root.ID,
-		HolderType: model.HolderComponent,
+		HolderType: api.HolderComponent,
 		HolderID:   "old-worker",
-		Status:     model.LeaseStatusActive,
+		Status:     api.LeaseStatusActive,
 		ExpiresAt:  time.Now().UTC().Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("SaveLease(expired) error = %v", err)
@@ -206,7 +206,7 @@ func TestAcquireReplacesExpiredLeaseWithMonotonicVersion(t *testing.T) {
 	got, err := execution.Acquire(ctx, uow, executionIDGenerator(), execution.AcquireInput{
 		RunID:      run.ID,
 		TaskID:     root.ID,
-		HolderType: model.HolderComponent,
+		HolderType: api.HolderComponent,
 		HolderID:   "orchestrator",
 		TTL:        time.Minute,
 	})
@@ -226,25 +226,25 @@ func TestValidateSubmissionAcceptsLegacyExpiryField(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-legacy", Status: model.RunStatusRunning}); err != nil {
+	if err := uow.Runs().SaveRun(ctx, api.Run{ID: "run-legacy", Status: api.RunStatusRunning}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
-	if err := uow.Tasks().SaveTask(ctx, model.Task{ID: "task-legacy", RunID: "run-legacy", Status: model.TaskStatusRunning, Version: 1}); err != nil {
+	if err := uow.Tasks().SaveTask(ctx, api.Task{ID: "task-legacy", RunID: "run-legacy", Status: api.TaskStatusRunning, Version: 1}); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
-	if err := uow.Leases().SaveLease(ctx, model.TaskExecutionLease{
+	if err := uow.Leases().SaveLease(ctx, api.TaskExecutionLease{
 		ID:          "lease-legacy",
 		RunID:       "run-legacy",
 		TaskID:      "task-legacy",
-		HolderType:  model.HolderAgent,
+		HolderType:  api.HolderAgent,
 		HolderID:    "agent-1",
 		TaskVersion: 1,
-		Status:      model.LeaseStatusActive,
+		Status:      api.LeaseStatusActive,
 		Expiry:      time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("SaveLease() error = %v", err)
 	}
-	if _, _, _, err := execution.ValidateSubmission(ctx, uow, "run-legacy", "task-legacy", "lease-legacy", model.HolderAgent, "agent-1", 1); err != nil {
+	if _, _, _, err := execution.ValidateSubmission(ctx, uow, "run-legacy", "task-legacy", "lease-legacy", api.HolderAgent, "agent-1", 1); err != nil {
 		t.Fatalf("ValidateSubmission() error = %v", err)
 	}
 }
@@ -257,22 +257,22 @@ func TestValidateSubmissionRejectsExpiredLease(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-expired", Status: model.RunStatusRunning}); err != nil {
+	if err := uow.Runs().SaveRun(ctx, api.Run{ID: "run-expired", Status: api.RunStatusRunning}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
-	if err := uow.Tasks().SaveTask(ctx, model.Task{ID: "task-expired", RunID: "run-expired", Status: model.TaskStatusRunning, Version: 1}); err != nil {
+	if err := uow.Tasks().SaveTask(ctx, api.Task{ID: "task-expired", RunID: "run-expired", Status: api.TaskStatusRunning, Version: 1}); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
-	if err := uow.Leases().SaveLease(ctx, model.TaskExecutionLease{
+	if err := uow.Leases().SaveLease(ctx, api.TaskExecutionLease{
 		ID: "lease-expired-submit", RunID: "run-expired", TaskID: "task-expired",
-		HolderType: model.HolderAgent, HolderID: "agent-1", TaskVersion: 1,
-		Status: model.LeaseStatusActive, ExpiresAt: time.Now().Add(-time.Second),
+		HolderType: api.HolderAgent, HolderID: "agent-1", TaskVersion: 1,
+		Status: api.LeaseStatusActive, ExpiresAt: time.Now().Add(-time.Second),
 	}); err != nil {
 		t.Fatalf("SaveLease() error = %v", err)
 	}
 	if _, _, _, err := execution.ValidateSubmission(
-		ctx, uow, "run-expired", "task-expired", "lease-expired-submit", model.HolderAgent, "agent-1", 1,
-	); !errors.Is(err, model.ErrLeaseNotActive) {
+		ctx, uow, "run-expired", "task-expired", "lease-expired-submit", api.HolderAgent, "agent-1", 1,
+	); !errors.Is(err, api.ErrLeaseNotActive) {
 		t.Fatalf("ValidateSubmission() error = %v, want ErrLeaseNotActive", err)
 	}
 }
@@ -294,7 +294,7 @@ func TestAcquireRejectsStaleEnvelopeVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if err := uow.MailboxOutbox().QueueEnvelope(ctx, model.TaskEnvelope{
+	if err := uow.MailboxOutbox().QueueEnvelope(ctx, api.TaskEnvelope{
 		ID:            "env-1",
 		RunID:         run.ID,
 		TaskID:        root.ID,
@@ -309,10 +309,10 @@ func TestAcquireRejectsStaleEnvelopeVersion(t *testing.T) {
 		RunID:      run.ID,
 		TaskID:     root.ID,
 		EnvelopeID: "env-1",
-		HolderType: model.HolderAgent,
+		HolderType: api.HolderAgent,
 		HolderID:   "agent-1",
 	})
-	if !errors.Is(err, model.ErrStaleTaskVersion) {
+	if !errors.Is(err, api.ErrStaleTaskVersion) {
 		t.Fatalf("Acquire() error = %v, want ErrStaleTaskVersion", err)
 	}
 }

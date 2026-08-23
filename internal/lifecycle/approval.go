@@ -3,14 +3,14 @@ package lifecycle
 import (
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 // NewApprovalPair creates a new ApprovalRequest and ResumeToken pair for the given task.
 // newID is a factory function that generates a unique ID with a given prefix.
-func NewApprovalPair(newID func(string) string, task model.Task, reason, requester string) (model.ApprovalRequest, model.ResumeToken) {
+func NewApprovalPair(newID func(string) string, task api.Task, reason, requester string) (api.ApprovalRequest, api.ResumeToken) {
 	now := time.Now().UTC()
-	approval := model.ApprovalRequest{
+	approval := api.ApprovalRequest{
 		ApprovalID:       newID("approval"),
 		RunID:            task.RunID,
 		TaskID:           task.ID,
@@ -19,15 +19,15 @@ func NewApprovalPair(newID func(string) string, task model.Task, reason, request
 		Status:           "pending",
 		ExpiresAt:        now.Add(24 * time.Hour),
 	}
-	token := model.ResumeToken{
+	token := api.ResumeToken{
 		TokenID:         newID("resume"),
 		RunID:           task.RunID,
 		TaskID:          task.ID,
 		ApprovalID:      approval.ApprovalID,
 		ExpiresAt:       approval.ExpiresAt,
 		ResumeCommand:   "approval.decide",
-		ResumeRunState:  model.RunStatusRunning,
-		ResumeTaskState: model.TaskStatusDispatched,
+		ResumeRunState:  api.RunStatusRunning,
+		ResumeTaskState: api.TaskStatusDispatched,
 	}
 	return approval, token
 }

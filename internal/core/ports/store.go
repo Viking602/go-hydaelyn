@@ -4,248 +4,68 @@ import (
 	"context"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-type RunStore interface {
-	SaveRun(context.Context, model.Run) error
-	LoadRun(context.Context, string) (model.Run, error)
-	ListRuns(context.Context, model.RunSelector) ([]model.Run, error)
-}
+type (
+	RunStore                       = api.RunStore
+	TaskStore                      = api.TaskStore
+	EventStore                     = api.EventStore
+	TraceStore                     = api.TraceStore
+	BlackboardReadWriter           = api.BlackboardReadWriter
+	UserMessageStore               = api.UserMessageStore
+	MailboxOutboxStore             = api.MailboxOutboxStore
+	LeaseStore                     = api.LeaseStore
+	ApprovalStore                  = api.ApprovalStore
+	ResumeTokenStore               = api.ResumeTokenStore
+	ActionAttemptStore             = api.ActionAttemptStore
+	AgentProfileStore              = api.AgentProfileStore
+	CapabilityStore                = api.CapabilityStore
+	UsageStore                     = api.UsageStore
+	DeadLetterStore                = api.DeadLetterStore
+	HandoffStore                   = api.HandoffStore
+	TeamStateStore                 = api.TeamStateStore
+	AgentInstanceStore             = api.AgentInstanceStore
+	AgentDefinitionStore           = api.AgentDefinitionStore
+	AdmissionReservationStore      = api.AdmissionReservationStore
+	AdmissionReservationUnitOfWork = api.AdmissionReservationUnitOfWork
+	ResourceClaimStore             = api.ResourceClaimStore
+	ResourceClaimUnitOfWork        = api.ResourceClaimUnitOfWork
+	AgentDefinitionUnitOfWork      = api.AgentDefinitionUnitOfWork
+	UnitOfWork                     = api.UnitOfWork
+	StoreProvider                  = api.StoreProvider
+	StoreCapabilities              = api.StoreCapabilities
+	CapabilityReporter             = api.CapabilityReporter
+	ProviderCloser                 = api.ProviderCloser
+	LeaseCAS                       = api.LeaseCAS
+)
 
-type TaskStore interface {
-	SaveTask(context.Context, model.Task) error
-	LoadTask(context.Context, string, string) (model.Task, error)
-	ListTasks(context.Context, string) ([]model.Task, error)
-}
-
-type EventStore interface {
-	AppendEvent(context.Context, model.Event) error
-	ListEvents(context.Context, string) ([]model.Event, error)
-	ListAfter(ctx context.Context, runID string, afterSeq uint64) ([]model.Event, error)
-}
-
-type TraceStore interface {
-	SaveTraceSpan(context.Context, model.TraceSpan) error
-	ListTraceSpans(context.Context, string) ([]model.TraceSpan, error)
-}
-
+// TraceSpanUpdater is the optional mutable trace extension used by the runtime.
 type TraceSpanUpdater interface {
-	LoadTraceSpan(context.Context, string) (model.TraceSpan, error)
-	UpdateTraceSpan(context.Context, model.TraceSpan) error
+	LoadTraceSpan(context.Context, string) (api.TraceSpan, error)
+	UpdateTraceSpan(context.Context, api.TraceSpan) error
 }
 
-type BlackboardReadWriter interface {
-	WriteItem(context.Context, model.BlackboardItem) error
-	SelectItems(context.Context, string, model.BlackboardSelector) ([]model.BlackboardItem, error)
-}
-
+// BlackboardCommittedReader reads committed blackboard state outside a write transaction.
 type BlackboardCommittedReader interface {
-	SelectItems(context.Context, string, model.BlackboardSelector) ([]model.BlackboardItem, error)
+	SelectItems(context.Context, string, api.BlackboardSelector) ([]api.BlackboardItem, error)
 }
 
+// BlackboardSubscriber is the optional push subscription extension.
 type BlackboardSubscriber interface {
-	Subscribe(context.Context, string, model.BlackboardSelector) (<-chan model.BlackboardItem, func() error, error)
+	Subscribe(context.Context, string, api.BlackboardSelector) (<-chan api.BlackboardItem, func() error, error)
 }
 
+// BlackboardWaiter is the optional store-native wait extension.
 type BlackboardWaiter interface {
-	WaitForBlackboard(context.Context, string, model.BlackboardSelector, func([]model.BlackboardItem) bool, time.Duration) ([]model.BlackboardItem, error)
+	WaitForBlackboard(context.Context, string, api.BlackboardSelector, func([]api.BlackboardItem) bool, time.Duration) ([]api.BlackboardItem, error)
 }
 
-type UserMessageStore interface {
-	QueueMessage(context.Context, model.UserMessage) error
-	LoadMessage(context.Context, string, string) (model.UserMessage, error)
-	UpdateMessage(context.Context, model.UserMessage) error
-	ListMessages(context.Context, string) ([]model.UserMessage, error)
-	ListPendingFor(context.Context, model.UserMessageSelector) ([]model.UserMessage, error)
-}
-
+// UserMessageOutboxScanner enumerates every queued user message for recovery.
 type UserMessageOutboxScanner interface {
-	ListQueuedMessages(context.Context) ([]model.UserMessage, error)
+	ListQueuedMessages(context.Context) ([]api.UserMessage, error)
 }
 
-type MailboxOutboxStore interface {
-	QueueEnvelope(context.Context, model.TaskEnvelope) error
-	LoadEnvelope(context.Context, string) (model.TaskEnvelope, error)
-	UpdateEnvelope(context.Context, model.TaskEnvelope) error
-	ListEnvelopes(context.Context, string) ([]model.TaskEnvelope, error)
-}
-
-type LeaseStore interface {
-	SaveLease(context.Context, model.TaskExecutionLease) error
-	LoadLease(context.Context, string) (model.TaskExecutionLease, error)
-	ActiveLeaseForTask(context.Context, string, string) (model.TaskExecutionLease, bool, error)
-	AcquireWithExpectedVersion(ctx context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error)
-	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
-	ReleaseExpiredLease(ctx context.Context, leaseID string, expectedVersion uint64, releasedAt time.Time) (bool, error)
-}
-
-type ApprovalStore interface {
-	SaveApproval(context.Context, model.ApprovalRequest) error
-	LoadApproval(context.Context, string) (model.ApprovalRequest, error)
-}
-
-type ResumeTokenStore interface {
-	SaveResumeToken(context.Context, model.ResumeToken) error
-	LoadResumeToken(context.Context, string) (model.ResumeToken, error)
-	ListPending(context.Context, model.ResumeTokenSelector) ([]model.ResumeToken, error)
-}
-
-type ActionAttemptStore interface {
-	SaveActionAttempt(context.Context, model.ActionAttempt) error
-	LoadActionAttempt(context.Context, string) (model.ActionAttempt, error)
-	LoadActionAttemptByIdempotencyKey(ctx context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error)
-	ListActionAttempts(context.Context, model.ActionAttemptSelector) ([]model.ActionAttempt, error)
-	ResolveActionAttempt(context.Context, model.ActionAttempt) (bool, error)
-}
-
-type AgentProfileStore interface {
-	SaveAgentProfile(context.Context, model.AgentProfile) error
-	LoadAgentProfile(context.Context, string) (model.AgentProfile, error)
-	ListAgentProfiles(context.Context, model.AgentSelector) ([]model.AgentProfile, error)
-}
-
-type CapabilityStore interface {
-	SaveCapability(context.Context, model.Capability) error
-	LoadCapability(ctx context.Context, name string, agentID string) (model.Capability, error)
-	ListCapabilities(context.Context, model.CapabilitySelector) ([]model.Capability, error)
-}
-
-type UsageStore interface {
-	AppendUsage(context.Context, model.UsageRecord) error
-	QueryUsage(context.Context, model.UsageSelector) ([]model.UsageRecord, error)
-	SumCredits(context.Context, model.UsageSelector) (int64, error)
-}
-
-type DeadLetterStore interface {
-	AppendDeadLetter(context.Context, model.DeadLetterEntry) error
-	ListDeadLetters(context.Context, model.DeadLetterSelector) ([]model.DeadLetterEntry, error)
-	Requeue(ctx context.Context, deadLetterID string) error
-}
-
-// HandoffStore mirrors api.HandoffStore on the internal side.
-type HandoffStore interface {
-	SaveHandoff(context.Context, model.HandoffRecord) error
-	LoadHandoff(ctx context.Context, runID, handoffID string) (model.HandoffRecord, error)
-	ListHandoffs(context.Context, model.HandoffSelector) ([]model.HandoffRecord, error)
-}
-
-// TeamStateStore mirrors api.TeamStateStore on the internal side.
-type TeamStateStore interface {
-	SaveTeamState(context.Context, model.TeamStateRecord) error
-	LoadTeamState(ctx context.Context, runID string) (model.TeamStateRecord, error)
-}
-
-// AgentInstanceStore mirrors api.AgentInstanceStore on the internal side.
-type AgentInstanceStore interface {
-	SaveAgentInstance(context.Context, model.AgentInstanceRecord) error
-	LoadAgentInstance(ctx context.Context, id string) (model.AgentInstanceRecord, error)
-	ListAgentInstances(context.Context, model.AgentInstanceSelector) ([]model.AgentInstanceRecord, error)
-}
-
-type AgentDefinitionStore interface {
-	SaveAgentDefinitionSnapshot(context.Context, model.AgentDefinitionSnapshot) error
-	LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error)
-	ListAgentDefinitionSnapshots(context.Context, model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error)
-}
-
-type AdmissionReservationStore interface {
-	PreviewAdmission(context.Context, model.AdmissionRequest) (model.AdmissionDecision, error)
-	ReserveAdmission(context.Context, model.AdmissionRequest) (model.AdmissionDecision, error)
-	TransitionAdmission(context.Context, model.AdmissionTransition) (model.AdmissionDecision, error)
-	LoadAdmissionReservation(context.Context, string) (model.AdmissionReservation, error)
-	ListAdmissionReservations(context.Context, model.AdmissionReservationSelector) ([]model.AdmissionReservation, error)
-}
-
-type AdmissionReservationUnitOfWork interface {
-	AdmissionReservations() AdmissionReservationStore
-}
-
-type ResourceClaimStore interface {
-	AcquireResourceClaims(context.Context, model.ResourceClaimRequest) (model.ResourceClaimDecision, error)
-	TransitionResourceClaims(context.Context, model.ResourceClaimTransitionRequest) (model.ResourceClaimDecision, error)
-	LoadResourceClaim(context.Context, string) (model.ResourceClaim, error)
-	ListResourceClaims(context.Context, model.ResourceClaimSelector) ([]model.ResourceClaim, error)
-}
-
-type ResourceClaimUnitOfWork interface {
-	ResourceClaims() ResourceClaimStore
-}
-
-type AgentDefinitionUnitOfWork interface {
-	AgentDefinitions() AgentDefinitionStore
-}
-
-type UnitOfWork interface {
-	Runs() RunStore
-	Tasks() TaskStore
-	Events() EventStore
-	Blackboard() BlackboardReadWriter
-	MailboxOutbox() MailboxOutboxStore
-	UserMessages() UserMessageStore
-	Trace() TraceStore
-	Leases() LeaseStore
-	Approvals() ApprovalStore
-	ResumeTokens() ResumeTokenStore
-	ActionAttempts() ActionAttemptStore
-	AgentProfiles() AgentProfileStore
-	CapabilityCatalog() CapabilityStore
-	UsageRecords() UsageStore
-	DeadLetters() DeadLetterStore
-	// v0.8.0 multi-agent stores — required members (spec 07; ADR-016 §6).
-	Handoffs() HandoffStore
-	TeamStates() TeamStateStore
-	AgentInstances() AgentInstanceStore
-	Commit(context.Context) error
-	Rollback(context.Context) error
-}
-
-type StoreProvider interface {
-	Begin(context.Context) (UnitOfWork, error)
-}
-
-// StoreCapabilities mirrors api.StoreCapabilities on the internal side.
-// Kept in lockstep with the public type — see api/store.go for the
-// authoritative godoc.
-type StoreCapabilities struct {
-	SupportsTransactions          bool
-	SupportsBlackboardSubscribe   bool
-	SupportsListPending           bool
-	SupportsConcurrentWriters     bool
-	SupportsDeadLetterRequeue     bool
-	SupportsDefinitionSnapshots   bool
-	SupportsAdmissionReservations bool
-	SupportsResourceClaims        bool
-}
-
-// DefaultStoreCapabilities returns the conservative profile applied to
-// providers that do not implement CapabilityReporter.
 func DefaultStoreCapabilities() StoreCapabilities {
-	return StoreCapabilities{
-		SupportsTransactions:          false,
-		SupportsBlackboardSubscribe:   false,
-		SupportsListPending:           false,
-		SupportsConcurrentWriters:     false,
-		SupportsDeadLetterRequeue:     false,
-		SupportsDefinitionSnapshots:   false,
-		SupportsAdmissionReservations: false,
-		SupportsResourceClaims:        false,
-	}
-}
-
-// CapabilityReporter mirrors api.CapabilityReporter on the internal side.
-type CapabilityReporter interface {
-	Capabilities(ctx context.Context) (StoreCapabilities, error)
-}
-
-// ProviderCloser mirrors api.ProviderCloser on the internal side.
-type ProviderCloser interface {
-	Close(ctx context.Context) error
-}
-
-// LeaseCAS mirrors api.LeaseCAS on the internal side. Atomic acquire +
-// conditional renewal — see api/store.go for full contract.
-type LeaseCAS interface {
-	AcquireWithExpectedVersion(ctx context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error)
-	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
+	return api.DefaultStoreCapabilities()
 }

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type handoffStore UnitOfWork
@@ -23,40 +23,40 @@ func handoffKey(runID, handoffID string) string { return runID + "|" + handoffID
 
 // HandoffStore
 
-func (s *handoffStore) SaveHandoff(_ context.Context, record model.HandoffRecord) error {
+func (s *handoffStore) SaveHandoff(_ context.Context, record api.HandoffRecord) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.RunID) == "" {
-		return fmt.Errorf("handoff ID and run ID required: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("handoff ID and run ID required: %w", api.ErrInvalidCommand)
 	}
 	key := handoffKey(record.RunID, record.ID)
 	if _, exists := u.staged.Handoffs[key]; exists {
-		return fmt.Errorf("handoff %s already recorded for run %s (append-only store): %w", record.ID, record.RunID, model.ErrInvalidCommand)
+		return fmt.Errorf("handoff %s already recorded for run %s (append-only store): %w", record.ID, record.RunID, api.ErrInvalidCommand)
 	}
 	u.staged.Handoffs[key] = record
 	return nil
 }
 
-func (s *handoffStore) LoadHandoff(_ context.Context, runID, handoffID string) (model.HandoffRecord, error) {
+func (s *handoffStore) LoadHandoff(_ context.Context, runID, handoffID string) (api.HandoffRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.HandoffRecord{}, err
+		return api.HandoffRecord{}, err
 	}
 	record, ok := u.staged.Handoffs[handoffKey(runID, handoffID)]
 	if !ok {
-		return model.HandoffRecord{}, model.ErrNotFound
+		return api.HandoffRecord{}, api.ErrNotFound
 	}
 	return record, nil
 }
 
-func (s *handoffStore) ListHandoffs(_ context.Context, sel model.HandoffSelector) ([]model.HandoffRecord, error) {
+func (s *handoffStore) ListHandoffs(_ context.Context, sel api.HandoffSelector) ([]api.HandoffRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	matches := func(record model.HandoffRecord) bool {
+	matches := func(record api.HandoffRecord) bool {
 		if sel.RunID != "" && record.RunID != sel.RunID {
 			return false
 		}
@@ -71,7 +71,7 @@ func (s *handoffStore) ListHandoffs(_ context.Context, sel model.HandoffSelector
 		}
 		return true
 	}
-	out := make([]model.HandoffRecord, 0)
+	out := make([]api.HandoffRecord, 0)
 	for _, record := range u.staged.Handoffs {
 		if matches(record) {
 			out = append(out, record)
@@ -92,62 +92,62 @@ func (s *handoffStore) ListHandoffs(_ context.Context, sel model.HandoffSelector
 
 // TeamStateStore
 
-func (s *teamStateStore) SaveTeamState(_ context.Context, record model.TeamStateRecord) error {
+func (s *teamStateStore) SaveTeamState(_ context.Context, record api.TeamStateRecord) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(record.RunID) == "" {
-		return fmt.Errorf("team state run ID required: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("team state run ID required: %w", api.ErrInvalidCommand)
 	}
 	u.staged.TeamStates[record.RunID] = record
 	return nil
 }
 
-func (s *teamStateStore) LoadTeamState(_ context.Context, runID string) (model.TeamStateRecord, error) {
+func (s *teamStateStore) LoadTeamState(_ context.Context, runID string) (api.TeamStateRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.TeamStateRecord{}, err
+		return api.TeamStateRecord{}, err
 	}
 	record, ok := u.staged.TeamStates[runID]
 	if !ok {
-		return model.TeamStateRecord{}, model.ErrNotFound
+		return api.TeamStateRecord{}, api.ErrNotFound
 	}
 	return record, nil
 }
 
 // AgentInstanceStore
 
-func (s *agentInstanceStore) SaveAgentInstance(_ context.Context, record model.AgentInstanceRecord) error {
+func (s *agentInstanceStore) SaveAgentInstance(_ context.Context, record api.AgentInstanceRecord) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(record.ID) == "" {
-		return fmt.Errorf("agent instance ID required: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("agent instance ID required: %w", api.ErrInvalidCommand)
 	}
 	u.staged.AgentInstances[record.ID] = record
 	return nil
 }
 
-func (s *agentInstanceStore) LoadAgentInstance(_ context.Context, id string) (model.AgentInstanceRecord, error) {
+func (s *agentInstanceStore) LoadAgentInstance(_ context.Context, id string) (api.AgentInstanceRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.AgentInstanceRecord{}, err
+		return api.AgentInstanceRecord{}, err
 	}
 	record, ok := u.staged.AgentInstances[id]
 	if !ok {
-		return model.AgentInstanceRecord{}, model.ErrNotFound
+		return api.AgentInstanceRecord{}, api.ErrNotFound
 	}
 	return record, nil
 }
 
-func (s *agentInstanceStore) ListAgentInstances(_ context.Context, sel model.AgentInstanceSelector) ([]model.AgentInstanceRecord, error) {
+func (s *agentInstanceStore) ListAgentInstances(_ context.Context, sel api.AgentInstanceSelector) ([]api.AgentInstanceRecord, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	out := make([]model.AgentInstanceRecord, 0)
+	out := make([]api.AgentInstanceRecord, 0)
 	for _, record := range u.staged.AgentInstances {
 		if sel.RunID != "" && record.RunID != sel.RunID {
 			continue

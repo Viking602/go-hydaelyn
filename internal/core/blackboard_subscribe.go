@@ -4,25 +4,22 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-// ErrSubscriptionClosed is returned by a subscription's cancel func if the
-// caller cancels twice.
-var ErrSubscriptionClosed = errors.New("orchestrator: blackboard subscription already closed")
-
-// ErrWaitTimeout is returned by WaitForBlackboard when the timeout elapses
-// before the predicate is satisfied.
-var ErrWaitTimeout = errors.New("orchestrator: blackboard wait timed out")
+var (
+	ErrSubscriptionClosed = api.ErrSubscriptionClosed
+	ErrWaitTimeout        = api.ErrWaitTimeout
+)
 
 // BlackboardFilter is the subset of BlackboardSelector used to match new items
 // for streaming subscribers. RunID is implicit (set when subscribing).
-type BlackboardFilter = model.BlackboardSelector
+type BlackboardFilter = api.BlackboardSelector
 
 // Subscribe streams future blackboard writes for runID that match filter. The
 // caller MUST drain the channel and call cancel() when done; on full buffer
 // (default 32) the runtime drops the oldest match (non-blocking writer).
-func (r *Runtime) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan model.BlackboardItem, func() error, error) {
+func (r *Runtime) Subscribe(ctx context.Context, runID string, filter BlackboardFilter) (<-chan api.BlackboardItem, func() error, error) {
 	if subscriber, ok := r.configuredBlackboardSubscriber(); ok {
 		return subscriber.Subscribe(ctx, runID, filter)
 	}
@@ -37,7 +34,7 @@ func (r *Runtime) configuredBlackboardSubscriber() (BlackboardSubscriber, bool) 
 	return subscriber, ok
 }
 
-func (r *Runtime) subscribeRuntimeHub(ctx context.Context, runID string, filter BlackboardFilter) (<-chan model.BlackboardItem, func() error, error) {
+func (r *Runtime) subscribeRuntimeHub(ctx context.Context, runID string, filter BlackboardFilter) (<-chan api.BlackboardItem, func() error, error) {
 	ch, cancel, err := r.memProvider.Subscribe(ctx, runID, filter)
 	if err != nil {
 		return nil, nil, err

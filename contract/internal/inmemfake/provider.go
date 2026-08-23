@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/internal/core/adapter"
 	internalmem "github.com/Viking602/venat/internal/memory"
 )
 
@@ -49,13 +48,13 @@ func (p *Provider) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	if err != nil {
 		return nil, err
 	}
-	return adapter.UnitOfWorkFromCore(uow), nil
+	return uow, nil
 }
 
 // Subscribe streams blackboard items for the given run. The returned
 // channel closes when the cancel func is called or ctx is cancelled.
 func (p *Provider) Subscribe(ctx context.Context, runID string, filter api.BlackboardSelector) (<-chan api.BlackboardItem, func() error, error) {
-	items, cancel, err := p.inner.Subscribe(ctx, runID, adapter.BlackboardSelectorToModel(filter))
+	items, cancel, err := p.inner.Subscribe(ctx, runID, filter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -63,7 +62,7 @@ func (p *Provider) Subscribe(ctx context.Context, runID string, filter api.Black
 	go func() {
 		defer close(out)
 		for item := range items {
-			out <- adapter.BlackboardItemFromModel(item)
+			out <- item
 		}
 	}()
 	return out, cancel, nil

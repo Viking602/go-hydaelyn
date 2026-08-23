@@ -1,9 +1,5 @@
 package blackboard
 
-import "github.com/Viking602/venat/internal/core/model"
+import "github.com/Viking602/venat/api"
 
-type WriteItemCommand struct {
-	Item model.BlackboardItem
-}
-
-func (WriteItemCommand) CommandName() string { return "blackboard.write_item" }
+type WriteItemCommand = api.WriteBlackboardItemCommand

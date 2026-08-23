@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-type obligationPolicyFunc func(context.Context, model.PolicyRequest) (model.PolicyDecision, error)
+type obligationPolicyFunc func(context.Context, api.PolicyRequest) (api.PolicyDecision, error)
 
-func (f obligationPolicyFunc) Authorize(ctx context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
+func (f obligationPolicyFunc) Authorize(ctx context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
 	return f(ctx, request)
 }
 
@@ -23,34 +23,34 @@ func TestBlackboardReadObligationsFilterAndRedact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	for _, item := range []model.BlackboardItem{
-		{RunID: run.ID, Key: "public", Content: "owner@example.com", Payload: "owner@example.com", Visibility: model.BlackboardVisibilityAgentVisible},
-		{RunID: run.ID, Key: "private", Content: "secret@example.com", Payload: "secret@example.com", Visibility: model.BlackboardVisibilityInternal},
+	for _, item := range []api.BlackboardItem{
+		{RunID: run.ID, Key: "public", Content: "owner@example.com", Payload: "owner@example.com", Visibility: api.BlackboardVisibilityAgentVisible},
+		{RunID: run.ID, Key: "private", Content: "secret@example.com", Payload: "secret@example.com", Visibility: api.BlackboardVisibilityInternal},
 	} {
 		if err := rt.WriteItem(ctx, item); err != nil {
 			t.Fatalf("WriteItem(%q) error = %v", item.Key, err)
 		}
 	}
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationBlackboardRead {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationBlackboardRead {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID: "decision-blackboard-read",
-			Effect:     model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{
+			Effect:     api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{
 				{
-					Kind:     model.ObligationSelectorOnly,
-					Target:   model.PolicyTargetBlackboardRead,
-					Selector: &model.BlackboardSelector{Keys: []string{"public"}},
+					Kind:     api.ObligationSelectorOnly,
+					Target:   api.PolicyTargetBlackboardRead,
+					Selector: &api.BlackboardSelector{Keys: []string{"public"}},
 				},
-				{Kind: model.ObligationRedactFields, Target: model.PolicyTargetBlackboardRead},
+				{Kind: api.ObligationRedactFields, Target: api.PolicyTargetBlackboardRead},
 			},
 			Redactions: []string{"email"},
 		}, nil
 	}))
 
-	items, err := rt.SelectItems(ctx, run.ID, model.BlackboardSelector{})
+	items, err := rt.SelectItems(ctx, run.ID, api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("SelectItems() error = %v", err)
 	}
@@ -60,9 +60,9 @@ func TestBlackboardReadObligationsFilterAndRedact(t *testing.T) {
 	if strings.Contains(items[0].Content, "owner@example.com") || strings.Contains(items[0].Payload, "owner@example.com") {
 		t.Fatalf("SelectItems() leaked unredacted item: %#v", items[0])
 	}
-	var audited model.Event
+	var audited api.Event
 	for _, event := range rt.Events(ctx, run.ID) {
-		if event.Type == model.EventPolicyDecisionRecorded &&
+		if event.Type == api.EventPolicyDecisionRecorded &&
 			stringFromPayload(event.Payload["decisionId"]) == "decision-blackboard-read" {
 			audited = event
 			break
@@ -75,7 +75,7 @@ func TestBlackboardReadObligationsFilterAndRedact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var auditedObligations []model.PolicyObligation
+	var auditedObligations []api.PolicyObligation
 	if err := json.Unmarshal(rawObligations, &auditedObligations); err != nil {
 		t.Fatal(err)
 	}
@@ -93,50 +93,50 @@ func TestBlackboardWriteObligationsTransformOrFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationBlackboardWrite {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationBlackboardWrite {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID:  "decision-blackboard-write",
-			Effect:      model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{{Kind: model.ObligationRedactFields, Target: model.PolicyTargetBlackboardWrite}},
+			Effect:      api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{Kind: api.ObligationRedactFields, Target: api.PolicyTargetBlackboardWrite}},
 			Redactions:  []string{"email"},
 		}, nil
 	}))
-	if err := rt.WriteItem(ctx, model.BlackboardItem{
+	if err := rt.WriteItem(ctx, api.BlackboardItem{
 		RunID: run.ID, Key: "redacted", Content: "owner@example.com", Payload: "owner@example.com",
 	}); err != nil {
 		t.Fatalf("WriteItem(redacted) error = %v", err)
 	}
 
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationBlackboardWrite {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationBlackboardWrite {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID: "decision-blackboard-deny",
-			Effect:     model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{{
-				Kind:     model.ObligationSelectorOnly,
-				Target:   model.PolicyTargetBlackboardWrite,
-				Selector: &model.BlackboardSelector{Keys: []string{"allowed"}},
+			Effect:     api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{
+				Kind:     api.ObligationSelectorOnly,
+				Target:   api.PolicyTargetBlackboardWrite,
+				Selector: &api.BlackboardSelector{Keys: []string{"allowed"}},
 			}},
 		}, nil
 	}))
-	if err := rt.WriteItem(ctx, model.BlackboardItem{RunID: run.ID, Key: "blocked"}); !errors.Is(err, model.ErrPolicyObligationFailed) {
+	if err := rt.WriteItem(ctx, api.BlackboardItem{RunID: run.ID, Key: "blocked"}); !errors.Is(err, api.ErrPolicyObligationFailed) {
 		t.Fatalf("WriteItem(blocked) error = %v, want ErrPolicyObligationFailed", err)
 	}
 
 	rt.SetPolicyEngine(nil)
-	items, err := rt.SelectItems(ctx, run.ID, model.BlackboardSelector{Keys: []string{"redacted", "blocked"}})
+	items, err := rt.SelectItems(ctx, run.ID, api.BlackboardSelector{Keys: []string{"redacted", "blocked"}})
 	if err != nil {
 		t.Fatalf("SelectItems() error = %v", err)
 	}
 	if len(items) != 1 || items[0].Key != "redacted" || strings.Contains(items[0].Payload, "owner@example.com") {
 		t.Fatalf("stored blackboard items = %#v", items)
 	}
-	if !collectEventTypes(rt.Events(ctx, run.ID)).Contains(model.EventPolicyObligationFailed) {
+	if !collectEventTypes(rt.Events(ctx, run.ID)).Contains(api.EventPolicyObligationFailed) {
 		t.Fatalf("missing PolicyObligationFailed event: %#v", rt.Events(ctx, run.ID))
 	}
 }
@@ -154,16 +154,16 @@ func TestHandoffObligationRemovesContextBeforePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationHandoff {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationHandoff {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID: "decision-restrict-handoff",
-			Effect:     model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{{
-				Kind:   model.ObligationRestrictHandoffContext,
-				Target: model.PolicyTargetHandoff,
+			Effect:     api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{
+				Kind:   api.ObligationRestrictHandoffContext,
+				Target: api.PolicyTargetHandoff,
 			}},
 		}, nil
 	}))
@@ -184,12 +184,12 @@ func TestHandoffObligationRemovesContextBeforePersistence(t *testing.T) {
 	if updated.OwnerAgentID != "agent-b" {
 		t.Fatalf("handoff owner = %q, want agent-b", updated.OwnerAgentID)
 	}
-	items, err := rt.SelectItems(ctx, run.ID, model.BlackboardSelector{})
+	items, err := rt.SelectItems(ctx, run.ID, api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("SelectItems() error = %v", err)
 	}
 	for _, item := range items {
-		if item.Type == model.BlackboardItemHandoffContext || strings.Contains(item.Content, "private-token") || strings.Contains(item.Payload, "private-token") {
+		if item.Type == api.BlackboardItemHandoffContext || strings.Contains(item.Content, "private-token") || strings.Contains(item.Payload, "private-token") {
 			t.Fatalf("handoff context leaked to blackboard: %#v", item)
 		}
 	}
@@ -202,21 +202,21 @@ func TestTraceReadObligationsHideOrRedactSpans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
-	if err := rt.SaveTraceSpan(ctx, model.TraceSpan{
+	if err := rt.SaveTraceSpan(ctx, api.TraceSpan{
 		ID: "span-sensitive", RunID: run.ID, Name: "sensitive", Error: "owner@example.com",
 		Metadata: map[string]string{"secret": "token", "contact": "owner@example.com"},
 	}); err != nil {
 		t.Fatalf("SaveTraceSpan() error = %v", err)
 	}
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationTraceRead {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationTraceRead {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID: "decision-hide-trace",
-			Effect:     model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{{
-				Kind: model.ObligationHideInternalTrace, Target: model.PolicyTargetTrace,
+			Effect:     api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{
+				Kind: api.ObligationHideInternalTrace, Target: api.PolicyTargetTrace,
 			}},
 		}, nil
 	}))
@@ -228,14 +228,14 @@ func TestTraceReadObligationsHideOrRedactSpans(t *testing.T) {
 		t.Fatalf("ListTraceSpans(hide) = %#v, want no visible spans", spans)
 	}
 
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationTraceRead {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationTraceRead {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
+		return api.PolicyDecision{
 			DecisionID:  "decision-redact-trace",
-			Effect:      model.PolicyEffectAllow,
-			Obligations: []model.PolicyObligation{{Kind: model.ObligationRedactFields, Target: model.PolicyTargetTrace}},
+			Effect:      api.PolicyEffectAllow,
+			Obligations: []api.PolicyObligation{{Kind: api.ObligationRedactFields, Target: api.PolicyTargetTrace}},
 			Redactions:  []string{"email", "metadata.secret"},
 		}, nil
 	}))
@@ -271,29 +271,29 @@ func TestPolicyDecisionAuditAndApprovalObligation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
-	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
-		if request.Operation != model.PolicyOperationDispatch {
-			return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+	rt.SetPolicyEngine(obligationPolicyFunc(func(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
+		if request.Operation != api.PolicyOperationDispatch {
+			return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 		}
-		return model.PolicyDecision{
-			Effect: model.PolicyEffectAllow,
+		return api.PolicyDecision{
+			Effect: api.PolicyEffectAllow,
 			Reason: "human review required",
-			Obligations: []model.PolicyObligation{{
-				Kind: model.ObligationRequireHumanApproval,
+			Obligations: []api.PolicyObligation{{
+				Kind: api.ObligationRequireHumanApproval,
 			}},
 			Metadata: map[string]string{"rule": "review"},
 		}, nil
 	}))
 	if _, err := rt.DispatchTask(ctx, DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "agent-a",
-	}); !errors.Is(err, model.ErrPolicyDenied) {
+	}); !errors.Is(err, api.ErrPolicyDenied) {
 		t.Fatalf("DispatchTask() error = %v, want ErrPolicyDenied", err)
 	}
 
-	var audited model.Event
+	var audited api.Event
 	for _, event := range rt.Events(ctx, run.ID) {
-		if event.Type == model.EventPolicyDecisionRecorded &&
-			stringFromPayload(event.Payload["operation"]) == string(model.PolicyOperationDispatch) {
+		if event.Type == api.EventPolicyDecisionRecorded &&
+			stringFromPayload(event.Payload["operation"]) == string(api.PolicyOperationDispatch) {
 			audited = event
 			break
 		}
@@ -302,10 +302,10 @@ func TestPolicyDecisionAuditAndApprovalObligation(t *testing.T) {
 		t.Fatalf("missing PolicyDecisionRecorded event: %#v", rt.Events(ctx, run.ID))
 	}
 	if stringFromPayload(audited.Payload["decisionId"]) == "" ||
-		stringFromPayload(audited.Payload["effect"]) != string(model.PolicyEffectRequireApproval) {
+		stringFromPayload(audited.Payload["effect"]) != string(api.PolicyEffectRequireApproval) {
 		t.Fatalf("policy audit payload = %#v", audited.Payload)
 	}
-	if !collectEventTypes(rt.Events(ctx, run.ID)).Contains(model.EventApprovalRequested) {
+	if !collectEventTypes(rt.Events(ctx, run.ID)).Contains(api.EventApprovalRequested) {
 		t.Fatalf("missing ApprovalRequested event: %#v", rt.Events(ctx, run.ID))
 	}
 }
@@ -318,18 +318,18 @@ func TestPolicyEngineErrorFailsClosedAndPersistsAudit(t *testing.T) {
 		t.Fatalf("StartRun() error = %v", err)
 	}
 	engineErr := errors.New("policy backend unavailable")
-	rt.SetPolicyEngine(obligationPolicyFunc(func(context.Context, model.PolicyRequest) (model.PolicyDecision, error) {
-		return model.PolicyDecision{}, engineErr
+	rt.SetPolicyEngine(obligationPolicyFunc(func(context.Context, api.PolicyRequest) (api.PolicyDecision, error) {
+		return api.PolicyDecision{}, engineErr
 	}))
-	err = rt.WriteItem(ctx, model.BlackboardItem{RunID: run.ID, Key: "blocked"})
-	if !errors.Is(err, model.ErrPolicyDenied) || !strings.Contains(err.Error(), engineErr.Error()) {
+	err = rt.WriteItem(ctx, api.BlackboardItem{RunID: run.ID, Key: "blocked"})
+	if !errors.Is(err, api.ErrPolicyDenied) || !strings.Contains(err.Error(), engineErr.Error()) {
 		t.Fatalf("WriteItem() error = %v, want fail-closed policy error", err)
 	}
 	for _, event := range rt.Events(ctx, run.ID) {
-		if event.Type != model.EventPolicyDecisionRecorded {
+		if event.Type != api.EventPolicyDecisionRecorded {
 			continue
 		}
-		if stringFromPayload(event.Payload["effect"]) != string(model.PolicyEffectDeny) ||
+		if stringFromPayload(event.Payload["effect"]) != string(api.PolicyEffectDeny) ||
 			stringFromPayload(event.Payload["decisionId"]) == "" {
 			t.Fatalf("policy error audit payload = %#v", event.Payload)
 		}
@@ -339,10 +339,10 @@ func TestPolicyEngineErrorFailsClosedAndPersistsAudit(t *testing.T) {
 }
 
 func TestToolResultEmailRedactionTraversesStructuredJSON(t *testing.T) {
-	decision := model.PolicyDecision{
-		Effect:      model.PolicyEffectAllow,
+	decision := api.PolicyDecision{
+		Effect:      api.PolicyEffectAllow,
 		Redactions:  []string{"email"},
-		Obligations: []model.PolicyObligation{{Kind: model.ObligationRedactFields, Target: model.PolicyTargetToolResult}},
+		Obligations: []api.PolicyObligation{{Kind: api.ObligationRedactFields, Target: api.PolicyTargetToolResult}},
 	}
 	result := json.RawMessage(`{
 		"toolCallId":"call-1",
@@ -417,17 +417,17 @@ func TestToolResultEmailRedactionTraversesStructuredJSON(t *testing.T) {
 }
 
 func TestToolResultEmailRedactionFailsClosedOnMalformedStructuredJSON(t *testing.T) {
-	decision := model.PolicyDecision{
-		Effect:      model.PolicyEffectAllow,
+	decision := api.PolicyDecision{
+		Effect:      api.PolicyEffectAllow,
 		Redactions:  []string{"email"},
-		Obligations: []model.PolicyObligation{{Kind: model.ObligationRedactFields, Target: model.PolicyTargetToolResult}},
+		Obligations: []api.PolicyObligation{{Kind: api.ObligationRedactFields, Target: api.PolicyTargetToolResult}},
 	}
 	_, err := (defaultPolicyObligationEnforcer{}).EnforceToolResult(
 		context.Background(),
 		decision,
 		json.RawMessage(`{"content":"owner@example.com","structured":{"nested":[}`),
 	)
-	if !errors.Is(err, model.ErrPolicyObligationFailed) {
+	if !errors.Is(err, api.ErrPolicyObligationFailed) {
 		t.Fatalf("EnforceToolResult() error = %v, want ErrPolicyObligationFailed", err)
 	}
 }

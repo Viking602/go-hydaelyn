@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 func TestRecoverRequeuesExpiredExecutionOnce(t *testing.T) {
@@ -146,7 +146,7 @@ func TestRecoverQuarantinesUnresolvedActionAttempt(t *testing.T) {
 	if got := mustLoadEnvelope(ctx, t, rt, envelope.ID); got.Status == "pending" {
 		t.Fatalf("recovery redispatched unresolved action envelope: %#v", got)
 	}
-	attempts, err := rt.ListActionAttempts(ctx, model.ActionAttemptSelector{RunID: run.ID, TaskID: task.ID})
+	attempts, err := rt.ListActionAttempts(ctx, api.ActionAttemptSelector{RunID: run.ID, TaskID: task.ID})
 	if err != nil || len(attempts) != 2 {
 		t.Fatalf("ListActionAttempts() attempts=%#v error=%v", attempts, err)
 	}

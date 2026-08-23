@@ -4,37 +4,35 @@ import (
 	"context"
 
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/internal/core/adapter"
-	"github.com/Viking602/venat/internal/core/model"
 )
 
 func (r *Runner) RegisterAgent(profile api.AgentProfile) {
-	_ = r.rt.RegisterAgent(adapter.AgentProfileToModel(profile))
+	_ = r.rt.RegisterAgent(profile)
 }
 
 func (r *Runner) Agents() []api.AgentProfile {
-	return adapter.AgentProfilesFromModel(r.rt.Agents())
+	return r.rt.Agents()
 }
 
 func (r *Runner) RegisterTool(tool api.Tool) {
-	_ = r.rt.RegisterTool(adapter.ToolToModel(tool))
+	_ = r.rt.RegisterTool(tool)
 }
 
 // RegisterToolForInvocation scopes governed tool metadata to one run, task,
 // holder, and tool name. RegisterTool remains the legacy global registration
 // API for direct non-agent callers.
 func (r *Runner) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) {
-	_ = r.rt.RegisterToolForInvocation(runID, taskID, model.HolderType(holderType), holderID, adapter.ToolToModel(tool))
+	_ = r.rt.RegisterToolForInvocation(runID, taskID, api.HolderType(holderType), holderID, tool)
 }
 
 // RemoveToolsForInvocation releases all scoped tool metadata for one exact
 // invocation identity.
 func (r *Runner) RemoveToolsForInvocation(runID, taskID string, holderType api.HolderType, holderID string) {
-	r.rt.RemoveToolsForInvocation(runID, taskID, model.HolderType(holderType), holderID)
+	r.rt.RemoveToolsForInvocation(runID, taskID, api.HolderType(holderType), holderID)
 }
 
 func (r *Runner) RegisterFlow(flow api.Flow) error {
-	return adapter.ErrorToAPI(r.rt.RegisterFlow(adapter.FlowToModel(flow)))
+	return r.rt.RegisterFlow(flow)
 }
 
 func (r *Runner) SetMessagePolicy(policy api.MessagePolicyChecker) {
@@ -42,33 +40,33 @@ func (r *Runner) SetMessagePolicy(policy api.MessagePolicyChecker) {
 		r.rt.SetMessagePolicy(nil)
 		return
 	}
-	r.rt.SetMessagePolicy(func(message model.UserMessage) model.PolicyDecision {
-		return adapter.PolicyDecisionToModel(policy(adapter.UserMessageFromModel(message)))
+	r.rt.SetMessagePolicy(func(message api.UserMessage) api.PolicyDecision {
+		return policy(message)
 	})
 }
 
 func (r *Runner) SetPolicyEngine(policy api.PolicyEngine) {
-	r.rt.SetPolicyEngine(adapter.PolicyEngineToCore(policy))
+	r.rt.SetPolicyEngine(policy)
 }
 
 func (r *Runner) SetOutputGateway(gateway api.OutputGateway) {
-	r.rt.SetOutputGateway(adapter.OutputGatewayToCore(gateway))
+	r.rt.SetOutputGateway(gateway)
 }
 
 func (r *Runner) SetPipeline(components api.PipelineComponents) {
-	r.rt.SetPipeline(adapter.PipelineToCore(components))
+	r.rt.SetPipeline(components)
 }
 
 // StoreProvider returns the configured provider. Prefer Admin() when
 // passing the raw store into host helpers (ADR-025).
 func (r *Runner) StoreProvider() api.StoreProvider {
-	return adapter.StoreProviderFromCore(r.rt.StoreProvider())
+	return r.rt.StoreProvider()
 }
 
 func (r *Runner) StoreCapabilities(ctx context.Context) (api.StoreCapabilities, error) {
 	capabilities, err := r.rt.StoreCapabilities(ctx)
 	if err != nil {
-		return api.StoreCapabilities{}, adapter.ErrorToAPI(err)
+		return api.StoreCapabilities{}, err
 	}
 	return api.StoreCapabilities{
 		SupportsTransactions:          capabilities.SupportsTransactions,
@@ -83,7 +81,7 @@ func (r *Runner) StoreCapabilities(ctx context.Context) (api.StoreCapabilities, 
 }
 
 func (r *Runner) Close(ctx context.Context) error {
-	return adapter.ErrorToAPI(r.rt.Close(ctx))
+	return r.rt.Close(ctx)
 }
 
 // Begin opens a host-owned UnitOfWork. Prefer Admin() for raw store
@@ -91,33 +89,33 @@ func (r *Runner) Close(ctx context.Context) error {
 func (r *Runner) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	uow, err := r.rt.Begin(ctx)
 	if err != nil {
-		return nil, adapter.ErrorToAPI(err)
+		return nil, err
 	}
-	return adapter.UnitOfWorkFromCore(uow), nil
+	return uow, nil
 }
 
 // SaveRun writes a run row through the configured provider. Prefer
 // QueueRun / StartRun for application lifecycle (ADR-025).
 func (r *Runner) SaveRun(ctx context.Context, run api.Run) error {
-	return adapter.ErrorToAPI(r.rt.SaveRun(ctx, adapter.RunToModel(run)))
+	return r.rt.SaveRun(ctx, run)
 }
 
 func (r *Runner) LoadRun(ctx context.Context, runID string) (api.Run, error) {
 	run, err := r.rt.LoadRun(ctx, runID)
 	if err != nil {
-		return api.Run{}, adapter.ErrorToAPI(err)
+		return api.Run{}, err
 	}
-	return adapter.RunFromModel(run), nil
+	return run, nil
 }
 
 func (r *Runner) AppendEvent(ctx context.Context, event api.Event) error {
-	return adapter.ErrorToAPI(r.rt.AppendEvent(ctx, adapter.EventToModel(event)))
+	return r.rt.AppendEvent(ctx, event)
 }
 
 func (r *Runner) ListEvents(ctx context.Context, runID string) ([]api.Event, error) {
 	events, err := r.rt.ListEvents(ctx, runID)
 	if err != nil {
-		return nil, adapter.ErrorToAPI(err)
+		return nil, err
 	}
-	return adapter.EventsFromModel(events), nil
+	return events, nil
 }

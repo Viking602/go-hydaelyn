@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -41,7 +41,7 @@ func TestBusRejectsWrongCommandTypeWithoutPanic(t *testing.T) {
 	bus := NewBus()
 	Register[testCommand](bus, testHandler{})
 	_, err := bus.Execute(context.Background(), nil, otherCommand{})
-	if !errors.Is(err, model.ErrInvalidCommand) {
+	if !errors.Is(err, api.ErrInvalidCommand) {
 		t.Fatalf("Execute() error = %v, want ErrInvalidCommand", err)
 	}
 }

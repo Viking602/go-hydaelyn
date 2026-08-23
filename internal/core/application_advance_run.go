@@ -3,18 +3,18 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	runsvc "github.com/Viking602/venat/internal/run"
 )
 
-func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (model.Run, error) {
+func (r *Runtime) AdvanceRun(ctx context.Context, cmd AdvanceRunCommand) (api.Run, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
-	run, ok := result.(model.Run)
+	run, ok := result.(api.Run)
 	if !ok {
-		return model.Run{}, ErrInvalidCommand
+		return api.Run{}, ErrInvalidCommand
 	}
 	return run, nil
 }

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/memory"
 	"github.com/Viking602/venat/internal/userinput"
 )
@@ -28,8 +28,8 @@ func TestSubmitUserInputWritesBlackboardAndRedispatchesWaitingTask(t *testing.T)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	run := model.Run{ID: "run-1", RootTaskID: "task-1", Status: model.RunStatusWaitingUserInput}
-	task := model.Task{ID: "task-1", RunID: run.ID, Status: model.TaskStatusWaitingUserInput, Version: 2, OwnerAgentID: "agent-1", Error: "need input", WriteTargets: []string{"answer"}}
+	run := api.Run{ID: "run-1", RootTaskID: "task-1", Status: api.RunStatusWaitingUserInput}
+	task := api.Task{ID: "task-1", RunID: run.ID, Status: api.TaskStatusWaitingUserInput, Version: 2, OwnerAgentID: "agent-1", Error: "need input", WriteTargets: []string{"answer"}}
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestSubmitUserInputWritesBlackboardAndRedispatchesWaitingTask(t *testing.T)
 	if !submitted.RunTransition || !submitted.Redispatched || !submitted.TaskTransition {
 		t.Fatalf("submit result = %#v", submitted)
 	}
-	if submitted.Task.Status != model.TaskStatusDispatched || submitted.Task.Version != 3 || submitted.Task.Error != "" {
+	if submitted.Task.Status != api.TaskStatusDispatched || submitted.Task.Version != 3 || submitted.Task.Error != "" {
 		t.Fatalf("redispatched task = %#v", submitted.Task)
 	}
 	if submitted.Item.Key != "user_input" || submitted.Item.Payload != "use option b" {

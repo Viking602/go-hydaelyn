@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	runsvc "github.com/Viking602/venat/internal/run"
 )
 
@@ -27,39 +27,39 @@ func (r *Runtime) StartRunWithResult(ctx context.Context, cmd StartRunCommand) (
 	return started, nil
 }
 
-func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (model.Run, model.Task, error) {
+func (r *Runtime) StartRun(ctx context.Context, cmd StartRunCommand) (api.Run, api.Task, error) {
 	started, err := r.StartRunWithResult(ctx, cmd)
 	if err != nil {
-		return model.Run{}, model.Task{}, err
+		return api.Run{}, api.Task{}, err
 	}
 	return started.Run, started.Root, nil
 }
 
-func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (model.Task, error) {
+func (r *Runtime) CreateTask(ctx context.Context, cmd CreateTaskCommand) (api.Task, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
-	task, ok := result.(model.Task)
+	task, ok := result.(api.Task)
 	if !ok {
-		return model.Task{}, ErrInvalidCommand
+		return api.Task{}, ErrInvalidCommand
 	}
 	return task, nil
 }
 
-func (r *Runtime) Run(ctx context.Context, runID string) (model.Run, error) {
+func (r *Runtime) Run(ctx context.Context, runID string) (api.Run, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.Runs().LoadRun(ctx, runID)
 }
 
-func (r *Runtime) Task(ctx context.Context, runID, taskID string) (model.Task, error) {
+func (r *Runtime) Task(ctx context.Context, runID, taskID string) (api.Task, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
 	defer func() { _ = done() }()
 	return uow.Tasks().LoadTask(ctx, runID, taskID)
@@ -67,7 +67,7 @@ func (r *Runtime) Task(ctx context.Context, runID, taskID string) (model.Task, e
 
 // ReadyTasks returns tasks that can become ready. Store errors are returned;
 // an empty slice means the store confirmed there are no ready tasks.
-func (r *Runtime) ReadyTasks(ctx context.Context, runID string) (out []model.Task, err error) {
+func (r *Runtime) ReadyTasks(ctx context.Context, runID string) (out []api.Task, err error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -77,11 +77,11 @@ func (r *Runtime) ReadyTasks(ctx context.Context, runID string) (out []model.Tas
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]model.Task, len(tasks))
+	byID := make(map[string]api.Task, len(tasks))
 	for _, task := range tasks {
 		byID[task.ID] = task
 	}
-	out = make([]model.Task, 0, len(tasks))
+	out = make([]api.Task, 0, len(tasks))
 	for _, task := range tasks {
 		ready, _ := dependencyGate(task, byID)
 		if !taskCanBecomeReady(task.Status) || !ready {
@@ -89,18 +89,18 @@ func (r *Runtime) ReadyTasks(ctx context.Context, runID string) (out []model.Tas
 		}
 		out = append(out, task)
 	}
-	slices.SortFunc(out, func(a, b model.Task) int {
+	slices.SortFunc(out, func(a, b api.Task) int {
 		return stringsCompare(a.ID, b.ID)
 	})
 	return out, nil
 }
 
-func (r *Runtime) Events(ctx context.Context, runID string) []model.Event {
+func (r *Runtime) Events(ctx context.Context, runID string) []api.Event {
 	events, _ := r.RunEvents(ctx, runID)
 	return events
 }
 
-func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]model.Event, error) {
+func (r *Runtime) RunEvents(ctx context.Context, runID string) ([]api.Event, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (r *Runtime) ActiveLeaseCount(ctx context.Context, runID, taskID string) (n
 	if err != nil {
 		return 0, err
 	}
-	if !ok || lease.Status != model.LeaseStatusActive || !model.LeaseExpiry(lease).After(time.Now().UTC()) {
+	if !ok || lease.Status != api.LeaseStatusActive || !api.LeaseExpiry(lease).After(time.Now().UTC()) {
 		return 0, nil
 	}
 	return 1, nil

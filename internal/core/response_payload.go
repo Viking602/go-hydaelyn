@@ -1,8 +1,8 @@
 package core
 
-import "github.com/Viking602/venat/internal/core/model"
+import "github.com/Viking602/venat/api"
 
-func userMessagePayload(message model.UserMessage) map[string]any {
+func userMessagePayload(message api.UserMessage) map[string]any {
 	return map[string]any{
 		"messageId":      message.ID,
 		"runId":          message.RunID,

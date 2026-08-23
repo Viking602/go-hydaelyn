@@ -3,30 +3,30 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-func (r *Runtime) Replay(ctx context.Context, runID string, mode model.ReplayMode) (model.Projection, error) {
+func (r *Runtime) Replay(ctx context.Context, runID string, mode api.ReplayMode) (api.Projection, error) {
 	switch mode {
-	case model.ReplayModeAudit:
-	case model.ReplayModeRecovery:
+	case api.ReplayModeAudit:
+	case api.ReplayModeRecovery:
 		if err := r.recoverExpiredTaskExecutions(ctx, runID); err != nil {
-			return model.Projection{}, err
+			return api.Projection{}, err
 		}
 	default:
-		return model.Projection{}, model.ErrInvalidCommand
+		return api.Projection{}, api.ErrInvalidCommand
 	}
 	events, err := r.RunEvents(ctx, runID)
 	if err != nil {
-		return model.Projection{}, err
+		return api.Projection{}, err
 	}
 	return replayProjection(events)
 }
 
-func (r *Runtime) ReplayRunState(ctx context.Context, runID string) (model.Projection, error) {
-	return r.Replay(ctx, runID, model.ReplayModeAudit)
+func (r *Runtime) ReplayRunState(ctx context.Context, runID string) (api.Projection, error) {
+	return r.Replay(ctx, runID, api.ReplayModeAudit)
 }
 
-func (r *Runtime) Recover(ctx context.Context, runID string) (model.Projection, error) {
-	return r.Replay(ctx, runID, model.ReplayModeRecovery)
+func (r *Runtime) Recover(ctx context.Context, runID string) (api.Projection, error) {
+	return r.Replay(ctx, runID, api.ReplayModeRecovery)
 }

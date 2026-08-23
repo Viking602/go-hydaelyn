@@ -1,23 +1,23 @@
 package core
 
 import (
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	corestate "github.com/Viking602/venat/internal/core/state"
 )
 
-func dependencyGate(task model.Task, tasks map[string]model.Task) (ready bool, fatal bool) {
+func dependencyGate(task api.Task, tasks map[string]api.Task) (ready bool, fatal bool) {
 	return corestate.DependencyGate(task, tasks)
 }
 
-func taskCanBecomeReady(status model.TaskStatus) bool {
+func taskCanBecomeReady(status api.TaskStatus) bool {
 	return corestate.TaskCanBecomeReady(status)
 }
 
-func isTerminalTask(status model.TaskStatus) bool {
+func isTerminalTask(status api.TaskStatus) bool {
 	return corestate.IsTerminalTask(status)
 }
 
-func isTerminalRun(status model.RunStatus) bool {
+func isTerminalRun(status api.RunStatus) bool {
 	return corestate.IsTerminalRun(status)
 }
 

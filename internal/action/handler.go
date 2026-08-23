@@ -9,8 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
@@ -22,7 +22,7 @@ const maxActionAttemptResultBytes = 8 << 20
 
 type IDGenerator func(string) string
 
-type Authorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
+type Authorizer func(context.Context, ports.UnitOfWork, api.PolicyRequest) (api.PolicyDecision, error)
 
 type HandlerOptions struct {
 	NewID     IDGenerator
@@ -36,19 +36,19 @@ func RegisterHandlers(bus *commandbus.Bus, options HandlerOptions) {
 }
 
 type CompleteAttemptResult struct {
-	Attempt       model.ActionAttempt
-	Task          model.Task
-	Run           model.Run
-	Lease         model.TaskExecutionLease
+	Attempt       api.ActionAttempt
+	Task          api.Task
+	Run           api.Run
+	Lease         api.TaskExecutionLease
 	Reconcile     bool
 	RunTransition bool
 }
 
 type ResolveAttemptResult struct {
-	Attempt        model.ActionAttempt
-	Task           model.Task
-	Run            model.Run
-	Envelope       model.TaskEnvelope
+	Attempt        api.ActionAttempt
+	Task           api.Task
+	Run            api.Run
+	Envelope       api.TaskEnvelope
 	TaskTransition bool
 	RunTransition  bool
 }
@@ -63,25 +63,25 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 		return nil, err
 	}
 	if !task.AllowsAction {
-		return nil, model.ErrActionTaskRequired
+		return nil, api.ErrActionTaskRequired
 	}
 	if cmd.IdempotencyKey != "" {
 		existing, err := uow.ActionAttempts().LoadActionAttemptByIdempotencyKey(ctx, cmd.RunID, cmd.TaskID, cmd.ToolName, cmd.IdempotencyKey)
 		if err == nil {
 			if existing.InputHash != cmd.InputHash {
-				return nil, model.ErrIdempotencyConflict
+				return nil, api.ErrIdempotencyConflict
 			}
 			if err := h.authorize(ctx, uow, cmd, existing); err != nil {
 				return nil, err
 			}
-			if existing.Status == model.ActionAttemptRunning && existing.LeaseID != cmd.LeaseID {
-				existing.Status = model.ActionAttemptUnknown
+			if existing.Status == api.ActionAttemptRunning && existing.LeaseID != cmd.LeaseID {
+				existing.Status = api.ActionAttemptUnknown
 				existing.RequiresReconcile = true
 				if err := uow.ActionAttempts().SaveActionAttempt(ctx, existing); err != nil {
 					return nil, err
 				}
-				if err := uow.Events().AppendEvent(ctx, model.Event{
-					RunID: cmd.RunID, TaskID: cmd.TaskID, Type: model.EventActionAttemptUpdated,
+				if err := uow.Events().AppendEvent(ctx, api.Event{
+					RunID: cmd.RunID, TaskID: cmd.TaskID, Type: api.EventActionAttemptUpdated,
 					Payload: map[string]any{
 						"attemptId": existing.AttemptID, "status": string(existing.Status),
 						"requiresReconcile": true, "replayedUnderLeaseId": cmd.LeaseID,
@@ -98,7 +98,7 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 			}
 			return existing, nil
 		}
-		if !errors.Is(err, model.ErrNotFound) {
+		if !errors.Is(err, api.ErrNotFound) {
 			return nil, err
 		}
 	}
@@ -106,14 +106,14 @@ func (h startActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfW
 	if attemptID == "" {
 		attemptID = h.options.NewID("attempt")
 	}
-	attempt := model.ActionAttempt{AttemptID: attemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, ToolName: cmd.ToolName, Status: model.ActionAttemptRunning, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}
+	attempt := api.ActionAttempt{AttemptID: attemptID, ActionID: cmd.ActionID, RunID: cmd.RunID, TaskID: cmd.TaskID, LeaseID: cmd.LeaseID, ToolName: cmd.ToolName, Status: api.ActionAttemptRunning, IdempotencyKey: cmd.IdempotencyKey, InputHash: cmd.InputHash}
 	if err := h.authorize(ctx, uow, cmd, attempt); err != nil {
 		return nil, err
 	}
 	if err := uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
 		return nil, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: model.EventActionAttemptStarted, Payload: map[string]any{"attemptId": attempt.AttemptID, "actionId": attempt.ActionID, "leaseId": attempt.LeaseID, "toolName": attempt.ToolName, "idempotencyKey": attempt.IdempotencyKey}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: api.EventActionAttemptStarted, Payload: map[string]any{"attemptId": attempt.AttemptID, "actionId": attempt.ActionID, "leaseId": attempt.LeaseID, "toolName": attempt.ToolName, "idempotencyKey": attempt.IdempotencyKey}, RecordedAt: time.Now().UTC()}); err != nil {
 		return nil, err
 	}
 	return attempt, nil
@@ -123,13 +123,13 @@ func (h startActionAttemptHandler) authorize(
 	ctx context.Context,
 	uow ports.UnitOfWork,
 	cmd StartActionAttemptCommand,
-	attempt model.ActionAttempt,
+	attempt api.ActionAttempt,
 ) error {
 	if h.options.Authorize == nil {
 		return nil
 	}
-	_, err := h.options.Authorize(ctx, uow, model.PolicyRequest{
-		Operation: model.PolicyOperationAction,
+	_, err := h.options.Authorize(ctx, uow, api.PolicyRequest{
+		Operation: api.PolicyOperationAction,
 		RunID:     cmd.RunID,
 		TaskID:    cmd.TaskID,
 		Actor:     actorFromHolder(cmd.HolderType, cmd.HolderID),
@@ -146,27 +146,27 @@ func (completeActionAttemptHandler) Name() string {
 
 func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd CompleteActionAttemptCommand) (any, error) {
 	if cmd.LeaseID == "" {
-		return nil, model.ErrLeaseNotActive
+		return nil, api.ErrLeaseNotActive
 	}
 	run, task, lease, err := execution.ValidateSubmission(ctx, uow, cmd.RunID, cmd.TaskID, cmd.LeaseID, cmd.HolderType, cmd.HolderID, cmd.TaskVersion)
 	if err != nil {
 		return nil, err
 	}
 	if !task.AllowsAction {
-		return nil, model.ErrActionTaskRequired
+		return nil, api.ErrActionTaskRequired
 	}
 	attempt, err := uow.ActionAttempts().LoadActionAttempt(ctx, cmd.AttemptID)
 	if err != nil {
 		return nil, err
 	}
 	if attempt.RunID != cmd.RunID || attempt.TaskID != cmd.TaskID {
-		return nil, model.ErrNotFound
+		return nil, api.ErrNotFound
 	}
 	if attempt.LeaseID != cmd.LeaseID {
-		return nil, model.ErrLeaseNotActive
+		return nil, api.ErrLeaseNotActive
 	}
 	if !isTerminalAttemptStatus(cmd.Status) {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	if err := validateActionAttemptResult(cmd.ExternalResultRef, cmd.ToolResult); err != nil {
 		return nil, err
@@ -175,16 +175,16 @@ func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOf
 		if sameTerminalAttempt(attempt, cmd) {
 			return CompleteAttemptResult{Attempt: attempt}, nil
 		}
-		return nil, model.ErrIdempotencyConflict
+		return nil, api.ErrIdempotencyConflict
 	}
 	attempt.Status = cmd.Status
 	attempt.ExternalRequestID = cmd.ExternalRequestID
 	attempt.ExternalResultRef = cmd.ExternalResultRef
 	attempt.ToolResult = append(attempt.ToolResult[:0], cmd.ToolResult...)
-	attempt.RequiresReconcile = cmd.RequiresReconcile || cmd.Status == model.ActionAttemptUnknown
+	attempt.RequiresReconcile = cmd.RequiresReconcile || cmd.Status == api.ActionAttemptUnknown
 	if cmd.UsageRecord != nil {
 		if cmd.UsageRecord.RunID != cmd.RunID || cmd.UsageRecord.TaskID != cmd.TaskID {
-			return nil, model.ErrInvalidCommand
+			return nil, api.ErrInvalidCommand
 		}
 		if err := uow.UsageRecords().AppendUsage(ctx, *cmd.UsageRecord); err != nil {
 			return nil, err
@@ -193,7 +193,7 @@ func (completeActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOf
 	if err := uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
 		return nil, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: model.EventActionAttemptUpdated, Payload: map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "externalRequestId": attempt.ExternalRequestID, "externalResultRef": attempt.ExternalResultRef, "requiresReconcile": attempt.RequiresReconcile}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: cmd.RunID, TaskID: cmd.TaskID, Type: api.EventActionAttemptUpdated, Payload: map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "externalRequestId": attempt.ExternalRequestID, "externalResultRef": attempt.ExternalResultRef, "requiresReconcile": attempt.RequiresReconcile}, RecordedAt: time.Now().UTC()}); err != nil {
 		return nil, err
 	}
 	result := CompleteAttemptResult{Attempt: attempt}
@@ -211,7 +211,7 @@ func (resolveActionAttemptHandler) Name() string {
 
 func (h resolveActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd ResolveActionAttemptCommand) (any, error) {
 	if cmd.AttemptID == "" || !isResolutionAttemptStatus(cmd.Status) {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	if err := validateActionAttemptResult(cmd.ExternalResultRef, cmd.ToolResult); err != nil {
 		return nil, err
@@ -220,11 +220,11 @@ func (h resolveActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitO
 	if err != nil {
 		return nil, err
 	}
-	if !attempt.RequiresReconcile || attempt.Status != model.ActionAttemptUnknown {
+	if !attempt.RequiresReconcile || attempt.Status != api.ActionAttemptUnknown {
 		if sameResolvedAttempt(attempt, cmd) {
 			return ResolveAttemptResult{Attempt: attempt}, nil
 		}
-		return nil, model.ErrIdempotencyConflict
+		return nil, api.ErrIdempotencyConflict
 	}
 	task, err := uow.Tasks().LoadTask(ctx, attempt.RunID, attempt.TaskID)
 	if err != nil {
@@ -244,7 +244,7 @@ func (h resolveActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitO
 		return nil, err
 	}
 	if !swapped {
-		return nil, model.ErrIdempotencyConflict
+		return nil, api.ErrIdempotencyConflict
 	}
 
 	result, err := applyResolvedAttemptState(ctx, uow, task, run, resolved, h.options.NewID)
@@ -260,16 +260,16 @@ func (h resolveActionAttemptHandler) Handle(ctx context.Context, uow ports.UnitO
 func applyResolvedAttemptState(
 	ctx context.Context,
 	uow ports.UnitOfWork,
-	task model.Task,
-	run model.Run,
-	resolved model.ActionAttempt,
+	task api.Task,
+	run api.Run,
+	resolved api.ActionAttempt,
 	newID IDGenerator,
 ) (ResolveAttemptResult, error) {
 	result := ResolveAttemptResult{Attempt: resolved, Task: task, Run: run}
 	requiresReconcile := true
-	pendingAttempts, err := uow.ActionAttempts().ListActionAttempts(ctx, model.ActionAttemptSelector{
+	pendingAttempts, err := uow.ActionAttempts().ListActionAttempts(ctx, api.ActionAttemptSelector{
 		RunID:             resolved.RunID,
-		Statuses:          []model.ActionAttemptStatus{model.ActionAttemptUnknown},
+		Statuses:          []api.ActionAttemptStatus{api.ActionAttemptUnknown},
 		RequiresReconcile: &requiresReconcile,
 	})
 	if err != nil {
@@ -282,8 +282,8 @@ func applyResolvedAttemptState(
 			break
 		}
 	}
-	if task.Status == model.TaskStatusReconcileRequired && !taskStillBlocked {
-		nextTask, err := corestate.TransitionTask(task, model.TaskStatusDispatched, false)
+	if task.Status == api.TaskStatusReconcileRequired && !taskStillBlocked {
+		nextTask, err := corestate.TransitionTask(task, api.TaskStatusDispatched, false)
 		if err != nil {
 			return ResolveAttemptResult{}, err
 		}
@@ -295,7 +295,7 @@ func applyResolvedAttemptState(
 		if newID != nil {
 			envelopeID = newID("env")
 		}
-		envelope := model.TaskEnvelope{
+		envelope := api.TaskEnvelope{
 			ID:              envelopeID,
 			RunID:           nextTask.RunID,
 			TaskID:          nextTask.ID,
@@ -323,13 +323,13 @@ func applyResolvedAttemptState(
 	}
 	runStillBlocked := false
 	for _, candidate := range tasks {
-		if candidate.Status == model.TaskStatusReconcileRequired {
+		if candidate.Status == api.TaskStatusReconcileRequired {
 			runStillBlocked = true
 			break
 		}
 	}
-	if run.Status == model.RunStatusReconcileRequired && !runStillBlocked {
-		nextRun, err := corestate.TransitionRun(run, model.RunStatusRunning)
+	if run.Status == api.RunStatusReconcileRequired && !runStillBlocked {
+		nextRun, err := corestate.TransitionRun(run, api.RunStatusRunning)
 		if err != nil {
 			return ResolveAttemptResult{}, err
 		}
@@ -345,15 +345,15 @@ func applyResolvedAttemptState(
 func appendResolvedAttemptEvents(
 	ctx context.Context,
 	uow ports.UnitOfWork,
-	attempt model.ActionAttempt,
-	previousRun model.Run,
+	attempt api.ActionAttempt,
+	previousRun api.Run,
 	result ResolveAttemptResult,
 ) error {
 	now := time.Now().UTC()
-	if err := uow.Events().AppendEvent(ctx, model.Event{
+	if err := uow.Events().AppendEvent(ctx, api.Event{
 		RunID:  attempt.RunID,
 		TaskID: attempt.TaskID,
-		Type:   model.EventActionAttemptUpdated,
+		Type:   api.EventActionAttemptUpdated,
 		Payload: map[string]any{
 			"attemptId":         result.Attempt.AttemptID,
 			"status":            string(result.Attempt.Status),
@@ -367,10 +367,10 @@ func appendResolvedAttemptEvents(
 		return err
 	}
 	if result.TaskTransition {
-		if err := uow.Events().AppendEvent(ctx, model.Event{
+		if err := uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      result.Task.RunID,
 			TaskID:     result.Task.ID,
-			Type:       model.EventTaskDispatched,
+			Type:       api.EventTaskDispatched,
 			Payload:    map[string]any{"reason": "action_reconciled", "task": eventpayload.Task(result.Task), "envelope": eventpayload.Envelope(result.Envelope)},
 			RecordedAt: now,
 		}); err != nil {
@@ -378,10 +378,10 @@ func appendResolvedAttemptEvents(
 		}
 	}
 	if result.RunTransition {
-		if err := uow.Events().AppendEvent(ctx, model.Event{
+		if err := uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      result.Run.ID,
 			TaskID:     result.Run.RootTaskID,
-			Type:       model.EventRunStatusChanged,
+			Type:       api.EventRunStatusChanged,
 			Payload:    map[string]any{"from": string(previousRun.Status), "to": string(result.Run.Status), "run": eventpayload.Run(result.Run)},
 			RecordedAt: now,
 		}); err != nil {
@@ -391,28 +391,28 @@ func appendResolvedAttemptEvents(
 	return nil
 }
 
-func sameResolvedAttempt(attempt model.ActionAttempt, cmd ResolveActionAttemptCommand) bool {
+func sameResolvedAttempt(attempt api.ActionAttempt, cmd ResolveActionAttemptCommand) bool {
 	return !attempt.RequiresReconcile &&
 		attempt.Status == cmd.Status &&
 		attempt.ExternalResultRef == cmd.ExternalResultRef &&
 		bytes.Equal(attempt.ToolResult, cmd.ToolResult)
 }
 
-func isResolutionAttemptStatus(status model.ActionAttemptStatus) bool {
+func isResolutionAttemptStatus(status api.ActionAttemptStatus) bool {
 	switch status {
-	case model.ActionAttemptSucceeded, model.ActionAttemptFailed, model.ActionAttemptTimeout, model.ActionAttemptCancelled:
+	case api.ActionAttemptSucceeded, api.ActionAttemptFailed, api.ActionAttemptTimeout, api.ActionAttemptCancelled:
 		return true
 	default:
 		return false
 	}
 }
 
-func sameTerminalAttempt(attempt model.ActionAttempt, cmd CompleteActionAttemptCommand) bool {
+func sameTerminalAttempt(attempt api.ActionAttempt, cmd CompleteActionAttemptCommand) bool {
 	return attempt.Status == cmd.Status &&
 		attempt.ExternalRequestID == cmd.ExternalRequestID &&
 		attempt.ExternalResultRef == cmd.ExternalResultRef &&
 		bytes.Equal(attempt.ToolResult, cmd.ToolResult) &&
-		attempt.RequiresReconcile == (cmd.RequiresReconcile || cmd.Status == model.ActionAttemptUnknown)
+		attempt.RequiresReconcile == (cmd.RequiresReconcile || cmd.Status == api.ActionAttemptUnknown)
 }
 
 func validateActionAttemptResult(externalResultRef string, toolResult json.RawMessage) error {
@@ -420,7 +420,7 @@ func validateActionAttemptResult(externalResultRef string, toolResult json.RawMe
 		return fmt.Errorf(
 			"action: result exceeds %d bytes: %w",
 			maxActionAttemptResultBytes,
-			model.ErrInvalidCommand,
+			api.ErrInvalidCommand,
 		)
 	}
 	if len(toolResult) == 0 {
@@ -428,13 +428,13 @@ func validateActionAttemptResult(externalResultRef string, toolResult json.RawMe
 	}
 	var result message.ToolResult
 	if err := json.Unmarshal(toolResult, &result); err != nil {
-		return fmt.Errorf("action: invalid tool result: %w: %v", model.ErrInvalidCommand, err)
+		return fmt.Errorf("action: invalid tool result: %w: %v", api.ErrInvalidCommand, err)
 	}
 	return nil
 }
 
-func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run model.Run, task model.Task, lease model.TaskExecutionLease, attempt model.ActionAttempt) (CompleteAttemptResult, error) {
-	nextTask, err := corestate.TransitionTask(task, model.TaskStatusReconcileRequired, true)
+func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run api.Run, task api.Task, lease api.TaskExecutionLease, attempt api.ActionAttempt) (CompleteAttemptResult, error) {
+	nextTask, err := corestate.TransitionTask(task, api.TaskStatusReconcileRequired, true)
 	if err != nil {
 		return CompleteAttemptResult{}, err
 	}
@@ -442,27 +442,27 @@ func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run model.Run, 
 	if err := uow.Tasks().SaveTask(ctx, nextTask); err != nil {
 		return CompleteAttemptResult{}, err
 	}
-	lease.Status = model.LeaseStatusReleased
+	lease.Status = api.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		return CompleteAttemptResult{}, err
 	}
 	if err := execution.ReleaseResourceClaims(ctx, uow, lease.ID, time.Now().UTC()); err != nil {
 		return CompleteAttemptResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: model.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: lease.RunID, TaskID: lease.TaskID, Type: api.EventTaskExecutionReleased, Payload: map[string]any{"leaseId": lease.ID}, RecordedAt: time.Now().UTC()}); err != nil {
 		return CompleteAttemptResult{}, err
 	}
-	nextRun, err := corestate.TransitionRun(run, model.RunStatusReconcileRequired)
+	nextRun, err := corestate.TransitionRun(run, api.RunStatusReconcileRequired)
 	if err != nil {
 		return CompleteAttemptResult{}, err
 	}
 	if err := uow.Runs().SaveRun(ctx, nextRun); err != nil {
 		return CompleteAttemptResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: nextRun.ID, TaskID: nextRun.RootTaskID, Type: model.EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(nextRun.Status), "run": eventpayload.Run(nextRun)}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: nextRun.ID, TaskID: nextRun.RootTaskID, Type: api.EventRunStatusChanged, Payload: map[string]any{"from": string(run.Status), "to": string(nextRun.Status), "run": eventpayload.Run(nextRun)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return CompleteAttemptResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: task.RunID, TaskID: task.ID, Type: model.EventActionReconcileRequired, Payload: map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "task": eventpayload.Task(nextTask)}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: task.RunID, TaskID: task.ID, Type: api.EventActionReconcileRequired, Payload: map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "task": eventpayload.Task(nextTask)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return CompleteAttemptResult{}, err
 	}
 	return CompleteAttemptResult{
@@ -475,26 +475,26 @@ func reconcileAttempt(ctx context.Context, uow ports.UnitOfWork, run model.Run, 
 	}, nil
 }
 
-func isTerminalAttemptStatus(status model.ActionAttemptStatus) bool {
+func isTerminalAttemptStatus(status api.ActionAttemptStatus) bool {
 	switch status {
-	case model.ActionAttemptSucceeded,
-		model.ActionAttemptFailed,
-		model.ActionAttemptTimeout,
-		model.ActionAttemptUnknown,
-		model.ActionAttemptCancelled:
+	case api.ActionAttemptSucceeded,
+		api.ActionAttemptFailed,
+		api.ActionAttemptTimeout,
+		api.ActionAttemptUnknown,
+		api.ActionAttemptCancelled:
 		return true
 	default:
 		return false
 	}
 }
 
-func actorFromHolder(holderType model.HolderType, holderID string) model.SourceIdentity {
+func actorFromHolder(holderType api.HolderType, holderID string) api.SourceIdentity {
 	switch holderType {
-	case model.HolderAgent:
-		return model.SourceIdentity{Type: model.SourceAgent, ID: holderID}
-	case model.HolderComponent:
-		return model.SourceIdentity{Type: model.SourceComponent, ID: holderID}
+	case api.HolderAgent:
+		return api.SourceIdentity{Type: api.SourceAgent, ID: holderID}
+	case api.HolderComponent:
+		return api.SourceIdentity{Type: api.SourceComponent, ID: holderID}
 	default:
-		return model.SourceIdentity{Type: model.SourceSystem, ID: holderID}
+		return api.SourceIdentity{Type: api.SourceSystem, ID: holderID}
 	}
 }

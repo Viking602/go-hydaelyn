@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 // WaitForBlackboard blocks until predicate returns true for the accumulated
@@ -19,9 +19,9 @@ func (r *Runtime) WaitForBlackboard(
 	ctx context.Context,
 	runID string,
 	filter BlackboardFilter,
-	predicate func([]model.BlackboardItem) bool,
+	predicate func([]api.BlackboardItem) bool,
 	timeout time.Duration,
-) ([]model.BlackboardItem, error) {
+) ([]api.BlackboardItem, error) {
 	if predicate == nil {
 		return nil, fmt.Errorf("%w: WaitForBlackboard requires predicate", ErrInvalidCommand)
 	}
@@ -68,7 +68,7 @@ func (r *Runtime) WaitForBlackboard(
 
 const maxAnonymousBlackboardWaitItems = 1024
 
-func appendUniqueBlackboardItems(acc []model.BlackboardItem, seen map[string]struct{}, items ...model.BlackboardItem) []model.BlackboardItem {
+func appendUniqueBlackboardItems(acc []api.BlackboardItem, seen map[string]struct{}, items ...api.BlackboardItem) []api.BlackboardItem {
 	anonymous := 0
 	for _, existing := range acc {
 		if existing.ID == "" {

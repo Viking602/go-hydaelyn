@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 func TestVersionPrintsSourceBuildVersion(t *testing.T) {
@@ -73,10 +73,10 @@ func TestResolveBuildVersionUsesModuleVersion(t *testing.T) {
 func TestInspectEventsFiltersByTask(t *testing.T) {
 	dir := t.TempDir()
 	eventsPath := filepath.Join(dir, "events.json")
-	events := []model.Event{
-		{RunID: "run-1", TaskID: "task-1", Sequence: 1, Type: model.EventTaskCreated},
-		{RunID: "run-1", TaskID: "task-2", Sequence: 2, Type: model.EventTaskCreated},
-		{RunID: "run-1", TaskID: "task-1", Sequence: 3, Type: model.EventTaskCompleted},
+	events := []api.Event{
+		{RunID: "run-1", TaskID: "task-1", Sequence: 1, Type: api.EventTaskCreated},
+		{RunID: "run-1", TaskID: "task-2", Sequence: 2, Type: api.EventTaskCreated},
+		{RunID: "run-1", TaskID: "task-1", Sequence: 3, Type: api.EventTaskCompleted},
 	}
 	payload, err := json.Marshal(events)
 	if err != nil {

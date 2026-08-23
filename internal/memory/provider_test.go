@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 func TestMemoryUnitOfWorkRollbackRunStore(t *testing.T) {
@@ -17,7 +17,7 @@ func TestMemoryUnitOfWorkRollbackRunStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-1", Status: model.RunStatusCreated}); err != nil {
+	if err := uow.Runs().SaveRun(ctx, api.Run{ID: "run-1", Status: api.RunStatusCreated}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
 	if err := uow.Rollback(ctx); err != nil {
@@ -28,7 +28,7 @@ func TestMemoryUnitOfWorkRollbackRunStore(t *testing.T) {
 		t.Fatalf("Begin() reader error = %v", err)
 	}
 	defer func() { _ = reader.Rollback(ctx) }()
-	if _, err := reader.Runs().LoadRun(ctx, "run-1"); !errors.Is(err, model.ErrNotFound) {
+	if _, err := reader.Runs().LoadRun(ctx, "run-1"); !errors.Is(err, api.ErrNotFound) {
 		t.Fatalf("LoadRun() after rollback error = %v, want ErrNotFound", err)
 	}
 }
@@ -40,7 +40,7 @@ func TestMemoryUnitOfWorkCommitRunStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Runs().SaveRun(ctx, model.Run{ID: "run-1", Status: model.RunStatusCreated}); err != nil {
+	if err := uow.Runs().SaveRun(ctx, api.Run{ID: "run-1", Status: api.RunStatusCreated}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
 	if err := uow.Commit(ctx); err != nil {
@@ -63,7 +63,7 @@ func TestMemoryUnitOfWorkRollbackLeaseStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	lease := model.TaskExecutionLease{ID: "lease-1", RunID: "run-1", TaskID: "task-1", Status: model.LeaseStatusActive}
+	lease := api.TaskExecutionLease{ID: "lease-1", RunID: "run-1", TaskID: "task-1", Status: api.LeaseStatusActive}
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
 		t.Fatalf("SaveLease() error = %v", err)
 	}
@@ -75,7 +75,7 @@ func TestMemoryUnitOfWorkRollbackLeaseStore(t *testing.T) {
 		t.Fatalf("Begin() reader error = %v", err)
 	}
 	defer func() { _ = reader.Rollback(ctx) }()
-	if _, err := reader.Leases().LoadLease(ctx, "lease-1"); !errors.Is(err, model.ErrNotFound) {
+	if _, err := reader.Leases().LoadLease(ctx, "lease-1"); !errors.Is(err, api.ErrNotFound) {
 		t.Fatalf("LoadLease() after rollback error = %v, want ErrNotFound", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestMemoryUnitOfWorkRollbackLeaseStore(t *testing.T) {
 func TestBlackboardSubscriberNotNotifiedOnRollback(t *testing.T) {
 	ctx := context.Background()
 	provider := NewProvider()
-	ch, cancel, err := provider.Subscribe(ctx, "run-1", model.BlackboardSelector{})
+	ch, cancel, err := provider.Subscribe(ctx, "run-1", api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBlackboardSubscriberNotNotifiedOnRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Blackboard().WriteItem(ctx, model.BlackboardItem{RunID: "run-1", Source: model.SourceIdentity{Type: model.SourceSystem, ID: "test"}}); err != nil {
+	if err := uow.Blackboard().WriteItem(ctx, api.BlackboardItem{RunID: "run-1", Source: api.SourceIdentity{Type: api.SourceSystem, ID: "test"}}); err != nil {
 		t.Fatalf("WriteItem() error = %v", err)
 	}
 	if err := uow.Rollback(ctx); err != nil {
@@ -108,7 +108,7 @@ func TestBlackboardSubscriberNotNotifiedOnRollback(t *testing.T) {
 func TestBlackboardSubscriberNotifiedAfterCommit(t *testing.T) {
 	ctx := context.Background()
 	provider := NewProvider()
-	ch, cancel, err := provider.Subscribe(ctx, "run-1", model.BlackboardSelector{})
+	ch, cancel, err := provider.Subscribe(ctx, "run-1", api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -117,7 +117,7 @@ func TestBlackboardSubscriberNotifiedAfterCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Blackboard().WriteItem(ctx, model.BlackboardItem{ID: "bb-1", RunID: "run-1", Source: model.SourceIdentity{Type: model.SourceSystem, ID: "test"}}); err != nil {
+	if err := uow.Blackboard().WriteItem(ctx, api.BlackboardItem{ID: "bb-1", RunID: "run-1", Source: api.SourceIdentity{Type: api.SourceSystem, ID: "test"}}); err != nil {
 		t.Fatalf("WriteItem() error = %v", err)
 	}
 	if err := uow.Commit(ctx); err != nil {
@@ -178,12 +178,12 @@ func TestMemoryProviderBeginReturnsUnifiedUnitOfWork(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 
-	run := model.Run{ID: "run-unified", Status: model.RunStatusCreated}
-	task := model.Task{ID: "task-unified", RunID: run.ID, Status: model.TaskStatusCreated, Version: 1}
-	lease := model.TaskExecutionLease{ID: "lease-unified", RunID: run.ID, TaskID: task.ID, Status: model.LeaseStatusActive}
-	approval := model.ApprovalRequest{ApprovalID: "approval-unified", RunID: run.ID, TaskID: task.ID, Status: "pending"}
-	token := model.ResumeToken{TokenID: "token-unified", RunID: run.ID, TaskID: task.ID, ApprovalID: approval.ApprovalID}
-	attempt := model.ActionAttempt{AttemptID: "attempt-unified", RunID: run.ID, TaskID: task.ID, Status: model.ActionAttemptRunning}
+	run := api.Run{ID: "run-unified", Status: api.RunStatusCreated}
+	task := api.Task{ID: "task-unified", RunID: run.ID, Status: api.TaskStatusCreated, Version: 1}
+	lease := api.TaskExecutionLease{ID: "lease-unified", RunID: run.ID, TaskID: task.ID, Status: api.LeaseStatusActive}
+	approval := api.ApprovalRequest{ApprovalID: "approval-unified", RunID: run.ID, TaskID: task.ID, Status: "pending"}
+	token := api.ResumeToken{TokenID: "token-unified", RunID: run.ID, TaskID: task.ID, ApprovalID: approval.ApprovalID}
+	attempt := api.ActionAttempt{AttemptID: "attempt-unified", RunID: run.ID, TaskID: task.ID, Status: api.ActionAttemptRunning}
 
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
@@ -191,19 +191,19 @@ func TestMemoryProviderBeginReturnsUnifiedUnitOfWork(t *testing.T) {
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: run.ID, TaskID: task.ID, Type: model.EventTaskCreated}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: run.ID, TaskID: task.ID, Type: api.EventTaskCreated}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if err := uow.Blackboard().WriteItem(ctx, model.BlackboardItem{ID: "bb-unified", RunID: run.ID, TaskID: task.ID, Source: model.SourceIdentity{Type: model.SourceSystem, ID: "test"}}); err != nil {
+	if err := uow.Blackboard().WriteItem(ctx, api.BlackboardItem{ID: "bb-unified", RunID: run.ID, TaskID: task.ID, Source: api.SourceIdentity{Type: api.SourceSystem, ID: "test"}}); err != nil {
 		t.Fatalf("WriteItem() error = %v", err)
 	}
-	if err := uow.MailboxOutbox().QueueEnvelope(ctx, model.TaskEnvelope{ID: "env-unified", RunID: run.ID, TaskID: task.ID}); err != nil {
+	if err := uow.MailboxOutbox().QueueEnvelope(ctx, api.TaskEnvelope{ID: "env-unified", RunID: run.ID, TaskID: task.ID}); err != nil {
 		t.Fatalf("QueueEnvelope() error = %v", err)
 	}
-	if err := uow.UserMessages().QueueMessage(ctx, model.UserMessage{ID: "msg-unified", RunID: run.ID, TaskID: task.ID}); err != nil {
+	if err := uow.UserMessages().QueueMessage(ctx, api.UserMessage{ID: "msg-unified", RunID: run.ID, TaskID: task.ID}); err != nil {
 		t.Fatalf("QueueMessage() error = %v", err)
 	}
-	if err := uow.Trace().SaveTraceSpan(ctx, model.TraceSpan{ID: "span-unified", RunID: run.ID, TaskID: task.ID, Name: "unified", Status: model.TraceSpanStarted}); err != nil {
+	if err := uow.Trace().SaveTraceSpan(ctx, api.TraceSpan{ID: "span-unified", RunID: run.ID, TaskID: task.ID, Name: "unified", Status: api.TraceSpanStarted}); err != nil {
 		t.Fatalf("SaveTraceSpan() error = %v", err)
 	}
 	if err := uow.Leases().SaveLease(ctx, lease); err != nil {
@@ -237,7 +237,7 @@ func TestMemoryProviderBeginReturnsUnifiedUnitOfWork(t *testing.T) {
 	if events, err := reader.Events().ListEvents(ctx, run.ID); err != nil || len(events) != 1 {
 		t.Fatalf("ListEvents() = %#v, %v", events, err)
 	}
-	if items, err := reader.Blackboard().SelectItems(ctx, run.ID, model.BlackboardSelector{}); err != nil || len(items) != 1 {
+	if items, err := reader.Blackboard().SelectItems(ctx, run.ID, api.BlackboardSelector{}); err != nil || len(items) != 1 {
 		t.Fatalf("SelectItems() = %#v, %v", items, err)
 	}
 	if _, err := reader.MailboxOutbox().LoadEnvelope(ctx, "env-unified"); err != nil {
@@ -301,19 +301,19 @@ func TestMemoryLeaseStore_AcquireWithExpectedVersion(t *testing.T) {
 	defer func() { _ = uow.Rollback(ctx) }()
 
 	cas, ok := uow.Leases().(interface {
-		AcquireWithExpectedVersion(context.Context, model.TaskExecutionLease, uint64) (bool, error)
+		AcquireWithExpectedVersion(context.Context, api.TaskExecutionLease, uint64) (bool, error)
 	})
 	if !ok {
 		t.Fatalf("leaseStore does not satisfy LeaseCAS")
 	}
 
-	lease := model.TaskExecutionLease{
+	lease := api.TaskExecutionLease{
 		ID:         "lease-cas-1",
 		RunID:      "run-1",
 		TaskID:     "task-1",
 		HolderID:   "worker-A",
-		HolderType: model.HolderAgent,
-		Status:     model.LeaseStatusActive,
+		HolderType: api.HolderAgent,
+		Status:     api.LeaseStatusActive,
 		Expiry:     time.Now().Add(time.Minute),
 	}
 	acquired, err := cas.AcquireWithExpectedVersion(ctx, lease, 0)
@@ -344,7 +344,7 @@ func TestMemoryLeaseStore_AcquireWithExpectedVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLease() error = %v", err)
 	}
-	loaded.Status = model.LeaseStatusReleased
+	loaded.Status = api.LeaseStatusReleased
 	if err := uow.Leases().SaveLease(ctx, loaded); err != nil {
 		t.Fatalf("SaveLease(released) error = %v", err)
 	}
@@ -370,18 +370,18 @@ func TestMemoryLeaseStore_ExtendLease(t *testing.T) {
 	defer func() { _ = uow.Rollback(ctx) }()
 
 	cas := uow.Leases().(interface {
-		AcquireWithExpectedVersion(context.Context, model.TaskExecutionLease, uint64) (bool, error)
+		AcquireWithExpectedVersion(context.Context, api.TaskExecutionLease, uint64) (bool, error)
 		ExtendLease(context.Context, string, string, time.Time) (bool, error)
 	})
 
 	original := time.Now().Add(30 * time.Second)
-	lease := model.TaskExecutionLease{
+	lease := api.TaskExecutionLease{
 		ID:         "lease-ext-1",
 		RunID:      "run-1",
 		TaskID:     "task-1",
 		HolderID:   "worker-A",
-		HolderType: model.HolderAgent,
-		Status:     model.LeaseStatusActive,
+		HolderType: api.HolderAgent,
+		Status:     api.LeaseStatusActive,
 		Expiry:     original,
 	}
 	if _, err := cas.AcquireWithExpectedVersion(ctx, lease, 0); err != nil {
@@ -428,31 +428,31 @@ func TestStateClone_NestedMutationDoesNotLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Runs().SaveRun(ctx, model.Run{
+	if err := uow.Runs().SaveRun(ctx, api.Run{
 		ID:       "run-1",
-		Status:   model.RunStatusCreated,
+		Status:   api.RunStatusCreated,
 		Metadata: map[string]string{"k": "v"},
 	}); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{
+	if err := uow.Events().AppendEvent(ctx, api.Event{
 		RunID:   "run-1",
-		Type:    model.EventRunStarted,
+		Type:    api.EventRunStarted,
 		Payload: map[string]any{"step": "start"},
 	}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if err := uow.Tasks().SaveTask(ctx, model.Task{
+	if err := uow.Tasks().SaveTask(ctx, api.Task{
 		ID:           "task-1",
 		RunID:        "run-1",
-		Status:       model.TaskStatusCreated,
+		Status:       api.TaskStatusCreated,
 		OwnerHistory: []string{"agent-a"},
-		Budget:       &model.TaskBudget{MaxTokens: 10},
-		Result:       &model.TypedReport{Status: model.ReportStatusSuccess, Structured: map[string]any{"ok": true}},
+		Budget:       &api.TaskBudget{MaxTokens: 10},
+		Result:       &api.TypedReport{Status: api.ReportStatusSuccess, Structured: map[string]any{"ok": true}},
 	}); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
-	if err := uow.MailboxOutbox().QueueEnvelope(ctx, model.TaskEnvelope{
+	if err := uow.MailboxOutbox().QueueEnvelope(ctx, api.TaskEnvelope{
 		ID:      "env-1",
 		RunID:   "run-1",
 		TaskID:  "task-1",
@@ -560,7 +560,7 @@ func TestBeginReadDoesNotTakeWriteGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginRead() while writer open error = %v", err)
 	}
-	if err := reader.Commit(ctx); !errors.Is(err, model.ErrInvalidCommand) {
+	if err := reader.Commit(ctx); !errors.Is(err, api.ErrInvalidCommand) {
 		t.Fatalf("read-only Commit() error = %v, want ErrInvalidCommand", err)
 	}
 	if err := reader.Rollback(ctx); err != nil {
@@ -578,14 +578,14 @@ func TestListRunsFiltersAgentMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Runs().SaveRun(ctx, model.Run{
-		ID: "run-a", Status: model.RunStatusCreated,
+	if err := uow.Runs().SaveRun(ctx, api.Run{
+		ID: "run-a", Status: api.RunStatusCreated,
 		Metadata: map[string]string{"agentId": "agent-1", "agentVersion": "v1"},
 	}); err != nil {
 		t.Fatalf("SaveRun(a) error = %v", err)
 	}
-	if err := uow.Runs().SaveRun(ctx, model.Run{
-		ID: "run-b", Status: model.RunStatusCreated,
+	if err := uow.Runs().SaveRun(ctx, api.Run{
+		ID: "run-b", Status: api.RunStatusCreated,
 		Metadata: map[string]string{"agentId": "agent-2", "agentVersion": "v2"},
 	}); err != nil {
 		t.Fatalf("SaveRun(b) error = %v", err)
@@ -598,7 +598,7 @@ func TestListRunsFiltersAgentMetadata(t *testing.T) {
 		t.Fatalf("BeginRead() error = %v", err)
 	}
 	defer func() { _ = reader.Rollback(ctx) }()
-	got, err := reader.Runs().ListRuns(ctx, model.RunSelector{AgentID: "agent-1", AgentVersion: "v1"})
+	got, err := reader.Runs().ListRuns(ctx, api.RunSelector{AgentID: "agent-1", AgentVersion: "v1"})
 	if err != nil {
 		t.Fatalf("ListRuns() error = %v", err)
 	}
@@ -614,10 +614,10 @@ func TestProviderEnforcesEventLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: "run-1", Type: model.EventRunStarted}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: "run-1", Type: api.EventRunStarted}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: "run-1", Type: model.EventRunStatusChanged}); !errors.Is(err, model.ErrInvalidCommand) {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: "run-1", Type: api.EventRunStatusChanged}); !errors.Is(err, api.ErrInvalidCommand) {
 		t.Fatalf("second AppendEvent() error = %v, want limit", err)
 	}
 	_ = uow.Rollback(ctx)
@@ -626,7 +626,7 @@ func TestProviderEnforcesEventLimit(t *testing.T) {
 func TestSubscribeRespectsContextAndCountsDrops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	provider := NewProvider()
-	ch, stop, err := provider.Subscribe(ctx, "run-1", model.BlackboardSelector{})
+	ch, stop, err := provider.Subscribe(ctx, "run-1", api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -643,7 +643,7 @@ func TestSubscribeRespectsContextAndCountsDrops(t *testing.T) {
 		t.Fatalf("stop() after cancel error = %v", err)
 	}
 
-	live, liveStop, err := provider.Subscribe(context.Background(), "run-1", model.BlackboardSelector{})
+	live, liveStop, err := provider.Subscribe(context.Background(), "run-1", api.BlackboardSelector{})
 	if err != nil {
 		t.Fatalf("Subscribe(live) error = %v", err)
 	}
@@ -654,10 +654,10 @@ func TestSubscribeRespectsContextAndCountsDrops(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 64; j++ {
-				provider.Notify([]model.BlackboardItem{{
+				provider.Notify([]api.BlackboardItem{{
 					ID:    "item",
 					RunID: "run-1",
-					Type:  model.BlackboardItemEvidence,
+					Type:  api.BlackboardItemEvidence,
 				}})
 			}
 		}()

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
 // SaveAgentDefinitionSnapshot persists one immutable definition revision.
-func (r *Runtime) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot model.AgentDefinitionSnapshot) (err error) {
+func (r *Runtime) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot api.AgentDefinitionSnapshot) (err error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return err
@@ -31,21 +31,21 @@ func (r *Runtime) SaveAgentDefinitionSnapshot(ctx context.Context, snapshot mode
 }
 
 // LoadAgentDefinitionSnapshot loads one immutable definition revision.
-func (r *Runtime) LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (model.AgentDefinitionSnapshot, error) {
+func (r *Runtime) LoadAgentDefinitionSnapshot(ctx context.Context, definitionID, version string) (api.AgentDefinitionSnapshot, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
-		return model.AgentDefinitionSnapshot{}, err
+		return api.AgentDefinitionSnapshot{}, err
 	}
 	defer func() { _ = done() }()
 	store, err := r.agentDefinitionStore(ctx, uow)
 	if err != nil {
-		return model.AgentDefinitionSnapshot{}, err
+		return api.AgentDefinitionSnapshot{}, err
 	}
 	return store.LoadAgentDefinitionSnapshot(ctx, definitionID, version)
 }
 
 // ListAgentDefinitionSnapshots lists immutable definition revisions matching selector.
-func (r *Runtime) ListAgentDefinitionSnapshots(ctx context.Context, selector model.AgentDefinitionSnapshotSelector) ([]model.AgentDefinitionSnapshot, error) {
+func (r *Runtime) ListAgentDefinitionSnapshots(ctx context.Context, selector api.AgentDefinitionSnapshotSelector) ([]api.AgentDefinitionSnapshot, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -64,15 +64,15 @@ func (r *Runtime) agentDefinitionStore(ctx context.Context, uow ports.UnitOfWork
 		return nil, err
 	}
 	if !capabilities.SupportsDefinitionSnapshots {
-		return nil, fmt.Errorf("agent definition snapshot storage is not supported: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("agent definition snapshot storage is not supported: %w", api.ErrInvalidConfiguration)
 	}
 	extension, ok := uow.(ports.AgentDefinitionUnitOfWork)
 	if !ok {
-		return nil, fmt.Errorf("provider advertises agent definition snapshots without exposing the store: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("provider advertises agent definition snapshots without exposing the store: %w", api.ErrInvalidConfiguration)
 	}
 	store := extension.AgentDefinitions()
 	if store == nil {
-		return nil, fmt.Errorf("provider advertises agent definition snapshots with a nil store: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("provider advertises agent definition snapshots with a nil store: %w", api.ErrInvalidConfiguration)
 	}
 	return store, nil
 }

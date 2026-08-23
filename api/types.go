@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -52,6 +54,9 @@ type RetryPolicy struct {
 	MaxBackoff  time.Duration `json:"maxBackoff,omitempty"`
 }
 
+// MaxRetryAttempts is the largest durable attempt count accepted by RetryPolicy.
+const MaxRetryAttempts = 10
+
 type ActionAttempt struct {
 	AttemptID         string              `json:"attemptId"`
 	ActionID          string              `json:"actionId,omitempty"`
@@ -94,6 +99,27 @@ type Address struct {
 	AgentID string      `json:"agentId,omitempty"`
 	Role    string      `json:"role,omitempty"`
 	Group   string      `json:"group,omitempty"`
+}
+
+// ValidateAddress returns an error if the address is malformed.
+func ValidateAddress(address Address) error {
+	switch address.Kind {
+	case AddressKindAgent:
+		if strings.TrimSpace(address.AgentID) == "" {
+			return fmt.Errorf("%w: agent address requires AgentID", ErrInvalidAddress)
+		}
+	case AddressKindRole:
+		if strings.TrimSpace(address.Role) == "" {
+			return fmt.Errorf("%w: role address requires Role", ErrInvalidAddress)
+		}
+	case AddressKindGroup:
+		if strings.TrimSpace(address.Group) == "" {
+			return fmt.Errorf("%w: group address requires Group", ErrInvalidAddress)
+		}
+	default:
+		return fmt.Errorf("%w: unknown kind %q", ErrInvalidAddress, address.Kind)
+	}
+	return nil
 }
 
 // AgentProfile is the framework-level identity of an agent participating in
@@ -298,6 +324,25 @@ type TaskExecutionLease struct {
 	// Expiry and ExpiresAt synchronized when persisting or extending leases.
 	// New code should treat ExpiresAt as the canonical lease liveness deadline.
 	Expiry time.Time `json:"expiry,omitempty"`
+}
+
+// SyncLeaseExpiry keeps the deprecated Expiry alias equal to ExpiresAt.
+func SyncLeaseExpiry(lease *TaskExecutionLease) {
+	if lease == nil {
+		return
+	}
+	if lease.ExpiresAt.IsZero() {
+		lease.ExpiresAt = lease.Expiry
+	}
+	lease.Expiry = lease.ExpiresAt
+}
+
+// LeaseExpiry returns the canonical lease liveness deadline.
+func LeaseExpiry(lease TaskExecutionLease) time.Time {
+	if !lease.ExpiresAt.IsZero() {
+		return lease.ExpiresAt
+	}
+	return lease.Expiry
 }
 
 type ResumeToken struct {

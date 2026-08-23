@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/memory"
 	runsvc "github.com/Viking602/venat/internal/run"
 )
@@ -50,7 +50,7 @@ func TestStartCreatesRunRootTaskAndEvents(t *testing.T) {
 	if run.AgentVersion != "def-v3" {
 		t.Fatalf("Start() AgentVersion = %q, want def-v3", run.AgentVersion)
 	}
-	if root.Type != model.TaskTypeWorker || root.Status != model.TaskStatusCreated || root.Version != 1 {
+	if root.Type != api.TaskTypeWorker || root.Status != api.TaskStatusCreated || root.Version != 1 {
 		t.Fatalf("unexpected root task contract: %#v", root)
 	}
 
@@ -58,7 +58,7 @@ func TestStartCreatesRunRootTaskAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if len(events) != 2 || events[0].Type != model.EventRunStarted || events[1].Type != model.EventTaskCreated {
+	if len(events) != 2 || events[0].Type != api.EventRunStarted || events[1].Type != api.EventTaskCreated {
 		t.Fatalf("Start() events = %#v", events)
 	}
 }
@@ -95,12 +95,12 @@ func TestStartIsIdempotentForExplicitRunIdentity(t *testing.T) {
 	}
 	conflict := input
 	conflict.Request = "replace existing run"
-	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), conflict); !errors.Is(err, model.ErrIdempotencyConflict) {
+	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), conflict); !errors.Is(err, api.ErrIdempotencyConflict) {
 		t.Fatalf("Start(conflict) error = %v, want ErrIdempotencyConflict", err)
 	}
 	versionConflict := input
 	versionConflict.AgentVersion = "other"
-	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), versionConflict); !errors.Is(err, model.ErrIdempotencyConflict) {
+	if _, _, err := runsvc.Start(ctx, uow, testIDGenerator(), versionConflict); !errors.Is(err, api.ErrIdempotencyConflict) {
 		t.Fatalf("Start(version conflict) error = %v, want ErrIdempotencyConflict", err)
 	}
 }
@@ -128,9 +128,9 @@ func TestCreateTaskDefaultsAndCopiesMutableInput(t *testing.T) {
 		Tags:            tags,
 		DependsOn:       deps,
 		WriteTargets:    []string{"findings"},
-		ReadSelectors:   []model.BlackboardSelector{{Keys: []string{"context"}}},
-		RetryPolicy:     model.RetryPolicy{MaxAttempts: 3},
-		PolicyDecisions: []model.PolicyDecision{{Effect: model.PolicyEffectAllow}},
+		ReadSelectors:   []api.BlackboardSelector{{Keys: []string{"context"}}},
+		RetryPolicy:     api.RetryPolicy{MaxAttempts: 3},
+		PolicyDecisions: []api.PolicyDecision{{Effect: api.PolicyEffectAllow}},
 	})
 	if err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
@@ -138,10 +138,10 @@ func TestCreateTaskDefaultsAndCopiesMutableInput(t *testing.T) {
 	tags[0] = "mutated"
 	deps[0] = "mutated"
 
-	if task.Type != model.TaskTypeWorker {
+	if task.Type != api.TaskTypeWorker {
 		t.Fatalf("CreateTask() default type = %q", task.Type)
 	}
-	if task.Status != model.TaskStatusWaitingDependency {
+	if task.Status != api.TaskStatusWaitingDependency {
 		t.Fatalf("CreateTask() status with dependencies = %q", task.Status)
 	}
 	if task.AssignedAgentID != "agent-1" || len(task.OwnerHistory) != 1 || task.OwnerHistory[0] != "agent-1" {
@@ -184,15 +184,15 @@ func TestCreateTaskRejectsUnsafeRetryPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, policy := range []model.RetryPolicy{
-		{MaxAttempts: model.MaxRetryAttempts + 1},
+	for _, policy := range []api.RetryPolicy{
+		{MaxAttempts: api.MaxRetryAttempts + 1},
 		{MaxAttempts: -1},
 		{MaxAttempts: 2, Backoff: -time.Second},
 		{MaxAttempts: 2, MaxBackoff: -time.Second},
 	} {
 		if _, err := runsvc.CreateTask(ctx, uow, testIDGenerator(), runsvc.CreateTaskInput{
 			RunID: run.ID, RetryPolicy: policy,
-		}); !errors.Is(err, model.ErrInvalidCommand) {
+		}); !errors.Is(err, api.ErrInvalidCommand) {
 			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalidCommand", policy, err)
 		}
 	}

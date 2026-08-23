@@ -3,25 +3,25 @@ package mailbox
 import (
 	"fmt"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 // ResolveRecipients expands an Address into the set of concrete agent IDs
 // among the supplied profiles. The result is deduplicated and stable in input
 // order. Returns ErrNoRecipients when zero agents match a well-formed address.
-func ResolveRecipients(agents []model.AgentProfile, to model.Address) ([]string, error) {
-	if err := model.ValidateAddress(to); err != nil {
+func ResolveRecipients(agents []api.AgentProfile, to api.Address) ([]string, error) {
+	if err := api.ValidateAddress(to); err != nil {
 		return nil, err
 	}
 	switch to.Kind {
-	case model.AddressKindAgent:
+	case api.AddressKindAgent:
 		for _, a := range agents {
 			if a.ID == to.AgentID {
 				return []string{a.ID}, nil
 			}
 		}
-		return nil, fmt.Errorf("%w: agent %q not found", model.ErrNoRecipients, to.AgentID)
-	case model.AddressKindRole:
+		return nil, fmt.Errorf("%w: agent %q not found", api.ErrNoRecipients, to.AgentID)
+	case api.AddressKindRole:
 		out, seen := make([]string, 0, len(agents)), map[string]struct{}{}
 		for _, a := range agents {
 			if a.Role != to.Role {
@@ -34,10 +34,10 @@ func ResolveRecipients(agents []model.AgentProfile, to model.Address) ([]string,
 			out = append(out, a.ID)
 		}
 		if len(out) == 0 {
-			return nil, fmt.Errorf("%w: no agents with role %q", model.ErrNoRecipients, to.Role)
+			return nil, fmt.Errorf("%w: no agents with role %q", api.ErrNoRecipients, to.Role)
 		}
 		return out, nil
-	case model.AddressKindGroup:
+	case api.AddressKindGroup:
 		out, seen := make([]string, 0, len(agents)), map[string]struct{}{}
 		for _, a := range agents {
 			for _, g := range a.Groups {
@@ -52,9 +52,9 @@ func ResolveRecipients(agents []model.AgentProfile, to model.Address) ([]string,
 			}
 		}
 		if len(out) == 0 {
-			return nil, fmt.Errorf("%w: no agents in group %q", model.ErrNoRecipients, to.Group)
+			return nil, fmt.Errorf("%w: no agents in group %q", api.ErrNoRecipients, to.Group)
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("%w: unknown kind %q", model.ErrInvalidAddress, to.Kind)
+	return nil, fmt.Errorf("%w: unknown kind %q", api.ErrInvalidAddress, to.Kind)
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/internal/core/adapter"
 	"github.com/Viking602/venat/internal/memory"
 )
 
@@ -132,7 +131,7 @@ func TestAcquireResourceClaims_PublicRetryIsIdempotentAcrossNormalizedTimes(t *t
 
 func TestAcquireTaskExecutionWithClaims_RejectsNonTransactionalProvider(t *testing.T) {
 	ctx := context.Background()
-	provider := &claimsNonTransactionalProvider{StoreProvider: adapter.StoreProviderFromCore(memory.NewProvider())}
+	provider := &claimsNonTransactionalProvider{StoreProvider: memory.NewProvider()}
 	runner := NewDevelopment(api.Config{StoreProvider: provider})
 	task, envelope := createClaimedExecutionTask(t, runner, "claims-nontransactional", "agent")
 	_, err := runner.AcquireTaskExecutionWithClaims(ctx, api.AcquireTaskExecutionCommand{
@@ -192,7 +191,7 @@ func TestCreateTask_RejectsInvalidResourceClaimDeclarations(t *testing.T) {
 
 func TestAcquireTaskExecutionWithClaims_FailsClosedWhenStorageLacksCapability(t *testing.T) {
 	ctx := context.Background()
-	provider := &claimsUnsupportedProvider{StoreProvider: adapter.StoreProviderFromCore(memory.NewProvider())}
+	provider := &claimsUnsupportedProvider{StoreProvider: memory.NewProvider()}
 	runner := NewDevelopment(api.Config{StoreProvider: provider})
 	task, envelope := createClaimedExecutionTask(t, runner, "claims-unsupported", "agent")
 	_, err := runner.AcquireTaskExecutionWithClaims(ctx, api.AcquireTaskExecutionCommand{

@@ -3,14 +3,14 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	executionsvc "github.com/Viking602/venat/internal/execution"
 )
 
-func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (model.TaskExecutionLease, bool, error) {
+func (r *Runtime) AcquireTaskExecution(ctx context.Context, cmd AcquireTaskExecutionCommand) (api.TaskExecutionLease, bool, error) {
 	result, err := r.AcquireTaskExecutionWithClaims(ctx, cmd)
 	if err != nil {
-		return model.TaskExecutionLease{}, false, err
+		return api.TaskExecutionLease{}, false, err
 	}
 	return result.Lease, result.Acquired, nil
 }

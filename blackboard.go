@@ -6,20 +6,18 @@ import (
 	"time"
 
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/internal/core/adapter"
-	"github.com/Viking602/venat/internal/core/model"
 )
 
 func (r *Runner) WriteItem(ctx context.Context, item api.BlackboardItem) error {
-	return adapter.ErrorToAPI(r.rt.WriteItem(ctx, adapter.BlackboardItemToModel(item)))
+	return r.rt.WriteItem(ctx, item)
 }
 
 func (r *Runner) SelectItems(ctx context.Context, runID string, selector api.BlackboardSelector) ([]api.BlackboardItem, error) {
-	items, err := r.rt.SelectItems(ctx, runID, adapter.BlackboardSelectorToModel(selector))
+	items, err := r.rt.SelectItems(ctx, runID, selector)
 	if err != nil {
-		return nil, adapter.ErrorToAPI(err)
+		return nil, err
 	}
-	return adapter.BlackboardItemsFromModel(items), nil
+	return items, nil
 }
 
 // Subscribe streams future blackboard writes for runID that match filter.
@@ -28,9 +26,9 @@ func (r *Runner) SelectItems(ctx context.Context, runID string, selector api.Bla
 // and the channel closes; items in flight at that moment may be dropped.
 // cancel is idempotent and safe to call after ctx cancellation.
 func (r *Runner) Subscribe(ctx context.Context, runID string, filter api.BlackboardFilter) (<-chan api.BlackboardItem, func() error, error) {
-	items, cancel, err := r.rt.Subscribe(ctx, runID, adapter.BlackboardSelectorToModel(filter))
+	items, cancel, err := r.rt.Subscribe(ctx, runID, filter)
 	if err != nil {
-		return nil, nil, adapter.ErrorToAPI(err)
+		return nil, nil, err
 	}
 	// stopFwd lets teardown unblock a forwarder parked on `out <-` after
 	// the consumer stopped reading; closing the upstream channel alone
@@ -41,7 +39,7 @@ func (r *Runner) Subscribe(ctx context.Context, runID string, filter api.Blackbo
 		defer close(out)
 		for item := range items {
 			select {
-			case out <- adapter.BlackboardItemFromModel(item):
+			case out <- item:
 			case <-fwd.Done():
 				return
 			}
@@ -62,16 +60,16 @@ func (r *Runner) Subscribe(ctx context.Context, runID string, filter api.Blackbo
 	stopAfter := context.AfterFunc(ctx, func() { _ = teardown() })
 	return out, func() error {
 		stopAfter()
-		return adapter.ErrorToAPI(teardown())
+		return teardown()
 	}, nil
 }
 
 func (r *Runner) WaitForBlackboard(ctx context.Context, runID string, filter api.BlackboardFilter, predicate func([]api.BlackboardItem) bool, timeout time.Duration) ([]api.BlackboardItem, error) {
-	items, err := r.rt.WaitForBlackboard(ctx, runID, adapter.BlackboardSelectorToModel(filter), func(items []model.BlackboardItem) bool {
-		return predicate(adapter.BlackboardItemsFromModel(items))
+	items, err := r.rt.WaitForBlackboard(ctx, runID, filter, func(items []api.BlackboardItem) bool {
+		return predicate(items)
 	}, timeout)
 	if err != nil {
-		return nil, adapter.ErrorToAPI(err)
+		return nil, err
 	}
-	return adapter.BlackboardItemsFromModel(items), nil
+	return items, nil
 }

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 )
@@ -72,22 +72,22 @@ func (appendTaskExecutionEventHandler) Name() string {
 
 func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd AppendTaskExecutionEventCommand) (any, error) {
 	if cmd.Event.RunID != cmd.RunID || cmd.Event.TaskID != cmd.TaskID {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	if !isLeasedExecutionEvent(cmd.Event.Type) {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	cmd.Event.Sequence = 0
 	if err := validateExecutionEventSubmission(ctx, uow, cmd); err != nil {
 		return nil, err
 	}
-	if cmd.Event.Type == model.EventExecutionCheckpointed {
+	if cmd.Event.Type == api.EventExecutionCheckpointed {
 		encoded, err := json.Marshal(cmd.Event)
 		if err != nil {
-			return nil, fmt.Errorf("%w: encode checkpoint: %w", model.ErrCheckpointLimitExceeded, err)
+			return nil, fmt.Errorf("%w: encode checkpoint: %w", api.ErrCheckpointLimitExceeded, err)
 		}
 		if len(encoded) > maxExecutionCheckpointBytes {
-			return nil, fmt.Errorf("%w: checkpoint is %d bytes (maximum %d)", model.ErrCheckpointLimitExceeded, len(encoded), maxExecutionCheckpointBytes)
+			return nil, fmt.Errorf("%w: checkpoint is %d bytes (maximum %d)", api.ErrCheckpointLimitExceeded, len(encoded), maxExecutionCheckpointBytes)
 		}
 		events, err := uow.Events().ListAfter(ctx, cmd.RunID, 0)
 		if err != nil {
@@ -95,23 +95,23 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 		}
 		count, total := 0, len(encoded)
 		for _, event := range events {
-			if event.Type != model.EventExecutionCheckpointed || event.TaskID != cmd.TaskID {
+			if event.Type != api.EventExecutionCheckpointed || event.TaskID != cmd.TaskID {
 				continue
 			}
 			count++
 			previous, err := json.Marshal(event)
 			if err != nil {
-				return nil, fmt.Errorf("%w: encode stored checkpoint: %w", model.ErrCheckpointLimitExceeded, err)
+				return nil, fmt.Errorf("%w: encode stored checkpoint: %w", api.ErrCheckpointLimitExceeded, err)
 			}
 			total += len(previous)
 		}
 		if count >= maxExecutionCheckpointCount || total > maxExecutionCheckpointTotalBytes {
-			return nil, fmt.Errorf("%w: task has %d checkpoints using %d bytes", model.ErrCheckpointLimitExceeded, count, total)
+			return nil, fmt.Errorf("%w: task has %d checkpoints using %d bytes", api.ErrCheckpointLimitExceeded, count, total)
 		}
 	}
 	for _, record := range cmd.UsageRecords {
 		if record.RunID != cmd.RunID || record.TaskID != cmd.TaskID {
-			return nil, model.ErrInvalidCommand
+			return nil, api.ErrInvalidCommand
 		}
 		if err := uow.UsageRecords().AppendUsage(ctx, record); err != nil {
 			return nil, err
@@ -123,9 +123,9 @@ func (appendTaskExecutionEventHandler) Handle(ctx context.Context, uow ports.Uni
 	return nil, nil
 }
 
-func isLeasedExecutionEvent(eventType model.EventType) bool {
-	return eventType == model.EventType("StepCompleted") ||
-		eventType == model.EventExecutionCheckpointed
+func isLeasedExecutionEvent(eventType api.EventType) bool {
+	return eventType == api.EventType("StepCompleted") ||
+		eventType == api.EventExecutionCheckpointed
 }
 
 func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork, cmd AppendTaskExecutionEventCommand) error {
@@ -133,8 +133,8 @@ func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork,
 	if err == nil {
 		return nil
 	}
-	if cmd.Event.Type != model.EventExecutionCheckpointed ||
-		(!errors.Is(err, model.ErrLeaseNotActive) && !errors.Is(err, model.ErrStaleTaskVersion)) {
+	if cmd.Event.Type != api.EventExecutionCheckpointed ||
+		(!errors.Is(err, api.ErrLeaseNotActive) && !errors.Is(err, api.ErrStaleTaskVersion)) {
 		return err
 	}
 	run, loadErr := uow.Runs().LoadRun(ctx, cmd.RunID)
@@ -142,17 +142,17 @@ func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork,
 		return loadErr
 	}
 	if corestate.IsTerminalRun(run.Status) {
-		return model.ErrTerminalState
+		return api.ErrTerminalState
 	}
 	task, loadErr := uow.Tasks().LoadTask(ctx, cmd.RunID, cmd.TaskID)
 	if loadErr != nil {
 		return loadErr
 	}
 	if task.Version != cmd.TaskVersion {
-		return model.ErrStaleTaskVersion
+		return api.ErrStaleTaskVersion
 	}
 	switch task.Status {
-	case model.TaskStatusPaused, model.TaskStatusWaitingUserInput, model.TaskStatusReconcileRequired:
+	case api.TaskStatusPaused, api.TaskStatusWaitingUserInput, api.TaskStatusReconcileRequired:
 	default:
 		return err
 	}
@@ -160,7 +160,7 @@ func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork,
 	if loadErr != nil {
 		return loadErr
 	}
-	if lease.Status != model.LeaseStatusReleased ||
+	if lease.Status != api.LeaseStatusReleased ||
 		lease.RunID != cmd.RunID || lease.TaskID != cmd.TaskID ||
 		lease.HolderType != cmd.HolderType || lease.HolderID != cmd.HolderID {
 		return err
@@ -170,7 +170,7 @@ func validateExecutionEventSubmission(ctx context.Context, uow ports.UnitOfWork,
 		return loadErr
 	}
 	if !found || latest.ID != lease.ID || latest.Version != lease.Version {
-		return model.ErrLeaseNotActive
+		return api.ErrLeaseNotActive
 	}
 	return nil
 }

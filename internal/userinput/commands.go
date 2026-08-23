@@ -1,9 +1,5 @@
 package userinput
 
-type SubmitUserInputCommand struct {
-	RunID  string
-	TaskID string
-	Input  string
-}
+import "github.com/Viking602/venat/api"
 
-func (SubmitUserInputCommand) CommandName() string { return "user_input.submit" }
+type SubmitUserInputCommand = api.SubmitUserInputCommand

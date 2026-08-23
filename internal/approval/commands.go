@@ -1,28 +1,9 @@
 package approval
 
-type RequestApprovalCommand struct {
-	RunID            string
-	TaskID           string
-	ActionID         string
-	RequesterAgentID string
-	Reason           string
-	RiskSummary      string
-	RequestedAction  string
-	Metadata         map[string]string
-}
+import "github.com/Viking602/venat/api"
 
-type DecideApprovalCommand struct {
-	RunID      string
-	ApprovalID string
-	DecidedBy  string
-	Decision   string
-	Reason     string
-}
-
-type RecoverResumeTokenCommand struct {
-	TokenID string
-}
-
-func (RequestApprovalCommand) CommandName() string    { return "approval.request" }
-func (DecideApprovalCommand) CommandName() string     { return "approval.decide" }
-func (RecoverResumeTokenCommand) CommandName() string { return "resume_token.recover" }
+type (
+	RequestApprovalCommand    = api.RequestApprovalCommand
+	DecideApprovalCommand     = api.DecideApprovalCommand
+	RecoverResumeTokenCommand = api.RecoverResumeTokenCommand
+)

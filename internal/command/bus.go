@@ -3,7 +3,7 @@ package command
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -42,11 +42,11 @@ func (b *Bus) HasHandler(name string) bool {
 
 func (b *Bus) Execute(ctx context.Context, uow ports.UnitOfWork, cmd ports.Command) (any, error) {
 	if b == nil || cmd == nil {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	handler, ok := b.handlers[cmd.CommandName()]
 	if !ok {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	return handler.HandleAny(ctx, uow, cmd)
 }
@@ -60,7 +60,7 @@ func (e erased[C]) Name() string { return e.handler.Name() }
 func (e erased[C]) HandleAny(ctx context.Context, uow ports.UnitOfWork, cmd ports.Command) (any, error) {
 	typed, ok := any(cmd).(C)
 	if !ok {
-		return nil, model.ErrInvalidCommand
+		return nil, api.ErrInvalidCommand
 	}
 	return e.handler.Handle(ctx, uow, typed)
 }

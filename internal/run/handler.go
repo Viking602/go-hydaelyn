@@ -3,8 +3,8 @@ package run
 import (
 	"context"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -12,8 +12,8 @@ import (
 // previous []any tuple keeps multi-value returns type-safe across the
 // command-bus boundary.
 type StartRunResult struct {
-	Run     model.Run
-	Root    model.Task
+	Run     api.Run
+	Root    api.Task
 	Created bool
 }
 

@@ -5,17 +5,17 @@ import (
 	"maps"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-func runFromPayload(value any) model.Run {
+func runFromPayload(value any) api.Run {
 	payload := mapFromPayload(value)
 	if len(payload) == 0 {
-		return model.Run{}
+		return api.Run{}
 	}
-	return model.Run{
+	return api.Run{
 		ID:           stringFromPayload(payload["id"]),
-		Status:       model.RunStatus(stringFromPayload(payload["status"])),
+		Status:       api.RunStatus(stringFromPayload(payload["status"])),
 		Request:      stringFromPayload(payload["request"]),
 		RootTaskID:   stringFromPayload(payload["rootTaskId"]),
 		AgentVersion: stringFromPayload(payload["agentVersion"]),
@@ -25,30 +25,30 @@ func runFromPayload(value any) model.Run {
 	}
 }
 
-func taskFromPayload(payload map[string]any) model.Task {
+func taskFromPayload(payload map[string]any) api.Task {
 	if len(payload) == 0 {
-		return model.Task{}
+		return api.Task{}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return model.Task{}
+		return api.Task{}
 	}
-	var task model.Task
+	var task api.Task
 	if err := json.Unmarshal(raw, &task); err != nil {
-		return model.Task{}
+		return api.Task{}
 	}
 	return task
 }
 
-func userMessageFromPayload(payload map[string]any) model.UserMessage {
-	return model.UserMessage{
+func userMessageFromPayload(payload map[string]any) api.UserMessage {
+	return api.UserMessage{
 		ID:             stringFromPayload(payload["messageId"]),
 		RunID:          stringFromPayload(payload["runId"]),
 		TaskID:         stringFromPayload(payload["taskId"]),
-		Type:           model.UserMessageType(stringFromPayload(payload["type"])),
+		Type:           api.UserMessageType(stringFromPayload(payload["type"])),
 		Title:          stringFromPayload(payload["title"]),
 		Payload:        stringFromPayload(payload["payload"]),
-		Status:         model.UserMessageStatus(stringFromPayload(payload["status"])),
+		Status:         api.UserMessageStatus(stringFromPayload(payload["status"])),
 		IdempotencyKey: stringFromPayload(payload["idempotencyKey"]),
 		CreatedAt:      timeFromPayload(payload["createdAt"]),
 		UpdatedAt:      timeFromPayload(payload["updatedAt"]),

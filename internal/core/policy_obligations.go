@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 var policyEmailRE = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
@@ -29,41 +29,41 @@ func (r *Runtime) currentPolicyEnforcer() PolicyObligationEnforcer {
 func (r *Runtime) enforceBlackboardReadUoW(
 	ctx context.Context,
 	uow UnitOfWork,
-	decision model.PolicyDecision,
-	selector model.BlackboardSelector,
-	items []model.BlackboardItem,
-) (model.BlackboardSelector, []model.BlackboardItem, error) {
+	decision api.PolicyDecision,
+	selector api.BlackboardSelector,
+	items []api.BlackboardItem,
+) (api.BlackboardSelector, []api.BlackboardItem, error) {
 	enforcedSelector, enforcedItems, err := r.currentPolicyEnforcer().EnforceBlackboardRead(ctx, decision, selector, items)
 	if err == nil {
 		return enforcedSelector, enforcedItems, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, selector.RunID, "", decision, err); eventErr != nil {
-		return model.BlackboardSelector{}, nil, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
+		return api.BlackboardSelector{}, nil, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
-	return model.BlackboardSelector{}, nil, commitWithError(err)
+	return api.BlackboardSelector{}, nil, commitWithError(err)
 }
 
 func (r *Runtime) enforceBlackboardWriteUoW(
 	ctx context.Context,
 	uow UnitOfWork,
-	decision model.PolicyDecision,
-	item model.BlackboardItem,
-) (model.BlackboardItem, error) {
+	decision api.PolicyDecision,
+	item api.BlackboardItem,
+) (api.BlackboardItem, error) {
 	enforced, err := r.currentPolicyEnforcer().EnforceBlackboardWrite(ctx, decision, item)
 	if err == nil {
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, item.RunID, item.TaskID, decision, err); eventErr != nil {
-		return model.BlackboardItem{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
+		return api.BlackboardItem{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
-	return model.BlackboardItem{}, commitWithError(err)
+	return api.BlackboardItem{}, commitWithError(err)
 }
 
 func (r *Runtime) EnforceToolResult(
 	ctx context.Context,
 	runID string,
 	taskID string,
-	decision model.PolicyDecision,
+	decision api.PolicyDecision,
 	result json.RawMessage,
 ) (enforced json.RawMessage, err error) {
 	uow, err := r.beginWriteUoW(ctx)
@@ -91,43 +91,43 @@ func (r *Runtime) EnforceToolResult(
 func (r *Runtime) enforceHandoffUoW(
 	ctx context.Context,
 	uow UnitOfWork,
-	decision model.PolicyDecision,
-	handoff model.HandoffRequest,
-) (model.HandoffRequest, error) {
+	decision api.PolicyDecision,
+	handoff api.HandoffRequest,
+) (api.HandoffRequest, error) {
 	enforced, err := r.currentPolicyEnforcer().EnforceHandoff(ctx, decision, handoff)
 	if err == nil {
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, handoff.RunID, handoff.TaskID, decision, err); eventErr != nil {
-		return model.HandoffRequest{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
+		return api.HandoffRequest{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
-	return model.HandoffRequest{}, commitWithError(err)
+	return api.HandoffRequest{}, commitWithError(err)
 }
 
 func (r *Runtime) enforceResponseUoW(
 	ctx context.Context,
 	uow UnitOfWork,
-	decision model.PolicyDecision,
-	message model.UserMessage,
-) (model.UserMessage, error) {
+	decision api.PolicyDecision,
+	message api.UserMessage,
+) (api.UserMessage, error) {
 	enforced, err := r.currentPolicyEnforcer().EnforceResponse(ctx, decision, message)
 	if err == nil {
 		return enforced, nil
 	}
 	if eventErr := appendPolicyObligationFailure(ctx, uow, message.RunID, message.TaskID, decision, err); eventErr != nil {
-		return model.UserMessage{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
+		return api.UserMessage{}, fmt.Errorf("%w: record obligation failure: %w", err, eventErr)
 	}
-	return model.UserMessage{}, err
+	return api.UserMessage{}, err
 }
 
 func (r *Runtime) enforceTraceSpansUoW(
 	ctx context.Context,
 	uow UnitOfWork,
 	runID string,
-	decision model.PolicyDecision,
-	spans []model.TraceSpan,
-) ([]model.TraceSpan, error) {
-	out := make([]model.TraceSpan, 0, len(spans))
+	decision api.PolicyDecision,
+	spans []api.TraceSpan,
+) ([]api.TraceSpan, error) {
+	out := make([]api.TraceSpan, 0, len(spans))
 	for _, span := range spans {
 		enforced, visible, err := r.currentPolicyEnforcer().EnforceTrace(ctx, decision, span)
 		if err != nil {
@@ -148,17 +148,17 @@ func appendPolicyObligationFailure(
 	uow UnitOfWork,
 	runID string,
 	taskID string,
-	decision model.PolicyDecision,
+	decision api.PolicyDecision,
 	enforcementErr error,
 ) error {
-	return uow.Events().AppendEvent(ctx, model.Event{
+	return uow.Events().AppendEvent(ctx, api.Event{
 		RunID:  runID,
 		TaskID: taskID,
-		Type:   model.EventPolicyObligationFailed,
+		Type:   api.EventPolicyObligationFailed,
 		Payload: map[string]any{
 			"decisionId":      decision.DecisionID,
 			"reason":          enforcementErr.Error(),
-			"effectiveEffect": string(model.PolicyEffectDeny),
+			"effectiveEffect": string(api.PolicyEffectDeny),
 		},
 		RecordedAt: time.Now().UTC(),
 	})
@@ -168,20 +168,20 @@ type defaultPolicyObligationEnforcer struct{}
 
 func (defaultPolicyObligationEnforcer) EnforceBlackboardRead(
 	_ context.Context,
-	decision model.PolicyDecision,
-	selector model.BlackboardSelector,
-	items []model.BlackboardItem,
-) (model.BlackboardSelector, []model.BlackboardItem, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetBlackboardRead)
+	decision api.PolicyDecision,
+	selector api.BlackboardSelector,
+	items []api.BlackboardItem,
+) (api.BlackboardSelector, []api.BlackboardItem, error) {
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetBlackboardRead)
 	if err != nil {
-		return model.BlackboardSelector{}, nil, err
+		return api.BlackboardSelector{}, nil, err
 	}
-	out := append([]model.BlackboardItem(nil), items...)
+	out := append([]api.BlackboardItem(nil), items...)
 	for _, obligation := range obligations {
 		switch obligation.Kind {
-		case model.ObligationSelectorOnly:
+		case api.ObligationSelectorOnly:
 			if obligation.Selector == nil {
-				return model.BlackboardSelector{}, nil, policyObligationError(obligation, "selector is required")
+				return api.BlackboardSelector{}, nil, policyObligationError(obligation, "selector is required")
 			}
 			filtered := out[:0]
 			for _, item := range out {
@@ -190,15 +190,15 @@ func (defaultPolicyObligationEnforcer) EnforceBlackboardRead(
 				}
 			}
 			out = filtered
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			for index := range out {
 				out[index], err = redactBlackboardItem(out[index], decision.Redactions)
 				if err != nil {
-					return model.BlackboardSelector{}, nil, err
+					return api.BlackboardSelector{}, nil, err
 				}
 			}
 		default:
-			return model.BlackboardSelector{}, nil, policyObligationError(obligation, "obligation is not supported for blackboard reads")
+			return api.BlackboardSelector{}, nil, policyObligationError(obligation, "obligation is not supported for blackboard reads")
 		}
 	}
 	return selector, out, nil
@@ -206,30 +206,30 @@ func (defaultPolicyObligationEnforcer) EnforceBlackboardRead(
 
 func (defaultPolicyObligationEnforcer) EnforceBlackboardWrite(
 	_ context.Context,
-	decision model.PolicyDecision,
-	item model.BlackboardItem,
-) (model.BlackboardItem, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetBlackboardWrite)
+	decision api.PolicyDecision,
+	item api.BlackboardItem,
+) (api.BlackboardItem, error) {
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetBlackboardWrite)
 	if err != nil {
-		return model.BlackboardItem{}, err
+		return api.BlackboardItem{}, err
 	}
 	out := item
 	for _, obligation := range obligations {
 		switch obligation.Kind {
-		case model.ObligationSelectorOnly:
+		case api.ObligationSelectorOnly:
 			if obligation.Selector == nil {
-				return model.BlackboardItem{}, policyObligationError(obligation, "selector is required")
+				return api.BlackboardItem{}, policyObligationError(obligation, "selector is required")
 			}
 			if !blackboardItemMatchesSelector(out, *obligation.Selector) {
-				return model.BlackboardItem{}, policyObligationError(obligation, "item is outside the allowed selector")
+				return api.BlackboardItem{}, policyObligationError(obligation, "item is outside the allowed selector")
 			}
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			out, err = redactBlackboardItem(out, decision.Redactions)
 			if err != nil {
-				return model.BlackboardItem{}, err
+				return api.BlackboardItem{}, err
 			}
 		default:
-			return model.BlackboardItem{}, policyObligationError(obligation, "obligation is not supported for blackboard writes")
+			return api.BlackboardItem{}, policyObligationError(obligation, "obligation is not supported for blackboard writes")
 		}
 	}
 	return out, nil
@@ -237,10 +237,10 @@ func (defaultPolicyObligationEnforcer) EnforceBlackboardWrite(
 
 func (defaultPolicyObligationEnforcer) EnforceToolResult(
 	_ context.Context,
-	decision model.PolicyDecision,
+	decision api.PolicyDecision,
 	result json.RawMessage,
 ) (json.RawMessage, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetToolResult)
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetToolResult)
 	if err != nil {
 		return nil, err
 	}
@@ -251,17 +251,17 @@ func (defaultPolicyObligationEnforcer) EnforceToolResult(
 			return nil, err
 		}
 		switch obligation.Kind {
-		case model.ObligationMaskToolOutput:
+		case api.ObligationMaskToolOutput:
 			value.Content = "[masked]"
 			delete(fields, "structured")
 			if err := setPolicyToolResultString(fields, "content", value.Content); err != nil {
 				return nil, err
 			}
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			if err := redactPolicyToolResult(&value, fields, decision.Redactions, obligation); err != nil {
 				return nil, err
 			}
-		case model.ObligationHideInternalTrace:
+		case api.ObligationHideInternalTrace:
 			value.Content = hidePolicyTraceLines(value.Content)
 			if err := setPolicyToolResultString(fields, "content", value.Content); err != nil {
 				return nil, err
@@ -271,7 +271,7 @@ func (defaultPolicyObligationEnforcer) EnforceToolResult(
 		}
 		out, err = json.Marshal(fields)
 		if err != nil {
-			return nil, fmt.Errorf("%w: encode enforced tool result: %w", model.ErrPolicyObligationFailed, err)
+			return nil, fmt.Errorf("%w: encode enforced tool result: %w", api.ErrPolicyObligationFailed, err)
 		}
 	}
 	return out, nil
@@ -283,7 +283,7 @@ type policyToolResult struct {
 
 func decodePolicyToolResult(
 	result json.RawMessage,
-	obligation model.PolicyObligation,
+	obligation api.PolicyObligation,
 ) (policyToolResult, map[string]json.RawMessage, error) {
 	var value policyToolResult
 	fields := make(map[string]json.RawMessage)
@@ -306,7 +306,7 @@ func redactPolicyToolResult(
 	value *policyToolResult,
 	fields map[string]json.RawMessage,
 	redactions []string,
-	obligation model.PolicyObligation,
+	obligation api.PolicyObligation,
 ) error {
 	for _, field := range defaultRedactions(redactions) {
 		switch field {
@@ -330,7 +330,7 @@ func redactPolicyToolResult(
 		case "structured":
 			delete(fields, "structured")
 		default:
-			return policyRedactionError(field, model.PolicyTargetToolResult)
+			return policyRedactionError(field, api.PolicyTargetToolResult)
 		}
 	}
 	return nil
@@ -338,22 +338,22 @@ func redactPolicyToolResult(
 
 func (defaultPolicyObligationEnforcer) EnforceHandoff(
 	_ context.Context,
-	decision model.PolicyDecision,
-	handoff model.HandoffRequest,
-) (model.HandoffRequest, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetHandoff)
+	decision api.PolicyDecision,
+	handoff api.HandoffRequest,
+) (api.HandoffRequest, error) {
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetHandoff)
 	if err != nil {
-		return model.HandoffRequest{}, err
+		return api.HandoffRequest{}, err
 	}
 	out := handoff
 	for _, obligation := range obligations {
 		switch obligation.Kind {
-		case model.ObligationRestrictHandoffContext:
+		case api.ObligationRestrictHandoffContext:
 			out.ContextSummary = ""
 			out.ContextReferences = nil
 			out.ContextSelectors = nil
 			out.Metadata = nil
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			for _, field := range defaultRedactions(decision.Redactions) {
 				switch field {
 				case "email":
@@ -370,11 +370,11 @@ func (defaultPolicyObligationEnforcer) EnforceHandoff(
 				case "metadata":
 					out.Metadata = nil
 				default:
-					return model.HandoffRequest{}, policyRedactionError(field, model.PolicyTargetHandoff)
+					return api.HandoffRequest{}, policyRedactionError(field, api.PolicyTargetHandoff)
 				}
 			}
 		default:
-			return model.HandoffRequest{}, policyObligationError(obligation, "obligation is not supported for handoff")
+			return api.HandoffRequest{}, policyObligationError(obligation, "obligation is not supported for handoff")
 		}
 	}
 	return out, nil
@@ -382,17 +382,17 @@ func (defaultPolicyObligationEnforcer) EnforceHandoff(
 
 func (defaultPolicyObligationEnforcer) EnforceResponse(
 	_ context.Context,
-	decision model.PolicyDecision,
-	message model.UserMessage,
-) (model.UserMessage, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetResponse)
+	decision api.PolicyDecision,
+	message api.UserMessage,
+) (api.UserMessage, error) {
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetResponse)
 	if err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	out := message
 	for _, obligation := range obligations {
 		switch obligation.Kind {
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			for _, field := range defaultRedactions(decision.Redactions) {
 				switch field {
 				case "email":
@@ -403,15 +403,15 @@ func (defaultPolicyObligationEnforcer) EnforceResponse(
 				case "payload":
 					out.Payload = "[redacted]"
 				default:
-					return model.UserMessage{}, policyRedactionError(field, model.PolicyTargetResponse)
+					return api.UserMessage{}, policyRedactionError(field, api.PolicyTargetResponse)
 				}
 			}
-		case model.ObligationHideInternalTrace:
+		case api.ObligationHideInternalTrace:
 			out.Payload = hidePolicyTraceLines(out.Payload)
-		case model.ObligationMaskToolOutput:
+		case api.ObligationMaskToolOutput:
 			out.Payload = maskPolicyToolOutputLines(out.Payload)
 		default:
-			return model.UserMessage{}, policyObligationError(obligation, "obligation is not supported for responses")
+			return api.UserMessage{}, policyObligationError(obligation, "obligation is not supported for responses")
 		}
 	}
 	return out, nil
@@ -419,21 +419,21 @@ func (defaultPolicyObligationEnforcer) EnforceResponse(
 
 func (defaultPolicyObligationEnforcer) EnforceTrace(
 	_ context.Context,
-	decision model.PolicyDecision,
-	span model.TraceSpan,
-) (model.TraceSpan, bool, error) {
-	obligations, err := policyObligationsForTarget(decision, model.PolicyTargetTrace)
+	decision api.PolicyDecision,
+	span api.TraceSpan,
+) (api.TraceSpan, bool, error) {
+	obligations, err := policyObligationsForTarget(decision, api.PolicyTargetTrace)
 	if err != nil {
-		return model.TraceSpan{}, false, err
+		return api.TraceSpan{}, false, err
 	}
 	out := span
 	out.Metadata = maps.Clone(span.Metadata)
 	visible := true
 	for _, obligation := range obligations {
 		switch obligation.Kind {
-		case model.ObligationHideInternalTrace:
+		case api.ObligationHideInternalTrace:
 			visible = false
-		case model.ObligationRedactFields:
+		case api.ObligationRedactFields:
 			for _, field := range defaultRedactions(decision.Redactions) {
 				switch {
 				case field == "email":
@@ -448,18 +448,18 @@ func (defaultPolicyObligationEnforcer) EnforceTrace(
 				case strings.HasPrefix(field, "metadata."):
 					delete(out.Metadata, strings.TrimPrefix(field, "metadata."))
 				default:
-					return model.TraceSpan{}, false, policyRedactionError(field, model.PolicyTargetTrace)
+					return api.TraceSpan{}, false, policyRedactionError(field, api.PolicyTargetTrace)
 				}
 			}
 		default:
-			return model.TraceSpan{}, false, policyObligationError(obligation, "obligation is not supported for traces")
+			return api.TraceSpan{}, false, policyObligationError(obligation, "obligation is not supported for traces")
 		}
 	}
 	return out, visible, nil
 }
 
-func policyObligationsForTarget(decision model.PolicyDecision, target model.PolicyObligationTarget) ([]model.PolicyObligation, error) {
-	out := make([]model.PolicyObligation, 0, len(decision.Obligations))
+func policyObligationsForTarget(decision api.PolicyDecision, target api.PolicyObligationTarget) ([]api.PolicyObligation, error) {
+	out := make([]api.PolicyObligation, 0, len(decision.Obligations))
 	for _, obligation := range decision.Obligations {
 		if !knownPolicyObligation(obligation.Kind) {
 			return nil, policyObligationError(obligation, "unknown obligation")
@@ -480,57 +480,57 @@ func policyObligationsForTarget(decision model.PolicyDecision, target model.Poli
 	return out, nil
 }
 
-func knownPolicyObligation(kind model.ObligationKind) bool {
+func knownPolicyObligation(kind api.ObligationKind) bool {
 	switch kind {
-	case model.ObligationRedactFields,
-		model.ObligationSelectorOnly,
-		model.ObligationRequireHumanApproval,
-		model.ObligationHideInternalTrace,
-		model.ObligationMaskToolOutput,
-		model.ObligationRestrictHandoffContext:
+	case api.ObligationRedactFields,
+		api.ObligationSelectorOnly,
+		api.ObligationRequireHumanApproval,
+		api.ObligationHideInternalTrace,
+		api.ObligationMaskToolOutput,
+		api.ObligationRestrictHandoffContext:
 		return true
 	default:
 		return false
 	}
 }
 
-func knownPolicyTarget(target model.PolicyObligationTarget) bool {
+func knownPolicyTarget(target api.PolicyObligationTarget) bool {
 	switch target {
-	case model.PolicyTargetBlackboardRead,
-		model.PolicyTargetBlackboardWrite,
-		model.PolicyTargetToolResult,
-		model.PolicyTargetHandoff,
-		model.PolicyTargetResponse,
-		model.PolicyTargetTrace:
+	case api.PolicyTargetBlackboardRead,
+		api.PolicyTargetBlackboardWrite,
+		api.PolicyTargetToolResult,
+		api.PolicyTargetHandoff,
+		api.PolicyTargetResponse,
+		api.PolicyTargetTrace:
 		return true
 	default:
 		return false
 	}
 }
 
-func defaultPolicyTargetApplies(kind model.ObligationKind, target model.PolicyObligationTarget) bool {
+func defaultPolicyTargetApplies(kind api.ObligationKind, target api.PolicyObligationTarget) bool {
 	switch kind {
-	case model.ObligationRedactFields:
-		return target == model.PolicyTargetResponse
-	case model.ObligationSelectorOnly:
-		return target == model.PolicyTargetBlackboardRead || target == model.PolicyTargetBlackboardWrite
-	case model.ObligationHideInternalTrace:
-		return target == model.PolicyTargetResponse || target == model.PolicyTargetTrace
-	case model.ObligationMaskToolOutput:
-		return target == model.PolicyTargetToolResult
-	case model.ObligationRestrictHandoffContext:
-		return target == model.PolicyTargetHandoff
+	case api.ObligationRedactFields:
+		return target == api.PolicyTargetResponse
+	case api.ObligationSelectorOnly:
+		return target == api.PolicyTargetBlackboardRead || target == api.PolicyTargetBlackboardWrite
+	case api.ObligationHideInternalTrace:
+		return target == api.PolicyTargetResponse || target == api.PolicyTargetTrace
+	case api.ObligationMaskToolOutput:
+		return target == api.PolicyTargetToolResult
+	case api.ObligationRestrictHandoffContext:
+		return target == api.PolicyTargetHandoff
 	default:
 		return false
 	}
 }
 
-func policyObligationError(obligation model.PolicyObligation, reason string) error {
-	return fmt.Errorf("%w: %s %q for target %q", model.ErrPolicyObligationFailed, reason, obligation.Kind, obligation.Target)
+func policyObligationError(obligation api.PolicyObligation, reason string) error {
+	return fmt.Errorf("%w: %s %q for target %q", api.ErrPolicyObligationFailed, reason, obligation.Kind, obligation.Target)
 }
 
-func policyRedactionError(field string, target model.PolicyObligationTarget) error {
-	return fmt.Errorf("%w: unsupported redaction %q for target %q", model.ErrPolicyObligationFailed, field, target)
+func policyRedactionError(field string, target api.PolicyObligationTarget) error {
+	return fmt.Errorf("%w: unsupported redaction %q for target %q", api.ErrPolicyObligationFailed, field, target)
 }
 
 func defaultRedactions(redactions []string) []string {
@@ -540,7 +540,7 @@ func defaultRedactions(redactions []string) []string {
 	return redactions
 }
 
-func redactBlackboardItem(item model.BlackboardItem, redactions []string) (model.BlackboardItem, error) {
+func redactBlackboardItem(item api.BlackboardItem, redactions []string) (api.BlackboardItem, error) {
 	out := item
 	for _, field := range defaultRedactions(redactions) {
 		switch field {
@@ -556,13 +556,13 @@ func redactBlackboardItem(item model.BlackboardItem, redactions []string) (model
 		case "artifactRefs":
 			out.ArtifactRefs = nil
 		default:
-			return model.BlackboardItem{}, policyRedactionError(field, model.PolicyTargetBlackboardRead)
+			return api.BlackboardItem{}, policyRedactionError(field, api.PolicyTargetBlackboardRead)
 		}
 	}
 	return out, nil
 }
 
-func blackboardItemMatchesSelector(item model.BlackboardItem, selector model.BlackboardSelector) bool {
+func blackboardItemMatchesSelector(item api.BlackboardItem, selector api.BlackboardSelector) bool {
 	if selector.RunID != "" && selector.RunID != item.RunID {
 		return false
 	}
@@ -597,7 +597,7 @@ func setPolicyToolResultString(fields map[string]json.RawMessage, name, value st
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("%w: encode enforced tool result field %q: %w", model.ErrPolicyObligationFailed, name, err)
+		return fmt.Errorf("%w: encode enforced tool result field %q: %w", api.ErrPolicyObligationFailed, name, err)
 	}
 	fields[name] = encoded
 	return nil

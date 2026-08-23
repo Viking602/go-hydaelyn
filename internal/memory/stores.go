@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type runStore UnitOfWork
@@ -54,7 +54,7 @@ func (s *resumeTokenStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
 
 func (s *actionAttemptStore) uow() *UnitOfWork { return (*UnitOfWork)(s) }
 
-func (s *runStore) SaveRun(_ context.Context, run model.Run) error {
+func (s *runStore) SaveRun(_ context.Context, run api.Run) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -67,26 +67,26 @@ func (s *runStore) SaveRun(_ context.Context, run model.Run) error {
 	return nil
 }
 
-func (s *runStore) LoadRun(_ context.Context, runID string) (model.Run, error) {
+func (s *runStore) LoadRun(_ context.Context, runID string) (api.Run, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
 	run, ok := u.staged.Runs[runID]
 	if !ok {
-		return model.Run{}, model.ErrNotFound
+		return api.Run{}, api.ErrNotFound
 	}
 	return run, nil
 }
 
 // ListRuns filters runs by RunSelector. All set fields AND-combine. Result
 // is sorted by CreatedAt ascending so callers get deterministic order.
-func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.Run, error) {
+func (s *runStore) ListRuns(_ context.Context, sel api.RunSelector) ([]api.Run, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	var out []model.Run
+	var out []api.Run
 	for _, run := range u.staged.Runs {
 		if len(sel.IDs) > 0 && !slices.Contains(sel.IDs, run.ID) {
 			continue
@@ -112,7 +112,7 @@ func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.R
 		}
 		out = append(out, run)
 	}
-	slices.SortFunc(out, func(a, b model.Run) int {
+	slices.SortFunc(out, func(a, b api.Run) int {
 		if a.CreatedAt.Before(b.CreatedAt) {
 			return -1
 		}
@@ -127,57 +127,57 @@ func (s *runStore) ListRuns(_ context.Context, sel model.RunSelector) ([]model.R
 	return out, nil
 }
 
-func (s *taskStore) SaveTask(_ context.Context, task model.Task) error {
+func (s *taskStore) SaveTask(_ context.Context, task api.Task) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if u.staged.Tasks[task.RunID] == nil {
-		u.staged.Tasks[task.RunID] = map[string]model.Task{}
+		u.staged.Tasks[task.RunID] = map[string]api.Task{}
 	}
 	task.UpdatedAt = time.Now().UTC()
 	u.staged.Tasks[task.RunID][task.ID] = task
 	return nil
 }
 
-func (s *taskStore) LoadTask(_ context.Context, runID, taskID string) (model.Task, error) {
+func (s *taskStore) LoadTask(_ context.Context, runID, taskID string) (api.Task, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
 	task, ok := u.staged.Tasks[runID][taskID]
 	if !ok {
-		return model.Task{}, model.ErrNotFound
+		return api.Task{}, api.ErrNotFound
 	}
 	return task, nil
 }
 
-func (s *taskStore) ListTasks(_ context.Context, runID string) ([]model.Task, error) {
+func (s *taskStore) ListTasks(_ context.Context, runID string) ([]api.Task, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	tasks := make([]model.Task, 0, len(u.staged.Tasks[runID]))
+	tasks := make([]api.Task, 0, len(u.staged.Tasks[runID]))
 	for _, task := range u.staged.Tasks[runID] {
 		tasks = append(tasks, task)
 	}
-	slices.SortFunc(tasks, func(a, b model.Task) int { return cmpString(a.ID, b.ID) })
+	slices.SortFunc(tasks, func(a, b api.Task) int { return cmpString(a.ID, b.ID) })
 	return tasks, nil
 }
 
-func (s *eventStore) AppendEvent(_ context.Context, event model.Event) error {
+func (s *eventStore) AppendEvent(_ context.Context, event api.Event) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if limit := u.provider.limits.MaxEventsPerRun; limit > 0 && len(u.staged.Events[event.RunID]) >= limit {
-		return fmt.Errorf("memory event limit exceeded: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("memory event limit exceeded: %w", api.ErrInvalidCommand)
 	}
 	if event.Sequence == 0 {
 		u.staged.Seq[event.RunID]++
 		seq := u.staged.Seq[event.RunID]
 		if seq > uint64(int(^uint(0)>>1)) {
-			return fmt.Errorf("event sequence overflow: %w", model.ErrInvalidCommand)
+			return fmt.Errorf("event sequence overflow: %w", api.ErrInvalidCommand)
 		}
 		event.Sequence = int(seq)
 	}
@@ -188,7 +188,7 @@ func (s *eventStore) AppendEvent(_ context.Context, event model.Event) error {
 	return nil
 }
 
-func (s *eventStore) ListEvents(_ context.Context, runID string) ([]model.Event, error) {
+func (s *eventStore) ListEvents(_ context.Context, runID string) ([]api.Event, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func (s *eventStore) ListEvents(_ context.Context, runID string) ([]model.Event,
 
 // ListAfter returns events with Sequence > afterSeq within the run, in
 // Sequence order. Per the storage contract, sequence is per-run monotonic.
-func (s *eventStore) ListAfter(_ context.Context, runID string, afterSeq uint64) ([]model.Event, error) {
+func (s *eventStore) ListAfter(_ context.Context, runID string, afterSeq uint64) ([]api.Event, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ func (s *eventStore) ListAfter(_ context.Context, runID string, afterSeq uint64)
 	return slices.Clone(all[i:]), nil
 }
 
-func (s *blackboardStore) WriteItem(_ context.Context, item model.BlackboardItem) error {
+func (s *blackboardStore) WriteItem(_ context.Context, item api.BlackboardItem) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -227,7 +227,7 @@ func (s *blackboardStore) WriteItem(_ context.Context, item model.BlackboardItem
 	return nil
 }
 
-func (s *blackboardStore) SelectItems(_ context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
+func (s *blackboardStore) SelectItems(_ context.Context, runID string, selector api.BlackboardSelector) ([]api.BlackboardItem, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (s *blackboardStore) SelectItems(_ context.Context, runID string, selector 
 	return selectBlackboardItems(u.staged, runID, selector), nil
 }
 
-func (s *mailboxStore) QueueEnvelope(_ context.Context, env model.TaskEnvelope) error {
+func (s *mailboxStore) QueueEnvelope(_ context.Context, env api.TaskEnvelope) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -256,44 +256,44 @@ func (s *mailboxStore) QueueEnvelope(_ context.Context, env model.TaskEnvelope) 
 	return nil
 }
 
-func (s *mailboxStore) LoadEnvelope(_ context.Context, envelopeID string) (model.TaskEnvelope, error) {
+func (s *mailboxStore) LoadEnvelope(_ context.Context, envelopeID string) (api.TaskEnvelope, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.TaskEnvelope{}, err
+		return api.TaskEnvelope{}, err
 	}
 	env, ok := u.staged.Envelopes[envelopeID]
 	if !ok {
-		return model.TaskEnvelope{}, model.ErrNotFound
+		return api.TaskEnvelope{}, api.ErrNotFound
 	}
 	return env, nil
 }
 
-func (s *mailboxStore) UpdateEnvelope(_ context.Context, env model.TaskEnvelope) error {
+func (s *mailboxStore) UpdateEnvelope(_ context.Context, env api.TaskEnvelope) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if _, ok := u.staged.Envelopes[env.ID]; !ok {
-		return model.ErrNotFound
+		return api.ErrNotFound
 	}
 	u.staged.Envelopes[env.ID] = env
 	return nil
 }
 
-func (s *mailboxStore) ListEnvelopes(_ context.Context, runID string) ([]model.TaskEnvelope, error) {
+func (s *mailboxStore) ListEnvelopes(_ context.Context, runID string) ([]api.TaskEnvelope, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
 	ids := slices.Clone(u.staged.EnvelopesByRun[runID])
-	out := make([]model.TaskEnvelope, 0, len(ids))
+	out := make([]api.TaskEnvelope, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, u.staged.Envelopes[id])
 	}
 	return out, nil
 }
 
-func (s *messageStore) QueueMessage(_ context.Context, message model.UserMessage) error {
+func (s *messageStore) QueueMessage(_ context.Context, message api.UserMessage) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -304,7 +304,7 @@ func (s *messageStore) QueueMessage(_ context.Context, message model.UserMessage
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
 	}
-	message.Status = model.UserMessageQueued
+	message.Status = api.UserMessageQueued
 	message.UpdatedAt = time.Now().UTC()
 	if _, exists := u.staged.Messages[message.ID]; !exists {
 		u.staged.MessagesByRun[message.RunID] = append(u.staged.MessagesByRun[message.RunID], message.ID)
@@ -313,45 +313,45 @@ func (s *messageStore) QueueMessage(_ context.Context, message model.UserMessage
 	return nil
 }
 
-func (s *messageStore) LoadMessage(_ context.Context, runID, messageID string) (model.UserMessage, error) {
+func (s *messageStore) LoadMessage(_ context.Context, runID, messageID string) (api.UserMessage, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	message, ok := u.staged.Messages[messageID]
 	if !ok || message.RunID != runID {
-		return model.UserMessage{}, model.ErrNotFound
+		return api.UserMessage{}, api.ErrNotFound
 	}
 	return message, nil
 }
 
-func (s *messageStore) UpdateMessage(_ context.Context, message model.UserMessage) error {
+func (s *messageStore) UpdateMessage(_ context.Context, message api.UserMessage) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
 	}
 	if _, ok := u.staged.Messages[message.ID]; !ok {
-		return model.ErrNotFound
+		return api.ErrNotFound
 	}
 	message.UpdatedAt = time.Now().UTC()
 	u.staged.Messages[message.ID] = message
 	return nil
 }
 
-func (s *messageStore) ListMessages(_ context.Context, runID string) ([]model.UserMessage, error) {
+func (s *messageStore) ListMessages(_ context.Context, runID string) ([]api.UserMessage, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
 	ids := slices.Clone(u.staged.MessagesByRun[runID])
-	out := make([]model.UserMessage, 0, len(ids))
+	out := make([]api.UserMessage, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, u.staged.Messages[id])
 	}
 	return out, nil
 }
 
-func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessage, error) {
+func (s *messageStore) ListQueuedMessages(_ context.Context) ([]api.UserMessage, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
@@ -361,11 +361,11 @@ func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessag
 		runIDs = append(runIDs, runID)
 	}
 	slices.Sort(runIDs)
-	var out []model.UserMessage
+	var out []api.UserMessage
 	for _, runID := range runIDs {
 		for _, id := range u.staged.MessagesByRun[runID] {
 			message, ok := u.staged.Messages[id]
-			if !ok || message.Status != model.UserMessageQueued {
+			if !ok || message.Status != api.UserMessageQueued {
 				continue
 			}
 			out = append(out, message)
@@ -378,16 +378,16 @@ func (s *messageStore) ListQueuedMessages(_ context.Context) ([]model.UserMessag
 // order. Status filter defaults to UserMessageQueued when no statuses are
 // specified. Recipient is currently a no-op until UserMessage gains a
 // Recipient field; spec callers should treat it as advisory.
-func (s *messageStore) ListPendingFor(_ context.Context, sel model.UserMessageSelector) ([]model.UserMessage, error) {
+func (s *messageStore) ListPendingFor(_ context.Context, sel api.UserMessageSelector) ([]api.UserMessage, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
 	statusFilter := sel.Statuses
 	if len(statusFilter) == 0 {
-		statusFilter = []string{string(model.UserMessageQueued)}
+		statusFilter = []string{string(api.UserMessageQueued)}
 	}
-	var out []model.UserMessage
+	var out []api.UserMessage
 	runIDs := make([]string, 0, len(u.staged.MessagesByRun))
 	if sel.RunID != "" {
 		runIDs = append(runIDs, sel.RunID)
@@ -421,7 +421,7 @@ func (s *messageStore) ListPendingFor(_ context.Context, sel model.UserMessageSe
 	return out, nil
 }
 
-func (s *traceStore) SaveTraceSpan(_ context.Context, span model.TraceSpan) error {
+func (s *traceStore) SaveTraceSpan(_ context.Context, span api.TraceSpan) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -433,16 +433,16 @@ func (s *traceStore) SaveTraceSpan(_ context.Context, span model.TraceSpan) erro
 		span.StartedAt = time.Now().UTC()
 	}
 	if span.Status == "" {
-		span.Status = model.TraceSpanStarted
+		span.Status = api.TraceSpanStarted
 	}
 	if limit := u.provider.limits.MaxTraceSpansPerRun; limit > 0 && len(u.staged.TraceSpans[span.RunID]) >= limit {
-		return fmt.Errorf("memory trace limit exceeded: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("memory trace limit exceeded: %w", api.ErrInvalidCommand)
 	}
 	u.staged.TraceSpans[span.RunID] = append(u.staged.TraceSpans[span.RunID], span)
 	return nil
 }
 
-func (s *traceStore) ListTraceSpans(_ context.Context, runID string) ([]model.TraceSpan, error) {
+func (s *traceStore) ListTraceSpans(_ context.Context, runID string) ([]api.TraceSpan, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
@@ -450,10 +450,10 @@ func (s *traceStore) ListTraceSpans(_ context.Context, runID string) ([]model.Tr
 	return slices.Clone(u.staged.TraceSpans[runID]), nil
 }
 
-func (s *traceStore) LoadTraceSpan(_ context.Context, spanID string) (model.TraceSpan, error) {
+func (s *traceStore) LoadTraceSpan(_ context.Context, spanID string) (api.TraceSpan, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.TraceSpan{}, err
+		return api.TraceSpan{}, err
 	}
 	for _, spans := range u.staged.TraceSpans {
 		for _, span := range spans {
@@ -462,10 +462,10 @@ func (s *traceStore) LoadTraceSpan(_ context.Context, spanID string) (model.Trac
 			}
 		}
 	}
-	return model.TraceSpan{}, model.ErrNotFound
+	return api.TraceSpan{}, api.ErrNotFound
 }
 
-func (s *traceStore) UpdateTraceSpan(_ context.Context, span model.TraceSpan) error {
+func (s *traceStore) UpdateTraceSpan(_ context.Context, span api.TraceSpan) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -478,10 +478,10 @@ func (s *traceStore) UpdateTraceSpan(_ context.Context, span model.TraceSpan) er
 			}
 		}
 	}
-	return model.ErrNotFound
+	return api.ErrNotFound
 }
 
-func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease) error {
+func (s *leaseStore) SaveLease(_ context.Context, lease api.TaskExecutionLease) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -489,11 +489,11 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 	if lease.ID == "" {
 		lease.ID = u.nextID("lease")
 	}
-	model.SyncLeaseExpiry(&lease)
+	api.SyncLeaseExpiry(&lease)
 	key := activeLeaseKey(lease.RunID, lease.TaskID)
 	latestID := u.staged.ActiveLeaseByTask[key]
 	if latestID != "" && latestID != lease.ID {
-		return model.ErrLeaseNotActive
+		return api.ErrLeaseNotActive
 	}
 	if existing, ok := u.staged.Leases[lease.ID]; ok {
 		lease.Version = existing.Version + 1
@@ -508,18 +508,18 @@ func (s *leaseStore) SaveLease(_ context.Context, lease model.TaskExecutionLease
 // AcquireWithExpectedVersion atomically persists lease iff the latest lease
 // slot for the same task has Version == expectedVersion and is not live.
 // Satisfies ports.LeaseCAS — see api/store.go for the full contract.
-func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.TaskExecutionLease, expectedVersion uint64) (bool, error) {
+func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease api.TaskExecutionLease, expectedVersion uint64) (bool, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return false, err
 	}
 	if lease.ID == "" {
-		return false, fmt.Errorf("lease.ID required for AcquireWithExpectedVersion: %w", model.ErrInvalidCommand)
+		return false, fmt.Errorf("lease.ID required for AcquireWithExpectedVersion: %w", api.ErrInvalidCommand)
 	}
-	model.SyncLeaseExpiry(&lease)
+	api.SyncLeaseExpiry(&lease)
 	key := activeLeaseKey(lease.RunID, lease.TaskID)
 	latestID := u.staged.ActiveLeaseByTask[key]
-	var latest model.TaskExecutionLease
+	var latest api.TaskExecutionLease
 	if latestID != "" {
 		latest = u.staged.Leases[latestID]
 	}
@@ -527,8 +527,8 @@ func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease model.T
 		return false, nil
 	}
 	now := time.Now().UTC()
-	if latest.Status == model.LeaseStatusActive {
-		expiry := model.LeaseExpiry(latest)
+	if latest.Status == api.LeaseStatusActive {
+		expiry := api.LeaseExpiry(latest)
 		if !expiry.IsZero() && expiry.After(now) {
 			return false, nil
 		}
@@ -555,12 +555,12 @@ func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID str
 		return false, nil
 	}
 	if u.staged.ActiveLeaseByTask[activeLeaseKey(existing.RunID, existing.TaskID)] != leaseID ||
-		existing.Status != model.LeaseStatusActive ||
+		existing.Status != api.LeaseStatusActive ||
 		existing.HolderID != workerID {
 		return false, nil
 	}
 	now := time.Now().UTC()
-	expiry := model.LeaseExpiry(existing)
+	expiry := api.LeaseExpiry(existing)
 	if expiry.IsZero() || !expiry.After(now) || !newExpiry.After(expiry) {
 		return false, nil
 	}
@@ -580,46 +580,46 @@ func (s *leaseStore) ReleaseExpiredLease(_ context.Context, leaseID string, expe
 	existing, ok := u.staged.Leases[leaseID]
 	if !ok ||
 		u.staged.ActiveLeaseByTask[activeLeaseKey(existing.RunID, existing.TaskID)] != leaseID ||
-		existing.Status != model.LeaseStatusActive ||
+		existing.Status != api.LeaseStatusActive ||
 		existing.Version != expectedVersion {
 		return false, nil
 	}
-	expiry := model.LeaseExpiry(existing)
+	expiry := api.LeaseExpiry(existing)
 	if expiry.IsZero() || expiry.After(releasedAt) {
 		return false, nil
 	}
-	existing.Status = model.LeaseStatusReleased
+	existing.Status = api.LeaseStatusReleased
 	existing.Version++
 	u.staged.Leases[leaseID] = existing
 	return true, nil
 }
 
-func (s *leaseStore) LoadLease(_ context.Context, leaseID string) (model.TaskExecutionLease, error) {
+func (s *leaseStore) LoadLease(_ context.Context, leaseID string) (api.TaskExecutionLease, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.TaskExecutionLease{}, err
+		return api.TaskExecutionLease{}, err
 	}
 	lease, ok := u.staged.Leases[leaseID]
 	if !ok {
-		return model.TaskExecutionLease{}, model.ErrNotFound
+		return api.TaskExecutionLease{}, api.ErrNotFound
 	}
 	return lease, nil
 }
 
-func (s *leaseStore) ActiveLeaseForTask(_ context.Context, runID, taskID string) (model.TaskExecutionLease, bool, error) {
+func (s *leaseStore) ActiveLeaseForTask(_ context.Context, runID, taskID string) (api.TaskExecutionLease, bool, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.TaskExecutionLease{}, false, err
+		return api.TaskExecutionLease{}, false, err
 	}
 	leaseID := u.staged.ActiveLeaseByTask[activeLeaseKey(runID, taskID)]
 	if leaseID == "" {
-		return model.TaskExecutionLease{}, false, nil
+		return api.TaskExecutionLease{}, false, nil
 	}
 	lease, ok := u.staged.Leases[leaseID]
 	return lease, ok, nil
 }
 
-func (s *approvalStore) SaveApproval(_ context.Context, approval model.ApprovalRequest) error {
+func (s *approvalStore) SaveApproval(_ context.Context, approval api.ApprovalRequest) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -628,19 +628,19 @@ func (s *approvalStore) SaveApproval(_ context.Context, approval model.ApprovalR
 	return nil
 }
 
-func (s *approvalStore) LoadApproval(_ context.Context, approvalID string) (model.ApprovalRequest, error) {
+func (s *approvalStore) LoadApproval(_ context.Context, approvalID string) (api.ApprovalRequest, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.ApprovalRequest{}, err
+		return api.ApprovalRequest{}, err
 	}
 	approval, ok := u.staged.Approvals[approvalID]
 	if !ok {
-		return model.ApprovalRequest{}, model.ErrNotFound
+		return api.ApprovalRequest{}, api.ErrNotFound
 	}
 	return approval, nil
 }
 
-func (s *resumeTokenStore) SaveResumeToken(_ context.Context, token model.ResumeToken) error {
+func (s *resumeTokenStore) SaveResumeToken(_ context.Context, token api.ResumeToken) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -649,14 +649,14 @@ func (s *resumeTokenStore) SaveResumeToken(_ context.Context, token model.Resume
 	return nil
 }
 
-func (s *resumeTokenStore) LoadResumeToken(_ context.Context, tokenID string) (model.ResumeToken, error) {
+func (s *resumeTokenStore) LoadResumeToken(_ context.Context, tokenID string) (api.ResumeToken, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.ResumeToken{}, err
+		return api.ResumeToken{}, err
 	}
 	token, ok := u.staged.ResumeTokens[tokenID]
 	if !ok {
-		return model.ResumeToken{}, model.ErrNotFound
+		return api.ResumeToken{}, api.ErrNotFound
 	}
 	return token, nil
 }
@@ -664,13 +664,13 @@ func (s *resumeTokenStore) LoadResumeToken(_ context.Context, tokenID string) (m
 // ListPending returns resume tokens that have not yet expired. Tokens whose
 // ExpiresAt has passed are filtered out — the runtime treats expired
 // tokens as already-consumed.
-func (s *resumeTokenStore) ListPending(_ context.Context, sel model.ResumeTokenSelector) ([]model.ResumeToken, error) {
+func (s *resumeTokenStore) ListPending(_ context.Context, sel api.ResumeTokenSelector) ([]api.ResumeToken, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
 	now := time.Now()
-	var out []model.ResumeToken
+	var out []api.ResumeToken
 	for _, token := range u.staged.ResumeTokens {
 		if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(now) {
 			continue
@@ -689,7 +689,7 @@ func (s *resumeTokenStore) ListPending(_ context.Context, sel model.ResumeTokenS
 		}
 		out = append(out, token)
 	}
-	slices.SortFunc(out, func(a, b model.ResumeToken) int {
+	slices.SortFunc(out, func(a, b api.ResumeToken) int {
 		if a.ExpiresAt.Before(b.ExpiresAt) {
 			return -1
 		}
@@ -704,7 +704,7 @@ func (s *resumeTokenStore) ListPending(_ context.Context, sel model.ResumeTokenS
 	return out, nil
 }
 
-func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.ActionAttempt) error {
+func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt api.ActionAttempt) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return err
@@ -716,7 +716,7 @@ func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.
 				existing.TaskID == attempt.TaskID &&
 				existing.ToolName == attempt.ToolName &&
 				existing.IdempotencyKey == attempt.IdempotencyKey {
-				return model.ErrIdempotencyConflict
+				return api.ErrIdempotencyConflict
 			}
 		}
 	}
@@ -724,25 +724,25 @@ func (s *actionAttemptStore) SaveActionAttempt(_ context.Context, attempt model.
 	return nil
 }
 
-func (s *actionAttemptStore) LoadActionAttempt(_ context.Context, attemptID string) (model.ActionAttempt, error) {
+func (s *actionAttemptStore) LoadActionAttempt(_ context.Context, attemptID string) (api.ActionAttempt, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.ActionAttempt{}, err
+		return api.ActionAttempt{}, err
 	}
 	attempt, ok := u.staged.ActionAttempts[attemptID]
 	if !ok {
-		return model.ActionAttempt{}, model.ErrNotFound
+		return api.ActionAttempt{}, api.ErrNotFound
 	}
 	return cloneActionAttempt(attempt), nil
 }
 
-func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context, runID string, taskID string, toolName string, key string) (model.ActionAttempt, error) {
+func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context, runID string, taskID string, toolName string, key string) (api.ActionAttempt, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
-		return model.ActionAttempt{}, err
+		return api.ActionAttempt{}, err
 	}
 	if key == "" {
-		return model.ActionAttempt{}, model.ErrNotFound
+		return api.ActionAttempt{}, api.ErrNotFound
 	}
 	for _, attempt := range u.staged.ActionAttempts {
 		if attempt.RunID == runID &&
@@ -752,19 +752,19 @@ func (s *actionAttemptStore) LoadActionAttemptByIdempotencyKey(_ context.Context
 			return cloneActionAttempt(attempt), nil
 		}
 	}
-	return model.ActionAttempt{}, model.ErrNotFound
+	return api.ActionAttempt{}, api.ErrNotFound
 }
 
-func (s *actionAttemptStore) ListActionAttempts(_ context.Context, sel model.ActionAttemptSelector) ([]model.ActionAttempt, error) {
+func (s *actionAttemptStore) ListActionAttempts(_ context.Context, sel api.ActionAttemptSelector) ([]api.ActionAttempt, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return nil, err
 	}
-	statuses := make(map[model.ActionAttemptStatus]struct{}, len(sel.Statuses))
+	statuses := make(map[api.ActionAttemptStatus]struct{}, len(sel.Statuses))
 	for _, status := range sel.Statuses {
 		statuses[status] = struct{}{}
 	}
-	out := make([]model.ActionAttempt, 0, len(u.staged.ActionAttempts))
+	out := make([]api.ActionAttempt, 0, len(u.staged.ActionAttempts))
 	for _, attempt := range u.staged.ActionAttempts {
 		if sel.RunID != "" && attempt.RunID != sel.RunID {
 			continue
@@ -785,7 +785,7 @@ func (s *actionAttemptStore) ListActionAttempts(_ context.Context, sel model.Act
 		}
 		out = append(out, cloneActionAttempt(attempt))
 	}
-	slices.SortFunc(out, func(a, b model.ActionAttempt) int {
+	slices.SortFunc(out, func(a, b api.ActionAttempt) int {
 		return strings.Compare(a.AttemptID, b.AttemptID)
 	})
 	if sel.Limit > 0 && len(out) > sel.Limit {
@@ -794,21 +794,21 @@ func (s *actionAttemptStore) ListActionAttempts(_ context.Context, sel model.Act
 	return out, nil
 }
 
-func (s *actionAttemptStore) ResolveActionAttempt(_ context.Context, attempt model.ActionAttempt) (bool, error) {
+func (s *actionAttemptStore) ResolveActionAttempt(_ context.Context, attempt api.ActionAttempt) (bool, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
 		return false, err
 	}
 	current, ok := u.staged.ActionAttempts[attempt.AttemptID]
 	if !ok {
-		return false, model.ErrNotFound
+		return false, api.ErrNotFound
 	}
-	if current.Status != model.ActionAttemptUnknown || !current.RequiresReconcile {
+	if current.Status != api.ActionAttemptUnknown || !current.RequiresReconcile {
 		return false, nil
 	}
-	if attempt.Status == model.ActionAttemptUnknown ||
-		attempt.Status == model.ActionAttemptRunning ||
-		attempt.Status == model.ActionAttemptCreated ||
+	if attempt.Status == api.ActionAttemptUnknown ||
+		attempt.Status == api.ActionAttemptRunning ||
+		attempt.Status == api.ActionAttemptCreated ||
 		attempt.RequiresReconcile ||
 		attempt.ActionID != current.ActionID ||
 		attempt.RunID != current.RunID ||
@@ -838,7 +838,7 @@ func activeLeaseKey(runID, taskID string) string {
 	return runID + "\x00" + taskID
 }
 
-func runMetadata(run model.Run, keys ...string) string {
+func runMetadata(run api.Run, keys ...string) string {
 	if run.Metadata == nil {
 		return ""
 	}

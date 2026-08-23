@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/venat/api"
 	blackboardsvc "github.com/Viking602/venat/internal/blackboard"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -44,9 +44,7 @@ type (
 	ProviderCloser                 = ports.ProviderCloser
 )
 
-type RuntimeCommand interface {
-	CommandName() string
-}
+type RuntimeCommand = api.Command
 
 type WriteBlackboardItemCommand = blackboardsvc.WriteItemCommand
 
@@ -57,7 +55,7 @@ type (
 )
 
 type UserTimelineProjector interface {
-	ProjectUserTimeline(context.Context, []model.Event) ([]model.RunTimelineItem, error)
+	ProjectUserTimeline(context.Context, []api.Event) ([]api.RunTimelineItem, error)
 }
 
 type (
@@ -71,4 +69,4 @@ type (
 	PipelineComponents = ports.PipelineComponents
 )
 
-type MailboxOutbox = model.TaskEnvelope
+type MailboxOutbox = api.TaskEnvelope

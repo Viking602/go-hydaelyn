@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -21,17 +21,17 @@ func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseComman
 	if err != nil {
 		return err
 	}
-	if message.Status == model.UserMessagePublished {
+	if message.Status == api.UserMessagePublished {
 		return nil
 	}
 	publishErr := r.currentOutputGateway().Publish(ctx, message)
 	return r.publishResponseFinalize(ctx, cmd, message, publishErr)
 }
 
-func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishResponseCommand) (model.UserMessage, error) {
+func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishResponseCommand) (api.UserMessage, error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	committed := false
 	defer func() {
@@ -41,20 +41,20 @@ func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishRespons
 	}()
 	message, err := uow.UserMessages().LoadMessage(ctx, cmd.RunID, cmd.MessageID)
 	if err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
-	if message.Status == model.UserMessagePublished {
+	if message.Status == api.UserMessagePublished {
 		if err := uow.Commit(ctx); err != nil {
-			return model.UserMessage{}, err
+			return api.UserMessage{}, err
 		}
 		committed = true
 		return message, nil
 	}
-	if message.Status != model.UserMessageQueued {
-		return model.UserMessage{}, ErrInvalidCommand
+	if message.Status != api.UserMessageQueued {
+		return api.UserMessage{}, ErrInvalidCommand
 	}
-	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
-		Operation: model.PolicyOperationResponsePublish,
+	decision, err := r.authorizeUoW(ctx, uow, api.PolicyRequest{
+		Operation: api.PolicyOperationResponsePublish,
 		RunID:     cmd.RunID,
 		TaskID:    message.TaskID,
 		Message:   &message,
@@ -62,31 +62,31 @@ func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishRespons
 	if err != nil {
 		if isCommitCommandError(err) {
 			if commitErr := uow.Commit(ctx); commitErr != nil {
-				return model.UserMessage{}, commitErr
+				return api.UserMessage{}, commitErr
 			}
 			committed = true
 		}
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	message, err = r.enforceResponseUoW(ctx, uow, decision, message)
 	if err != nil {
 		if commitErr := uow.Commit(ctx); commitErr != nil {
-			return model.UserMessage{}, commitErr
+			return api.UserMessage{}, commitErr
 		}
 		committed = true
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	if err := uow.UserMessages().UpdateMessage(ctx, message); err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	if err := uow.Commit(ctx); err != nil {
-		return model.UserMessage{}, err
+		return api.UserMessage{}, err
 	}
 	committed = true
 	return message, nil
 }
 
-func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishResponseCommand, message model.UserMessage, publishErr error) error {
+func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishResponseCommand, message api.UserMessage, publishErr error) error {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		if publishErr != nil {
@@ -101,10 +101,10 @@ func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishRespon
 		}
 	}()
 	if publishErr != nil {
-		if appendErr := uow.Events().AppendEvent(ctx, model.Event{
+		if appendErr := uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      cmd.RunID,
 			TaskID:     message.TaskID,
-			Type:       model.EventResponsePublishFailed,
+			Type:       api.EventResponsePublishFailed,
 			Payload:    map[string]any{"messageId": message.ID, "reason": publishErr.Error()},
 			RecordedAt: time.Now().UTC(),
 		}); appendErr != nil {
@@ -126,31 +126,31 @@ func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishRespon
 	return nil
 }
 
-func (r *Runtime) applyPublishedTransition(ctx context.Context, uow ports.UnitOfWork, cmd PublishResponseCommand, _ model.UserMessage) error {
+func (r *Runtime) applyPublishedTransition(ctx context.Context, uow ports.UnitOfWork, cmd PublishResponseCommand, _ api.UserMessage) error {
 	current, err := uow.UserMessages().LoadMessage(ctx, cmd.RunID, cmd.MessageID)
 	if err != nil {
 		return err
 	}
-	if current.Status == model.UserMessagePublished {
+	if current.Status == api.UserMessagePublished {
 		return nil
 	}
-	if current.Status != model.UserMessageQueued {
+	if current.Status != api.UserMessageQueued {
 		return ErrInvalidCommand
 	}
 	if err := r.recordEndedTraceUoW(ctx, uow, cmd.RunID, current.TaskID, "response.publish", "response"); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	current.Status = model.UserMessagePublished
+	current.Status = api.UserMessagePublished
 	current.PublishedAt = now
 	current.UpdatedAt = now
 	if err := uow.UserMessages().UpdateMessage(ctx, current); err != nil {
 		return err
 	}
-	return uow.Events().AppendEvent(ctx, model.Event{
+	return uow.Events().AppendEvent(ctx, api.Event{
 		RunID:      cmd.RunID,
 		TaskID:     current.TaskID,
-		Type:       model.EventResponsePublished,
+		Type:       api.EventResponsePublished,
 		Payload:    map[string]any{"messageId": current.ID, "message": userMessagePayload(current)},
 		RecordedAt: now,
 	})

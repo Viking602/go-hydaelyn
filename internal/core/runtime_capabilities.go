@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -11,7 +11,7 @@ import (
 type IDGenerator func(prefix string) string
 
 // UoWAuthorizer is the runtime policy boundary exposed to migrated handlers.
-type UoWAuthorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
+type UoWAuthorizer func(context.Context, ports.UnitOfWork, api.PolicyRequest) (api.PolicyDecision, error)
 
 // UoWTraceRecorder records a completed trace span inside the active UnitOfWork.
 type UoWTraceRecorder func(context.Context, ports.UnitOfWork, string, string, string, string) error
@@ -26,4 +26,4 @@ type PipelineProvider func() PipelineComponents
 type OutputGatewayProvider func() OutputGateway
 
 // ApprovalFactory creates an approval request and matching resume token for a task.
-type ApprovalFactory func(model.Task, string, string) (model.ApprovalRequest, model.ResumeToken)
+type ApprovalFactory func(api.Task, string, string) (api.ApprovalRequest, api.ResumeToken)

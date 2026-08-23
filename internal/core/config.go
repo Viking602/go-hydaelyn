@@ -4,8 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/memory"
 	storedel "github.com/Viking602/venat/internal/store"
 )
@@ -22,11 +22,11 @@ type Runtime struct {
 	commandBus    *commandbus.Bus
 	*storedel.Delegates
 
-	tools       map[string]model.Tool
-	scopedTools map[toolHolderKey]map[string]model.Tool
+	tools       map[string]api.Tool
+	scopedTools map[toolHolderKey]map[string]api.Tool
 	agents      map[string]AgentProfile
 	agentOrder  []string
-	flows       map[string]model.Flow
+	flows       map[string]api.Flow
 
 	policy         PolicyEngine
 	policyEnforcer PolicyObligationEnforcer
@@ -34,13 +34,7 @@ type Runtime struct {
 	pipeline       PipelineComponents
 }
 
-type Config struct {
-	StoreProvider  StoreProvider
-	PolicyEngine   PolicyEngine
-	PolicyEnforcer PolicyObligationEnforcer
-	OutputGateway  OutputGateway
-	Pipeline       PipelineComponents
-}
+type Config = api.Config
 
 func NewMemoryRuntime() *Runtime {
 	return NewRuntime(Config{})
@@ -48,11 +42,11 @@ func NewMemoryRuntime() *Runtime {
 
 func NewRuntime(config Config) *Runtime {
 	rt := &Runtime{
-		tools:          map[string]model.Tool{},
-		scopedTools:    map[toolHolderKey]map[string]model.Tool{},
+		tools:          map[string]api.Tool{},
+		scopedTools:    map[toolHolderKey]map[string]api.Tool{},
 		agents:         map[string]AgentProfile{},
 		agentOrder:     []string{},
-		flows:          map[string]model.Flow{},
+		flows:          map[string]api.Flow{},
 		policy:         allowPolicyEngine{},
 		policyEnforcer: defaultPolicyObligationEnforcer{},
 		outputGateway:  memoryOutputGateway{},

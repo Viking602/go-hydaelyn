@@ -11,7 +11,6 @@ import (
 
 	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core"
-	"github.com/Viking602/venat/internal/core/adapter"
 )
 
 // New constructs an in-memory development runner.
@@ -62,7 +61,7 @@ func isNilDependency(value any) bool {
 }
 
 func newRunner(cfg api.Config, mode api.RuntimeMode) *Runner {
-	return &Runner{rt: core.NewRuntime(adapter.ConfigToCore(cfg)), mode: mode}
+	return &Runner{rt: core.NewRuntime(cfg), mode: mode}
 }
 
 // DefaultConfig returns an empty api.Config; useful as a baseline before

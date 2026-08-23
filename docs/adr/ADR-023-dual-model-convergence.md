@@ -2,10 +2,9 @@
 
 ## Status
 
-Accepted — 2026-08-15. Effective as a *decision* from v0.15.0.
-Implementation is incremental and must not start until Phases 1–4
-correctness fixes are on the same branch (they are). Adapter deletion is
-explicitly out of the v0.15 first drop.
+Implemented — 2026-08-23. Effective from v0.15.0. The ordered
+store, command, and façade conversions landed only after the Phase 1–4
+correctness fixes were present.
 
 ## Context
 
@@ -42,12 +41,12 @@ Two models also double every storage change: a new field must land in
 
 ## Impact
 
-Follow-up PRs cite this ADR and name the store they migrate. Until those
-PRs land, `adapter` stays and the façade continues to convert.
+`api` now supplies every persisted runtime value and store contract.
+`internal/core/model` and `internal/core/adapter` are absent; domain
+packages and the façade exchange the same typed values without conversion.
 
 ## References
 
 - ADR-017 Durable Runner boundary
 - ADR-009 public-any contract
-- `internal/core/adapter/`
 - `api/`

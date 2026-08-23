@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/venat/api"
 	actionsvc "github.com/Viking602/venat/internal/action"
-	"github.com/Viking602/venat/internal/core/model"
 )
 
 type (
@@ -15,43 +15,43 @@ type (
 	resolveActionAttemptResult   = actionsvc.ResolveAttemptResult
 )
 
-func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (model.ActionAttempt, error) {
+func (r *Runtime) StartActionAttempt(ctx context.Context, cmd StartActionAttemptCommand) (api.ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.ActionAttempt{}, err
+		return api.ActionAttempt{}, err
 	}
-	attempt, ok := result.(model.ActionAttempt)
+	attempt, ok := result.(api.ActionAttempt)
 	if !ok {
-		return model.ActionAttempt{}, ErrInvalidCommand
+		return api.ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
 }
 
-func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (model.ActionAttempt, error) {
+func (r *Runtime) CompleteActionAttempt(ctx context.Context, cmd CompleteActionAttemptCommand) (api.ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.ActionAttempt{}, err
+		return api.ActionAttempt{}, err
 	}
-	attempt, ok := result.(model.ActionAttempt)
+	attempt, ok := result.(api.ActionAttempt)
 	if !ok {
-		return model.ActionAttempt{}, ErrInvalidCommand
+		return api.ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
 }
 
-func (r *Runtime) ResolveActionAttempt(ctx context.Context, cmd ResolveActionAttemptCommand) (model.ActionAttempt, error) {
+func (r *Runtime) ResolveActionAttempt(ctx context.Context, cmd ResolveActionAttemptCommand) (api.ActionAttempt, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.ActionAttempt{}, err
+		return api.ActionAttempt{}, err
 	}
-	attempt, ok := result.(model.ActionAttempt)
+	attempt, ok := result.(api.ActionAttempt)
 	if !ok {
-		return model.ActionAttempt{}, ErrInvalidCommand
+		return api.ActionAttempt{}, ErrInvalidCommand
 	}
 	return attempt, nil
 }
 
-func (r *Runtime) ListActionAttempts(ctx context.Context, selector model.ActionAttemptSelector) ([]model.ActionAttempt, error) {
+func (r *Runtime) ListActionAttempts(ctx context.Context, selector api.ActionAttemptSelector) ([]api.ActionAttempt, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err

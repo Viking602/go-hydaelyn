@@ -3,12 +3,12 @@ package projection
 import (
 	"fmt"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 // Timeline converts a run's events into a human-readable timeline.
-func Timeline(events []model.Event) []model.RunTimelineItem {
-	items := make([]model.RunTimelineItem, 0, len(events))
+func Timeline(events []api.Event) []api.RunTimelineItem {
+	items := make([]api.RunTimelineItem, 0, len(events))
 	for _, event := range events {
 		if item, ok := TimelineItem(event); ok {
 			items = append(items, item)
@@ -19,40 +19,40 @@ func Timeline(events []model.Event) []model.RunTimelineItem {
 
 // TimelineItem converts a single event into a RunTimelineItem if it is
 // visible in the user-facing timeline.
-func TimelineItem(event model.Event) (model.RunTimelineItem, bool) {
-	item := model.RunTimelineItem{
+func TimelineItem(event api.Event) (api.RunTimelineItem, bool) {
+	item := api.RunTimelineItem{
 		Sequence:   event.Sequence,
 		RecordedAt: event.RecordedAt,
 		RunID:      event.RunID,
 		TaskID:     event.TaskID,
 	}
 	switch event.Type {
-	case model.EventRunStatusChanged:
-		item.Kind = model.RunTimelineKindControl
+	case api.EventRunStatusChanged:
+		item.Kind = api.RunTimelineKindControl
 		item.Title = "Run status changed"
 		item.Text = fmt.Sprintf("%s -> %s", stringFromPayload(event.Payload["from"]), stringFromPayload(event.Payload["to"]))
-	case model.EventPlanCreated:
-		item.Kind = model.RunTimelineKindControl
+	case api.EventPlanCreated:
+		item.Kind = api.RunTimelineKindControl
 		item.Title = "Plan created"
 		item.Text = fmt.Sprintf("%d task(s)", intFromPayload(event.Payload["taskCount"]))
-	case model.EventTaskDispatched:
-		item.Kind = model.RunTimelineKindWork
+	case api.EventTaskDispatched:
+		item.Kind = api.RunTimelineKindWork
 		item.Title = "Task dispatched"
 		item.Text = event.TaskID
-	case model.EventTaskCompleted:
-		item.Kind = model.RunTimelineKindWork
+	case api.EventTaskCompleted:
+		item.Kind = api.RunTimelineKindWork
 		item.Title = "Task completed"
 		item.Text = stringFromPayload(event.Payload["summary"])
-	case model.EventUserMessageQueued:
-		item.Kind = model.RunTimelineKindResponse
+	case api.EventUserMessageQueued:
+		item.Kind = api.RunTimelineKindResponse
 		item.Title = "User message queued"
 		item.Text = stringFromPayload(mapFromPayload(event.Payload["message"])["payload"])
-	case model.EventResponsePublished:
-		item.Kind = model.RunTimelineKindResponse
+	case api.EventResponsePublished:
+		item.Kind = api.RunTimelineKindResponse
 		item.Title = "User message published"
 		item.Text = stringFromPayload(mapFromPayload(event.Payload["message"])["payload"])
 	default:
-		return model.RunTimelineItem{}, false
+		return api.RunTimelineItem{}, false
 	}
 	return item, true
 }

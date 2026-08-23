@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/internal/core/model"
 )
 
 func TestExecuteCommand_StartRunReturnsTypedResult(t *testing.T) {
@@ -83,7 +82,7 @@ func TestExecuteCommand_RequestApprovalReturnsTypedResult(t *testing.T) {
 func TestCommandResultFromCore_ResolveActionAttemptReturnsPublicType(t *testing.T) {
 	result := commandResultFromCore(
 		api.ResolveActionAttemptCommand{},
-		model.ActionAttempt{AttemptID: "attempt-1", Status: model.ActionAttemptSucceeded},
+		api.ActionAttempt{AttemptID: "attempt-1", Status: api.ActionAttemptSucceeded},
 	)
 	attempt, ok := result.(api.ActionAttempt)
 	if !ok {

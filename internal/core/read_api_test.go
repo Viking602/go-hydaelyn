@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 	"github.com/Viking602/venat/internal/memory"
 )
@@ -38,7 +38,7 @@ func TestResumeTokensRejectsStoreWithoutListPending(t *testing.T) {
 	if tokens, err := rt.ResumeTokens(ctx); tokens != nil || !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("ResumeTokens() = %#v, %v, want nil, %v", tokens, err, ErrInvalidConfiguration)
 	}
-	if tokens, err := rt.PendingResumeTokens(ctx, model.ResumeTokenSelector{}); tokens != nil || !errors.Is(err, ErrInvalidConfiguration) {
+	if tokens, err := rt.PendingResumeTokens(ctx, api.ResumeTokenSelector{}); tokens != nil || !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("PendingResumeTokens() = %#v, %v, want nil, %v", tokens, err, ErrInvalidConfiguration)
 	}
 }
@@ -170,7 +170,7 @@ type failingResumeTokenStore struct {
 	err error
 }
 
-func (s failingResumeTokenStore) ListPending(context.Context, model.ResumeTokenSelector) ([]ResumeToken, error) {
+func (s failingResumeTokenStore) ListPending(context.Context, api.ResumeTokenSelector) ([]ResumeToken, error) {
 	return nil, s.err
 }
 

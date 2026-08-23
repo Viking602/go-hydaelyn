@@ -3,14 +3,14 @@ package blackboard
 import (
 	"context"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
-type Authorizer func(context.Context, ports.UnitOfWork, model.PolicyRequest) (model.PolicyDecision, error)
+type Authorizer func(context.Context, ports.UnitOfWork, api.PolicyRequest) (api.PolicyDecision, error)
 
-type ObligationEnforcer func(context.Context, ports.UnitOfWork, model.PolicyDecision, model.BlackboardItem) (model.BlackboardItem, error)
+type ObligationEnforcer func(context.Context, ports.UnitOfWork, api.PolicyDecision, api.BlackboardItem) (api.BlackboardItem, error)
 
 type HandlerOptions struct {
 	NewID              IDGenerator
@@ -29,7 +29,7 @@ func (writeItemHandler) Name() string { return WriteItemCommand{}.CommandName() 
 func (h writeItemHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd WriteItemCommand) (any, error) {
 	item := cmd.Item
 	if h.options.Authorize != nil {
-		decision, err := h.options.Authorize(ctx, uow, model.PolicyRequest{Operation: model.PolicyOperationBlackboardWrite, RunID: item.RunID, TaskID: item.TaskID, Actor: item.Source, Item: &item})
+		decision, err := h.options.Authorize(ctx, uow, api.PolicyRequest{Operation: api.PolicyOperationBlackboardWrite, RunID: item.RunID, TaskID: item.TaskID, Actor: item.Source, Item: &item})
 		if err != nil {
 			return nil, err
 		}

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/memory"
 )
 
@@ -20,9 +20,9 @@ func TestDecideApprovalResumesPausedTaskAndWaitingRun(t *testing.T) {
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	run := model.Run{ID: "run-1", RootTaskID: "task-1", Status: model.RunStatusWaitingApproval}
-	task := model.Task{ID: "task-1", RunID: run.ID, Status: model.TaskStatusPaused, Version: 2, OwnerAgentID: "agent-1"}
-	approval := model.ApprovalRequest{ApprovalID: "approval-1", RunID: run.ID, TaskID: task.ID, Status: "pending"}
+	run := api.Run{ID: "run-1", RootTaskID: "task-1", Status: api.RunStatusWaitingApproval}
+	task := api.Task{ID: "task-1", RunID: run.ID, Status: api.TaskStatusPaused, Version: 2, OwnerAgentID: "agent-1"}
+	approval := api.ApprovalRequest{ApprovalID: "approval-1", RunID: run.ID, TaskID: task.ID, Status: "pending"}
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
@@ -49,10 +49,10 @@ func TestDecideApprovalResumesPausedTaskAndWaitingRun(t *testing.T) {
 	if !decided.TaskResumed || !decided.RunTransition {
 		t.Fatalf("result = %#v", decided)
 	}
-	if decided.Task.Status != model.TaskStatusDispatched || decided.Task.Version != 3 {
+	if decided.Task.Status != api.TaskStatusDispatched || decided.Task.Version != 3 {
 		t.Fatalf("resumed task = %#v", decided.Task)
 	}
-	if decided.Run.Status != model.RunStatusRunning {
+	if decided.Run.Status != api.RunStatusRunning {
 		t.Fatalf("resumed run = %#v", decided.Run)
 	}
 	if decided.Envelope.Status != "pending" ||
@@ -72,9 +72,9 @@ func TestDecideApprovalResumesPausedTaskAndWaitingRun(t *testing.T) {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
 	if len(events) != 3 ||
-		events[0].Type != model.EventApprovalDecided ||
-		events[1].Type != model.EventTaskDispatched ||
-		events[2].Type != model.EventRunStatusChanged {
+		events[0].Type != api.EventApprovalDecided ||
+		events[1].Type != api.EventTaskDispatched ||
+		events[2].Type != api.EventRunStatusChanged {
 		t.Fatalf("events = %#v", events)
 	}
 }
@@ -88,15 +88,15 @@ func TestRequestApprovalPersistsIsolatedMetadata(t *testing.T) {
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	task := model.Task{ID: "task-1", RunID: "run-1", Status: model.TaskStatusRunning}
+	task := api.Task{ID: "task-1", RunID: "run-1", Status: api.TaskStatusRunning}
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
 		t.Fatalf("SaveTask() error = %v", err)
 	}
 	bus := commandbus.NewBus()
 	RegisterHandlers(bus, HandlerOptions{
-		NewApproval: func(task model.Task, _, _ string) (model.ApprovalRequest, model.ResumeToken) {
-			return model.ApprovalRequest{ApprovalID: "approval-1", RunID: task.RunID, TaskID: task.ID},
-				model.ResumeToken{TokenID: "token-1", RunID: task.RunID, TaskID: task.ID, ExpiresAt: time.Now().Add(time.Minute)}
+		NewApproval: func(task api.Task, _, _ string) (api.ApprovalRequest, api.ResumeToken) {
+			return api.ApprovalRequest{ApprovalID: "approval-1", RunID: task.RunID, TaskID: task.ID},
+				api.ResumeToken{TokenID: "token-1", RunID: task.RunID, TaskID: task.ID, ExpiresAt: time.Now().Add(time.Minute)}
 		},
 	})
 	metadata := map[string]string{"operation": "turn:2:call:0", "scope": "write:file"}
@@ -124,12 +124,12 @@ func TestRecoverResumeTokenRejectsExpiredToken(t *testing.T) {
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	if err := uow.ResumeTokens().SaveResumeToken(ctx, model.ResumeToken{TokenID: "token-1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+	if err := uow.ResumeTokens().SaveResumeToken(ctx, api.ResumeToken{TokenID: "token-1", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
 		t.Fatalf("SaveResumeToken() error = %v", err)
 	}
 	bus := commandbus.NewBus()
 	RegisterHandlers(bus, HandlerOptions{})
-	if _, err := bus.Execute(ctx, uow, RecoverResumeTokenCommand{TokenID: "token-1"}); err != model.ErrInvalidCommand {
+	if _, err := bus.Execute(ctx, uow, RecoverResumeTokenCommand{TokenID: "token-1"}); err != api.ErrInvalidCommand {
 		t.Fatalf("RecoverResumeToken error = %v, want ErrInvalidCommand", err)
 	}
 }

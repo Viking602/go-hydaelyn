@@ -7,8 +7,8 @@ import (
 	"maps"
 	"time"
 
+	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
@@ -27,10 +27,10 @@ func RegisterDeadLetterHandler(bus *commandbus.Bus, options DeadLetterHandlerOpt
 }
 
 type deadLetterResult struct {
-	Envelope       model.TaskEnvelope
-	Task           model.Task
-	Lease          model.TaskExecutionLease
-	Decision       model.TaskMonitorDecision
+	Envelope       api.TaskEnvelope
+	Task           api.Task
+	Lease          api.TaskExecutionLease
+	Decision       api.TaskMonitorDecision
 	Reason         string
 	Retry          bool
 	TaskChanged    bool
@@ -74,16 +74,16 @@ func (h deadLetterHandler) Handle(ctx context.Context, uow ports.UnitOfWork, cmd
 
 func (h deadLetterHandler) monitor() (ports.TaskMonitor, error) {
 	if h.options.Monitor == nil {
-		return nil, fmt.Errorf("dead-letter handler missing task monitor: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("dead-letter handler missing task monitor: %w", api.ErrInvalidConfiguration)
 	}
 	monitor := h.options.Monitor()
 	if monitor == nil {
-		return nil, fmt.Errorf("dead-letter handler missing task monitor: %w", model.ErrInvalidConfiguration)
+		return nil, fmt.Errorf("dead-letter handler missing task monitor: %w", api.ErrInvalidConfiguration)
 	}
 	return monitor, nil
 }
 
-func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env model.TaskEnvelope, reason string, decision model.TaskMonitorDecision) (deadLetterResult, error) {
+func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env api.TaskEnvelope, reason string, decision api.TaskMonitorDecision) (deadLetterResult, error) {
 	env.Status = "pending"
 	backoff := env.RetryPolicy.Backoff
 	if backoff <= 0 {
@@ -92,13 +92,13 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 	env.NextRetryAt = time.Now().UTC().Add(backoff)
 	result := deadLetterResult{Envelope: env, Decision: decision, Reason: reason, Retry: true}
 	task, err := uow.Tasks().LoadTask(ctx, env.RunID, env.TaskID)
-	if err != nil && !errors.Is(err, model.ErrNotFound) {
+	if err != nil && !errors.Is(err, api.ErrNotFound) {
 		return deadLetterResult{}, err
 	}
 	if err == nil && !corestate.IsTerminalTask(task.Status) {
 		if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, env.RunID, env.TaskID); err != nil {
 			return deadLetterResult{}, err
-		} else if ok && lease.Status == model.LeaseStatusActive {
+		} else if ok && lease.Status == api.LeaseStatusActive {
 			lease, err = execution.Release(ctx, uow, lease.ID, lease.HolderID)
 			if err != nil {
 				return deadLetterResult{}, err
@@ -106,8 +106,8 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 			result.Lease = lease
 			result.LeaseReleased = true
 		}
-		if task.Status != model.TaskStatusDispatched {
-			next, err := corestate.TransitionTask(task, model.TaskStatusDispatched, true)
+		if task.Status != api.TaskStatusDispatched {
+			next, err := corestate.TransitionTask(task, api.TaskStatusDispatched, true)
 			if err != nil {
 				return deadLetterResult{}, err
 			}
@@ -125,17 +125,17 @@ func (h deadLetterHandler) retry(ctx context.Context, uow ports.UnitOfWork, env 
 	if err := uow.MailboxOutbox().UpdateEnvelope(ctx, env); err != nil {
 		return deadLetterResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventMailboxRetryScheduled, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "nextRetryAt": env.NextRetryAt, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(task)}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: env.RunID, TaskID: env.TaskID, Type: api.EventMailboxRetryScheduled, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "nextRetryAt": env.NextRetryAt, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(task)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: env.RunID, TaskID: env.TaskID, Type: api.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
 	result.Envelope = env
 	return result, nil
 }
 
-func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env model.TaskEnvelope, reason string, decision model.TaskMonitorDecision) (deadLetterResult, error) {
+func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env api.TaskEnvelope, reason string, decision api.TaskMonitorDecision) (deadLetterResult, error) {
 	original := env
 	env.Status = "dead"
 	if err := uow.MailboxOutbox().UpdateEnvelope(ctx, env); err != nil {
@@ -148,7 +148,7 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 	result := deadLetterResult{Envelope: env, Task: task, Decision: decision, Reason: reason}
 	if lease, ok, err := uow.Leases().ActiveLeaseForTask(ctx, env.RunID, env.TaskID); err != nil {
 		return deadLetterResult{}, err
-	} else if ok && lease.Status == model.LeaseStatusActive {
+	} else if ok && lease.Status == api.LeaseStatusActive {
 		lease, err = execution.Release(ctx, uow, lease.ID, lease.HolderID)
 		if err != nil {
 			return deadLetterResult{}, err
@@ -157,7 +157,7 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 		result.LeaseReleased = true
 	}
 	if !corestate.IsTerminalTask(task.Status) {
-		next, err := corestate.TransitionTask(task, model.TaskStatusBlocked, true)
+		next, err := corestate.TransitionTask(task, api.TaskStatusBlocked, true)
 		if err != nil {
 			return deadLetterResult{}, err
 		}
@@ -169,7 +169,7 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 		result.TaskChanged = true
 		result.TaskTransition = true
 	}
-	if err := uow.DeadLetters().AppendDeadLetter(ctx, model.DeadLetterEntry{
+	if err := uow.DeadLetters().AppendDeadLetter(ctx, api.DeadLetterEntry{
 		ID:         "deadletter-" + original.ID,
 		EnvelopeID: original.ID,
 		RunID:      original.RunID,
@@ -182,10 +182,10 @@ func (h deadLetterHandler) dead(ctx context.Context, uow ports.UnitOfWork, env m
 	}); err != nil {
 		return deadLetterResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventEnvelopeDeadLettered, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(result.Task)}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: env.RunID, TaskID: env.TaskID, Type: api.EventEnvelopeDeadLettered, Payload: map[string]any{"envelopeId": env.ID, "reason": reason, "envelope": eventpayload.Envelope(env), "task": eventpayload.Task(result.Task)}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: env.RunID, TaskID: env.TaskID, Type: model.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: env.RunID, TaskID: env.TaskID, Type: api.EventTaskMonitorDecision, Payload: map[string]any{"decision": decision.Decision, "reason": decision.Reason}, RecordedAt: time.Now().UTC()}); err != nil {
 		return deadLetterResult{}, err
 	}
 	return result, nil

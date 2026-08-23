@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type memoryOutputGateway struct{}
 
-func (memoryOutputGateway) Publish(context.Context, model.UserMessage) error {
+func (memoryOutputGateway) Publish(context.Context, api.UserMessage) error {
 	return nil
 }
 
@@ -30,7 +30,7 @@ func (r *Runtime) DrainResponseOutbox(ctx context.Context) (int, error) {
 
 	published := 0
 	for _, message := range messages {
-		if message.Status != model.UserMessageQueued {
+		if message.Status != api.UserMessageQueued {
 			continue
 		}
 		if err := r.PublishResponse(ctx, PublishResponseCommand{RunID: message.RunID, MessageID: message.ID}); err != nil {
@@ -41,7 +41,7 @@ func (r *Runtime) DrainResponseOutbox(ctx context.Context) (int, error) {
 	return published, nil
 }
 
-func (r *Runtime) queuedResponseMessages(ctx context.Context) ([]model.UserMessage, error) {
+func (r *Runtime) queuedResponseMessages(ctx context.Context) ([]api.UserMessage, error) {
 	uow, done, err := r.beginReadUoW(ctx)
 	if err != nil {
 		return nil, err

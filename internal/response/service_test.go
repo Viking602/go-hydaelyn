@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/memory"
 	"github.com/Viking602/venat/internal/response"
 )
@@ -18,11 +18,11 @@ func TestRedactionHelpersRemoveEmailAndInternalTrace(t *testing.T) {
 }
 
 func TestCriticalContextItemDefaultsSource(t *testing.T) {
-	item := response.CriticalContextItem("id-1", "run-1", "task-1", model.SourceIdentity{}, "key", "payload")
-	if item.Source.Type != model.SourceSystem || item.Source.ID != "orchestrator" {
+	item := response.CriticalContextItem("id-1", "run-1", "task-1", api.SourceIdentity{}, "key", "payload")
+	if item.Source.Type != api.SourceSystem || item.Source.ID != "orchestrator" {
 		t.Fatalf("default source = %#v", item.Source)
 	}
-	if item.Type != model.BlackboardItemContext || item.Key != "key" || item.Content != "payload" {
+	if item.Type != api.BlackboardItemContext || item.Key != "key" || item.Content != "payload" {
 		t.Fatalf("item = %#v", item)
 	}
 }
@@ -35,7 +35,7 @@ func TestAppendBlackboardWrittenEvent(t *testing.T) {
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
-	item := response.CriticalContextItem("id-1", "run-1", "task-1", model.SourceIdentity{Type: model.SourceAgent, ID: "a"}, "key", "payload")
+	item := response.CriticalContextItem("id-1", "run-1", "task-1", api.SourceIdentity{Type: api.SourceAgent, ID: "a"}, "key", "payload")
 	if err := response.AppendBlackboardWrittenEvent(ctx, uow, item); err != nil {
 		t.Fatalf("AppendBlackboardWrittenEvent() error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestAppendBlackboardWrittenEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if len(events) != 1 || events[0].Type != model.EventBlackboardItemWritten {
+	if len(events) != 1 || events[0].Type != api.EventBlackboardItemWritten {
 		t.Fatalf("events = %#v", events)
 	}
 }

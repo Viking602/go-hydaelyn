@@ -6,7 +6,7 @@ import (
 	"maps"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -22,9 +22,9 @@ type StartInput struct {
 	Metadata  map[string]string
 }
 
-func StartSpan(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.TraceSpan, error) {
+func StartSpan(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (api.TraceSpan, error) {
 	now := time.Now().UTC()
-	span := model.TraceSpan{
+	span := api.TraceSpan{
 		ID:        newID("span"),
 		RunID:     input.RunID,
 		TaskID:    input.TaskID,
@@ -32,7 +32,7 @@ func StartSpan(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, inp
 		ParentID:  input.ParentID,
 		Name:      input.Name,
 		Component: input.Component,
-		Status:    model.TraceSpanStarted,
+		Status:    api.TraceSpanStarted,
 		StartedAt: now,
 		Metadata:  maps.Clone(input.Metadata),
 	}
@@ -40,39 +40,39 @@ func StartSpan(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, inp
 		span.TraceID = span.ID
 	}
 	if err := uow.Trace().SaveTraceSpan(ctx, span); err != nil {
-		return model.TraceSpan{}, err
+		return api.TraceSpan{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: span.RunID, TaskID: span.TaskID, Type: model.EventTraceSpanStarted, Payload: Payload(span), RecordedAt: now}); err != nil {
-		return model.TraceSpan{}, err
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: span.RunID, TaskID: span.TaskID, Type: api.EventTraceSpanStarted, Payload: Payload(span), RecordedAt: now}); err != nil {
+		return api.TraceSpan{}, err
 	}
 	return span, nil
 }
 
-func EndSpan(ctx context.Context, uow ports.UnitOfWork, spanID, spanError string) (model.TraceSpan, error) {
+func EndSpan(ctx context.Context, uow ports.UnitOfWork, spanID, spanError string) (api.TraceSpan, error) {
 	updater, ok := uow.Trace().(ports.TraceSpanUpdater)
 	if !ok {
-		return model.TraceSpan{}, fmt.Errorf("trace store does not implement TraceSpanUpdater: %w", model.ErrInvalidConfiguration)
+		return api.TraceSpan{}, fmt.Errorf("trace store does not implement TraceSpanUpdater: %w", api.ErrInvalidConfiguration)
 	}
 	span, err := updater.LoadTraceSpan(ctx, spanID)
 	if err != nil {
-		return model.TraceSpan{}, err
+		return api.TraceSpan{}, err
 	}
-	span.Status = model.TraceSpanEnded
+	span.Status = api.TraceSpanEnded
 	if spanError != "" {
-		span.Status = model.TraceSpanFailed
+		span.Status = api.TraceSpanFailed
 		span.Error = spanError
 	}
 	span.EndedAt = time.Now().UTC()
 	if err := updater.UpdateTraceSpan(ctx, span); err != nil {
-		return model.TraceSpan{}, err
+		return api.TraceSpan{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: span.RunID, TaskID: span.TaskID, Type: model.EventTraceSpanEnded, Payload: Payload(span), RecordedAt: time.Now().UTC()}); err != nil {
-		return model.TraceSpan{}, err
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: span.RunID, TaskID: span.TaskID, Type: api.EventTraceSpanEnded, Payload: Payload(span), RecordedAt: time.Now().UTC()}); err != nil {
+		return api.TraceSpan{}, err
 	}
 	return span, nil
 }
 
-func Payload(span model.TraceSpan) map[string]any {
+func Payload(span api.TraceSpan) map[string]any {
 	return map[string]any{
 		"spanId":    span.ID,
 		"runId":     span.RunID,

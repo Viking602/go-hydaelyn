@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
@@ -30,7 +30,7 @@ type CreateTaskInput struct {
 	RunID              string
 	TaskID             string
 	ParentTaskID       string
-	Type               model.TaskType
+	Type               api.TaskType
 	Goal               string
 	Input              json.RawMessage
 	AssignedAgentID    string
@@ -40,25 +40,25 @@ type CreateTaskInput struct {
 	Tags               []string
 	CompletionCriteria []string
 	DependsOn          []string
-	AwaitMode          model.AwaitMode
+	AwaitMode          api.AwaitMode
 	AwaitQuorum        int
-	OnDependencyFailed model.OnDependencyFailed
-	ReadSelectors      []model.BlackboardSelector
+	OnDependencyFailed api.OnDependencyFailed
+	ReadSelectors      []api.BlackboardSelector
 	WriteTargets       []string
-	RetryPolicy        model.RetryPolicy
-	PolicyDecisions    []model.PolicyDecision
+	RetryPolicy        api.RetryPolicy
+	PolicyDecisions    []api.PolicyDecision
 	InputSchema        json.RawMessage
 	OutputSchema       json.RawMessage
-	Budget             *model.TaskBudget
-	ResourceClaims     []model.ResourceClaimSpec
+	Budget             *api.TaskBudget
+	ResourceClaims     []api.ResourceClaimSpec
 }
 
-func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, error) {
+func Start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (api.Run, api.Task, error) {
 	run, root, _, err := start(ctx, uow, newID, input)
 	return run, root, err
 }
 
-func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (model.Run, model.Task, bool, error) {
+func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input StartInput) (api.Run, api.Task, bool, error) {
 	now := time.Now().UTC()
 	runID := input.RunID
 	if runID == "" {
@@ -73,24 +73,24 @@ func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 		if existing.RootTaskID != rootID || existing.Request != input.Request ||
 			existing.AgentVersion != input.AgentVersion ||
 			!maps.Equal(existing.Metadata, input.Metadata) {
-			return model.Run{}, model.Task{}, false, fmt.Errorf(
+			return api.Run{}, api.Task{}, false, fmt.Errorf(
 				"run: start input conflicts with existing run %q: %w",
 				runID,
-				model.ErrIdempotencyConflict,
+				api.ErrIdempotencyConflict,
 			)
 		}
 		root, loadErr := uow.Tasks().LoadTask(ctx, runID, rootID)
 		if loadErr != nil {
-			return model.Run{}, model.Task{}, false, loadErr
+			return api.Run{}, api.Task{}, false, loadErr
 		}
 		return existing, root, false, nil
 	}
-	if !errors.Is(err, model.ErrNotFound) {
-		return model.Run{}, model.Task{}, false, err
+	if !errors.Is(err, api.ErrNotFound) {
+		return api.Run{}, api.Task{}, false, err
 	}
-	run := model.Run{
+	run := api.Run{
 		ID:           runID,
-		Status:       model.RunStatusCreated,
+		Status:       api.RunStatusCreated,
 		Request:      input.Request,
 		RootTaskID:   rootID,
 		AgentVersion: input.AgentVersion,
@@ -98,27 +98,27 @@ func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	root := model.Task{
+	root := api.Task{
 		ID:             rootID,
 		RunID:          runID,
-		Type:           model.TaskTypeWorker,
+		Type:           api.TaskTypeWorker,
 		OwnerComponent: "orchestrator",
-		Status:         model.TaskStatusCreated,
+		Status:         api.TaskStatusCreated,
 		Version:        1,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	if err := uow.Runs().SaveRun(ctx, run); err != nil {
-		return model.Run{}, model.Task{}, false, err
+		return api.Run{}, api.Task{}, false, err
 	}
 	if err := uow.Tasks().SaveTask(ctx, root); err != nil {
-		return model.Run{}, model.Task{}, false, err
+		return api.Run{}, api.Task{}, false, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: runID, TaskID: rootID, Type: model.EventRunStarted, Payload: map[string]any{"request": input.Request, "run": eventpayload.Run(run)}, RecordedAt: now}); err != nil {
-		return model.Run{}, model.Task{}, false, err
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: runID, TaskID: rootID, Type: api.EventRunStarted, Payload: map[string]any{"request": input.Request, "run": eventpayload.Run(run)}, RecordedAt: now}); err != nil {
+		return api.Run{}, api.Task{}, false, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: runID, TaskID: rootID, Type: model.EventTaskCreated, Payload: eventpayload.Task(root), RecordedAt: now}); err != nil {
-		return model.Run{}, model.Task{}, false, err
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: runID, TaskID: rootID, Type: api.EventTaskCreated, Payload: eventpayload.Task(root), RecordedAt: now}); err != nil {
+		return api.Run{}, api.Task{}, false, err
 	}
 	return run, root, true, nil
 }
@@ -126,7 +126,7 @@ func start(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input S
 // cloneTaskBudget deep-copies the per-task budget so the stored task does not
 // alias the caller's pointer. The budget is a flat value struct, so copying
 // the pointee is a complete clone.
-func cloneTaskBudget(budget *model.TaskBudget) *model.TaskBudget {
+func cloneTaskBudget(budget *api.TaskBudget) *api.TaskBudget {
 	if budget == nil {
 		return nil
 	}
@@ -134,27 +134,27 @@ func cloneTaskBudget(budget *model.TaskBudget) *model.TaskBudget {
 	return &cloned
 }
 
-func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input CreateTaskInput) (model.Task, error) {
+func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, input CreateTaskInput) (api.Task, error) {
 	if err := validateTaskInput(input); err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
 	run, err := uow.Runs().LoadRun(ctx, input.RunID)
 	if err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
 	if corestate.IsTerminalRun(run.Status) {
-		return model.Task{}, model.ErrTerminalState
+		return api.Task{}, api.ErrTerminalState
 	}
 	taskID := input.TaskID
 	if taskID == "" {
 		taskID = newID("task")
 	}
 	now := time.Now().UTC()
-	status := model.TaskStatusCreated
+	status := api.TaskStatusCreated
 	if len(input.DependsOn) > 0 {
-		status = model.TaskStatusWaitingDependency
+		status = api.TaskStatusWaitingDependency
 	}
-	task := model.Task{
+	task := api.Task{
 		ID:                 taskID,
 		RunID:              input.RunID,
 		ParentTaskID:       input.ParentTaskID,
@@ -185,7 +185,7 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		UpdatedAt:          now,
 	}
 	if task.Type == "" {
-		task.Type = model.TaskTypeWorker
+		task.Type = api.TaskTypeWorker
 	}
 	if task.AssignedAgentID == "" && task.OwnerAgentID != "" {
 		task.AssignedAgentID = task.OwnerAgentID
@@ -194,10 +194,10 @@ func CreateTask(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, in
 		task.OwnerHistory = []string{task.OwnerAgentID}
 	}
 	if err := uow.Tasks().SaveTask(ctx, task); err != nil {
-		return model.Task{}, err
+		return api.Task{}, err
 	}
-	if err := uow.Events().AppendEvent(ctx, model.Event{RunID: input.RunID, TaskID: task.ID, Type: model.EventTaskCreated, Payload: eventpayload.Task(task), RecordedAt: now}); err != nil {
-		return model.Task{}, err
+	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: input.RunID, TaskID: task.ID, Type: api.EventTaskCreated, Payload: eventpayload.Task(task), RecordedAt: now}); err != nil {
+		return api.Task{}, err
 	}
 	return task, nil
 }
@@ -215,26 +215,26 @@ func validateTaskInput(input CreateTaskInput) error {
 			return fmt.Errorf("run: task %s must be valid JSON", field.name)
 		}
 	}
-	if input.RetryPolicy.MaxAttempts < 0 || input.RetryPolicy.MaxAttempts > model.MaxRetryAttempts {
+	if input.RetryPolicy.MaxAttempts < 0 || input.RetryPolicy.MaxAttempts > api.MaxRetryAttempts {
 		return fmt.Errorf(
 			"run: task retry max attempts must be between 0 and %d: %w",
-			model.MaxRetryAttempts,
-			model.ErrInvalidCommand,
+			api.MaxRetryAttempts,
+			api.ErrInvalidCommand,
 		)
 	}
 	if input.RetryPolicy.Backoff < 0 || input.RetryPolicy.MaxBackoff < 0 {
-		return fmt.Errorf("run: task retry delays must not be negative: %w", model.ErrInvalidCommand)
+		return fmt.Errorf("run: task retry delays must not be negative: %w", api.ErrInvalidCommand)
 	}
 	claimKeys := make(map[string]struct{}, len(input.ResourceClaims))
 	for _, claim := range input.ResourceClaims {
 		if claim.ID != "" || strings.TrimSpace(claim.Key) == "" {
-			return fmt.Errorf("run: task resource claims require a key and cannot preassign an ID: %w", model.ErrInvalidCommand)
+			return fmt.Errorf("run: task resource claims require a key and cannot preassign an ID: %w", api.ErrInvalidCommand)
 		}
-		if claim.Mode != model.ResourceClaimShared && claim.Mode != model.ResourceClaimExclusive {
-			return fmt.Errorf("run: task resource claim %q has invalid mode %q: %w", claim.Key, claim.Mode, model.ErrInvalidCommand)
+		if claim.Mode != api.ResourceClaimShared && claim.Mode != api.ResourceClaimExclusive {
+			return fmt.Errorf("run: task resource claim %q has invalid mode %q: %w", claim.Key, claim.Mode, api.ErrInvalidCommand)
 		}
 		if _, duplicate := claimKeys[claim.Key]; duplicate {
-			return fmt.Errorf("run: duplicate task resource claim key %q: %w", claim.Key, model.ErrInvalidCommand)
+			return fmt.Errorf("run: duplicate task resource claim key %q: %w", claim.Key, api.ErrInvalidCommand)
 		}
 		claimKeys[claim.Key] = struct{}{}
 	}

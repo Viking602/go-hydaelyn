@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/memory"
 	tracesvc "github.com/Viking602/venat/internal/trace"
 )
@@ -40,14 +40,14 @@ func TestStartSpanDefaultsTraceIDAndCopiesMetadata(t *testing.T) {
 	}
 	metadata["phase"] = "mutated"
 
-	if span.TraceID != span.ID || span.Metadata["phase"] != "dispatch" || span.Status != model.TraceSpanStarted {
+	if span.TraceID != span.ID || span.Metadata["phase"] != "dispatch" || span.Status != api.TraceSpanStarted {
 		t.Fatalf("StartSpan() contract = %#v", span)
 	}
 	events, err := uow.Events().ListEvents(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if len(events) != 1 || events[0].Type != model.EventTraceSpanStarted {
+	if len(events) != 1 || events[0].Type != api.EventTraceSpanStarted {
 		t.Fatalf("StartSpan() events = %#v", events)
 	}
 }
@@ -74,14 +74,14 @@ func TestEndSpanMarksFailureAndEmitsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EndSpan() error = %v", err)
 	}
-	if ended.Status != model.TraceSpanFailed || ended.Error != "denied" || ended.EndedAt.IsZero() {
+	if ended.Status != api.TraceSpanFailed || ended.Error != "denied" || ended.EndedAt.IsZero() {
 		t.Fatalf("EndSpan() contract = %#v", ended)
 	}
 	events, err := uow.Events().ListEvents(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if len(events) != 2 || events[1].Type != model.EventTraceSpanEnded {
+	if len(events) != 2 || events[1].Type != api.EventTraceSpanEnded {
 		t.Fatalf("EndSpan() events = %#v", events)
 	}
 }

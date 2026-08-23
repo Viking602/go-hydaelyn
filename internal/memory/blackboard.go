@@ -7,14 +7,14 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type subscription struct {
 	id     uint64
 	runID  string
-	filter model.BlackboardSelector
-	ch     chan model.BlackboardItem
+	filter api.BlackboardSelector
+	ch     chan api.BlackboardItem
 	done   <-chan struct{}
 	once   sync.Once
 }
@@ -30,9 +30,9 @@ func newSubscriptionHub() *subscriptionHub {
 	return &subscriptionHub{subs: map[string][]*subscription{}}
 }
 
-func (h *subscriptionHub) Subscribe(ctx context.Context, runID string, filter model.BlackboardSelector) (<-chan model.BlackboardItem, func() error, error) {
+func (h *subscriptionHub) Subscribe(ctx context.Context, runID string, filter api.BlackboardSelector) (<-chan api.BlackboardItem, func() error, error) {
 	if runID == "" {
-		return nil, nil, model.ErrInvalidCommand
+		return nil, nil, api.ErrInvalidCommand
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -44,7 +44,7 @@ func (h *subscriptionHub) Subscribe(ctx context.Context, runID string, filter mo
 		id:     h.nextID,
 		runID:  runID,
 		filter: filter,
-		ch:     make(chan model.BlackboardItem, 32),
+		ch:     make(chan api.BlackboardItem, 32),
 		done:   ctx.Done(),
 	}
 	h.subs[runID] = append(h.subs[runID], sub)
@@ -54,7 +54,7 @@ func (h *subscriptionHub) Subscribe(ctx context.Context, runID string, filter mo
 		stop()
 		err := h.unsubscribe(sub)
 		if stopped.CompareAndSwap(false, true) {
-			if errors.Is(err, model.ErrNotFound) {
+			if errors.Is(err, api.ErrNotFound) {
 				return nil
 			}
 			return err
@@ -77,14 +77,14 @@ func (h *subscriptionHub) unsubscribe(sub *subscription) error {
 	list := h.subs[sub.runID]
 	idx := slices.IndexFunc(list, func(current *subscription) bool { return current.id == sub.id })
 	if idx < 0 {
-		return model.ErrNotFound
+		return api.ErrNotFound
 	}
 	h.subs[sub.runID] = slices.Delete(list, idx, idx+1)
 	sub.once.Do(func() { close(sub.ch) })
 	return nil
 }
 
-func (h *subscriptionHub) Notify(items []model.BlackboardItem) {
+func (h *subscriptionHub) Notify(items []api.BlackboardItem) {
 	if len(items) == 0 {
 		return
 	}
@@ -120,8 +120,8 @@ func (h *subscriptionHub) Notify(items []model.BlackboardItem) {
 	}
 }
 
-func selectBlackboardItems(state *State, runID string, selector model.BlackboardSelector) []model.BlackboardItem {
-	items := make([]model.BlackboardItem, 0, len(state.Blackboard[runID]))
+func selectBlackboardItems(state *State, runID string, selector api.BlackboardSelector) []api.BlackboardItem {
+	items := make([]api.BlackboardItem, 0, len(state.Blackboard[runID]))
 	for _, item := range state.Blackboard[runID] {
 		if matchesBlackboardSelector(item, selector) {
 			items = append(items, item)
@@ -133,7 +133,7 @@ func selectBlackboardItems(state *State, runID string, selector model.Blackboard
 	return items
 }
 
-func matchesBlackboardSelector(item model.BlackboardItem, selector model.BlackboardSelector) bool {
+func matchesBlackboardSelector(item api.BlackboardItem, selector api.BlackboardSelector) bool {
 	if selector.RunID != "" && item.RunID != selector.RunID {
 		return false
 	}

@@ -6,12 +6,12 @@ import (
 	"flag"
 	"io"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("inspect-events", flag.ContinueOnError)
-	eventsPath := flags.String("events", "", "path to JSON-encoded []model.Event")
+	eventsPath := flags.String("events", "", "path to JSON-encoded []api.Event")
 	taskFilter := flags.String("task", "", "only show events for this task id")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -19,13 +19,13 @@ func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error 
 	if *eventsPath == "" {
 		return errors.New("inspect-events requires --events")
 	}
-	var events []model.Event
+	var events []api.Event
 	if err := readJSONFile(*eventsPath, &events); err != nil {
 		return err
 	}
 	out := events
 	if *taskFilter != "" {
-		filtered := make([]model.Event, 0, len(events))
+		filtered := make([]api.Event, 0, len(events))
 		for _, ev := range events {
 			if ev.TaskID == *taskFilter {
 				filtered = append(filtered, ev)
@@ -40,7 +40,7 @@ func runInspectEvents(_ context.Context, args []string, stdout io.Writer) error 
 	})
 }
 
-func firstRunID(events []model.Event) string {
+func firstRunID(events []api.Event) string {
 	if len(events) == 0 {
 		return ""
 	}

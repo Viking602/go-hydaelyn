@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-08-15. Effective from v0.15.0.
+Implemented — 2026-08-23. Effective from v0.15.0.
 
 ## Context
 
@@ -25,14 +25,12 @@ dispatch bypasses typed results.
    Callers use `RunEvents`, `ReplayContext`, `ReplayRunStateContext`,
    `ReadyTasksContext`, `ActiveLeaseCountContext`, `ListTraceSpans`,
    `ResponseOutboxContext`.
-3. **Expose domain sub-façades** that embed `*Runner` so hosts can pass
-   a narrower value:
+3. **Expose explicit domain sub-façades** without embedding `*Runner`:
    `Runner.Admin() RunAdmin`, `Runner.Governance() Governance`,
    `Runner.Blackboard() Blackboard`.
-   Raw store verbs (`SaveRun`, `Begin`, `StoreProvider`, …) stay on
-   `Runner` in v0.15 and are documented as administration. A later PR
-   may stop promoting them on `Runner` once `Admin()` is the documented
-   path.
+   Each value forwards only its named domain methods. Raw store verbs
+   remain on `Runner` for source compatibility in v0.15 but are documented
+   as administration; they are not promoted through the other façades.
 4. **Do not add new no-context methods.**
 
 ## Anti-patterns rejected by this ADR
@@ -44,8 +42,9 @@ dispatch bypasses typed results.
 
 ## Impact
 
-v0.15 is a source break for callers of the deleted no-context methods.
-`ExecuteCommand` still compiles with a deprecation comment.
+v0.15 is a source break for callers of deleted no-context methods and for
+code that treated a domain sub-façade as the complete Runner. `ExecuteCommand`
+still compiles with a deprecation comment.
 
 ## References
 

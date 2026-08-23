@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 
+	"github.com/Viking602/venat/api"
 	blackboardsvc "github.com/Viking602/venat/internal/blackboard"
-	"github.com/Viking602/venat/internal/core/model"
 	"github.com/Viking602/venat/internal/core/ports"
 )
 
@@ -40,7 +40,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 // WriteItem is the public BlackboardStore API. It goes through the UoW command
 // path so policy, trace, and events are all recorded.
-func (r *Runtime) WriteItem(ctx context.Context, item model.BlackboardItem) error {
+func (r *Runtime) WriteItem(ctx context.Context, item api.BlackboardItem) error {
 	_, err := r.ExecuteCommand(ctx, WriteBlackboardItemCommand{Item: item})
 	return err
 }
@@ -54,7 +54,7 @@ func registerBlackboardUoWCommandHandlers(runtime *Runtime) {
 }
 
 // SelectItems is the public BlackboardStore read API backed by the configured store provider.
-func (r *Runtime) SelectItems(ctx context.Context, runID string, selector model.BlackboardSelector) ([]model.BlackboardItem, error) {
+func (r *Runtime) SelectItems(ctx context.Context, runID string, selector api.BlackboardSelector) ([]api.BlackboardItem, error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -69,8 +69,8 @@ func (r *Runtime) SelectItems(ctx context.Context, runID string, selector model.
 	if policySelector.RunID == "" {
 		policySelector.RunID = runID
 	}
-	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
-		Operation: model.PolicyOperationBlackboardRead,
+	decision, err := r.authorizeUoW(ctx, uow, api.PolicyRequest{
+		Operation: api.PolicyOperationBlackboardRead,
 		RunID:     runID,
 		Selector:  &policySelector,
 	})

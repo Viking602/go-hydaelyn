@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/ports"
 	corestate "github.com/Viking602/venat/internal/core/state"
 	"github.com/Viking602/venat/internal/eventpayload"
@@ -34,7 +34,7 @@ func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string
 	if err != nil {
 		return err
 	}
-	attempts, err := uow.ActionAttempts().ListActionAttempts(ctx, model.ActionAttemptSelector{RunID: runID})
+	attempts, err := uow.ActionAttempts().ListActionAttempts(ctx, api.ActionAttemptSelector{RunID: runID})
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (r *Runtime) recoverExpiredTaskExecutions(ctx context.Context, runID string
 	}
 	changed := false
 	for _, task := range tasks {
-		if task.Status != model.TaskStatusRunning {
+		if task.Status != api.TaskStatusRunning {
 			continue
 		}
 		taskChanged, err := recovery.recoverTask(ctx, task)
@@ -76,18 +76,18 @@ type executionRecovery struct {
 	uow           ports.UnitOfWork
 	runID         string
 	now           time.Time
-	envelopes     map[string]model.TaskEnvelope
+	envelopes     map[string]api.TaskEnvelope
 	unresolved    map[string][]string
 	runReconciled bool
 }
 
-func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.Task) (bool, error) {
+func (recovery *executionRecovery) recoverTask(ctx context.Context, task api.Task) (bool, error) {
 	lease, hasLease, err := recovery.uow.Leases().ActiveLeaseForTask(ctx, recovery.runID, task.ID)
 	if err != nil {
 		return false, err
 	}
-	if hasLease && lease.Status == model.LeaseStatusActive {
-		if model.LeaseExpiry(lease).After(recovery.now) {
+	if hasLease && lease.Status == api.LeaseStatusActive {
+		if api.LeaseExpiry(lease).After(recovery.now) {
 			return false, nil
 		}
 		released, err := recovery.uow.Leases().ReleaseExpiredLease(ctx, lease.ID, lease.Version, recovery.now)
@@ -100,10 +100,10 @@ func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.T
 		if err := execution.ExpireResourceClaims(ctx, recovery.uow, lease.ID, recovery.now); err != nil {
 			return false, err
 		}
-		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
+		if err := recovery.uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      recovery.runID,
 			TaskID:     task.ID,
-			Type:       model.EventTaskExecutionReleased,
+			Type:       api.EventTaskExecutionReleased,
 			Payload:    map[string]any{"leaseId": lease.ID, "reason": "expired", "version": lease.Version},
 			RecordedAt: recovery.now,
 		}); err != nil {
@@ -116,35 +116,35 @@ func (recovery *executionRecovery) recoverTask(ctx context.Context, task model.T
 	return true, recovery.redispatch(ctx, task)
 }
 
-func (recovery *executionRecovery) quarantine(ctx context.Context, task model.Task, attemptIDs []string) error {
+func (recovery *executionRecovery) quarantine(ctx context.Context, task api.Task, attemptIDs []string) error {
 	sort.Strings(attemptIDs)
 	for _, attemptID := range attemptIDs {
 		attempt, err := recovery.uow.ActionAttempts().LoadActionAttempt(ctx, attemptID)
 		if err != nil {
 			return err
 		}
-		if attempt.Status == model.ActionAttemptUnknown && attempt.RequiresReconcile {
+		if attempt.Status == api.ActionAttemptUnknown && attempt.RequiresReconcile {
 			continue
 		}
-		if attempt.Status != model.ActionAttemptRunning {
+		if attempt.Status != api.ActionAttemptRunning {
 			continue
 		}
-		attempt.Status = model.ActionAttemptUnknown
+		attempt.Status = api.ActionAttemptUnknown
 		attempt.RequiresReconcile = true
 		if err := recovery.uow.ActionAttempts().SaveActionAttempt(ctx, attempt); err != nil {
 			return err
 		}
-		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
+		if err := recovery.uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      recovery.runID,
 			TaskID:     task.ID,
-			Type:       model.EventActionAttemptUpdated,
+			Type:       api.EventActionAttemptUpdated,
 			Payload:    map[string]any{"attemptId": attempt.AttemptID, "status": string(attempt.Status), "requiresReconcile": true},
 			RecordedAt: recovery.now,
 		}); err != nil {
 			return err
 		}
 	}
-	next, err := corestate.TransitionTask(task, model.TaskStatusReconcileRequired, true)
+	next, err := corestate.TransitionTask(task, api.TaskStatusReconcileRequired, true)
 	if err != nil {
 		return err
 	}
@@ -152,10 +152,10 @@ func (recovery *executionRecovery) quarantine(ctx context.Context, task model.Ta
 	if err := recovery.uow.Tasks().SaveTask(ctx, next); err != nil {
 		return err
 	}
-	if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
+	if err := recovery.uow.Events().AppendEvent(ctx, api.Event{
 		RunID:      recovery.runID,
 		TaskID:     task.ID,
-		Type:       model.EventActionReconcileRequired,
+		Type:       api.EventActionReconcileRequired,
 		Payload:    map[string]any{"attemptIds": attemptIDs, "reason": next.Error, "task": eventpayload.Task(next)},
 		RecordedAt: recovery.now,
 	}); err != nil {
@@ -172,18 +172,18 @@ func (recovery *executionRecovery) reconcileRun(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if run.Status != model.RunStatusReconcileRequired {
-		next, err := corestate.TransitionRun(run, model.RunStatusReconcileRequired)
+	if run.Status != api.RunStatusReconcileRequired {
+		next, err := corestate.TransitionRun(run, api.RunStatusReconcileRequired)
 		if err != nil {
 			return err
 		}
 		if err := recovery.uow.Runs().SaveRun(ctx, next); err != nil {
 			return err
 		}
-		if err := recovery.uow.Events().AppendEvent(ctx, model.Event{
+		if err := recovery.uow.Events().AppendEvent(ctx, api.Event{
 			RunID:      next.ID,
 			TaskID:     next.RootTaskID,
-			Type:       model.EventRunStatusChanged,
+			Type:       api.EventRunStatusChanged,
 			Payload:    map[string]any{"from": string(run.Status), "to": string(next.Status), "run": eventpayload.Run(next)},
 			RecordedAt: recovery.now,
 		}); err != nil {
@@ -194,8 +194,8 @@ func (recovery *executionRecovery) reconcileRun(ctx context.Context) error {
 	return nil
 }
 
-func (recovery *executionRecovery) redispatch(ctx context.Context, task model.Task) error {
-	next, err := corestate.TransitionTask(task, model.TaskStatusDispatched, true)
+func (recovery *executionRecovery) redispatch(ctx context.Context, task api.Task) error {
+	next, err := corestate.TransitionTask(task, api.TaskStatusDispatched, true)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (recovery *executionRecovery) redispatch(ctx context.Context, task model.Ta
 	}
 	envelope, found := recovery.envelopes[task.ID]
 	if !found {
-		envelope = model.TaskEnvelope{
+		envelope = api.TaskEnvelope{
 			ID:              recovery.runtime.newID("env"),
 			RunID:           recovery.runID,
 			TaskID:          task.ID,
@@ -227,26 +227,26 @@ func (recovery *executionRecovery) redispatch(ctx context.Context, task model.Ta
 		return err
 	}
 	recovery.envelopes[task.ID] = envelope
-	return recovery.uow.Events().AppendEvent(ctx, model.Event{
+	return recovery.uow.Events().AppendEvent(ctx, api.Event{
 		RunID:      recovery.runID,
 		TaskID:     task.ID,
-		Type:       model.EventTaskDispatched,
+		Type:       api.EventTaskDispatched,
 		Payload:    map[string]any{"envelope": eventpayload.Envelope(envelope), "reason": "recovery"},
 		RecordedAt: recovery.now,
 	})
 }
 
-func hasRunningTask(tasks []model.Task) bool {
+func hasRunningTask(tasks []api.Task) bool {
 	for _, task := range tasks {
-		if task.Status == model.TaskStatusRunning {
+		if task.Status == api.TaskStatusRunning {
 			return true
 		}
 	}
 	return false
 }
 
-func recoverableEnvelopes(envelopes []model.TaskEnvelope) map[string]model.TaskEnvelope {
-	byTask := make(map[string]model.TaskEnvelope)
+func recoverableEnvelopes(envelopes []api.TaskEnvelope) map[string]api.TaskEnvelope {
+	byTask := make(map[string]api.TaskEnvelope)
 	for _, envelope := range envelopes {
 		if envelope.Status != "dead" {
 			byTask[envelope.TaskID] = envelope
@@ -255,7 +255,7 @@ func recoverableEnvelopes(envelopes []model.TaskEnvelope) map[string]model.TaskE
 	return byTask
 }
 
-func unresolvedActionAttempts(attempts []model.ActionAttempt) map[string][]string {
+func unresolvedActionAttempts(attempts []api.ActionAttempt) map[string][]string {
 	byTask := make(map[string][]string)
 	for _, attempt := range attempts {
 		if !isUnresolvedActionAttempt(attempt) {
@@ -266,12 +266,12 @@ func unresolvedActionAttempts(attempts []model.ActionAttempt) map[string][]strin
 	return byTask
 }
 
-func isUnresolvedActionAttempt(attempt model.ActionAttempt) bool {
+func isUnresolvedActionAttempt(attempt api.ActionAttempt) bool {
 	if attempt.RequiresReconcile {
 		return true
 	}
 	switch attempt.Status {
-	case model.ActionAttemptRunning, model.ActionAttemptCreated, model.ActionAttemptUnknown:
+	case api.ActionAttemptRunning, api.ActionAttemptCreated, api.ActionAttemptUnknown:
 		return true
 	default:
 		return false

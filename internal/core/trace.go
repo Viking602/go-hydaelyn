@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	tracesvc "github.com/Viking602/venat/internal/trace"
 )
 
@@ -12,14 +12,14 @@ type (
 	EndTraceSpanCommand   = tracesvc.EndTraceSpanCommand
 )
 
-func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (model.TraceSpan, error) {
+func (r *Runtime) StartTraceSpan(ctx context.Context, cmd StartTraceSpanCommand) (api.TraceSpan, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.TraceSpan{}, err
+		return api.TraceSpan{}, err
 	}
-	span, ok := result.(model.TraceSpan)
+	span, ok := result.(api.TraceSpan)
 	if !ok {
-		return model.TraceSpan{}, ErrInvalidCommand
+		return api.TraceSpan{}, ErrInvalidCommand
 	}
 	return span, nil
 }
@@ -29,7 +29,7 @@ func (r *Runtime) EndTraceSpan(ctx context.Context, cmd EndTraceSpanCommand) err
 	return err
 }
 
-func (r *Runtime) TraceSpans(ctx context.Context, runID string) []model.TraceSpan {
+func (r *Runtime) TraceSpans(ctx context.Context, runID string) []api.TraceSpan {
 	spans, err := r.ListTraceSpans(ctx, runID)
 	if err != nil {
 		return nil
@@ -37,7 +37,7 @@ func (r *Runtime) TraceSpans(ctx context.Context, runID string) []model.TraceSpa
 	return spans
 }
 
-func (r *Runtime) ListTraceSpans(ctx context.Context, runID string) ([]model.TraceSpan, error) {
+func (r *Runtime) ListTraceSpans(ctx context.Context, runID string) ([]api.TraceSpan, error) {
 	uow, err := r.beginWriteUoW(ctx)
 	if err != nil {
 		return nil, err
@@ -48,8 +48,8 @@ func (r *Runtime) ListTraceSpans(ctx context.Context, runID string) ([]model.Tra
 			_ = uow.Rollback(ctx)
 		}
 	}()
-	decision, err := r.authorizeUoW(ctx, uow, model.PolicyRequest{
-		Operation: model.PolicyOperationTraceRead,
+	decision, err := r.authorizeUoW(ctx, uow, api.PolicyRequest{
+		Operation: api.PolicyOperationTraceRead,
 		RunID:     runID,
 	})
 	if err != nil {

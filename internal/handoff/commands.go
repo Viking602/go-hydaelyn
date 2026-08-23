@@ -1,12 +1,5 @@
 package handoff
 
-type HandoffCommand struct {
-	RunID          string
-	TaskID         string
-	FromAgentID    string
-	ToAgentID      string
-	TaskVersion    int
-	HandoffContext string
-}
+import "github.com/Viking602/venat/api"
 
-func (HandoffCommand) CommandName() string { return "handoff.request" }
+type HandoffCommand = api.HandoffCommand

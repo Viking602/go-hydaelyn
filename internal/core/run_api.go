@@ -3,21 +3,21 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (model.Run, error) {
+func (r *Runtime) QueueRun(ctx context.Context, cmd StartRunCommand) (api.Run, error) {
 	result, err := r.ExecuteCommand(ctx, cmd)
 	if err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
 	started, ok := result.(StartRunResult)
 	if !ok {
-		return model.Run{}, ErrInvalidCommand
+		return api.Run{}, ErrInvalidCommand
 	}
 	advanced, err := r.ExecuteCommand(ctx, AdvanceRunCommand{RunID: started.Run.ID})
 	if err != nil {
-		return model.Run{}, err
+		return api.Run{}, err
 	}
-	return advanced.(model.Run), nil
+	return advanced.(api.Run), nil
 }

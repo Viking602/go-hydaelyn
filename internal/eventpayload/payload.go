@@ -4,10 +4,10 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
-func Task(task model.Task) map[string]any {
+func Task(task api.Task) map[string]any {
 	return map[string]any{
 		"taskId":             task.ID,
 		"runId":              task.RunID,
@@ -45,7 +45,7 @@ func Task(task model.Task) map[string]any {
 	}
 }
 
-func Run(run model.Run) map[string]any {
+func Run(run api.Run) map[string]any {
 	return map[string]any{
 		"id":           run.ID,
 		"status":       string(run.Status),
@@ -58,7 +58,7 @@ func Run(run model.Run) map[string]any {
 	}
 }
 
-func Envelope(env model.TaskEnvelope) map[string]any {
+func Envelope(env api.TaskEnvelope) map[string]any {
 	return map[string]any{
 		"envelopeId":      env.ID,
 		"runId":           env.RunID,
@@ -74,7 +74,7 @@ func Envelope(env model.TaskEnvelope) map[string]any {
 	}
 }
 
-func RetryPolicy(policy model.RetryPolicy) map[string]any {
+func RetryPolicy(policy api.RetryPolicy) map[string]any {
 	if policy.MaxAttempts == 0 && policy.Backoff == 0 && policy.MaxBackoff == 0 {
 		return nil
 	}

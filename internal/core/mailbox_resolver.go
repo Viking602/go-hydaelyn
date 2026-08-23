@@ -1,25 +1,25 @@
 package core
 
 import (
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/mailbox"
 )
 
 var (
-	ErrInvalidAddress = model.ErrInvalidAddress
-	ErrNoRecipients   = model.ErrNoRecipients
+	ErrInvalidAddress = api.ErrInvalidAddress
+	ErrNoRecipients   = api.ErrNoRecipients
 )
 
 type (
-	AddressKind  = model.AddressKind
-	Address      = model.Address
-	AgentProfile = model.AgentProfile
+	AddressKind  = api.AddressKind
+	Address      = api.Address
+	AgentProfile = api.AgentProfile
 )
 
 const (
-	AddressKindAgent = model.AddressKindAgent
-	AddressKindRole  = model.AddressKindRole
-	AddressKindGroup = model.AddressKindGroup
+	AddressKindAgent = api.AddressKindAgent
+	AddressKindRole  = api.AddressKindRole
+	AddressKindGroup = api.AddressKindGroup
 )
 
 // ResolveRecipients expands an Address into the set of concrete agent IDs

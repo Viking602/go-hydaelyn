@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted — 2026-08-15. Effective from v0.15.0. Companion ADRs: ADR-021
-through ADR-027. Builds on ADR-008, ADR-011, ADR-012, ADR-013, ADR-015,
-ADR-016, and ADR-017.
+Accepted and implemented — 2026-08-23. Effective from v0.15.0.
+Companion ADRs: ADR-021 through ADR-027. Builds on ADR-008, ADR-011,
+ADR-012, ADR-013, ADR-015, ADR-016, and ADR-017.
 
 ## Context
 
@@ -32,8 +32,8 @@ dependency order:
 2. **ADR-022** — split `UnitOfWork` into capability interfaces; keep the
    composite as the transition type.
 3. **ADR-023** — converge the dual model by sinking `api` types into
-   `internal/core` as the spec types, then delete `internal/core/adapter`.
-   This ADR decides; later PRs migrate store by store.
+   `internal/core` as the spec types, then delete `internal/core/model`
+   and `internal/core/adapter`.
 4. **ADR-024** — document five layers, including the worker integration
    layer, and machine-check the new import seams.
 5. **ADR-025** — slim the Runner façade (typed methods, domain
@@ -43,10 +43,11 @@ dependency order:
 7. **ADR-027** — clean the package map and keep `api.ArtifactStore` as a
    Position D contract with no shipped backend.
 
-Code that can land with the ADR in the same change (narrow interfaces,
-deprecations, import-boundary script, contract-only Artifact types) does
-so. Adapter deletion, full façade method moves, and alias-package removal
-are follow-up PRs cited by the companion ADRs.
+The ordered implementation is complete for v0.15: narrow capability
+interfaces, canonical `api` model types, explicit domain sub-façades,
+machine-checked import seams, and the contract-only Artifact surface.
+The deprecated `memory/`, `flow/`, and `blackboard/` aliases remain only
+for the separately documented compatibility window.
 
 ## Anti-patterns rejected by this ADR
 

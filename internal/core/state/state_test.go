@@ -4,29 +4,29 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/core/state"
 )
 
 // ── IsTerminalRun ────────────────────────────────────────────────────────────
 
 func TestIsTerminalRun(t *testing.T) {
-	terminal := []model.RunStatus{
-		model.RunStatusCompleted,
-		model.RunStatusFailed,
-		model.RunStatusCancelled,
+	terminal := []api.RunStatus{
+		api.RunStatusCompleted,
+		api.RunStatusFailed,
+		api.RunStatusCancelled,
 	}
 	for _, s := range terminal {
 		if !state.IsTerminalRun(s) {
 			t.Errorf("expected %q to be terminal", s)
 		}
 	}
-	nonTerminal := []model.RunStatus{
-		model.RunStatusCreated,
-		model.RunStatusRunning,
-		model.RunStatusPlanning,
-		model.RunStatusBlocked,
-		model.RunStatusWaitingApproval,
+	nonTerminal := []api.RunStatus{
+		api.RunStatusCreated,
+		api.RunStatusRunning,
+		api.RunStatusPlanning,
+		api.RunStatusBlocked,
+		api.RunStatusWaitingApproval,
 	}
 	for _, s := range nonTerminal {
 		if state.IsTerminalRun(s) {
@@ -38,22 +38,22 @@ func TestIsTerminalRun(t *testing.T) {
 // ── IsTerminalTask ───────────────────────────────────────────────────────────
 
 func TestIsTerminalTask(t *testing.T) {
-	terminal := []model.TaskStatus{
-		model.TaskStatusCompleted,
-		model.TaskStatusFailed,
-		model.TaskStatusCancelled,
+	terminal := []api.TaskStatus{
+		api.TaskStatusCompleted,
+		api.TaskStatusFailed,
+		api.TaskStatusCancelled,
 	}
 	for _, s := range terminal {
 		if !state.IsTerminalTask(s) {
 			t.Errorf("expected %q to be terminal", s)
 		}
 	}
-	nonTerminal := []model.TaskStatus{
-		model.TaskStatusCreated,
-		model.TaskStatusRunning,
-		model.TaskStatusDispatched,
-		model.TaskStatusPaused,
-		model.TaskStatusBlocked,
+	nonTerminal := []api.TaskStatus{
+		api.TaskStatusCreated,
+		api.TaskStatusRunning,
+		api.TaskStatusDispatched,
+		api.TaskStatusPaused,
+		api.TaskStatusBlocked,
 	}
 	for _, s := range nonTerminal {
 		if state.IsTerminalTask(s) {
@@ -65,24 +65,24 @@ func TestIsTerminalTask(t *testing.T) {
 // ── TaskCanBecomeReady ───────────────────────────────────────────────────────
 
 func TestTaskCanBecomeReady(t *testing.T) {
-	ready := []model.TaskStatus{
-		model.TaskStatusCreated,
-		model.TaskStatusPlanned,
-		model.TaskStatusValidated,
-		model.TaskStatusRouted,
-		model.TaskStatusWaitingDependency,
+	ready := []api.TaskStatus{
+		api.TaskStatusCreated,
+		api.TaskStatusPlanned,
+		api.TaskStatusValidated,
+		api.TaskStatusRouted,
+		api.TaskStatusWaitingDependency,
 	}
 	for _, s := range ready {
 		if !state.TaskCanBecomeReady(s) {
 			t.Errorf("expected %q to be able to become ready", s)
 		}
 	}
-	notReady := []model.TaskStatus{
-		model.TaskStatusDispatched,
-		model.TaskStatusRunning,
-		model.TaskStatusCompleted,
-		model.TaskStatusFailed,
-		model.TaskStatusCancelled,
+	notReady := []api.TaskStatus{
+		api.TaskStatusDispatched,
+		api.TaskStatusRunning,
+		api.TaskStatusCompleted,
+		api.TaskStatusFailed,
+		api.TaskStatusCancelled,
 	}
 	for _, s := range notReady {
 		if state.TaskCanBecomeReady(s) {
@@ -94,39 +94,39 @@ func TestTaskCanBecomeReady(t *testing.T) {
 // ── TransitionRun ────────────────────────────────────────────────────────────
 
 func TestTransitionRun_ValidTransition(t *testing.T) {
-	run := model.Run{ID: "r1", Status: model.RunStatusCreated}
-	next, err := state.TransitionRun(run, model.RunStatusPlanning)
+	run := api.Run{ID: "r1", Status: api.RunStatusCreated}
+	next, err := state.TransitionRun(run, api.RunStatusPlanning)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if next.Status != model.RunStatusPlanning {
+	if next.Status != api.RunStatusPlanning {
 		t.Errorf("want Planning, got %q", next.Status)
 	}
 }
 
 func TestTransitionRun_SameStatus(t *testing.T) {
-	run := model.Run{ID: "r1", Status: model.RunStatusRunning}
-	next, err := state.TransitionRun(run, model.RunStatusRunning)
+	run := api.Run{ID: "r1", Status: api.RunStatusRunning}
+	next, err := state.TransitionRun(run, api.RunStatusRunning)
 	if err != nil {
 		t.Fatalf("same-status transition should not error: %v", err)
 	}
-	if next.Status != model.RunStatusRunning {
+	if next.Status != api.RunStatusRunning {
 		t.Errorf("status should remain Running")
 	}
 }
 
 func TestTransitionRun_InvalidTransition(t *testing.T) {
-	run := model.Run{ID: "r1", Status: model.RunStatusCompleted}
-	_, err := state.TransitionRun(run, model.RunStatusRunning)
-	if !errors.Is(err, model.ErrTerminalState) {
+	run := api.Run{ID: "r1", Status: api.RunStatusCompleted}
+	_, err := state.TransitionRun(run, api.RunStatusRunning)
+	if !errors.Is(err, api.ErrTerminalState) {
 		t.Fatalf("want ErrTerminalState, got %v", err)
 	}
 }
 
 func TestTransitionRun_ForbiddenTransition(t *testing.T) {
-	run := model.Run{ID: "r1", Status: model.RunStatusCreated}
-	_, err := state.TransitionRun(run, model.RunStatusCompleted)
-	if !errors.Is(err, model.ErrInvalidTransition) {
+	run := api.Run{ID: "r1", Status: api.RunStatusCreated}
+	_, err := state.TransitionRun(run, api.RunStatusCompleted)
+	if !errors.Is(err, api.ErrInvalidTransition) {
 		t.Fatalf("want ErrInvalidTransition, got %v", err)
 	}
 }
@@ -134,12 +134,12 @@ func TestTransitionRun_ForbiddenTransition(t *testing.T) {
 // ── TransitionTask ───────────────────────────────────────────────────────────
 
 func TestTransitionTask_ValidTransition(t *testing.T) {
-	task := model.Task{ID: "t1", Status: model.TaskStatusDispatched, Version: 1}
-	next, err := state.TransitionTask(task, model.TaskStatusRunning, true)
+	task := api.Task{ID: "t1", Status: api.TaskStatusDispatched, Version: 1}
+	next, err := state.TransitionTask(task, api.TaskStatusRunning, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if next.Status != model.TaskStatusRunning {
+	if next.Status != api.TaskStatusRunning {
 		t.Errorf("want Running, got %q", next.Status)
 	}
 	if next.Version != 2 {
@@ -148,8 +148,8 @@ func TestTransitionTask_ValidTransition(t *testing.T) {
 }
 
 func TestTransitionTask_NoBumpVersion(t *testing.T) {
-	task := model.Task{ID: "t1", Status: model.TaskStatusDispatched, Version: 5}
-	next, err := state.TransitionTask(task, model.TaskStatusRunning, false)
+	task := api.Task{ID: "t1", Status: api.TaskStatusDispatched, Version: 5}
+	next, err := state.TransitionTask(task, api.TaskStatusRunning, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -159,17 +159,17 @@ func TestTransitionTask_NoBumpVersion(t *testing.T) {
 }
 
 func TestTransitionTask_TerminalBlocked(t *testing.T) {
-	task := model.Task{ID: "t1", Status: model.TaskStatusCompleted}
-	_, err := state.TransitionTask(task, model.TaskStatusRunning, false)
-	if !errors.Is(err, model.ErrTerminalState) {
+	task := api.Task{ID: "t1", Status: api.TaskStatusCompleted}
+	_, err := state.TransitionTask(task, api.TaskStatusRunning, false)
+	if !errors.Is(err, api.ErrTerminalState) {
 		t.Fatalf("want ErrTerminalState, got %v", err)
 	}
 }
 
 func TestTransitionTask_ForbiddenTransition(t *testing.T) {
-	task := model.Task{ID: "t1", Status: model.TaskStatusCreated}
-	_, err := state.TransitionTask(task, model.TaskStatusCompleted, false)
-	if !errors.Is(err, model.ErrInvalidTransition) {
+	task := api.Task{ID: "t1", Status: api.TaskStatusCreated}
+	_, err := state.TransitionTask(task, api.TaskStatusCompleted, false)
+	if !errors.Is(err, api.ErrInvalidTransition) {
 		t.Fatalf("want ErrInvalidTransition, got %v", err)
 	}
 }
@@ -177,7 +177,7 @@ func TestTransitionTask_ForbiddenTransition(t *testing.T) {
 // ── DependencyGate ───────────────────────────────────────────────────────────
 
 func TestDependencyGate_NoDeps(t *testing.T) {
-	task := model.Task{ID: "t1"}
+	task := api.Task{ID: "t1"}
 	ready, fatal := state.DependencyGate(task, nil)
 	if !ready || fatal {
 		t.Error("task with no deps should be ready and non-fatal")
@@ -185,65 +185,65 @@ func TestDependencyGate_NoDeps(t *testing.T) {
 }
 
 func TestDependencyGate_AllCompleted(t *testing.T) {
-	dep := model.Task{ID: "dep1", Status: model.TaskStatusCompleted}
-	task := model.Task{ID: "t1", DependsOn: []string{"dep1"}}
-	ready, fatal := state.DependencyGate(task, map[string]model.Task{"dep1": dep})
+	dep := api.Task{ID: "dep1", Status: api.TaskStatusCompleted}
+	task := api.Task{ID: "t1", DependsOn: []string{"dep1"}}
+	ready, fatal := state.DependencyGate(task, map[string]api.Task{"dep1": dep})
 	if !ready || fatal {
 		t.Error("all deps completed: should be ready")
 	}
 }
 
 func TestDependencyGate_DepPending(t *testing.T) {
-	dep := model.Task{ID: "dep1", Status: model.TaskStatusRunning}
-	task := model.Task{ID: "t1", DependsOn: []string{"dep1"}}
-	ready, fatal := state.DependencyGate(task, map[string]model.Task{"dep1": dep})
+	dep := api.Task{ID: "dep1", Status: api.TaskStatusRunning}
+	task := api.Task{ID: "t1", DependsOn: []string{"dep1"}}
+	ready, fatal := state.DependencyGate(task, map[string]api.Task{"dep1": dep})
 	if ready || fatal {
 		t.Error("pending dep: should not be ready and non-fatal")
 	}
 }
 
 func TestDependencyGate_DepFailedWithFailPolicy(t *testing.T) {
-	dep := model.Task{ID: "dep1", Status: model.TaskStatusFailed}
-	task := model.Task{ID: "t1", DependsOn: []string{"dep1"}, OnDependencyFailed: model.OnDependencyFailedFail}
-	ready, fatal := state.DependencyGate(task, map[string]model.Task{"dep1": dep})
+	dep := api.Task{ID: "dep1", Status: api.TaskStatusFailed}
+	task := api.Task{ID: "t1", DependsOn: []string{"dep1"}, OnDependencyFailed: api.OnDependencyFailedFail}
+	ready, fatal := state.DependencyGate(task, map[string]api.Task{"dep1": dep})
 	if ready || !fatal {
 		t.Error("failed dep with Fail policy: should not be ready and be fatal")
 	}
 }
 
 func TestDependencyGate_DepFailedWithSkipPolicy(t *testing.T) {
-	dep := model.Task{ID: "dep1", Status: model.TaskStatusFailed}
-	task := model.Task{ID: "t1", DependsOn: []string{"dep1"}, OnDependencyFailed: model.OnDependencyFailedSkip}
-	ready, fatal := state.DependencyGate(task, map[string]model.Task{"dep1": dep})
+	dep := api.Task{ID: "dep1", Status: api.TaskStatusFailed}
+	task := api.Task{ID: "t1", DependsOn: []string{"dep1"}, OnDependencyFailed: api.OnDependencyFailedSkip}
+	ready, fatal := state.DependencyGate(task, map[string]api.Task{"dep1": dep})
 	if !ready || fatal {
 		t.Error("failed dep with Skip policy: should be ready and non-fatal")
 	}
 }
 
 func TestDependencyGate_AwaitModeAny(t *testing.T) {
-	dep1 := model.Task{ID: "dep1", Status: model.TaskStatusCompleted}
-	dep2 := model.Task{ID: "dep2", Status: model.TaskStatusRunning}
-	task := model.Task{
+	dep1 := api.Task{ID: "dep1", Status: api.TaskStatusCompleted}
+	dep2 := api.Task{ID: "dep2", Status: api.TaskStatusRunning}
+	task := api.Task{
 		ID:        "t1",
 		DependsOn: []string{"dep1", "dep2"},
-		AwaitMode: model.AwaitModeAny,
+		AwaitMode: api.AwaitModeAny,
 	}
-	ready, fatal := state.DependencyGate(task, map[string]model.Task{"dep1": dep1, "dep2": dep2})
+	ready, fatal := state.DependencyGate(task, map[string]api.Task{"dep1": dep1, "dep2": dep2})
 	if !ready || fatal {
 		t.Error("AwaitModeAny with one completed dep: should be ready")
 	}
 }
 
 func TestDependencyGate_AwaitModeQuorum(t *testing.T) {
-	tasks := map[string]model.Task{
-		"d1": {ID: "d1", Status: model.TaskStatusCompleted},
-		"d2": {ID: "d2", Status: model.TaskStatusCompleted},
-		"d3": {ID: "d3", Status: model.TaskStatusRunning},
+	tasks := map[string]api.Task{
+		"d1": {ID: "d1", Status: api.TaskStatusCompleted},
+		"d2": {ID: "d2", Status: api.TaskStatusCompleted},
+		"d3": {ID: "d3", Status: api.TaskStatusRunning},
 	}
-	task := model.Task{
+	task := api.Task{
 		ID:          "t1",
 		DependsOn:   []string{"d1", "d2", "d3"},
-		AwaitMode:   model.AwaitModeQuorum,
+		AwaitMode:   api.AwaitModeQuorum,
 		AwaitQuorum: 2,
 	}
 	ready, fatal := state.DependencyGate(task, tasks)

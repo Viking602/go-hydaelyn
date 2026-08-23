@@ -17,13 +17,16 @@ this drop:
   methods.
 - Domain sub-façades are available: `Runner.Admin()`,
   `Runner.Governance()`, `Runner.Blackboard()`.
+  They expose only their named domain methods; embedding no longer promotes
+  the complete `Runner` surface.
 - `api.ArtifactStore` exists as a contract only. The framework ships no
   blob backend (ADR-027 / Position D).
 - `api.UnitOfWork` now embeds capability interfaces (`RunStores`,
   `CollaborationStores`, …). Full providers do not need to change.
 
-`internal/core/adapter` is still present. Dual-model deletion is
-incremental (ADR-023) and is not part of this drop.
+`api` types are now the canonical runtime and persistence model.
+`internal/core/model` and `internal/core/adapter` are deleted (ADR-023);
+application `api.StoreProvider` implementations bind directly to the runtime.
 
 The default `New` / `NewDevelopment` store remains process-local memory
 and is not crash-durable.

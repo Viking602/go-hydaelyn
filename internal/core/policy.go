@@ -3,27 +3,27 @@ package core
 import (
 	"context"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type allowPolicyEngine struct{}
 
-func (allowPolicyEngine) Authorize(context.Context, model.PolicyRequest) (model.PolicyDecision, error) {
-	return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+func (allowPolicyEngine) Authorize(context.Context, api.PolicyRequest) (api.PolicyDecision, error) {
+	return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 }
 
 type messagePolicyAdapter struct {
-	check model.MessagePolicyChecker
+	check api.MessagePolicyChecker
 }
 
-func (p messagePolicyAdapter) Authorize(_ context.Context, request model.PolicyRequest) (model.PolicyDecision, error) {
+func (p messagePolicyAdapter) Authorize(_ context.Context, request api.PolicyRequest) (api.PolicyDecision, error) {
 	if p.check == nil || request.Message == nil {
-		return model.PolicyDecision{Effect: model.PolicyEffectAllow}, nil
+		return api.PolicyDecision{Effect: api.PolicyEffectAllow}, nil
 	}
 	return p.check(*request.Message), nil
 }
 
-func requestRunID(request model.PolicyRequest) string {
+func requestRunID(request api.PolicyRequest) string {
 	if request.Message != nil {
 		return request.Message.RunID
 	}
@@ -39,7 +39,7 @@ func requestRunID(request model.PolicyRequest) string {
 	return ""
 }
 
-func requestTaskID(request model.PolicyRequest) string {
+func requestTaskID(request api.PolicyRequest) string {
 	if request.Message != nil {
 		return request.Message.TaskID
 	}

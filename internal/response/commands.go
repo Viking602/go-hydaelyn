@@ -1,24 +1,8 @@
 package response
 
-import "github.com/Viking602/venat/internal/core/model"
+import "github.com/Viking602/venat/api"
 
-type SubmitOutputCommand struct {
-	RunID          string
-	TaskID         string
-	LeaseID        string
-	HolderType     model.HolderType
-	HolderID       string
-	TaskVersion    int
-	Type           model.UserMessageType
-	Title          string
-	Payload        string
-	IdempotencyKey string
-}
-
-type PublishCommand struct {
-	RunID     string
-	MessageID string
-}
-
-func (SubmitOutputCommand) CommandName() string { return "response.submit_output" }
-func (PublishCommand) CommandName() string      { return "response.publish" }
+type (
+	SubmitOutputCommand = api.SubmitResponseOutputCommand
+	PublishCommand      = api.PublishResponseCommand
+)

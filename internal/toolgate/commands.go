@@ -1,22 +1,8 @@
 package toolgate
 
-import "github.com/Viking602/venat/internal/core/model"
+import "github.com/Viking602/venat/api"
 
-type Invocation struct {
-	RunID       string
-	TaskID      string
-	LeaseID     string
-	HolderType  model.HolderType
-	HolderID    string
-	TaskVersion int
-	ToolName    string
-	Input       any
-}
-
-type InvocationResult struct {
-	ToolName string
-	Output   any
-	Decision model.PolicyDecision
-}
-
-func (Invocation) CommandName() string { return "tool.invoke" }
+type (
+	Invocation       = api.ToolInvocation
+	InvocationResult = api.ToolInvocationResult
+)

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/internal/handoff"
 	"github.com/Viking602/venat/internal/memory"
 )
@@ -28,8 +28,8 @@ func TestApplierTransfersOwnerWritesContextAndQueuesEnvelope(t *testing.T) {
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	task := model.Task{ID: "task-1", RunID: "run-1", Status: model.TaskStatusRunning, Version: 2, OwnerAgentID: "agent-a", OwnerHistory: []string{"agent-a"}}
-	result, err := handoff.NewApplier(handoff.HandlerOptions{NewID: handoffIDGenerator()}).Apply(ctx, uow, task, &model.HandoffRequest{
+	task := api.Task{ID: "task-1", RunID: "run-1", Status: api.TaskStatusRunning, Version: 2, OwnerAgentID: "agent-a", OwnerHistory: []string{"agent-a"}}
+	result, err := handoff.NewApplier(handoff.HandlerOptions{NewID: handoffIDGenerator()}).Apply(ctx, uow, task, &api.HandoffRequest{
 		RunID:          task.RunID,
 		TaskID:         task.ID,
 		FromAgentID:    "agent-a",
@@ -61,15 +61,15 @@ func TestApplierRejectsOwnerCycle(t *testing.T) {
 	}
 	defer func() { _ = uow.Rollback(ctx) }()
 
-	task := model.Task{ID: "task-1", RunID: "run-1", Status: model.TaskStatusRunning, Version: 1, OwnerAgentID: "agent-a", OwnerHistory: []string{"agent-a", "agent-b"}}
-	_, err = handoff.NewApplier(handoff.HandlerOptions{NewID: handoffIDGenerator()}).Apply(ctx, uow, task, &model.HandoffRequest{
+	task := api.Task{ID: "task-1", RunID: "run-1", Status: api.TaskStatusRunning, Version: 1, OwnerAgentID: "agent-a", OwnerHistory: []string{"agent-a", "agent-b"}}
+	_, err = handoff.NewApplier(handoff.HandlerOptions{NewID: handoffIDGenerator()}).Apply(ctx, uow, task, &api.HandoffRequest{
 		RunID:       task.RunID,
 		TaskID:      task.ID,
 		FromAgentID: "agent-a",
 		ToAgentID:   "agent-b",
 		TaskVersion: task.Version,
 	}, "")
-	if !errors.Is(err, model.ErrHandoffCycle) {
+	if !errors.Is(err, api.ErrHandoffCycle) {
 		t.Fatalf("Apply() error = %v, want ErrHandoffCycle", err)
 	}
 }

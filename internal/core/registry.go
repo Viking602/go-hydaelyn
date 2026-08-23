@@ -5,40 +5,40 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Viking602/venat/internal/core/model"
+	"github.com/Viking602/venat/api"
 )
 
 type toolHolderKey struct {
 	runID      string
 	taskID     string
-	holderType model.HolderType
+	holderType api.HolderType
 	holderID   string
 }
 
-func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType model.HolderType, holderID string, tool model.Tool) error {
+func (r *Runtime) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if runID == "" || taskID == "" || holderType == "" || holderID == "" || tool.Name == "" {
-		return fmt.Errorf("%w: scoped tool registration requires run, task, holder, and tool name", model.ErrInvalidCommand)
+		return fmt.Errorf("%w: scoped tool registration requires run, task, holder, and tool name", api.ErrInvalidCommand)
 	}
 	if tool.EffectType == "" {
-		tool.EffectType = model.ToolEffectReadOnly
+		tool.EffectType = api.ToolEffectReadOnly
 	}
 	key := toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID}
 	if r.scopedTools[key] == nil {
-		r.scopedTools[key] = make(map[string]model.Tool)
+		r.scopedTools[key] = make(map[string]api.Tool)
 	}
 	r.scopedTools[key][tool.Name] = cloneTool(tool)
 	return nil
 }
 
-func (r *Runtime) RemoveToolsForInvocation(runID, taskID string, holderType model.HolderType, holderID string) {
+func (r *Runtime) RemoveToolsForInvocation(runID, taskID string, holderType api.HolderType, holderID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.scopedTools, toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID})
 }
 
-func (r *Runtime) toolForInvocation(runID, taskID string, holderType model.HolderType, holderID, name string) (model.Tool, bool) {
+func (r *Runtime) toolForInvocation(runID, taskID string, holderType api.HolderType, holderID, name string) (api.Tool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tools := r.scopedTools[toolHolderKey{runID: runID, taskID: taskID, holderType: holderType, holderID: holderID}]
@@ -50,7 +50,7 @@ func (r *Runtime) RegisterAgent(profile AgentProfile) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if profile.ID == "" {
-		return fmt.Errorf("%w: agent id is required", model.ErrInvalidCommand)
+		return fmt.Errorf("%w: agent id is required", api.ErrInvalidCommand)
 	}
 	if _, exists := r.agents[profile.ID]; !exists {
 		r.agentOrder = append(r.agentOrder, profile.ID)
@@ -78,34 +78,34 @@ func cloneAgentProfile(profile AgentProfile) AgentProfile {
 	return clone
 }
 
-func (r *Runtime) RegisterTool(tool model.Tool) error {
+func (r *Runtime) RegisterTool(tool api.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if tool.Name == "" {
-		return fmt.Errorf("%w: tool name is required", model.ErrInvalidCommand)
+		return fmt.Errorf("%w: tool name is required", api.ErrInvalidCommand)
 	}
 	if tool.EffectType == "" {
-		tool.EffectType = model.ToolEffectReadOnly
+		tool.EffectType = api.ToolEffectReadOnly
 	}
 	r.tools[tool.Name] = cloneTool(tool)
 	return nil
 }
 
-func (r *Runtime) tool(name string) (model.Tool, bool) {
+func (r *Runtime) tool(name string) (api.Tool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tool, ok := r.tools[name]
 	return cloneTool(tool), ok
 }
 
-func cloneTool(tool model.Tool) model.Tool {
+func cloneTool(tool api.Tool) api.Tool {
 	clone := tool
 	clone.PolicyTags = slices.Clone(tool.PolicyTags)
 	clone.Metadata = maps.Clone(tool.Metadata)
 	return clone
 }
 
-func (r *Runtime) SetMessagePolicy(policy model.MessagePolicyChecker) {
+func (r *Runtime) SetMessagePolicy(policy api.MessagePolicyChecker) {
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
 	if policy == nil {
