@@ -26,14 +26,17 @@ type Step struct {
 }
 
 type ModelCall struct {
-	Provider              string              `json:"provider,omitempty"`
-	Model                 string              `json:"model"`
-	InputTokens           int                 `json:"inputTokens,omitempty"`
-	CachedInputTokens     int                 `json:"cachedInputTokens,omitempty"`
-	CacheWriteInputTokens int                 `json:"cacheWriteInputTokens,omitempty"`
-	OutputTokens          int                 `json:"outputTokens,omitempty"`
-	TotalTokens           int                 `json:"totalTokens,omitempty"`
-	StopReason            provider.StopReason `json:"stopReason,omitempty"`
+	Provider                      string              `json:"provider,omitempty"`
+	Model                         string              `json:"model"`
+	InputTokens                   int                 `json:"inputTokens,omitempty"`
+	CachedInputTokens             int                 `json:"cachedInputTokens,omitempty"`
+	CachedInputTokensReported     bool                `json:"cachedInputTokensReported,omitempty"`
+	CacheWriteInputTokens         int                 `json:"cacheWriteInputTokens,omitempty"`
+	CacheWriteInputTokensReported bool                `json:"cacheWriteInputTokensReported,omitempty"`
+	OutputTokens                  int                 `json:"outputTokens,omitempty"`
+	ReasoningTokens               int                 `json:"reasoningTokens,omitempty"`
+	TotalTokens                   int                 `json:"totalTokens,omitempty"`
+	StopReason                    provider.StopReason `json:"stopReason,omitempty"`
 }
 
 type ToolCallTrace struct {

@@ -321,14 +321,17 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				steps = append(steps, Step{
 					Index: iteration,
 					ModelCall: &ModelCall{
-						Provider:              identity.Provider.Name,
-						Model:                 identity.Model,
-						InputTokens:           usage.InputTokens,
-						CachedInputTokens:     usage.CachedInputTokens,
-						CacheWriteInputTokens: usage.CacheWriteInputTokens,
-						OutputTokens:          usage.OutputTokens,
-						TotalTokens:           usage.TotalTokens,
-						StopReason:            stopReason,
+						Provider:                      identity.Provider.Name,
+						Model:                         identity.Model,
+						InputTokens:                   usage.InputTokens,
+						CachedInputTokens:             usage.CachedInputTokens,
+						CachedInputTokensReported:     usage.CachedInputTokensReported,
+						CacheWriteInputTokens:         usage.CacheWriteInputTokens,
+						CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
+						OutputTokens:                  usage.OutputTokens,
+						ReasoningTokens:               usage.ReasoningTokens,
+						TotalTokens:                   usage.TotalTokens,
+						StopReason:                    stopReason,
 					},
 					Decision:   StepDecisionFail,
 					BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
@@ -345,14 +348,17 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		// turn in Iterations rather than only the turns whose Step already exists.
 		turnsRun = iteration + 1
 		modelCall := &ModelCall{
-			Provider:              identity.Provider.Name,
-			Model:                 identity.Model,
-			InputTokens:           usage.InputTokens,
-			CachedInputTokens:     usage.CachedInputTokens,
-			CacheWriteInputTokens: usage.CacheWriteInputTokens,
-			OutputTokens:          usage.OutputTokens,
-			TotalTokens:           usage.TotalTokens,
-			StopReason:            stopReason,
+			Provider:                      identity.Provider.Name,
+			Model:                         identity.Model,
+			InputTokens:                   usage.InputTokens,
+			CachedInputTokens:             usage.CachedInputTokens,
+			CachedInputTokensReported:     usage.CachedInputTokensReported,
+			CacheWriteInputTokens:         usage.CacheWriteInputTokens,
+			CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
+			OutputTokens:                  usage.OutputTokens,
+			ReasoningTokens:               usage.ReasoningTokens,
+			TotalTokens:                   usage.TotalTokens,
+			StopReason:                    stopReason,
 		}
 		lastModelCall = modelCall
 		if input.MaxTokens > 0 && usage.TotalTokens == 0 {
@@ -1297,7 +1303,7 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 	// lost. errors.Is(err, ErrPanicRecovered) still holds end-to-end.
 	defer func() {
 		if r := recover(); r != nil {
-			usage, _, _ = applyNormalized(&assistant, events)
+			usage, _, _ = applyNormalized(&assistant, events, false)
 			stop = provider.StopReasonError
 			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
 		}
@@ -1312,7 +1318,7 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 		// and normalize the events already collected rather than failing the turn.
 		if !sawTerminal {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				partialUsage, partialStop, _ := applyNormalized(&assistant, events)
+				partialUsage, partialStop, _ := applyNormalized(&assistant, events, false)
 				if partialStop == "" {
 					partialStop = provider.StopReasonError
 				}
@@ -1334,7 +1340,7 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 			if sawTerminal && (errors.Is(recvErr, context.Canceled) || errors.Is(recvErr, context.DeadlineExceeded)) {
 				break
 			}
-			partialUsage, partialStop, _ := applyNormalized(&assistant, events)
+			partialUsage, partialStop, _ := applyNormalized(&assistant, events, false)
 			if partialStop == "" {
 				partialStop = provider.StopReasonError
 			}
@@ -1349,11 +1355,11 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 		// far rather than starting from an empty turn.
 		events = append(events, event)
 		if cbErr := e.fanOutEvent(ctx, event, onEvent, sink); cbErr != nil {
-			usage, stop, _ = applyNormalized(&assistant, events)
+			usage, stop, _ = applyNormalized(&assistant, events, false)
 			return assistant, usage, stop, cbErr
 		}
 	}
-	usage, stop, err = applyNormalized(&assistant, events)
+	usage, stop, err = applyNormalized(&assistant, events, true)
 	if err != nil {
 		return assistant, provider.Usage{}, provider.StopReasonError, err
 	}
@@ -1391,16 +1397,22 @@ func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent f
 // normalize error (a malformed stream prefix) leaves the assistant untouched and
 // reports StopReasonError, so a failure path never masks its original cause with a
 // normalize error.
-func applyNormalized(assistant *message.Message, events []provider.Event) (provider.Usage, provider.StopReason, error) {
-	normalized, err := provider.NormalizeEvents(events)
+func applyNormalized(assistant *message.Message, events []provider.Event, requireTerminal bool) (provider.Usage, provider.StopReason, error) {
+	var (
+		normalized provider.NormalizedResponse
+		err        error
+	)
+	if requireTerminal {
+		normalized, err = provider.NormalizeEvents(events)
+	} else {
+		normalized, err = provider.NormalizePartialEvents(events)
+	}
 	if err != nil {
 		return provider.Usage{}, provider.StopReasonError, err
 	}
-	assistant.Text = normalized.Text
-	assistant.Thinking = normalized.Thinking
-	assistant.ThinkingSignature = normalized.Signature
-	assistant.RedactedThinking = normalized.RedactedThinking
+	assistant.Content = message.CloneContent(normalized.Content)
 	assistant.ToolCalls = normalized.ToolCalls
 	assistant.ProviderState = normalized.ProviderState
+	assistant.SyncLegacyContent()
 	return normalized.Usage, normalized.StopReason, nil
 }

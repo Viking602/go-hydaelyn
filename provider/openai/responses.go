@@ -75,9 +75,12 @@ type responsesUsage struct {
 	OutputTokens       int `json:"output_tokens"`
 	TotalTokens        int `json:"total_tokens"`
 	InputTokensDetails struct {
-		CachedTokens     int `json:"cached_tokens"`
-		CacheWriteTokens int `json:"cache_write_tokens"`
+		CachedTokens     *int `json:"cached_tokens"`
+		CacheWriteTokens *int `json:"cache_write_tokens"`
 	} `json:"input_tokens_details"`
+	OutputTokensDetails struct {
+		ReasoningTokens *int `json:"reasoning_tokens"`
+	} `json:"output_tokens_details"`
 }
 
 type responsesIncompleteDetails struct {
@@ -543,8 +546,13 @@ func (s *responsesStream) incomplete(response responsesResponse) (provider.Event
 		return provider.Event{}, false, err
 	}
 	stopReason := provider.StopReasonUnknown
-	if response.IncompleteDetails != nil && response.IncompleteDetails.Reason == "max_output_tokens" {
-		stopReason = provider.StopReasonMaxTurns
+	if response.IncompleteDetails != nil {
+		switch response.IncompleteDetails.Reason {
+		case "max_output_tokens":
+			stopReason = provider.StopReasonLength
+		case "content_filter":
+			stopReason = provider.StopReasonContentFilter
+		}
 	}
 	s.finished = true
 	return responsesDoneEvent(response.Usage, stopReason, providerState), true, nil
@@ -567,18 +575,31 @@ func responsesOutput(raw json.RawMessage) (json.RawMessage, []responsesOutputIte
 }
 
 func responsesDoneEvent(usage responsesUsage, stopReason provider.StopReason, state json.RawMessage) provider.Event {
+	cachedTokens, cacheReported := reportedToken(usage.InputTokensDetails.CachedTokens)
+	cacheWriteTokens, cacheWriteReported := reportedToken(usage.InputTokensDetails.CacheWriteTokens)
+	reasoningTokens, _ := reportedToken(usage.OutputTokensDetails.ReasoningTokens)
 	return provider.Event{
 		Kind: provider.EventDone,
 		Usage: provider.Usage{
-			InputTokens:           usage.InputTokens,
-			CachedInputTokens:     usage.InputTokensDetails.CachedTokens,
-			CacheWriteInputTokens: usage.InputTokensDetails.CacheWriteTokens,
-			OutputTokens:          usage.OutputTokens,
-			TotalTokens:           usage.TotalTokens,
+			InputTokens:                   usage.InputTokens,
+			CachedInputTokens:             cachedTokens,
+			CachedInputTokensReported:     cacheReported,
+			CacheWriteInputTokens:         cacheWriteTokens,
+			CacheWriteInputTokensReported: cacheWriteReported,
+			OutputTokens:                  usage.OutputTokens,
+			ReasoningTokens:               reasoningTokens,
+			TotalTokens:                   usage.TotalTokens,
 		},
 		StopReason:    stopReason,
 		ProviderState: state,
 	}
+}
+
+func reportedToken(value *int) (int, bool) {
+	if value == nil {
+		return 0, false
+	}
+	return max(0, *value), true
 }
 
 func responsesError(apiError *responsesAPIError) error {

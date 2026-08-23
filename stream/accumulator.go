@@ -45,13 +45,19 @@ func (a *Accumulator) Emit(_ context.Context, frame Frame) error {
 	return nil
 }
 
-// Response folds the accumulated provider frames into a
-// NormalizedResponse, identical to the non-streaming loop's view of the
-// turn.
+// Response folds every provider frame observed so far. It remains available
+// before the terminal frame for live UI projections.
 func (a *Accumulator) Response() (provider.NormalizedResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return provider.NormalizeEvents(a.events)
+	return normalizeAccumulatorEvents(a.events, false)
+}
+
+// FinalResponse requires a complete, terminal provider stream.
+func (a *Accumulator) FinalResponse() (provider.NormalizedResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return normalizeAccumulatorEvents(a.events, true)
 }
 
 // Message folds the accumulated frames into a single assistant Message.
@@ -60,15 +66,66 @@ func (a *Accumulator) Message() (message.Message, error) {
 	if err != nil {
 		return message.Message{}, err
 	}
-	return message.Message{
-		Role:              message.RoleAssistant,
-		Kind:              message.KindStandard,
-		Text:              response.Text,
-		Thinking:          response.Thinking,
-		ThinkingSignature: response.Signature,
-		RedactedThinking:  response.RedactedThinking,
-		ToolCalls:         response.ToolCalls,
-	}, nil
+	result := message.Message{
+		Role:      message.RoleAssistant,
+		Kind:      message.KindStandard,
+		Content:   message.CloneContent(response.Content),
+		ToolCalls: response.ToolCalls,
+	}
+	result.SyncLegacyContent()
+	return result, nil
+}
+
+func normalizeAccumulatorEvents(events []provider.Event, requireFinal bool) (provider.NormalizedResponse, error) {
+	var combined provider.NormalizedResponse
+	start := 0
+	for index, event := range events {
+		if event.Kind != provider.EventDone && event.Kind != provider.EventError {
+			continue
+		}
+		response, err := provider.NormalizeEvents(events[start : index+1])
+		if err != nil {
+			return provider.NormalizedResponse{}, err
+		}
+		mergeNormalizedResponse(&combined, response)
+		start = index + 1
+	}
+	if start < len(events) {
+		var (
+			response provider.NormalizedResponse
+			err      error
+		)
+		if requireFinal {
+			response, err = provider.NormalizeEvents(events[start:])
+		} else {
+			response, err = provider.NormalizePartialEvents(events[start:])
+		}
+		if err != nil {
+			return provider.NormalizedResponse{}, err
+		}
+		mergeNormalizedResponse(&combined, response)
+	} else if requireFinal && len(events) == 0 {
+		return provider.NormalizeEvents(nil)
+	}
+	return combined, nil
+}
+
+func mergeNormalizedResponse(target *provider.NormalizedResponse, source provider.NormalizedResponse) {
+	target.Content = append(target.Content, message.CloneContent(source.Content)...)
+	target.Text += source.Text
+	target.Thinking += source.Thinking
+	target.RedactedThinking += source.RedactedThinking
+	target.ToolCalls = append(target.ToolCalls, source.ToolCalls...)
+	target.Usage = target.Usage.Add(source.Usage)
+	if source.Signature != "" {
+		target.Signature = source.Signature
+	}
+	if source.StopReason != "" {
+		target.StopReason = source.StopReason
+	}
+	if len(source.ProviderState) > 0 {
+		target.ProviderState = append(target.ProviderState[:0], source.ProviderState...)
+	}
 }
 
 // ToolResults returns the tool results observed on the stream in arrival

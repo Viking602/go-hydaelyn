@@ -41,6 +41,7 @@ func TestDriverStreamParsesMessageSSE(t *testing.T) {
 			t.Fatalf("unexpected path %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"usage\":{\"input_tokens\":3,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"lookup\",\"input\":{}}}\n\n"))
 		_, _ = writer.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"ve\"}}\n\n"))
@@ -80,6 +81,10 @@ func TestDriverStreamParsesMessageSSE(t *testing.T) {
 	}
 	if last.Usage.OutputTokens != 15 {
 		t.Fatalf("expected usage in final event, got %#v", last)
+	}
+	if last.Usage.InputTokens != 6 || last.Usage.CachedInputTokens != 2 || !last.Usage.CachedInputTokensReported ||
+		last.Usage.CacheWriteInputTokens != 1 || !last.Usage.CacheWriteInputTokensReported {
+		t.Fatalf("expected inclusive cache usage in final event, got %#v", last.Usage)
 	}
 }
 

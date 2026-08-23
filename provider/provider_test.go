@@ -85,6 +85,26 @@ func TestUsageAdd(t *testing.T) {
 	}
 }
 
+func TestUsageAddPreservesReportedZeroCacheAndReasoning(t *testing.T) {
+	usage := (Usage{
+		InputTokens:               10,
+		CachedInputTokensReported: true,
+		OutputTokens:              6,
+		ReasoningTokens:           4,
+	}).Add(Usage{
+		InputTokens:                   5,
+		CacheWriteInputTokensReported: true,
+		OutputTokens:                  2,
+		ReasoningTokens:               1,
+	})
+	if !usage.CachedInputTokensReported || !usage.CacheWriteInputTokensReported {
+		t.Fatalf("reported cache flags were lost: %#v", usage)
+	}
+	if usage.ReasoningTokens != 5 || usage.OutputTokens != 8 {
+		t.Fatalf("reasoning/output usage = %#v", usage)
+	}
+}
+
 func TestNewSliceStream(t *testing.T) {
 	events := []Event{
 		{Kind: EventTextDelta, Text: "Hello"},
@@ -230,11 +250,13 @@ func TestStopReasonConstants(t *testing.T) {
 		StopReasonUnknown,
 		StopReasonComplete,
 		StopReasonToolUse,
+		StopReasonLength,
+		StopReasonContentFilter,
 		StopReasonMaxTurns,
 		StopReasonAborted,
 		StopReasonError,
 	}
-	expected := []string{"unknown", "complete", "tool_use", "max_turns", "aborted", "error"}
+	expected := []string{"unknown", "complete", "tool_use", "length", "content_filter", "max_turns", "aborted", "error"}
 
 	for i, reason := range reasons {
 		if string(reason) != expected[i] {

@@ -85,8 +85,10 @@ type eventEnvelope struct {
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int  `json:"input_tokens"`
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		OutputTokens             int  `json:"output_tokens"`
 	} `json:"usage"`
 	// Error carries a mid-stream API error (overload, content policy,
 	// invalid request that passed the initial 200). Anthropic's SSE error
@@ -210,7 +212,13 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 		}
 		switch parsed.Type {
 		case "message_start":
-			s.state.usage.InputTokens = parsed.Usage.InputTokens
+			cacheReadTokens, cacheReadReported := optionalToken(parsed.Usage.CacheReadInputTokens)
+			cacheWriteTokens, cacheWriteReported := optionalToken(parsed.Usage.CacheCreationInputTokens)
+			s.state.usage.InputTokens = parsed.Usage.InputTokens + cacheReadTokens + cacheWriteTokens
+			s.state.usage.CachedInputTokens = cacheReadTokens
+			s.state.usage.CachedInputTokensReported = cacheReadReported
+			s.state.usage.CacheWriteInputTokens = cacheWriteTokens
+			s.state.usage.CacheWriteInputTokensReported = cacheWriteReported
 		case "content_block_start":
 			switch parsed.ContentBlock.Type {
 			case "tool_use":
@@ -234,8 +242,9 @@ func (s *anthropicStream) Recv() (provider.Event, error) {
 		case "content_block_delta":
 			if parsed.Delta.Type == "text_delta" {
 				s.state.pending = append(s.state.pending, provider.Event{
-					Kind: provider.EventTextDelta,
-					Text: parsed.Delta.Text,
+					Kind:      provider.EventTextDelta,
+					Text:      parsed.Delta.Text,
+					TextPhase: provider.TextPhaseFinalAnswer,
 				})
 			}
 			if parsed.Delta.Type == "thinking_delta" {
@@ -427,10 +436,17 @@ func mapAnthropicStopReason(reason string) provider.StopReason {
 	case "end_turn", "stop_sequence":
 		return provider.StopReasonComplete
 	case "max_tokens":
-		return provider.StopReasonMaxTurns
+		return provider.StopReasonLength
 	case "tool_use":
 		return provider.StopReasonToolUse
 	default:
 		return provider.StopReasonUnknown
 	}
+}
+
+func optionalToken(value *int) (int, bool) {
+	if value == nil {
+		return 0, false
+	}
+	return max(0, *value), true
 }

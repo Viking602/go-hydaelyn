@@ -450,8 +450,10 @@ func (w AgentWorker) usageRecordsForStep(
 			),
 			RunID: task.RunID, TaskID: task.ID, AgentID: w.AgentID,
 			Kind: api.UsageKindModelCall, Provider: providerName, Model: call.Model,
-			InputTokens: call.InputTokens, CachedInputTokens: call.CachedInputTokens,
-			CacheWriteInputTokens: call.CacheWriteInputTokens, OutputTokens: call.OutputTokens,
+			InputTokens:       call.InputTokens,
+			CachedInputTokens: call.CachedInputTokens, CachedInputTokensReported: call.CachedInputTokensReported,
+			CacheWriteInputTokens: call.CacheWriteInputTokens, CacheWriteInputTokensReported: call.CacheWriteInputTokensReported,
+			OutputTokens: call.OutputTokens, ReasoningTokens: call.ReasoningTokens,
 			TotalTokens: totalTokens, Steps: 1,
 			Metadata: map[string]string{
 				"executionId": executionID,
@@ -494,15 +496,18 @@ func (w AgentWorker) appendPartialModelUsage(ctx context.Context, task api.Task,
 			continue
 		}
 		recorded = recorded.Add(provider.Usage{
-			InputTokens: step.ModelCall.InputTokens, CachedInputTokens: step.ModelCall.CachedInputTokens,
-			CacheWriteInputTokens: step.ModelCall.CacheWriteInputTokens,
-			OutputTokens:          step.ModelCall.OutputTokens, TotalTokens: step.ModelCall.TotalTokens,
+			InputTokens:       step.ModelCall.InputTokens,
+			CachedInputTokens: step.ModelCall.CachedInputTokens, CachedInputTokensReported: step.ModelCall.CachedInputTokensReported,
+			CacheWriteInputTokens: step.ModelCall.CacheWriteInputTokens, CacheWriteInputTokensReported: step.ModelCall.CacheWriteInputTokensReported,
+			OutputTokens: step.ModelCall.OutputTokens, ReasoningTokens: step.ModelCall.ReasoningTokens,
+			TotalTokens: step.ModelCall.TotalTokens,
 		})
 	}
 	inputTokens := max(0, result.Usage.InputTokens-recorded.InputTokens)
 	cachedInputTokens := max(0, result.Usage.CachedInputTokens-recorded.CachedInputTokens)
 	cacheWriteInputTokens := max(0, result.Usage.CacheWriteInputTokens-recorded.CacheWriteInputTokens)
 	outputTokens := max(0, result.Usage.OutputTokens-recorded.OutputTokens)
+	reasoningTokens := max(0, result.Usage.ReasoningTokens-recorded.ReasoningTokens)
 	totalTokens := max(0, result.Usage.TotalTokens-recorded.TotalTokens)
 	if inputTokens == 0 && outputTokens == 0 && totalTokens == 0 {
 		return nil
@@ -515,8 +520,10 @@ func (w AgentWorker) appendPartialModelUsage(ctx context.Context, task api.Task,
 		ID:    stableUsageID(task.RunID, task.ID, w.AgentID, string(api.UsageKindModelCall), "partial", lease.ID),
 		RunID: task.RunID, TaskID: task.ID, AgentID: w.AgentID,
 		Kind: api.UsageKindModelCall, Provider: providerName, Model: engine.Model,
-		InputTokens: inputTokens, CachedInputTokens: cachedInputTokens,
-		CacheWriteInputTokens: cacheWriteInputTokens, OutputTokens: outputTokens,
+		InputTokens:       inputTokens,
+		CachedInputTokens: cachedInputTokens, CachedInputTokensReported: result.Usage.CachedInputTokensReported,
+		CacheWriteInputTokens: cacheWriteInputTokens, CacheWriteInputTokensReported: result.Usage.CacheWriteInputTokensReported,
+		OutputTokens: outputTokens, ReasoningTokens: reasoningTokens,
 		TotalTokens: totalTokens, Metadata: map[string]string{"partial": "true"},
 	})
 	appendErr := w.Runner.AppendUsage(context.WithoutCancel(ctx), record)

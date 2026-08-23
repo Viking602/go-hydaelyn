@@ -11,11 +11,15 @@ import (
 var (
 	ErrInvalidToolCallArguments = errors.New("invalid tool call arguments")
 	ErrDuplicateToolCallID      = errors.New("duplicate tool call id")
+	ErrMissingTerminalEvent     = errors.New("provider stream ended without a terminal event")
+	ErrMultipleTerminalEvents   = errors.New("provider stream returned multiple terminal events")
+	ErrEventAfterTerminal       = errors.New("provider stream returned an event after termination")
 )
 
 type NormalizedResponse struct {
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	Content  []message.ContentPart `json:"content,omitempty"`
+	Text     string                `json:"text,omitempty"`
+	Thinking string                `json:"thinking,omitempty"`
 	// Signature is the opaque thinking-block signature accumulated from
 	// signature_delta events; empty for providers that do not sign reasoning.
 	Signature string `json:"signature,omitempty"`
@@ -28,14 +32,23 @@ type NormalizedResponse struct {
 	ProviderState    json.RawMessage    `json:"providerState,omitempty"`
 }
 
-// NormalizeEvents replays a stream of provider Events into a single
-// NormalizedResponse, accumulating text/thinking deltas and reconciling
-// tool-call deltas into well-formed ToolCalls.
-//
-// The body is intentionally a thin dispatcher; per-case work lives in
-// applyToolCallEvent / applyToolCallDeltaEvent / finalizeToolCalls so this
-// function stays under revive's gocyclo threshold.
+// NormalizeEvents folds one complete provider stream and requires exactly one
+// terminal event at the end.
 func NormalizeEvents(events []Event) (NormalizedResponse, error) {
+	return normalizeEvents(events, true)
+}
+
+// NormalizePartialEvents folds events already observed from an interrupted
+// stream. A terminal event is optional, but if present it must still be unique
+// and last.
+func NormalizePartialEvents(events []Event) (NormalizedResponse, error) {
+	return normalizeEvents(events, false)
+}
+
+func normalizeEvents(events []Event, requireTerminal bool) (NormalizedResponse, error) {
+	if err := validateTerminalSequence(events, false); err != nil {
+		return NormalizedResponse{}, err
+	}
 	response := NormalizedResponse{}
 	builders := map[string]*toolCallBuilder{}
 	order := make([]string, 0)
@@ -48,17 +61,19 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 		switch event.Kind {
 		case EventTextDelta:
 			response.Text += event.Text
+			response.Content = appendTextContent(response.Content, contentKindForPhase(event.TextPhase), event.Text, "")
 		case EventThinkingDelta:
 			response.Thinking += event.Thinking
-			// signature_delta / redacted_thinking ride on thinking events.
-			// The loop models one thinking block per turn, so last-non-empty
-			// wins; interleaved multi-block fidelity is out of scope (see
-			// anthropic.toAnthropicRequest).
+			response.Content = appendTextContent(response.Content, message.ContentReasoning, event.Thinking, event.Signature)
 			if event.Signature != "" {
 				response.Signature = event.Signature
 			}
 			if event.RedactedThinking != "" {
 				response.RedactedThinking = event.RedactedThinking
+				response.Content = append(response.Content, message.ContentPart{
+					Kind: message.ContentRedactedReasoning,
+					Data: []byte(event.RedactedThinking),
+				})
 			}
 		case EventToolCall:
 			if err := applyToolCallEvent(event.ToolCall, builders, &order, idKeys, indexKeys, &syntheticSeq); err != nil {
@@ -81,8 +96,58 @@ func NormalizeEvents(events []Event) (NormalizedResponse, error) {
 			}
 		}
 	}
+	if requireTerminal {
+		if err := validateTerminalSequence(events, true); err != nil {
+			return NormalizedResponse{}, err
+		}
+	}
 
 	return finalizeToolCalls(response, order, builders)
+}
+
+func validateTerminalSequence(events []Event, requireTerminal bool) error {
+	terminal := -1
+	for index, event := range events {
+		if event.Kind != EventDone && event.Kind != EventError {
+			if terminal >= 0 {
+				return fmt.Errorf("%w: terminal index %d, event index %d", ErrEventAfterTerminal, terminal, index)
+			}
+			continue
+		}
+		if terminal >= 0 {
+			return fmt.Errorf("%w: indexes %d and %d", ErrMultipleTerminalEvents, terminal, index)
+		}
+		terminal = index
+	}
+	if requireTerminal && terminal < 0 {
+		return ErrMissingTerminalEvent
+	}
+	return nil
+}
+
+func contentKindForPhase(phase TextPhase) message.ContentKind {
+	switch phase {
+	case TextPhaseCommentary:
+		return message.ContentCommentary
+	case TextPhaseFinalAnswer:
+		return message.ContentFinalAnswer
+	default:
+		return message.ContentText
+	}
+}
+
+func appendTextContent(parts []message.ContentPart, kind message.ContentKind, text, signature string) []message.ContentPart {
+	if text == "" && signature == "" {
+		return parts
+	}
+	if len(parts) > 0 && parts[len(parts)-1].Kind == kind {
+		parts[len(parts)-1].Text += text
+		if signature != "" {
+			parts[len(parts)-1].Signature = signature
+		}
+		return parts
+	}
+	return append(parts, message.ContentPart{Kind: kind, Text: text, Signature: signature})
 }
 
 // applyToolCallEvent records a complete tool call. Returns an error when the

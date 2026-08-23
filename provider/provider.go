@@ -18,12 +18,14 @@ import (
 type StopReason string
 
 const (
-	StopReasonUnknown  StopReason = "unknown"
-	StopReasonComplete StopReason = "complete"
-	StopReasonToolUse  StopReason = "tool_use"
-	StopReasonMaxTurns StopReason = "max_turns"
-	StopReasonAborted  StopReason = "aborted"
-	StopReasonError    StopReason = "error"
+	StopReasonUnknown       StopReason = "unknown"
+	StopReasonComplete      StopReason = "complete"
+	StopReasonToolUse       StopReason = "tool_use"
+	StopReasonLength        StopReason = "length"
+	StopReasonContentFilter StopReason = "content_filter"
+	StopReasonMaxTurns      StopReason = "max_turns"
+	StopReasonAborted       StopReason = "aborted"
+	StopReasonError         StopReason = "error"
 )
 
 // TextPhase identifies the semantic phase of streamed assistant text.
@@ -54,22 +56,28 @@ type Metadata struct {
 }
 
 type Usage struct {
-	InputTokens           int `json:"inputTokens,omitempty"`
-	CachedInputTokens     int `json:"cachedInputTokens,omitempty"`
-	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
-	OutputTokens          int `json:"outputTokens,omitempty"`
-	TotalTokens           int `json:"totalTokens,omitempty"`
+	InputTokens                   int  `json:"inputTokens,omitempty"`
+	CachedInputTokens             int  `json:"cachedInputTokens,omitempty"`
+	CachedInputTokensReported     bool `json:"cachedInputTokensReported,omitempty"`
+	CacheWriteInputTokens         int  `json:"cacheWriteInputTokens,omitempty"`
+	CacheWriteInputTokensReported bool `json:"cacheWriteInputTokensReported,omitempty"`
+	OutputTokens                  int  `json:"outputTokens,omitempty"`
+	ReasoningTokens               int  `json:"reasoningTokens,omitempty"`
+	TotalTokens                   int  `json:"totalTokens,omitempty"`
 }
 
 func (u Usage) Add(v Usage) Usage {
 	u = normalizedUsage(u)
 	v = normalizedUsage(v)
 	return Usage{
-		InputTokens:           saturatingTokenAdd(u.InputTokens, v.InputTokens),
-		CachedInputTokens:     saturatingTokenAdd(u.CachedInputTokens, v.CachedInputTokens),
-		CacheWriteInputTokens: saturatingTokenAdd(u.CacheWriteInputTokens, v.CacheWriteInputTokens),
-		OutputTokens:          saturatingTokenAdd(u.OutputTokens, v.OutputTokens),
-		TotalTokens:           saturatingTokenAdd(u.TotalTokens, v.TotalTokens),
+		InputTokens:                   saturatingTokenAdd(u.InputTokens, v.InputTokens),
+		CachedInputTokens:             saturatingTokenAdd(u.CachedInputTokens, v.CachedInputTokens),
+		CachedInputTokensReported:     u.CachedInputTokensReported || v.CachedInputTokensReported,
+		CacheWriteInputTokens:         saturatingTokenAdd(u.CacheWriteInputTokens, v.CacheWriteInputTokens),
+		CacheWriteInputTokensReported: u.CacheWriteInputTokensReported || v.CacheWriteInputTokensReported,
+		OutputTokens:                  saturatingTokenAdd(u.OutputTokens, v.OutputTokens),
+		ReasoningTokens:               saturatingTokenAdd(u.ReasoningTokens, v.ReasoningTokens),
+		TotalTokens:                   saturatingTokenAdd(u.TotalTokens, v.TotalTokens),
 	}
 }
 
@@ -78,6 +86,9 @@ func normalizedUsage(usage Usage) Usage {
 	usage.CachedInputTokens = min(max(0, usage.CachedInputTokens), usage.InputTokens)
 	usage.CacheWriteInputTokens = min(max(0, usage.CacheWriteInputTokens), usage.InputTokens)
 	usage.OutputTokens = max(0, usage.OutputTokens)
+	usage.ReasoningTokens = min(max(0, usage.ReasoningTokens), usage.OutputTokens)
+	usage.CachedInputTokensReported = usage.CachedInputTokensReported || usage.CachedInputTokens > 0
+	usage.CacheWriteInputTokensReported = usage.CacheWriteInputTokensReported || usage.CacheWriteInputTokens > 0
 	usage.TotalTokens = max(max(0, usage.TotalTokens), saturatingTokenAdd(usage.InputTokens, usage.OutputTokens))
 	return usage
 }

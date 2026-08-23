@@ -786,27 +786,30 @@ const (
 // ID is its idempotency key. An empty Kind is interpreted as
 // UsageKindLegacyExecution for records written before granular metering.
 type UsageRecord struct {
-	PricingState          UsagePricingState `json:"pricingState,omitempty"`
-	ID                    string            `json:"id"`
-	RunID                 string            `json:"runId"`
-	TaskID                string            `json:"taskId,omitempty"`
-	AgentID               string            `json:"agentId,omitempty"`
-	Kind                  UsageKind         `json:"kind,omitempty"`
-	Provider              string            `json:"provider,omitempty"`
-	Model                 string            `json:"model,omitempty"`
-	ToolName              string            `json:"toolName,omitempty"`
-	InputTokens           int               `json:"inputTokens,omitempty"`
-	OutputTokens          int               `json:"outputTokens,omitempty"`
-	CachedInputTokens     int               `json:"cachedInputTokens,omitempty"`
-	CacheWriteInputTokens int               `json:"cacheWriteInputTokens,omitempty"`
-	TotalTokens           int               `json:"totalTokens,omitempty"`
-	ToolCalls             int               `json:"toolCalls,omitempty"`
-	Steps                 int               `json:"steps,omitempty"`
-	DurationMS            int64             `json:"durationMs,omitempty"`
-	Credits               int64             `json:"credits,omitempty"`
-	CreditsKind           string            `json:"creditsKind,omitempty"`
-	Metadata              map[string]string `json:"metadata,omitempty"`
-	CreatedAt             time.Time         `json:"createdAt"`
+	PricingState                  UsagePricingState `json:"pricingState,omitempty"`
+	ID                            string            `json:"id"`
+	RunID                         string            `json:"runId"`
+	TaskID                        string            `json:"taskId,omitempty"`
+	AgentID                       string            `json:"agentId,omitempty"`
+	Kind                          UsageKind         `json:"kind,omitempty"`
+	Provider                      string            `json:"provider,omitempty"`
+	Model                         string            `json:"model,omitempty"`
+	ToolName                      string            `json:"toolName,omitempty"`
+	InputTokens                   int               `json:"inputTokens,omitempty"`
+	OutputTokens                  int               `json:"outputTokens,omitempty"`
+	ReasoningTokens               int               `json:"reasoningTokens,omitempty"`
+	CachedInputTokens             int               `json:"cachedInputTokens,omitempty"`
+	CachedInputTokensReported     bool              `json:"cachedInputTokensReported,omitempty"`
+	CacheWriteInputTokens         int               `json:"cacheWriteInputTokens,omitempty"`
+	CacheWriteInputTokensReported bool              `json:"cacheWriteInputTokensReported,omitempty"`
+	TotalTokens                   int               `json:"totalTokens,omitempty"`
+	ToolCalls                     int               `json:"toolCalls,omitempty"`
+	Steps                         int               `json:"steps,omitempty"`
+	DurationMS                    int64             `json:"durationMs,omitempty"`
+	Credits                       int64             `json:"credits,omitempty"`
+	CreditsKind                   string            `json:"creditsKind,omitempty"`
+	Metadata                      map[string]string `json:"metadata,omitempty"`
+	CreatedAt                     time.Time         `json:"createdAt"`
 }
 
 // UsageSelector filters UsageStore.Query.

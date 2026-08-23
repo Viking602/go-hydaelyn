@@ -95,16 +95,18 @@ type ToolResult struct {
 	ToolCallID string          `json:"toolCallId,omitempty"`
 	Name       string          `json:"name"`
 	Content    string          `json:"content,omitempty"`
+	Parts      []ContentPart   `json:"parts,omitempty"`
 	Structured json.RawMessage `json:"structured,omitempty"`
 	IsError    bool            `json:"isError,omitempty"`
 }
 
 type Message struct {
-	ID   string `json:"id,omitempty"`
-	Role Role   `json:"role"`
-	Kind Kind   `json:"kind,omitempty"`
-	Name string `json:"name,omitempty"`
-	Text string `json:"text,omitempty"`
+	ID      string        `json:"id,omitempty"`
+	Role    Role          `json:"role"`
+	Kind    Kind          `json:"kind,omitempty"`
+	Name    string        `json:"name,omitempty"`
+	Text    string        `json:"text,omitempty"`
+	Content []ContentPart `json:"content,omitempty"`
 	// CacheBoundary marks the end of a stable prompt prefix at this text
 	// message. Providers with explicit prefix caching may map it to their
 	// native cache-control marker; unsupported providers may ignore it.
@@ -138,12 +140,14 @@ func NewText(role Role, text string) Message {
 		Role:       role,
 		Kind:       KindStandard,
 		Text:       text,
+		Content:    []ContentPart{TextPart(text)},
 		Visibility: VisibilityShared,
 		CreatedAt:  time.Now().UTC(),
 	}
 }
 
 func NewToolResult(result ToolResult) Message {
+	result.SyncLegacyContent()
 	return Message{
 		Role:       RoleTool,
 		Kind:       KindStandard,

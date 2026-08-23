@@ -86,9 +86,12 @@ type chunk struct {
 		CompletionTokens    int `json:"completion_tokens"`
 		TotalTokens         int `json:"total_tokens"`
 		PromptTokensDetails struct {
-			CachedTokens     int `json:"cached_tokens"`
-			CacheWriteTokens int `json:"cache_write_tokens"`
+			CachedTokens     *int `json:"cached_tokens"`
+			CacheWriteTokens *int `json:"cache_write_tokens"`
 		} `json:"prompt_tokens_details"`
+		CompletionTokensDetails struct {
+			ReasoningTokens *int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -406,8 +409,9 @@ func (s *openAIStream) handleDoneMarker() {
 		}
 		if text != "" {
 			s.state.pending = append(s.state.pending, provider.Event{
-				Kind: provider.EventTextDelta,
-				Text: text,
+				Kind:      provider.EventTextDelta,
+				Text:      text,
+				TextPhase: provider.TextPhaseFinalAnswer,
 			})
 		}
 	}
@@ -420,13 +424,21 @@ func (s *openAIStream) handleDoneMarker() {
 
 // consumeChunk records usage tokens and dispatches each choice's delta.
 func (s *openAIStream) consumeChunk(parsed chunk) {
-	if parsed.Usage.TotalTokens > 0 {
+	if parsed.Usage.TotalTokens > 0 || parsed.Usage.PromptTokens > 0 || parsed.Usage.CompletionTokens > 0 ||
+		parsed.Usage.PromptTokensDetails.CachedTokens != nil || parsed.Usage.PromptTokensDetails.CacheWriteTokens != nil ||
+		parsed.Usage.CompletionTokensDetails.ReasoningTokens != nil {
+		cachedTokens, cacheReported := reportedToken(parsed.Usage.PromptTokensDetails.CachedTokens)
+		cacheWriteTokens, cacheWriteReported := reportedToken(parsed.Usage.PromptTokensDetails.CacheWriteTokens)
+		reasoningTokens, _ := reportedToken(parsed.Usage.CompletionTokensDetails.ReasoningTokens)
 		s.state.usage = provider.Usage{
-			InputTokens:           parsed.Usage.PromptTokens,
-			CachedInputTokens:     parsed.Usage.PromptTokensDetails.CachedTokens,
-			CacheWriteInputTokens: parsed.Usage.PromptTokensDetails.CacheWriteTokens,
-			OutputTokens:          parsed.Usage.CompletionTokens,
-			TotalTokens:           parsed.Usage.TotalTokens,
+			InputTokens:                   parsed.Usage.PromptTokens,
+			CachedInputTokens:             cachedTokens,
+			CachedInputTokensReported:     cacheReported,
+			CacheWriteInputTokens:         cacheWriteTokens,
+			CacheWriteInputTokensReported: cacheWriteReported,
+			OutputTokens:                  parsed.Usage.CompletionTokens,
+			ReasoningTokens:               reasoningTokens,
+			TotalTokens:                   parsed.Usage.TotalTokens,
 		}
 	}
 	for _, choice := range parsed.Choices {
@@ -458,8 +470,9 @@ func (s *openAIStream) processChoiceDelta(choice choiceChunk) {
 		}
 		if text != "" {
 			s.state.pending = append(s.state.pending, provider.Event{
-				Kind: provider.EventTextDelta,
-				Text: text,
+				Kind:      provider.EventTextDelta,
+				Text:      text,
+				TextPhase: provider.TextPhaseFinalAnswer,
 			})
 		}
 	}
@@ -578,11 +591,11 @@ func mapOpenAIStopReason(reason string) provider.StopReason {
 	case "stop":
 		return provider.StopReasonComplete
 	case "length":
-		return provider.StopReasonMaxTurns
+		return provider.StopReasonLength
 	case "tool_calls", "function_call":
 		return provider.StopReasonToolUse
 	case "content_filter":
-		return provider.StopReasonError
+		return provider.StopReasonContentFilter
 	default:
 		return provider.StopReasonUnknown
 	}
