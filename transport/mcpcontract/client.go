@@ -22,6 +22,10 @@ type SubscriptionClient interface {
 	UnsubscribeResource(context.Context, string) error
 }
 
+type ResourceTemplateClient interface {
+	ListResourceTemplates(context.Context) ([]ResourceTemplate, error)
+}
+
 type Notification struct {
 	Kind          string  `json:"kind"`
 	URI           string  `json:"uri,omitempty"`
@@ -75,6 +79,12 @@ type CallToolResult struct {
 
 type Resource struct {
 	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+type ResourceTemplate struct {
+	URITemplate string `json:"uriTemplate"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	MimeType    string `json:"mimeType,omitempty"`

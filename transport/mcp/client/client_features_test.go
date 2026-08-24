@@ -84,6 +84,17 @@ func TestClientResourcesMapOfficialValues(t *testing.T) {
 	}
 }
 
+func TestClientResourceTemplatesMapOfficialValues(t *testing.T) {
+	client := newInitializedTestClient(t)
+	templates, err := client.ListResourceTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(templates) != 1 || templates[0].URITemplate != "file:///{name}.md" {
+		t.Fatalf("resource templates = %#v", templates)
+	}
+}
+
 func TestClientReadResourceMapsOfficialContent(t *testing.T) {
 	// Given
 	client := newInitializedTestClient(t)
@@ -239,6 +250,9 @@ func newFeatureTestServerWithOptions(options *sdkmcp.ServerOptions) *sdkmcp.Serv
 	})
 	server.AddResource(&sdkmcp.Resource{URI: "file:///readme.md", Name: "README", MIMEType: "text/markdown"}, func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
 		return &sdkmcp.ReadResourceResult{Contents: []*sdkmcp.ResourceContents{{URI: "file:///readme.md", MIMEType: "text/markdown", Text: "# Venat"}}}, nil
+	})
+	server.AddResourceTemplate(&sdkmcp.ResourceTemplate{URITemplate: "file:///{name}.md", Name: "Markdown"}, func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+		return &sdkmcp.ReadResourceResult{}, nil
 	})
 	server.AddPrompt(&sdkmcp.Prompt{
 		Name: "summarize",

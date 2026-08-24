@@ -115,6 +115,20 @@ func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
 	return mapResources(result.Resources)
 }
 
+func (c *Client) ListResourceTemplates(ctx context.Context) ([]mcpcontract.ResourceTemplate, error) {
+	session, err := c.initializedSession()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
+	result, err := session.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		return nil, c.operationError(err)
+	}
+	return mapResourceTemplates(result.ResourceTemplates)
+}
+
 // ReadResource reads one server resource.
 func (c *Client) ReadResource(ctx context.Context, uri string) ([]ResourceContent, error) {
 	session, err := c.initializedSession()

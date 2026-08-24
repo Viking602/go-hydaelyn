@@ -7,6 +7,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 func mapInitializeResult(result *sdkmcp.InitializeResult) (InitializeResult, error) {
@@ -34,6 +35,18 @@ func mapResources(resources []*sdkmcp.Resource) ([]Resource, error) {
 		item, err := convertJSON[Resource](resource)
 		if err != nil {
 			return nil, fmt.Errorf("map MCP resource: %w", err)
+		}
+		mapped = append(mapped, item)
+	}
+	return mapped, nil
+}
+
+func mapResourceTemplates(templates []*sdkmcp.ResourceTemplate) ([]mcpcontract.ResourceTemplate, error) {
+	mapped := make([]mcpcontract.ResourceTemplate, 0, len(templates))
+	for _, template := range templates {
+		item, err := convertJSON[mcpcontract.ResourceTemplate](template)
+		if err != nil {
+			return nil, fmt.Errorf("map MCP resource template: %w", err)
 		}
 		mapped = append(mapped, item)
 	}
