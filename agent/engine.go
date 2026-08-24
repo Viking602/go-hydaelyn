@@ -88,6 +88,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		NativeToolHost:      e.NativeToolHost,
 		ContextUsage:        e.ContextUsage,
 		Control:             e.Control,
+		ContextTransition:   e.ContextTransition,
 		AppliedControlIDs:   append([]string(nil), e.AppliedControlIDs...),
 		OutputGuardrails:    e.OutputGuardrails,
 		OutputRecorder:      e.OutputRecorder,

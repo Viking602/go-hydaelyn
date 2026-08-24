@@ -87,8 +87,9 @@ type LoopInput struct {
 	// aborts the current turn and surfaces as the loop error, exactly like a
 	// failing OnEvent callback — so a Sink must absorb transient delivery
 	// hiccups it can tolerate rather than returning an error for them.
-	Sink    stream.Sink
-	Control TurnControl
+	Sink              stream.Sink
+	Control           TurnControl
+	ContextTransition ContextTransition
 	// AppliedControlIDs come only from the latest host-owned durable
 	// checkpoint. They acknowledge controls already embedded in that checkpoint
 	// before a resumed loop reserves new work.
@@ -248,6 +249,7 @@ type Engine struct {
 	NativeToolHost    provider.NativeToolHost
 	ContextUsage      provider.ContextUsageObserver
 	Control           TurnControl
+	ContextTransition ContextTransition
 	AppliedControlIDs []string
 	// SubagentScheduler routes agent-as-tool child executions through an
 	// application-owned durable scheduler. A nil scheduler keeps the embedded
@@ -663,6 +665,13 @@ func (e Engine) runToolStep(
 	appendErr := appendToolResults(ctx, current, results, input.Sink)
 	if executionErr := errors.Join(dispatchErr, appendErr); executionErr != nil {
 		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, executionErr
+	}
+	if input.ContextTransition != nil {
+		transitioned, transitionErr := input.ContextTransition.Apply(ctx, message.CloneMessages(*current), append([]tool.Result(nil), results...))
+		if transitionErr != nil {
+			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, transitionErr
+		}
+		*current = message.CloneMessages(transitioned)
 	}
 	if len(postToolControl) > 0 {
 		*current = append(*current, controlMessages(postToolControl)...)
