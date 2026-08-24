@@ -17,6 +17,25 @@ type Client interface {
 	Close() error
 }
 
+type SubscriptionClient interface {
+	SubscribeResource(context.Context, string) error
+	UnsubscribeResource(context.Context, string) error
+}
+
+type Notification struct {
+	Kind          string  `json:"kind"`
+	URI           string  `json:"uri,omitempty"`
+	Level         string  `json:"level,omitempty"`
+	Logger        string  `json:"logger,omitempty"`
+	Message       string  `json:"message,omitempty"`
+	ProgressToken string  `json:"progressToken,omitempty"`
+	Progress      float64 `json:"progress,omitempty"`
+	Total         float64 `json:"total,omitempty"`
+	Data          any     `json:"data,omitempty"`
+}
+
+type NotificationHandler func(context.Context, Notification)
+
 type Elicitation struct {
 	Mode            string
 	Message         string

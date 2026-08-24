@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -47,9 +48,11 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (Initiali
 		c.initTransport = transport
 		c.mu.Unlock()
 
-		var clientOptions *sdkmcp.ClientOptions
+		clientOptions := &sdkmcp.ClientOptions{}
+		hasClientOptions := false
 		if c.options.ElicitationHandler != nil {
-			clientOptions = &sdkmcp.ClientOptions{ElicitationHandler: func(handlerCtx context.Context, request *sdkmcp.ElicitRequest) (*sdkmcp.ElicitResult, error) {
+			hasClientOptions = true
+			clientOptions.ElicitationHandler = func(handlerCtx context.Context, request *sdkmcp.ElicitRequest) (*sdkmcp.ElicitResult, error) {
 				params := request.Params
 				result, handlerErr := c.options.ElicitationHandler(handlerCtx, mcpcontract.Elicitation{
 					Mode: params.Mode, Message: params.Message, URL: params.URL,
@@ -59,7 +62,48 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (Initiali
 					return nil, handlerErr
 				}
 				return &sdkmcp.ElicitResult{Action: result.Action, Content: result.Content}, nil
-			}}
+			}
+		}
+		if notify := c.options.NotificationHandler; notify != nil {
+			hasClientOptions = true
+			clientOptions.ToolListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.ToolListChangedRequest) {
+				notify(handlerCtx, mcpcontract.Notification{Kind: "tools/list_changed"})
+			}
+			clientOptions.PromptListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.PromptListChangedRequest) {
+				notify(handlerCtx, mcpcontract.Notification{Kind: "prompts/list_changed"})
+			}
+			clientOptions.ResourceListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.ResourceListChangedRequest) {
+				notify(handlerCtx, mcpcontract.Notification{Kind: "resources/list_changed"})
+			}
+			clientOptions.ResourceUpdatedHandler = func(handlerCtx context.Context, request *sdkmcp.ResourceUpdatedNotificationRequest) {
+				notification := mcpcontract.Notification{Kind: "resources/updated"}
+				if request != nil && request.Params != nil {
+					notification.URI = request.Params.URI
+				}
+				notify(handlerCtx, notification)
+			}
+			clientOptions.LoggingMessageHandler = func(handlerCtx context.Context, request *sdkmcp.LoggingMessageRequest) {
+				notification := mcpcontract.Notification{Kind: "logging/message"}
+				if request != nil && request.Params != nil {
+					notification.Level = string(request.Params.Level)
+					notification.Logger = request.Params.Logger
+					notification.Data = request.Params.Data
+				}
+				notify(handlerCtx, notification)
+			}
+			clientOptions.ProgressNotificationHandler = func(handlerCtx context.Context, request *sdkmcp.ProgressNotificationClientRequest) {
+				notification := mcpcontract.Notification{Kind: "progress"}
+				if request != nil && request.Params != nil {
+					notification.ProgressToken = fmt.Sprint(request.Params.ProgressToken)
+					notification.Message = request.Params.Message
+					notification.Progress = request.Params.Progress
+					notification.Total = request.Params.Total
+				}
+				notify(handlerCtx, notification)
+			}
+		}
+		if !hasClientOptions {
+			clientOptions = nil
 		}
 		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: name, Version: version}, clientOptions)
 		session, initErr := client.Connect(connectCtx, transport, nil)

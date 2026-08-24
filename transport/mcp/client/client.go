@@ -41,7 +41,8 @@ type Client struct {
 }
 
 type Options struct {
-	ElicitationHandler mcpcontract.ElicitationHandler
+	ElicitationHandler  mcpcontract.ElicitationHandler
+	NotificationHandler mcpcontract.NotificationHandler
 }
 
 // New creates a client for transport. Initialize establishes the session.
@@ -157,6 +158,26 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 		return nil, c.operationError(err)
 	}
 	return mapPromptMessages(result.Messages)
+}
+
+func (c *Client) SubscribeResource(ctx context.Context, uri string) error {
+	session, err := c.initializedSession()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
+	return session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: uri})
+}
+
+func (c *Client) UnsubscribeResource(ctx context.Context, uri string) error {
+	session, err := c.initializedSession()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
+	return session.Unsubscribe(ctx, &sdkmcp.UnsubscribeParams{URI: uri})
 }
 
 func (c *Client) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {

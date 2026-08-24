@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
+	"github.com/Viking602/venat/transport/mcpcontract"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -127,6 +129,63 @@ func TestClientGetPromptMapsOfficialMessage(t *testing.T) {
 	}
 }
 
+func TestClientForwardsNotificationsAndResourceSubscriptions(t *testing.T) {
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	server := newFeatureTestServerWithOptions(&sdkmcp.ServerOptions{
+		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
+		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- server.Run(ctx, serverTransport) }()
+	notifications := make(chan mcpcontract.Notification, 16)
+	client := NewWithOptions(clientTransport, Options{NotificationHandler: func(_ context.Context, notification mcpcontract.Notification) {
+		notifications <- notification
+	}})
+	if _, err := client.Initialize(context.Background(), "notification-client", "v1"); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+		cancel()
+		<-serverDone
+	})
+	server.AddPrompt(&sdkmcp.Prompt{Name: "late"}, func(context.Context, *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+		return &sdkmcp.GetPromptResult{}, nil
+	})
+	waitNotificationKind(t, notifications, "prompts/list_changed")
+	if err := client.SubscribeResource(context.Background(), "file:///readme.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.ResourceUpdated(context.Background(), &sdkmcp.ResourceUpdatedNotificationParams{URI: "file:///readme.md"}); err != nil {
+		t.Fatal(err)
+	}
+	updated := waitNotificationKind(t, notifications, "resources/updated")
+	if updated.URI != "file:///readme.md" {
+		t.Fatalf("resource update = %#v", updated)
+	}
+	if err := client.UnsubscribeResource(context.Background(), "file:///readme.md"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitNotificationKind(t *testing.T, notifications <-chan mcpcontract.Notification, kind string) mcpcontract.Notification {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case notification := <-notifications:
+			if notification.Kind == kind {
+				return notification
+			}
+		case <-timer.C:
+			t.Fatalf("notification %q was not received", kind)
+		}
+	}
+}
+
 func newInitializedTestClient(t *testing.T) *Client {
 	t.Helper()
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
@@ -153,7 +212,11 @@ func newInitializedTestClient(t *testing.T) *Client {
 }
 
 func newFeatureTestServer() *sdkmcp.Server {
-	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	return newFeatureTestServerWithOptions(nil)
+}
+
+func newFeatureTestServerWithOptions(options *sdkmcp.ServerOptions) *sdkmcp.Server {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "v1.0.0"}, options)
 	type echoArguments struct {
 		Text string `json:"text"`
 	}
