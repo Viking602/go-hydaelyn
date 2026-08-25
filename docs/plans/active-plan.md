@@ -2,19 +2,19 @@
 
 ## Release state
 
-- v0.15.0 is the latest published release.
+- v0.15.4 is the latest published release.
 - Later-minor work (production pack content, OpenTelemetry, and artifact
   backends) stays in the unversioned backlog.
 
 See the [product specification index](../product-spec/README.md), the
 [v0.14.0 control-plane specification](../product-spec/v0.14.0/README.md), and
-the [v0.15.0 release notes](../release-notes/v0.15.0.md).
+the [v0.15.4 release notes](../release-notes/v0.15.4.md).
 
 ## Current candidate scope
 
-No new minor is open. Hosts should take v0.15.0 for the canonical public API,
-lossless provider messages, governed tools, live turn control, and durable
-subagent scheduler boundary.
+No new minor is open. Hosts should take v0.15.4 for stream-rule interruption,
+host-owned context transitions, and typed MCP notifications, subscriptions,
+and resource-template discovery on top of the v0.15.0 public API.
 
 ## Release gates
 

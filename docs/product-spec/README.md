@@ -19,9 +19,13 @@ as a promise.
 | [v0.14.1](../release-notes/v0.14.1.md) | Released 2026-08-18 | Fail-closed policy, lease, and read APIs; ProcessTool and coding-sandbox I/O; reserved `hydaelyn.self.*`; `Run.AgentVersion`; MCP capability export; architecture-gate hardening |
 | [v0.14.2](../release-notes/v0.14.2.md) | Released 2026-08-20 | Skill tool misses return `IsError` results; hashline edits recover by current-file anchors |
 | [v0.15.0](../release-notes/v0.15.0.md) | Released 2026-08-23 | Canonical public API boundaries, lossless multimodal messages, strict provider streams, validated concurrent tools, durable turn control, stable Skills, and host-scheduled subagents |
+| [v0.15.1](../release-notes/v0.15.1.md) | Released 2026-08-23 | Stream-rule interruption: host hooks stop an open provider stream and the turn-control queue injects the matched rule at the next model boundary |
+| [v0.15.2](../release-notes/v0.15.2.md) | Released 2026-08-24 | Host-owned context transitions via the optional `agent.ContextTransition` engine extension |
+| [v0.15.3](../release-notes/v0.15.3.md) | Released 2026-08-24 | Typed MCP notifications, resource subscriptions, and list-change, logging, and progress events through the client contract |
+| [v0.15.4](../release-notes/v0.15.4.md) | Released 2026-08-24 | Typed MCP resource-template discovery alongside resources, prompts, notifications, and subscriptions |
 | [Future backlog](../plans/future-backlog.md) | Unversioned | Scheduler expansion, memory and artifact work, OpenTelemetry integration, and production pack content |
 
-The latest published release is v0.15.0.
+The latest published release is v0.15.4.
 
 ## Architecture
 
@@ -49,7 +53,7 @@ The historical v0.8.0 architecture record is
 
 ## Reading order
 
-1. Read the [latest released notes](../release-notes/v0.15.0.md).
+1. Read the [latest released notes](../release-notes/v0.15.4.md).
 2. Read the [live architecture boundaries](../architecture-boundaries.md)
    and the [v0.8.0 package structure](./v0.8.0/12-package-structure.md).
 3. Review the [v0.14.0 specification](./v0.14.0/) for the current
