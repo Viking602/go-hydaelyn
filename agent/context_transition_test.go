@@ -27,16 +27,6 @@ func (fixture *checkpointTransitionFixture) Apply(_ context.Context, history []m
 	return history, nil
 }
 
-type contextTransitionTool struct{}
-
-func (contextTransitionTool) Definition() tool.Definition {
-	return tool.Definition{Name: "checkpoint", InputSchema: tool.Schema{Type: "object"}}
-}
-
-func (contextTransitionTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
-	return tool.Result{ToolCallID: call.ID, Name: call.Name, Content: "result for " + call.Name}, nil
-}
-
 func TestContextTransitionRewindsToolHistoryBeforeNextModelTurn(t *testing.T) {
 	fixture := &checkpointTransitionFixture{}
 	tools := tool.NewBus(
