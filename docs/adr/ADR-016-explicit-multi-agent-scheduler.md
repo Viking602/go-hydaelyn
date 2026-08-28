@@ -7,6 +7,13 @@ Accepted — enforced from the v0.8.0 reconstruction onward. Anchor documents:
 `docs/product-spec/v0.8.0/05-multi-agent-layer.md`,
 `docs/product-spec/v0.8.0/11-boundaries.md` Principle 3 (extended).
 
+**Amended for v0.16.0 — 2026-08-28.** `Scheduler`, `SchedulerFunc`,
+`SequentialScheduler`, and `Drive` are the supported scheduling protocol. The
+unused name-only `api.Flow` registry, the `workflow/` wrapper package, and the
+incomplete built-in Graph/DAG implementation are removed. Conditional,
+parallel, fan-in, and failure policies belong in application Scheduler
+implementations until a real consumer justifies a durable serializable model.
+
 ## Context
 
 The pre-reconstruction v0.8.0 design treated multi-agent

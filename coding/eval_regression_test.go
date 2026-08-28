@@ -403,7 +403,9 @@ func newCodingHarnessWithPolicy(t *testing.T, runID, request string, engine api.
 	}
 
 	runner := venat.NewDevelopment(api.Config{PolicyEngine: engine})
-	runner.RegisterAgent(api.AgentProfile{ID: codingHarnessAgentID})
+	if err := runner.RegisterAgent(api.AgentProfile{ID: codingHarnessAgentID}); err != nil {
+		t.Fatalf("RegisterAgent: %v", err)
+	}
 
 	ctx := context.Background()
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: runID, RootTaskID: "root", Request: request})
@@ -461,7 +463,9 @@ func writeTargets(files map[string]string) []string {
 func (h *codingHarness) Runner() *venat.Runner { return h.runner }
 
 // RegisterAgent registers an additional agent profile.
-func (h *codingHarness) RegisterAgent(profile api.AgentProfile) { h.runner.RegisterAgent(profile) }
+func (h *codingHarness) RegisterAgent(profile api.AgentProfile) error {
+	return h.runner.RegisterAgent(profile)
+}
 
 // Cleanup is a no-op; t.TempDir cleans the workspace and the runner is GC'd.
 func (h *codingHarness) Cleanup() {}
@@ -474,7 +478,7 @@ func (h *codingHarness) EmbeddingProvider() eval.EmbeddingProvider { return nil 
 // call routed through these drivers passes runner.InvokeTool first (tool gate +
 // policy) before the underlying coding driver executes.
 func (h *codingHarness) toolSet() []tool.Driver {
-	bus := worker.GovernedToolBus{
+	bus, err := (worker.GovernedToolBus{
 		Runner:      h.runner,
 		Bus:         tool.NewBus(coding.NewToolSet(h.ws)...),
 		RunID:       h.runID,
@@ -483,7 +487,10 @@ func (h *codingHarness) toolSet() []tool.Driver {
 		HolderType:  api.HolderAgent,
 		HolderID:    h.agentID,
 		TaskVersion: h.version,
-	}.ToolBus()
+	}).ToolBus()
+	if err != nil {
+		h.t.Fatalf("ToolBus: %v", err)
+	}
 	drivers := make([]tool.Driver, 0)
 	for _, def := range bus.Definitions() {
 		if d, ok := bus.Driver(def.Name); ok {

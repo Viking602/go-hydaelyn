@@ -717,7 +717,7 @@ func TestAgentWorkerPersistsValidatedStructuredOutput(t *testing.T) {
 	}
 	// The validated structured payload must survive onto the persisted report;
 	// a success report carrying only Summary would drop it, leaving durable
-	// downstream readers (routers, graph edges) unable to route on it.
+	// schedulers and graph edges unable to route on it.
 	if completed.Result == nil {
 		t.Fatalf("completed task carries no typed report")
 	}
@@ -737,7 +737,7 @@ func TestGovernedToolBusKeepsSourceValidationOnDirectExecute(t *testing.T) {
 			AdditionalProperties: &additional,
 		},
 	}}
-	bus := GovernedToolBus{Bus: tool.NewBus(driver)}
+	bus := GovernedToolBus{Runner: venat.NewDevelopment(), Bus: tool.NewBus(driver)}
 	result, err := bus.Execute(
 		context.Background(),
 		tool.Call{ID: "call", Name: "lookup", Arguments: json.RawMessage(`{"query":"a","query":"b"}`)},
@@ -745,6 +745,20 @@ func TestGovernedToolBusKeepsSourceValidationOnDirectExecute(t *testing.T) {
 	)
 	if err != nil || !result.IsError || driver.called {
 		t.Fatalf("governed validation result=%#v called=%v err=%v", result, driver.called, err)
+	}
+}
+
+func TestGovernedToolBusSurfacesRegistrationFailure(t *testing.T) {
+	driver := &recordingTool{definition: tool.Definition{Name: "lookup"}}
+	bus := GovernedToolBus{
+		Runner:     venat.NewDevelopment(),
+		Bus:        tool.NewBus(driver),
+		HolderType: api.HolderAgent,
+		HolderID:   "agent-a",
+	}
+
+	if _, err := bus.ToolBus(); !errors.Is(err, api.ErrInvalidCommand) {
+		t.Fatalf("ToolBus() error = %v, want ErrInvalidCommand", err)
 	}
 }
 

@@ -1,8 +1,6 @@
 package core
 
 import (
-	"context"
-
 	"github.com/Viking602/venat/api"
 	blackboardsvc "github.com/Viking602/venat/internal/blackboard"
 	"github.com/Viking602/venat/internal/core/ports"
@@ -14,11 +12,8 @@ type (
 	EventStore                     = ports.EventStore
 	TraceStore                     = ports.TraceStore
 	BlackboardReadWriter           = ports.BlackboardReadWriter
-	BlackboardCommittedReader      = ports.BlackboardCommittedReader
 	BlackboardSubscriber           = ports.BlackboardSubscriber
-	BlackboardWaiter               = ports.BlackboardWaiter
 	UserMessageStore               = ports.UserMessageStore
-	UserMessageOutboxScanner       = ports.UserMessageOutboxScanner
 	MailboxOutboxStore             = ports.MailboxOutboxStore
 	LeaseStore                     = ports.LeaseStore
 	ApprovalStore                  = ports.ApprovalStore
@@ -54,12 +49,7 @@ type (
 	OutputGateway            = ports.OutputGateway
 )
 
-type UserTimelineProjector interface {
-	ProjectUserTimeline(context.Context, []api.Event) ([]api.RunTimelineItem, error)
-}
-
 type (
-	Projector          = ports.Projector
 	IntentAnalyzer     = ports.IntentAnalyzer
 	Planner            = ports.Planner
 	PlanValidator      = ports.PlanValidator

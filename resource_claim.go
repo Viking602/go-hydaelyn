@@ -30,5 +30,5 @@ func (r *Runner) ListResourceClaims(ctx context.Context, selector api.ResourceCl
 	if err != nil {
 		return nil, err
 	}
-	return claims, nil
+	return append([]api.ResourceClaim(nil), claims...), nil
 }

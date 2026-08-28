@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/Viking602/venat/api"
 )
@@ -22,6 +22,11 @@ func (r *Runtime) currentOutputGateway() OutputGateway {
 	return r.outputGateway
 }
 
+// DrainResponseOutbox publishes every queued user message and reports how
+// many it published. The queued snapshot is taken outside a write
+// transaction, so a message can be claimed by another publisher between the
+// scan and the publish; such a message is skipped, not counted, and does not
+// fail the drain.
 func (r *Runtime) DrainResponseOutbox(ctx context.Context) (int, error) {
 	messages, err := r.queuedResponseMessages(ctx)
 	if err != nil {
@@ -33,10 +38,16 @@ func (r *Runtime) DrainResponseOutbox(ctx context.Context) (int, error) {
 		if message.Status != api.UserMessageQueued {
 			continue
 		}
-		if err := r.PublishResponse(ctx, PublishResponseCommand{RunID: message.RunID, MessageID: message.ID}); err != nil {
+		didPublish, err := r.publishResponse(ctx, PublishResponseCommand{RunID: message.RunID, MessageID: message.ID})
+		if didPublish {
+			published++
+		}
+		if errors.Is(err, ErrResponsePublishInFlight) {
+			continue
+		}
+		if err != nil {
 			return published, err
 		}
-		published++
 	}
 	return published, nil
 }
@@ -47,9 +58,7 @@ func (r *Runtime) queuedResponseMessages(ctx context.Context) ([]api.UserMessage
 		return nil, err
 	}
 	defer func() { _ = done() }()
-	scanner, ok := uow.UserMessages().(UserMessageOutboxScanner)
-	if !ok {
-		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", ErrInvalidConfiguration)
-	}
-	return scanner.ListQueuedMessages(ctx)
+	return uow.UserMessages().ListPendingFor(ctx, api.UserMessageSelector{
+		Statuses: []string{string(api.UserMessageQueued)},
+	})
 }

@@ -10,7 +10,8 @@ human approvals, and idempotent side effects. Its `Runner` records typed `Run`,
 configurable stores. Applications embed the runner and provide the production
 storage implementation.
 
-> **Status:** The latest release is [v0.15.0](https://github.com/Viking602/venat/releases/tag/v0.15.0).
+> **Status:** The latest published release is [v0.15.4](https://github.com/Viking602/venat/releases/tag/v0.15.4).
+> [v0.16.0](docs/release-notes/v0.16.0.md) is the prepared release candidate.
 > The public API may still change before v1.0.
 
 ## Why Venat
@@ -36,13 +37,12 @@ handles those concerns in four concrete ways:
   Reusable `skill/` instruction bundles support explicit and model-driven
   activation there; they do not grant host tools or create a second runtime.
 - **Explicit multi-agent scheduler** (`multiagent/`): first-class
-  `AgentClass`, `Team`, `Scheduler`, `Dispatch`, typed `Handoff`, `Blackboard`,
-  `Voting`, and `Supervisor`, instead of ad-hoc helpers.
+  `AgentClass`, `Team`, `Scheduler`, `SchedulerFunc`, `Dispatch`, typed
+  `Handoff`, and `Blackboard`. Fixed pipelines use `SequentialScheduler`;
+  applications own more specialized scheduling policies.
 - **Durable runner** (root + `internal/`): runs, tasks, events, leases,
   approvals, an outbox / action-attempt ledger for idempotent side effects, and
   handoffs, all persisted and replayable.
-- **Workflow modeling** (`workflow/`): a declarative `Definition` compiles to a
-  `multiagent` graph; it adds no second runtime.
 - **Durable triggers** (`transport/cron`, `transport/webhook`, and others): schedule and
   event entry points, with per-trigger timezone support on the cron driver.
 - **Product packs** (`packs/`): vertical skeletons free to encode domain
@@ -137,9 +137,8 @@ runner := venat.NewDevelopment(api.Config{
 })
 ```
 
-Continue with the [full quickstart](docs/quickstart.md), or run the
-[`workflow` example](_examples/workflow/main.go) for a declarative multi-step
-flow.
+Continue with the [full quickstart](docs/quickstart.md). Multi-step scheduling
+uses `multiagent.Scheduler` implementations directly.
 
 ## How it works
 
@@ -155,9 +154,8 @@ primitive, not an upward dependency on Runner. See
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Packs / Workflow / Examples                 │
-│ research, customer-support, devops, aiops,  │
-│ workflow modeling                           │
+│ Packs / Examples                            │
+│ research, customer-support, devops, aiops   │
 └─────────────────────────────────────────────┘
                     ↓ host wiring
 ┌─────────────────────────────────────────────┐
@@ -168,7 +166,7 @@ primitive, not an upward dependency on Runner. See
 ┌─────────────────────────────────────────────┐
 │ Multi-Agent Layer  (multiagent/)            │
 │ AgentClass, AgentInstance, Team, Scheduler, │
-│ Dispatch, typed Handoff, Blackboard, Voting │
+│ Dispatch, typed Handoff, Blackboard         │
 └─────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────┐
@@ -195,32 +193,6 @@ keeps everything in memory so you can
 start without provisioning anything, and you swap in your own backend for
 production by implementing the store interfaces.
 
-## Workflow layer
-
-`workflow/` is a **modeling** layer, not a runtime. A `workflow.Definition`
-(built fluently with `New().Step().Then().Branch().Map()`) compiles to a
-`multiagent.CompiledGraph`:
-
-```
-Definition ──Compile──▶ Compiled ──Scheduler()──▶ multiagent.Scheduler
-                                └──Graph()──────▶ multiagent.CompiledGraph
-```
-
-Because it lowers to the existing graph, workflow execution still flows through
-`multiagent.Scheduler` decisions and `multiagent.Dispatch` values. It does **not**
-create a second durable runtime and does **not** bypass Runner-owned `Run`,
-`Task`, `Event`, `Lease`, `Policy`, or `Outbox` behavior. `Engine` is an
-in-process convenience over `multiagent.Drive`; for durable execution, supply a
-`multiagent.Executor` that persists each dispatch through the root `Runner`
-before running agent work.
-
-Two constraints worth knowing:
-
-- **`Branch` conditions must be pure** functions of `api.TypedReport`. The
-  compiled graph may evaluate them during replay or recovery, so they must not
-  read clocks, mutate state, call providers, or depend on process-local counters.
-- `flow` / `api.Flow` (preset adapter metadata) is a separate concept from
-  `workflow/`, despite sharing the same English word.
 
 ## Examples
 
@@ -229,8 +201,6 @@ Examples live under `_examples/` (the leading underscore keeps them out of
 
 - [`incident_response`](_examples/incident_response/main.go): fan-out,
   blackboard, review, approval, and action in one flow.
-- [`workflow`](_examples/workflow/main.go): a declarative workflow compiled to
-  a multi-agent graph.
 - [`subagent`](_examples/subagent/main.go): agent-as-tool delegation across
   models and providers.
 - [`evaluation`](_examples/evaluation/main.go): the evaluation harness.

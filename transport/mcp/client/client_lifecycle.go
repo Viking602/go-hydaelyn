@@ -48,64 +48,7 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (Initiali
 		c.initTransport = transport
 		c.mu.Unlock()
 
-		clientOptions := &sdkmcp.ClientOptions{}
-		hasClientOptions := false
-		if c.options.ElicitationHandler != nil {
-			hasClientOptions = true
-			clientOptions.ElicitationHandler = func(handlerCtx context.Context, request *sdkmcp.ElicitRequest) (*sdkmcp.ElicitResult, error) {
-				params := request.Params
-				result, handlerErr := c.options.ElicitationHandler(handlerCtx, mcpcontract.Elicitation{
-					Mode: params.Mode, Message: params.Message, URL: params.URL,
-					ElicitationID: params.ElicitationID, RequestedSchema: params.RequestedSchema,
-				})
-				if handlerErr != nil {
-					return nil, handlerErr
-				}
-				return &sdkmcp.ElicitResult{Action: result.Action, Content: result.Content}, nil
-			}
-		}
-		if notify := c.options.NotificationHandler; notify != nil {
-			hasClientOptions = true
-			clientOptions.ToolListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.ToolListChangedRequest) {
-				notify(handlerCtx, mcpcontract.Notification{Kind: "tools/list_changed"})
-			}
-			clientOptions.PromptListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.PromptListChangedRequest) {
-				notify(handlerCtx, mcpcontract.Notification{Kind: "prompts/list_changed"})
-			}
-			clientOptions.ResourceListChangedHandler = func(handlerCtx context.Context, _ *sdkmcp.ResourceListChangedRequest) {
-				notify(handlerCtx, mcpcontract.Notification{Kind: "resources/list_changed"})
-			}
-			clientOptions.ResourceUpdatedHandler = func(handlerCtx context.Context, request *sdkmcp.ResourceUpdatedNotificationRequest) {
-				notification := mcpcontract.Notification{Kind: "resources/updated"}
-				if request != nil && request.Params != nil {
-					notification.URI = request.Params.URI
-				}
-				notify(handlerCtx, notification)
-			}
-			clientOptions.LoggingMessageHandler = func(handlerCtx context.Context, request *sdkmcp.LoggingMessageRequest) {
-				notification := mcpcontract.Notification{Kind: "logging/message"}
-				if request != nil && request.Params != nil {
-					notification.Level = string(request.Params.Level)
-					notification.Logger = request.Params.Logger
-					notification.Data = request.Params.Data
-				}
-				notify(handlerCtx, notification)
-			}
-			clientOptions.ProgressNotificationHandler = func(handlerCtx context.Context, request *sdkmcp.ProgressNotificationClientRequest) {
-				notification := mcpcontract.Notification{Kind: "progress"}
-				if request != nil && request.Params != nil {
-					notification.ProgressToken = fmt.Sprint(request.Params.ProgressToken)
-					notification.Message = request.Params.Message
-					notification.Progress = request.Params.Progress
-					notification.Total = request.Params.Total
-				}
-				notify(handlerCtx, notification)
-			}
-		}
-		if !hasClientOptions {
-			clientOptions = nil
-		}
-		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: name, Version: version}, clientOptions)
+		client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: name, Version: version}, c.clientOptions())
 		session, initErr := client.Connect(connectCtx, transport, nil)
 		cancel()
 		if initErr != nil {
@@ -137,6 +80,71 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (Initiali
 			return InitializeResult{}, sdkmcp.ErrConnectionClosed
 		}
 		return result, initErr
+	}
+}
+
+func (c *Client) clientOptions() *sdkmcp.ClientOptions {
+	options := &sdkmcp.ClientOptions{}
+	configured := false
+	if handler := c.options.ElicitationHandler; handler != nil {
+		configured = true
+		options.ElicitationHandler = func(ctx context.Context, request *sdkmcp.ElicitRequest) (*sdkmcp.ElicitResult, error) {
+			params := request.Params
+			result, err := handler(ctx, mcpcontract.Elicitation{
+				Mode: params.Mode, Message: params.Message, URL: params.URL,
+				ElicitationID: params.ElicitationID, RequestedSchema: params.RequestedSchema,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &sdkmcp.ElicitResult{Action: result.Action, Content: result.Content}, nil
+		}
+	}
+	if handler := c.options.NotificationHandler; handler != nil {
+		configured = true
+		configureNotificationHandlers(options, handler)
+	}
+	if !configured {
+		return nil
+	}
+	return options
+}
+
+func configureNotificationHandlers(options *sdkmcp.ClientOptions, notify mcpcontract.NotificationHandler) {
+	options.ToolListChangedHandler = func(ctx context.Context, _ *sdkmcp.ToolListChangedRequest) {
+		notify(ctx, mcpcontract.Notification{Kind: "tools/list_changed"})
+	}
+	options.PromptListChangedHandler = func(ctx context.Context, _ *sdkmcp.PromptListChangedRequest) {
+		notify(ctx, mcpcontract.Notification{Kind: "prompts/list_changed"})
+	}
+	options.ResourceListChangedHandler = func(ctx context.Context, _ *sdkmcp.ResourceListChangedRequest) {
+		notify(ctx, mcpcontract.Notification{Kind: "resources/list_changed"})
+	}
+	options.ResourceUpdatedHandler = func(ctx context.Context, request *sdkmcp.ResourceUpdatedNotificationRequest) {
+		notification := mcpcontract.Notification{Kind: "resources/updated"}
+		if request != nil && request.Params != nil {
+			notification.URI = request.Params.URI
+		}
+		notify(ctx, notification)
+	}
+	options.LoggingMessageHandler = func(ctx context.Context, request *sdkmcp.LoggingMessageRequest) {
+		notification := mcpcontract.Notification{Kind: "logging/message"}
+		if request != nil && request.Params != nil {
+			notification.Level = string(request.Params.Level)
+			notification.Logger = request.Params.Logger
+			notification.Data = request.Params.Data
+		}
+		notify(ctx, notification)
+	}
+	options.ProgressNotificationHandler = func(ctx context.Context, request *sdkmcp.ProgressNotificationClientRequest) {
+		notification := mcpcontract.Notification{Kind: "progress"}
+		if request != nil && request.Params != nil {
+			notification.ProgressToken = fmt.Sprint(request.Params.ProgressToken)
+			notification.Message = request.Params.Message
+			notification.Progress = request.Params.Progress
+			notification.Total = request.Params.Total
+		}
+		notify(ctx, notification)
 	}
 }
 

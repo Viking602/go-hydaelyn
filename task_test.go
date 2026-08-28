@@ -72,19 +72,6 @@ func TestTask_LoadsExistingTask(t *testing.T) {
 	}
 }
 
-func TestReadyTasks_ReturnsCreatedRootTask(t *testing.T) {
-	r := newTestRunner(t)
-	ctx := context.Background()
-	run, _, _ := r.StartRun(ctx, api.StartRunCommand{Request: "test"})
-	tasks, err := r.ReadyTasksContext(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("ReadyTasksContext: %v", err)
-	}
-	if len(tasks) == 0 {
-		t.Error("expected at least one ready task after StartRun")
-	}
-}
-
 func TestListTasks_IncludesRootTask(t *testing.T) {
 	r := newTestRunner(t)
 	ctx := context.Background()

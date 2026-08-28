@@ -12,9 +12,7 @@
 //   - [api]          — Config, commands, interfaces, Run/Task data contracts
 //   - [agent]        — agent engine and profile contracts
 //   - [tool]         — tool contract, effect types, and tooltest helpers
-//   - [flow]         — flow preset contracts
 //   - [policy]       — unified authorization contract
-//   - [blackboard]   — blackboard item and selector contracts
 //   - [provider]     — LLM provider drivers (anthropic, openai, scripted)
 //   - [message]      — shared message/content data types
 //   - [hook]         — pre/post-turn hook contracts

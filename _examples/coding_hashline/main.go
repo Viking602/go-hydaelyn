@@ -76,7 +76,7 @@ func main() {
 	//    the run uses. That composition is exactly the "explicit allowance"
 	//    spec section 7.1 says must clear the default deny.
 	runner := venat.NewDevelopment(api.Config{PolicyEngine: hostPolicy()})
-	runner.RegisterAgent(api.AgentProfile{ID: agentID})
+	must(runner.RegisterAgent(api.AgentProfile{ID: agentID}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "fix the Add bug"})
 	must(err)

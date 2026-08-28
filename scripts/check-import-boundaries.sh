@@ -165,6 +165,17 @@ check_import() {
         report "coding-no-worker-packs-root" "$package" "$imported" "$kind"
       fi
       ;;
+    session)
+      if [[ "$imported" == "$module" ]] ||
+        is_within "$imported" "$module/agent" ||
+        is_within "$imported" "$module/multiagent" ||
+        is_within "$imported" "$module/worker" ||
+        is_within "$imported" "$module/internal" ||
+        is_within "$imported" "$module/packs" ||
+        is_within "$imported" "$module/coding"; then
+        report "session-no-runtime-layers" "$package" "$imported" "$kind"
+      fi
+      ;;
   esac
 }
 
@@ -190,6 +201,7 @@ check_package_set root '.'
 check_package_set worker './worker/...'
 check_package_set packs './packs/...'
 check_package_set coding './coding/...'
+check_package_set session './session/...'
 check_coding_test_files
 
 if ((violations > 0)); then
@@ -198,6 +210,6 @@ if ((violations > 0)); then
   exit 1
 fi
 
-go list './api/...' './agent/...' './multiagent/...' './worker/...' './packs/...' './coding/...' '.' >/dev/null
+go list './api/...' './agent/...' './multiagent/...' './worker/...' './packs/...' './coding/...' './session/...' '.' >/dev/null
 
 echo "OK: import boundaries preserved."

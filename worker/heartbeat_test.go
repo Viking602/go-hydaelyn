@@ -198,14 +198,34 @@ func TestFailureReportOnlyMarksPureCancel(t *testing.T) {
 	}
 }
 
-func TestPulseLeaseHeartbeatIgnoresErrorAfterCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := pulseLeaseHeartbeat(ctx, func(context.Context) error {
-		return api.ErrLeaseNotActive
-	})
-	if err != nil {
-		t.Fatalf("pulseLeaseHeartbeat() error = %v, want nil after cancel", err)
+func TestPulseLeaseHeartbeatAfterCancel(t *testing.T) {
+	tests := []struct {
+		name  string
+		pulse error
+		want  error
+	}{
+		{name: "transport failure is explained by cancel", pulse: errors.New("dial: connection refused")},
+		{name: "lost lease surfaces", pulse: api.ErrLeaseNotActive, want: api.ErrLeaseNotActive},
+		{name: "stolen lease surfaces", pulse: api.ErrLeaseHolderMismatch, want: api.ErrLeaseHolderMismatch},
+		{name: "missing lease surfaces", pulse: api.ErrNotFound, want: api.ErrNotFound},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := pulseLeaseHeartbeat(ctx, func(context.Context) error {
+				return test.pulse
+			})
+			if test.want == nil {
+				if err != nil {
+					t.Fatalf("pulseLeaseHeartbeat() error = %v, want nil after cancel", err)
+				}
+				return
+			}
+			if !errors.Is(err, test.want) {
+				t.Fatalf("pulseLeaseHeartbeat() error = %v, want %v", err, test.want)
+			}
+		})
 	}
 }
 

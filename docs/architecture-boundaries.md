@@ -14,11 +14,11 @@ The five-layer stack is a documentation map, not a proof that every
 import is strictly downward:
 
 ```
-Packs / Workflow / Examples     domain configuration; host-mounted
+Packs / Examples                domain configuration; host-mounted
         ↓ host wiring
 Worker integration (worker/)    poll, lease, execute, team drive
         ↓
-Multi-Agent (multiagent/)       schedule, dispatch, handoff, vote
+Multi-Agent (multiagent/)       schedule, dispatch, handoff, blackboard
         ↓
 Agent Loop (agent/)             one-task bounded loop
         ↓
@@ -51,12 +51,14 @@ Enforced by `scripts/check-import-boundaries.sh` on production,
 | `worker/` | `packs/`, `coding/` |
 | `packs/` | `coding/`, `worker/`, root module |
 | `coding/` | `worker/`, `packs/`, root module |
+| `session/` | root module, `agent/`, `multiagent/`, `worker/`, `internal/`, `packs/`, `coding/` |
 
 Allowed on purpose:
 
 - `multiagent/` → `stream/` (runtime-neutral collaboration primitive)
 - `worker/` → root `venat` (integration seam)
 - `agent/` → `api/`, `provider/`, `tool/`, `skill/`, `stream/`
+- `agent/` → `session/` (durable harness state, ADR-028, Experimental)
 - `eval/` → `worker/` and the root façade (declared harness bridge)
 - `coding/eval_regression_test.go` only → root façade and `worker/`
   (named file exception; other coding tests stay banned)
@@ -72,18 +74,18 @@ enforces cycles, coupling, and god files.
 
 Code under `api/`, `internal/**`, `agent/**`, and `multiagent/**` must
 not contain the closed business-word list. Multi-agent primitives
-(`Scheduler`, `Supervisor`, `Voting`, `Handoff`, `Dispatch`, `Team`,
-`AgentClass`, `AgentInstance`, `TypedReport`, `TeamState`) are
-framework words (ADR-008). Domain vocabulary belongs in `packs/`,
-`_examples/`, and docs.
+(`Scheduler`, `Handoff`, `Dispatch`, `Team`, `AgentClass`,
+`AgentInstance`, `TypedReport`, `TeamState`) are framework words
+(ADR-008). Domain vocabulary belongs in `packs/`, `_examples/`, and
+docs.
 
 Enforcement: `scripts/check-business-words.sh`.
 
-### 2. Recipes compile to Run/Task; no second runtime
+### 2. Packs and recipes compile to Run/Task; no second runtime
 
-Patterns, recipes, workflows, and schedulers emit Commands or Dispatches
-that the Runner persists. A package that grows its own event store,
-lease, or outbox is a second runtime.
+Packs, recipes, and schedulers emit Commands or Dispatches that the Runner
+persists. A package that grows its own event store, lease, or outbox is a
+second runtime.
 
 ### 3. Five concepts, five owners
 
@@ -118,8 +120,12 @@ multiagent → pack boundaries. Use `agent.AgentFailure` and
   `contract.RunStoreProviderContractTests`. Applications own schema and
   implementation. `internal/memory` is a development default, not a
   backend product.
-- **Memory (ADR-013):** `api.Memory[T]` is the optional plugin.
-  `memory/` is a deprecated compatibility package.
+- **Memory (ADR-013):** `api.Memory[T]` is the optional plugin. The
+  deprecated `memory/` compatibility package was removed in v0.16.
+- **Durable agent session (ADR-028, Experimental):** `session.Storage`
+  requires atomic commits, register-sequence CAS, root-to-leaf branch scans,
+  and usage reads. `session.Memory` is process-local. `agent.Harness` owns a
+  renewable durable lane lease; custom stores must not weaken the CAS contract.
 
 ## Public any-field contract
 

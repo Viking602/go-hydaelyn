@@ -58,13 +58,24 @@ func (e streamingNodeExecutor) ExecuteStream(ctx context.Context, dispatch Dispa
 	return e.Execute(ctx, dispatch)
 }
 
+func oneBatchScheduler(classes ...AgentClass) Scheduler {
+	frozen := append([]AgentClass(nil), classes...)
+	return SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		dispatches := make([]Dispatch, 0, len(frozen))
+		for index, class := range frozen {
+			dispatches = append(dispatches, buildDispatch(state.RunID, class, index, nil))
+		}
+		return dispatches, nil
+	})
+}
+
 func TestDriveStreamsFramesLabeledByNode(t *testing.T) {
-	g := NewGraph().
-		AddNode("a", AgentClass{Name: "a"}).
-		AddNode("b", AgentClass{Name: "b"}).
-		AddEdge("a", "b")
+	scheduler := SequentialScheduler{Classes: []AgentClass{{Name: "a"}, {Name: "b"}}}
 	sink := &collectSink{}
-	if _, err := Drive(context.Background(), "run-1", mustCompile(t, g), streamingNodeExecutor{}, DriveOptions{Sink: sink}); err != nil {
+	if _, err := Drive(context.Background(), "run-1", scheduler, streamingNodeExecutor{}, DriveOptions{Sink: sink}); err != nil {
 		t.Fatalf("Drive error = %v", err)
 	}
 	got := sink.textBySource()
@@ -74,16 +85,13 @@ func TestDriveStreamsFramesLabeledByNode(t *testing.T) {
 }
 
 func TestDriveStreamingFoldMatchesNonStreaming(t *testing.T) {
-	build := func() *CompiledGraph {
-		return mustCompile(t, NewGraph().
-			AddNode("a", AgentClass{Name: "a"}).
-			AddNode("b", AgentClass{Name: "b"}).
-			AddNode("c", AgentClass{Name: "c"}).
-			AddNode("d", AgentClass{Name: "d"}).
-			AddEdge("a", "b").
-			AddEdge("a", "c").
-			AddEdge("b", "d").
-			AddEdge("c", "d"))
+	build := func() Scheduler {
+		return oneBatchScheduler(
+			AgentClass{Name: "a"},
+			AgentClass{Name: "b"},
+			AgentClass{Name: "c"},
+			AgentClass{Name: "d"},
+		)
 	}
 	ids := func(opts DriveOptions) []string {
 		result, err := Drive(context.Background(), "run-1", build(), streamingNodeExecutor{}, opts)
@@ -97,7 +105,7 @@ func TestDriveStreamingFoldMatchesNonStreaming(t *testing.T) {
 		return out
 	}
 	// Attaching a Sink must not change the folded snapshot: frames are a
-	// transient side-channel, so the concurrent diamond folds identically with
+	// transient side-channel, so the concurrent batch folds identically with
 	// and without a consumer attached.
 	want := ids(DriveOptions{MaxConcurrency: 4})
 	got := ids(DriveOptions{MaxConcurrency: 4, Sink: &collectSink{}})
@@ -112,31 +120,17 @@ func TestDriveStreamingFoldMatchesNonStreaming(t *testing.T) {
 }
 
 func TestDriveSinkWithNonStreamingExecutorRunsWithoutFrames(t *testing.T) {
-	g := NewGraph().AddNode("a", AgentClass{Name: "a"})
+	scheduler := SequentialScheduler{Classes: []AgentClass{{Name: "a"}}}
 	sink := &collectSink{}
-	// graphExecutor is a plain ExecutorFunc — not a StreamingExecutor — so the
-	// run completes but produces no frames (documented degraded mode).
-	if _, err := Drive(context.Background(), "run-1", mustCompile(t, g), graphExecutor("run-1", nil), DriveOptions{Sink: sink}); err != nil {
+	plain := ExecutorFunc(func(context.Context, Dispatch) (api.TypedReport, error) {
+		return api.TypedReport{Status: api.ReportStatusSuccess}, nil
+	})
+	// A plain ExecutorFunc is not a StreamingExecutor, so the run completes
+	// without frames.
+	if _, err := Drive(context.Background(), "run-1", scheduler, plain, DriveOptions{Sink: sink}); err != nil {
 		t.Fatalf("Drive error = %v", err)
 	}
 	if n := sink.count(); n != 0 {
 		t.Fatalf("non-streaming executor must produce no frames, got %d", n)
-	}
-}
-
-func TestDriveSubgraphFramesFlowToParentSink(t *testing.T) {
-	inner := mustCompile(t, NewGraph().
-		AddNode("inner1", AgentClass{Name: "inner1"}).
-		AddNode("inner2", AgentClass{Name: "inner2"}).
-		AddEdge("inner1", "inner2"))
-	parent := mustCompile(t, NewGraph().AddSubgraph("mid", inner))
-	sink := &collectSink{}
-	opts := DriveOptions{Sink: sink}
-	if _, err := Drive(context.Background(), "run-1", parent, parent.Executor(streamingNodeExecutor{}, opts), opts); err != nil {
-		t.Fatalf("Drive error = %v", err)
-	}
-	got := sink.textBySource()
-	if got["inner1"] != "hello-inner1" || got["inner2"] != "hello-inner2" {
-		t.Fatalf("subgraph frames by source = %#v, want inner1/inner2 labels", got)
 	}
 }

@@ -19,7 +19,6 @@ type (
 	BlackboardVisibility   = api.BlackboardVisibility
 	Event                  = api.Event
 	EventType              = api.EventType
-	Flow                   = api.Flow
 	HandoffRequest         = api.HandoffRequest
 	HolderType             = api.HolderType
 	Intent                 = api.Intent
@@ -102,6 +101,7 @@ const (
 	EventSystemResponseBypassAudited = api.EventSystemResponseBypassAudited
 	EventTaskBlocked                 = api.EventTaskBlocked
 	EventTaskCompleted               = api.EventTaskCompleted
+	EventTaskPartiallyCompleted      = api.EventTaskPartiallyCompleted
 	EventTaskCreated                 = api.EventTaskCreated
 	EventTaskDispatched              = api.EventTaskDispatched
 	EventPolicyDecisionRecorded      = api.EventPolicyDecisionRecorded
@@ -219,11 +219,12 @@ const (
 	TraceSpanFailed  = api.TraceSpanFailed
 	TraceSpanStarted = api.TraceSpanStarted
 
-	UserMessageComposed  = api.UserMessageComposed
-	UserMessageFailed    = api.UserMessageFailed
-	UserMessagePublished = api.UserMessagePublished
-	UserMessageQueued    = api.UserMessageQueued
-	UserMessageCancelled = api.UserMessageCancelled
+	UserMessageComposed   = api.UserMessageComposed
+	UserMessageFailed     = api.UserMessageFailed
+	UserMessagePublishing = api.UserMessagePublishing
+	UserMessagePublished  = api.UserMessagePublished
+	UserMessageQueued     = api.UserMessageQueued
+	UserMessageCancelled  = api.UserMessageCancelled
 
 	UserMessageTypeClarificationRequest = api.UserMessageTypeClarificationRequest
 	UserMessageTypeErrorNotice          = api.UserMessageTypeErrorNotice

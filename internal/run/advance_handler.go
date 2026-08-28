@@ -328,7 +328,7 @@ func (h advanceRunHandler) emit(ctx context.Context, uow ports.UnitOfWork, m *Ad
 
 func (h advanceRunHandler) recordTrace(ctx context.Context, uow ports.UnitOfWork, m *AdvanceResult, runID, taskID, name, component string) error {
 	now := time.Now().UTC()
-	span := api.TraceSpan{RunID: runID, TaskID: taskID, Name: name, Component: component, Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}
+	span := api.TraceSpan{ID: h.options.NewID("span"), RunID: runID, TaskID: taskID, Name: name, Component: component, Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}
 	if err := uow.Trace().SaveTraceSpan(ctx, span); err != nil {
 		return err
 	}

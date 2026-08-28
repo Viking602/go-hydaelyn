@@ -86,16 +86,8 @@ runner, err := venat.NewProduction(api.Config{
 })
 ```
 
-## 4. Flow Presets
 
-`api.Flow` is the preset contract. A flow can select planner, router, policy,
-and projector presets, but it cannot bypass runner primitives.
-
-```go
-err := runner.RegisterFlow(api.Flow{Name: "deepsearch"})
-```
-
-## 5. CLI
+## 4. CLI
 
 The v2 CLI is deliberately small and library-first:
 
@@ -105,7 +97,7 @@ venat inspect-events --events events.json
 venat help
 ```
 
-## 6. Next Docs
+## 5. Next Docs
 
 - [Runner Runtime](orchestrator-runtime.md)
 - [Migration Notes](migration.md)

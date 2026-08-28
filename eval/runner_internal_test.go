@@ -39,6 +39,23 @@ func script(text string) []provider.Event {
 	}
 }
 
+func TestNewHarnessRejectsInvalidInitialAgent(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("NewHarness() did not panic for an empty agent id")
+		}
+	}()
+	NewHarness(WithAgentID(""))
+}
+
+func TestDefaultHarnessRegisterAgentReturnsValidationError(t *testing.T) {
+	h := NewHarness()
+	defer h.Cleanup()
+	if err := h.RegisterAgent(api.AgentProfile{}); !errors.Is(err, api.ErrInvalidCommand) {
+		t.Fatalf("RegisterAgent() error = %v, want ErrInvalidCommand", err)
+	}
+}
+
 func TestEvalRun_FailingAssertionFailsCase(t *testing.T) {
 	c := EvalCase{
 		Name:  "failing",

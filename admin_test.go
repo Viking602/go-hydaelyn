@@ -2,6 +2,7 @@ package venat
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Viking602/venat/api"
@@ -9,7 +10,9 @@ import (
 
 func TestRegisterAndListAgents(t *testing.T) {
 	r := newTestRunner(t)
-	r.RegisterAgent(api.AgentProfile{ID: "agent-1", Role: "worker"})
+	if err := r.RegisterAgent(api.AgentProfile{ID: "agent-1", Role: "worker"}); err != nil {
+		t.Fatalf("RegisterAgent: %v", err)
+	}
 	agents := r.Agents()
 	if len(agents) == 0 {
 		t.Fatal("expected at least one agent after RegisterAgent")
@@ -19,9 +22,11 @@ func TestRegisterAndListAgents(t *testing.T) {
 	}
 }
 
-func TestRegisterAgent_IgnoresEmptyID(t *testing.T) {
+func TestRegisterAgent_RejectsEmptyID(t *testing.T) {
 	r := newTestRunner(t)
-	r.RegisterAgent(api.AgentProfile{})
+	if err := r.RegisterAgent(api.AgentProfile{}); !errors.Is(err, api.ErrInvalidCommand) {
+		t.Fatalf("RegisterAgent(empty) error = %v, want ErrInvalidCommand", err)
+	}
 	if len(r.Agents()) != 0 {
 		t.Error("agent with empty ID should not be registered")
 	}
@@ -29,13 +34,39 @@ func TestRegisterAgent_IgnoresEmptyID(t *testing.T) {
 
 func TestRegisterTool(t *testing.T) {
 	r := newTestRunner(t)
-	r.RegisterTool(api.Tool{Name: "my-tool"})
+	if err := r.RegisterTool(api.Tool{Name: "my-tool"}); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
+	}
 }
 
-func TestRegisterFlow_ValidFlow(t *testing.T) {
-	r := newTestRunner(t)
-	if err := r.RegisterFlow(api.Flow{Name: "my-flow"}); err != nil {
-		t.Fatalf("RegisterFlow: %v", err)
+func TestRegistration_RejectsMissingIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		register func(*Runner) error
+	}{
+		{
+			name:     "tool without a name",
+			register: func(r *Runner) error { return r.RegisterTool(api.Tool{}) },
+		},
+		{
+			name: "scoped tool without a run",
+			register: func(r *Runner) error {
+				return r.RegisterToolForInvocation("", "task-1", api.HolderAgent, "agent-1", api.Tool{Name: "t"})
+			},
+		},
+		{
+			name: "scoped tool without a name",
+			register: func(r *Runner) error {
+				return r.RegisterToolForInvocation("run-1", "task-1", api.HolderAgent, "agent-1", api.Tool{})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.register(newTestRunner(t)); !errors.Is(err, api.ErrInvalidCommand) {
+				t.Fatalf("register error = %v, want ErrInvalidCommand", err)
+			}
+		})
 	}
 }
 

@@ -49,8 +49,8 @@ func (r *Runtime) toolForInvocation(runID, taskID string, holderType api.HolderT
 func (r *Runtime) RegisterAgent(profile AgentProfile) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if profile.ID == "" {
-		return fmt.Errorf("%w: agent id is required", api.ErrInvalidCommand)
+	if err := profile.Validate(); err != nil {
+		return err
 	}
 	if _, exists := r.agents[profile.ID]; !exists {
 		r.agentOrder = append(r.agentOrder, profile.ID)
@@ -105,24 +105,23 @@ func cloneTool(tool api.Tool) api.Tool {
 	return clone
 }
 
+// SetMessagePolicy installs the message-scoped checker. It is independent of
+// SetPolicyEngine: a message request must satisfy both, and the stricter
+// decision wins. Passing nil clears only the message checker and leaves any
+// installed policy engine in force.
 func (r *Runtime) SetMessagePolicy(policy api.MessagePolicyChecker) {
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
-	if policy == nil {
-		r.policy = allowPolicyEngine{}
-		return
-	}
-	r.policy = messagePolicyAdapter{check: policy}
+	r.messagePolicy = policy
 }
 
+// SetPolicyEngine installs the engine that authorizes every operation, message
+// requests included. Passing nil clears only the engine and leaves any checker
+// installed by SetMessagePolicy in force.
 func (r *Runtime) SetPolicyEngine(policy PolicyEngine) {
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
-	if policy == nil {
-		r.policy = allowPolicyEngine{}
-		return
-	}
-	r.policy = policy
+	r.policyEngine = policy
 }
 
 func (r *Runtime) SetOutputGateway(gateway OutputGateway) {
@@ -141,13 +140,22 @@ func (r *Runtime) SetPipeline(components PipelineComponents) {
 	r.pipeline = defaultPipeline(components)
 }
 
+// currentPolicyEngine composes the configured engine and message checker into
+// the single engine the authorization path consults. Both are optional; with
+// neither configured every request is allowed, as before.
 func (r *Runtime) currentPolicyEngine() PolicyEngine {
 	r.configMu.RLock()
 	defer r.configMu.RUnlock()
-	if r.policy == nil {
+	switch {
+	case r.policyEngine == nil && r.messagePolicy == nil:
 		return allowPolicyEngine{}
+	case r.messagePolicy == nil:
+		return r.policyEngine
+	case r.policyEngine == nil:
+		return messagePolicyAdapter{check: r.messagePolicy}
+	default:
+		return combinedPolicyEngine{engine: r.policyEngine, message: r.messagePolicy}
 	}
-	return r.policy
 }
 
 func (r *Runtime) currentTaskMonitor() TaskMonitor {

@@ -10,12 +10,9 @@ import (
 	"github.com/Viking602/venat/api"
 )
 
-// The reference Schedulers (SequentialScheduler, RouterScheduler,
-// SupervisorScheduler) are pure, stateless functions of TeamState: every
-// decision is derived from the AgentInstances and Tasks in the snapshot,
-// never from fields on the Scheduler. This keeps them safe to call from
-// the runner's replay/recovery path (spec hard rule 4: stateless across
-// ticks).
+// Schedulers must be pure, stateless functions of TeamState: every decision is
+// derived from the AgentInstances and Tasks in the snapshot, never from hidden
+// mutable scheduler state. This keeps replay and recovery deterministic.
 
 // hasActiveInstance reports whether any instance is still pending or
 // running, in which case a Scheduler should wait rather than dispatch more
@@ -57,14 +54,15 @@ func (s TeamState) finishedClasses() map[string]bool {
 // of className, resolved through that instance's TaskID, or nil when no
 // finished instance or report exists.
 //
-// When multiple finished instances share a ClassName (e.g. a Supervisor
-// re-dispatched via SupervisorActionRetry), the LATEST finished instance
-// wins: Drive appends instances in dispatch order, so the last match is the
-// most recent run. Reading the earliest match would freeze the scheduler on
-// the original decision and make Retry loop until MaxTicks — see
-// TestSupervisorRetryObservesLatestDecision. Iterating in reverse keeps
-// Next a pure function of the snapshot (the snapshot order is fixed by the
-// append order, not by completion timing), so replay determinism is preserved.
+// When multiple finished instances share a ClassName (e.g. a scheduler
+// re-dispatches the same class in a retry loop), the LATEST finished
+// instance wins: Drive appends instances in dispatch order, so the last
+// match is the most recent run. Reading the earliest match would freeze the
+// scheduler on the original decision and loop until MaxTicks — see
+// TestDriveReportForClassUsesLatestFinishedInstance. Iterating in reverse
+// keeps Next a pure function of the snapshot (the snapshot order is fixed by
+// the append order, not by completion timing), so replay determinism is
+// preserved.
 func (s TeamState) reportForClass(className string) *api.TypedReport {
 	var taskID string
 	for i := len(s.Instances) - 1; i >= 0; i-- {
@@ -156,29 +154,4 @@ func (s TeamState) buildDispatch(class AgentClass, input json.RawMessage) Dispat
 		dispatch.To = ComputeInstanceID(class.Name, s.RunID, dispatch.Task.ID, strconv.Itoa(len(s.Instances)))
 	}
 	return dispatch
-}
-
-// discriminatorValue reads field from a report's Structured payload and
-// renders it as a routing key. It supports a plain top-level field name
-// (not a full JSON path); unknown fields yield "".
-func discriminatorValue(structured map[string]any, field string) string {
-	if structured == nil {
-		return ""
-	}
-	value, ok := structured[field]
-	if !ok {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case bool:
-		return strconv.FormatBool(typed)
-	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
-	case json.Number:
-		return typed.String()
-	default:
-		return fmt.Sprint(typed)
-	}
 }

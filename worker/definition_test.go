@@ -395,6 +395,30 @@ func TestDefinitionDeploymentRejectsUnsupportedFieldsBeforePublishing(t *testing
 	}
 }
 
+func TestDefinitionDeploymentRejectsInvalidProfileBeforePublishing(t *testing.T) {
+	runner := venat.NewDevelopment()
+	definition := api.AgentDefinition{
+		ID:      "   ",
+		Name:    "Whitespace Agent",
+		Version: "v1",
+		Model:   api.ModelPolicy{Model: "primary"},
+	}
+
+	_, err := (DefinitionDeployment{
+		Runner:    runner,
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(&recordingProvider{})},
+	}).Deploy(context.Background(), definition)
+	if !errors.Is(err, api.ErrInvalidCommand) {
+		t.Fatalf("Deploy() error = %v, want ErrInvalidCommand", err)
+	}
+	if _, loadErr := runner.LoadAgentDefinitionSnapshot(context.Background(), definition.ID, definition.Version); loadErr == nil {
+		t.Fatal("invalid agent profile was published as a snapshot")
+	}
+	if profiles := runner.Agents(); len(profiles) != 0 {
+		t.Fatalf("invalid agent profile was registered: %#v", profiles)
+	}
+}
+
 func TestDefinitionDeploymentRequiresAndCarriesAdmissionController(t *testing.T) {
 	runner := venat.NewDevelopment()
 	definition := api.AgentDefinition{

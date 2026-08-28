@@ -11,7 +11,6 @@
 - [Runner Runtime](orchestrator-runtime.md): command execution and state ownership.
 - [Durable Execution](durable-execution.md): storage, leases, events, and replay.
 - [Task Dataflow](task-dataflow.md): task state and report propagation.
-- [Workflow](workflow.md): declarative graph modeling.
 - [Evaluation](evaluation.md): cases, assertions, matchers, and reporters.
 
 ## Extensions
@@ -26,7 +25,8 @@
 - [Migration Notes](migration.md): version-to-version API changes.
 - [SemVer and Compatibility](semver.md): stability policy.
 - [Product Release Status](product-spec/README.md): shipped and planned surfaces.
-- [v0.15.0 Release Notes](release-notes/v0.15.0.md): latest published release.
+- [v0.15.4 Release Notes](release-notes/v0.15.4.md): latest published release.
+- [v0.16.0 Release Candidate](release-notes/v0.16.0.md): prepared breaking-minor scope.
 - [Architecture Boundaries](architecture-boundaries.md): live import seams and ownership rules.
 
 ## Package map
@@ -37,12 +37,11 @@
 | `api/` | Public contracts: configuration, commands, models, stores, and policy interfaces |
 | `agent/` | Bounded model/tool loop, output policy, tool safety, context management, and typed failures |
 | `skill/` | Agent Skills discovery, parsing, registry, activation rendering, and bounded resource access |
-| `multiagent/` | Teams, scheduling, dispatch, handoff, blackboard, voting, and supervision |
-| `workflow/` | Declarative definitions compiled to `multiagent` graphs |
+| `multiagent/` | Teams, sequential and application-defined scheduling, dispatch, handoff, and blackboard |
 | `transport/` | MCP, cron, webhook, SSE, and event integrations |
 | `provider/` | Anthropic, OpenAI, and scripted provider drivers |
 | `tool/`, `hook/`, `policy/`, `message/` | Tool execution, hooks, policy, and messages |
-| `memory/` | Deprecated compatibility Memory surface; use `api.Memory[T]` (ADR-021) |
+| `session/` | Experimental durable conversation tree and register storage contract |
 | `worker/` | Integration layer: poll, lease, execute, team drive |
 | `coding/` | Domain coding runtime; packs must not import it |
 | `packs/` | Vertical pack skeletons |

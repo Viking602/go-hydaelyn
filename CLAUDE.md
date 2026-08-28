@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Documentation map: Packs → Worker integration (`worker/`) → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The linear picture is documentation only; reverse-edge bans stay. The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `coding/`, `memory/` (deprecated; use `api.Memory`), `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`. `internal/memory` is the process-local development/test store, not a Position D reference backend. See `docs/architecture-boundaries.md`.
+Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Documentation map: Packs → Worker integration (`worker/`) → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The linear picture is documentation only; reverse-edge bans stay. The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `session/` (durable session tree used by `agent.Harness`), `coding/`, `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`. `internal/memory` is the process-local development/test store, not a Position D reference backend. See `docs/architecture-boundaries.md`.
 
 ## Build, test, and development commands
 
@@ -31,6 +31,8 @@ Enforced by `scripts/check-public-any.sh`. Test files are exempt.
 ## Coding style & naming
 
 Use `gofmt` as the source of truth; goimports uses local prefix `github.com/Viking602/venat`. Go files and `Makefile` use tabs; Markdown uses two spaces, LF, final newlines (`.editorconfig`). Prefer package-context names that read naturally at call sites (`venat.New()`, `team.Profile`). Avoid package-name stutter, generic files (`types.go`, `helpers.go`, `utils.go`), package/directory renames, exported-symbol renames, and new linting stacks unless explicitly approved.
+
+Demand-driven API surface: introduce an interface only together with its second implementation, and export a symbol only together with its first consumer outside the package (tests and `_examples/` do not count). Speculative "reserved for later" interfaces, fields, and exported helpers are rejected in review — add them when the demand actually arrives.
 
 ## Testing
 

@@ -51,6 +51,10 @@ func publicUoWCommandResult(command RuntimeCommand, result any) any {
 		if resolved, ok := result.(resolveActionAttemptResult); ok {
 			return resolved.Attempt
 		}
+	case ReconcileResponsePublicationCommand:
+		if reconciled, ok := result.(reconcileResponsePublicationResult); ok {
+			return reconciled.Message
+		}
 	}
 	return result
 }

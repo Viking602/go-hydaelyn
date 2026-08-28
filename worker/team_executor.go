@@ -42,7 +42,9 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 	if err != nil {
 		return api.TypedReport{}, err
 	}
-	e.Runner.RegisterAgent(api.AgentProfile{ID: dispatch.To})
+	if err := e.Runner.RegisterAgent(api.AgentProfile{ID: dispatch.To}); err != nil {
+		return api.TypedReport{}, err
+	}
 	task, err := e.ensureTask(ctx, dispatch, class)
 	if err != nil {
 		return api.TypedReport{}, err
@@ -53,25 +55,12 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 		}
 		return *task.Result, nil
 	}
+	envelope, err := e.runnableEnvelope(ctx, task, dispatch.To)
+	if err != nil {
+		return api.TypedReport{}, err
+	}
 	engine, err = e.prepareEngine(ctx, engine, dispatch, class)
 	if err != nil {
-		return api.TypedReport{}, err
-	}
-	envelope, ok, err := taskEnvelope(ctx, e.Runner, task.RunID, task.ID, "pending")
-	if err != nil {
-		return api.TypedReport{}, err
-	}
-	if !ok {
-		envelope, err = e.Runner.DispatchTask(ctx, api.DispatchTaskCommand{
-			RunID:         task.RunID,
-			TaskID:        task.ID,
-			TargetAgentID: dispatch.To,
-		})
-		if err != nil {
-			return api.TypedReport{}, err
-		}
-	}
-	if err := waitForEnvelopeReady(ctx, envelope); err != nil {
 		return api.TypedReport{}, err
 	}
 	if err := e.persistInstance(ctx, dispatch, instanceClassName, multiagent.InstanceStateRunning, multiagent.EventAgentInstanceCreated); err != nil {
@@ -104,6 +93,35 @@ func (e RunnerExecutor) Execute(ctx context.Context, dispatch multiagent.Dispatc
 		return reportValue(persisted.Result), &multiagent.ExecutionSuspendedError{Task: persisted, Cause: runErr}
 	}
 	return reportValue(persisted.Result), runErr
+}
+
+// runnableEnvelope returns the envelope this dispatch should execute: the
+// task's queued one, or a freshly dispatched one when nothing is pending. It
+// returns only once the envelope's retry backoff has elapsed, so the caller
+// can hand it straight to the worker.
+func (e RunnerExecutor) runnableEnvelope(
+	ctx context.Context,
+	task api.Task,
+	targetAgentID string,
+) (api.TaskEnvelope, error) {
+	envelope, pending, err := taskEnvelope(ctx, e.Runner, task.RunID, task.ID, "pending")
+	if err != nil {
+		return api.TaskEnvelope{}, err
+	}
+	if !pending {
+		envelope, err = e.Runner.DispatchTask(ctx, api.DispatchTaskCommand{
+			RunID:         task.RunID,
+			TaskID:        task.ID,
+			TargetAgentID: targetAgentID,
+		})
+		if err != nil {
+			return api.TaskEnvelope{}, err
+		}
+	}
+	if err := waitForEnvelopeReady(ctx, envelope); err != nil {
+		return api.TaskEnvelope{}, err
+	}
+	return envelope, nil
 }
 
 func (e RunnerExecutor) prepareEngine(

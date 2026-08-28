@@ -151,7 +151,8 @@ func (a AgentInstanceSpawned) Check(ctx context.Context, run api.Run, harness ev
 // AgentClasses matching the given path. The observed path is the ordered list of
 // className payloads on the run's EventDispatchEmitted events (the scheduler's
 // per-tick dispatch decisions). The match is an exact, in-order sequence
-// comparison, validating SequentialScheduler / RouterScheduler routing.
+// comparison, validating routing from SequentialScheduler or an application
+// Scheduler implementation.
 type SchedulerTookPath struct {
 	// Path is the expected ordered sequence of dispatched AgentClass names.
 	Path []string

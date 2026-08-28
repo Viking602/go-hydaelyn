@@ -15,7 +15,7 @@ import (
 // Broadcast when a consumer needs both the live stream and the final
 // message.
 //
-// Accumulator is safe for concurrent Emit so it can sit behind Merge.
+// Accumulator is safe for concurrent Emit from independently driven streams.
 type Accumulator struct {
 	mu     sync.Mutex
 	events []provider.Event

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sort"
-	"sync"
 	"testing"
 
 	"github.com/Viking602/venat/message"
@@ -129,69 +127,6 @@ func TestBroadcastDeliversToAllSinksAndJoinsErrors(t *testing.T) {
 	msg, _ := another.Message()
 	if msg.Text != "x" {
 		t.Fatalf("third sink missed the frame: %q", msg.Text)
-	}
-}
-
-func TestChannelProducerConsumer(t *testing.T) {
-	ctx := context.Background()
-	ch := NewChannel(2)
-	go func() {
-		_ = ch.Emit(ctx, Frame{Kind: FrameText, Text: "a"})
-		_ = ch.Emit(ctx, Frame{Kind: FrameText, Text: "b"})
-		ch.Close()
-	}()
-
-	var got string
-	for frame := range ch.Seq() {
-		got += frame.Text
-	}
-	if got != "ab" {
-		t.Fatalf("ranged frames = %q, want ab", got)
-	}
-	if err := ch.Emit(ctx, Frame{Kind: FrameText}); !errors.Is(err, ErrClosed) {
-		t.Fatalf("Emit after Close error = %v, want ErrClosed", err)
-	}
-}
-
-func TestChannelEmitRespectsContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	ch := NewChannel(0)
-	cancel()
-	if err := ch.Emit(ctx, Frame{Kind: FrameText}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Emit on cancelled ctx error = %v, want context.Canceled", err)
-	}
-}
-
-func TestMergeFansInAndStampsSource(t *testing.T) {
-	ctx := context.Background()
-	a := make(chan Frame, 2)
-	b := make(chan Frame, 2)
-	a <- Frame{Kind: FrameText, Text: "a1"}
-	a <- Frame{Kind: FrameText, Text: "a2"}
-	close(a)
-	b <- Frame{Kind: FrameText, Text: "b1"}
-	close(b)
-
-	var (
-		mu    sync.Mutex
-		bySrc = map[string][]string{}
-	)
-	dst := SinkFunc(func(_ context.Context, frame Frame) error {
-		mu.Lock()
-		defer mu.Unlock()
-		bySrc[frame.Source] = append(bySrc[frame.Source], frame.Text)
-		return nil
-	})
-
-	if err := Merge(ctx, dst, Source{Label: "agent-a", Frames: a}, Source{Label: "agent-b", Frames: b}); err != nil {
-		t.Fatalf("Merge error = %v", err)
-	}
-	sort.Strings(bySrc["agent-a"])
-	if len(bySrc["agent-a"]) != 2 || bySrc["agent-a"][0] != "a1" {
-		t.Fatalf("agent-a frames = %#v", bySrc["agent-a"])
-	}
-	if len(bySrc["agent-b"]) != 1 || bySrc["agent-b"][0] != "b1" {
-		t.Fatalf("agent-b frames = %#v", bySrc["agent-b"])
 	}
 }
 

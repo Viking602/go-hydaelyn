@@ -4,6 +4,11 @@
 
 Accepted — 2026-08-15. Effective from v0.15.0.
 
+**Amended for v0.16.0 — 2026-08-28.** Unused reverse conversion helpers
+(`HandoffFromRecord`, `EntryFromItem`) and the public `Handoff.Record` helper
+are removed. `BlackboardEntry.Item` remains the demanded one-way conversion;
+worker persistence maps handoffs at its Runner integration boundary.
+
 ## Context
 
 Agent identity is split across `api.AgentProfile` (durable routing

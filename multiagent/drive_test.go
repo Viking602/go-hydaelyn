@@ -11,8 +11,8 @@ import (
 	"github.com/Viking602/venat/api"
 )
 
-// reportExecutor returns a fixed Structured payload per class name, letting
-// tests drive Router/Supervisor branches deterministically.
+// reportExecutor returns a fixed Structured payload per class name so tests
+// can drive scheduler branches deterministically.
 func reportExecutor(runID string, byClass map[string]map[string]any) Executor {
 	return ExecutorFunc(func(_ context.Context, dispatch Dispatch) (api.TypedReport, error) {
 		class := classNameFromTaskID(runID, dispatch.Task.ID)
@@ -80,48 +80,6 @@ func TestDrivePersistsDistinctAgentClassIdentity(t *testing.T) {
 	instance := result.State.Instances[0]
 	if instance.ClassName != "draft-slot" || instance.AgentClassName != "writer" {
 		t.Fatalf("persisted instance identity = %#v", instance)
-	}
-}
-
-func TestDriveRoutesThenTerminates(t *testing.T) {
-	scheduler := RouterScheduler{
-		Entry:              AgentClass{Name: "triage"},
-		DiscriminatorField: "severity",
-		Routes:             map[string]AgentClass{"high": {Name: "pager"}},
-	}
-	executor := reportExecutor("run-1", map[string]map[string]any{
-		"triage": {"severity": "high"},
-	})
-
-	result, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
-	if err != nil {
-		t.Fatalf("Drive error = %v", err)
-	}
-	got := classNames(result.State)
-	if len(got) != 2 || got[0] != "triage" || got[1] != "pager" {
-		t.Fatalf("routed classes = %#v, want [triage pager]", got)
-	}
-}
-
-func TestDriveSupervisorHandoffThenAccept(t *testing.T) {
-	scheduler := SupervisorScheduler{
-		Supervisor: AgentClass{Name: "boss"},
-		Workers:    map[string]AgentClass{"writer": {Name: "writer"}},
-	}
-	// boss hands off to writer; writer's report carries no decision, so the
-	// next supervisor tick sees the worker finished and the boss already
-	// finished — terminal.
-	executor := reportExecutor("run-1", map[string]map[string]any{
-		"boss": {"action": string(SupervisorActionHandoff), "handoffTo": "writer"},
-	})
-
-	result, err := Drive(context.Background(), "run-1", scheduler, executor, DriveOptions{})
-	if err != nil {
-		t.Fatalf("Drive error = %v", err)
-	}
-	got := classNames(result.State)
-	if len(got) != 2 || got[0] != "boss" || got[1] != "writer" {
-		t.Fatalf("supervisor classes = %#v, want [boss writer]", got)
 	}
 }
 
@@ -304,32 +262,38 @@ func drivePeakConcurrency(t *testing.T, opts DriveOptions, releaseAt int32) int3
 	return peak.Load()
 }
 
-// TestSupervisorRetryObservesLatestDecision is the regression for the
-// stale-decision bug: when SupervisorActionRetry re-dispatches the
-// supervisor, the retried run produces a new report, but reportForClass
-// used to return the FIRST finished instance (the original Retry
-// decision), freezing the loop until MaxTicks. With the fix it returns
-// the LATEST finished instance, so a retry that says Accept terminates.
-func TestSupervisorRetryObservesLatestDecision(t *testing.T) {
-	scheduler := SupervisorScheduler{
-		Supervisor: AgentClass{Name: "boss"},
-		Workers:    map[string]AgentClass{"writer": {Name: "writer"}},
-	}
-	// boss returns Retry on its first run, Accept on its second. Pre-fix
-	// reportForClass kept reading the first run's Retry → ErrMaxTicksExceeded.
+// TestDriveReportForClassUsesLatestFinishedInstance is the regression for
+// the stale-decision bug: when a scheduler re-dispatches the same class
+// (e.g. a retry loop), the retried run produces a new report, but
+// reportForClass used to return the FIRST finished instance (the original
+// decision), freezing the loop until MaxTicks. With the fix it returns the
+// LATEST finished instance, so a retry that eventually accepts terminates.
+func TestDriveReportForClassUsesLatestFinishedInstance(t *testing.T) {
+	// A minimal scheduler that reads "boss"'s latest report and either
+	// re-dispatches it (retry) or stops (accept).
+	scheduler := SchedulerFunc(func(_ context.Context, state TeamState) ([]Dispatch, error) {
+		report := state.reportForClass("boss")
+		if report == nil || report.Structured["action"] == "retry" {
+			return []Dispatch{buildDispatch(state.RunID, AgentClass{Name: "boss"}, len(state.Instances), nil)}, nil
+		}
+		return nil, nil
+	})
+	// boss returns "retry" on its first run, "accept" on its second.
+	// Pre-fix reportForClass kept reading the first run's "retry" decision
+	// → the scheduler never stopped re-dispatching → ErrMaxTicksExceeded.
 	calls := 0
 	executor := ExecutorFunc(func(_ context.Context, dispatch Dispatch) (api.TypedReport, error) {
 		if classNameFromTaskID("run-1", dispatch.Task.ID) != "boss" {
 			return api.TypedReport{}, errors.New("unexpected non-boss dispatch")
 		}
 		calls++
-		action := SupervisorActionRetry
+		action := "retry"
 		if calls >= 2 {
-			action = SupervisorActionAccept
+			action = "accept"
 		}
 		return api.TypedReport{
 			Status:     api.ReportStatusSuccess,
-			Structured: map[string]any{"action": string(action)},
+			Structured: map[string]any{"action": action},
 		}, nil
 	})
 

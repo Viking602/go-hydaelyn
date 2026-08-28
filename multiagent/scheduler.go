@@ -6,10 +6,9 @@ import (
 	"github.com/Viking602/venat/api"
 )
 
-// Scheduler decides which AgentInstance executes which api.Task next.
-// v0.8.0 ships the interface and the TeamState contract; the three
-// reference Schedulers (Sequential, Router, Supervisor) land in
-// Phase 4 per the rollout plan.
+// Scheduler decides which AgentInstance executes which api.Task next. The
+// built-in reference implementation is SequentialScheduler; applications can
+// adapt a function with SchedulerFunc or implement the interface directly.
 //
 // Spec anchor: docs/product-spec/v0.8.0/05-multi-agent-layer.md.
 type Scheduler interface {

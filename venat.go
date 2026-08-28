@@ -38,13 +38,17 @@ func NewDevelopment(configs ...api.Config) *Runner {
 // storage and an explicit policy. The framework cannot verify whether a
 // StoreProvider is durable, so production ownership remains with the host.
 func NewProduction(cfg api.Config) (*Runner, error) {
+	resolved := resolveConfig(cfg)
+	// The required dependencies are checked against the caller's config, not the
+	// resolved one, so normalization defaults can never satisfy a production
+	// requirement on the host's behalf.
 	if isNilDependency(cfg.StoreProvider) {
 		return nil, fmt.Errorf("%w: store provider is required", api.ErrInvalidConfiguration)
 	}
 	if isNilDependency(cfg.PolicyEngine) {
 		return nil, fmt.Errorf("%w: policy engine is required", api.ErrInvalidConfiguration)
 	}
-	return newRunner(cfg, api.RuntimeModeProduction), nil
+	return newRunner(resolved, api.RuntimeModeProduction), nil
 }
 
 func isNilDependency(value any) bool {

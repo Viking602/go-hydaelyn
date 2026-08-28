@@ -71,6 +71,10 @@ func (d DefinitionDeployment) Deploy(ctx context.Context, definition api.AgentDe
 	if err := validateDefinition(effective); err != nil {
 		return nil, err
 	}
+	profile := effective.AsProfile()
+	if err := profile.Validate(); err != nil {
+		return nil, fmt.Errorf("worker: validate definition %q agent profile: %w", effective.ID, err)
+	}
 	capabilities, err := d.Runner.StoreCapabilities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("worker: inspect definition storage capability: %w", err)
@@ -98,7 +102,9 @@ func (d DefinitionDeployment) Deploy(ctx context.Context, definition api.AgentDe
 	if err := d.Runner.SaveAgentDefinitionSnapshot(ctx, snapshot); err != nil {
 		return nil, fmt.Errorf("worker: save definition %q version %q: %w", effective.ID, effective.Version, err)
 	}
-	d.Runner.RegisterAgent(effective.AsProfile())
+	if err := d.Runner.RegisterAgent(profile); err != nil {
+		return nil, fmt.Errorf("worker: register definition %q agent profile: %w", effective.ID, err)
+	}
 
 	registrations, err := d.Registrars.Register(effective, d.TriggerHandler)
 	if err != nil {

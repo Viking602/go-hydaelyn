@@ -47,12 +47,11 @@ const (
 
 // Frame is one unit of a live stream. It mirrors provider.Event but is a
 // distinct consumer type: it never appears in the driver SPI, so the SPI
-// can evolve independently, and it carries a Source label that fan-in
-// (Merge) populates so a single consumer can tell which agent produced a
-// frame.
+// can evolve independently. Source optionally identifies the producer when a
+// host fans multiple streams into one consumer.
 type Frame struct {
-	// Source is an optional origin label (e.g. an AgentInstance ID). It is
-	// empty for single-agent streams and set by Merge for fan-in.
+	// Source is an optional origin label (e.g. an AgentInstance ID). Producers
+	// or host fan-in code set it when origin tracking is required.
 	Source    string             `json:"source,omitempty"`
 	Kind      FrameKind          `json:"kind"`
 	Text      string             `json:"text,omitempty"`

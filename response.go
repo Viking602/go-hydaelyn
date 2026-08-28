@@ -23,17 +23,24 @@ func (r *Runner) PublishResponse(ctx context.Context, cmd api.PublishResponseCom
 	return r.rt.PublishResponse(ctx, core.PublishResponseCommand(cmd))
 }
 
+// ReconcileResponsePublication settles a message left mid-publication by an
+// interrupted publish. Such a message sits in api.UserMessagePublishing and
+// the runtime will not republish it, because it cannot tell whether the
+// output gateway already delivered it; the host reports that determination
+// here. It returns the message as it stands afterwards.
+//
+// Call this only for crash residue. A publish claim carries no holder and no
+// expiry, so the runtime cannot distinguish an abandoned claim from a live
+// publisher's and will not judge staleness for you — reconciling a message
+// whose publisher is still running races that publisher. See
+// api.ReconcileResponsePublicationCommand for the full operational contract.
+func (r *Runner) ReconcileResponsePublication(ctx context.Context, cmd api.ReconcileResponsePublicationCommand) (api.UserMessage, error) {
+	return r.rt.ReconcileResponsePublication(ctx, core.ReconcileResponsePublicationCommand(cmd))
+}
+
 func (r *Runner) DrainResponseOutbox(ctx context.Context) (int, error) {
 	published, err := r.rt.DrainResponseOutbox(ctx)
 	return published, err
-}
-
-func (r *Runner) ResponseOutboxContext(ctx context.Context, runID string) ([]api.UserMessage, error) {
-	messages, err := r.rt.ResponseOutbox(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return messages, nil
 }
 
 func (r *Runner) QueueMessage(ctx context.Context, message api.UserMessage) error {
@@ -57,7 +64,7 @@ func (r *Runner) ListMessages(ctx context.Context, runID string) ([]api.UserMess
 	if err != nil {
 		return nil, err
 	}
-	return messages, nil
+	return append([]api.UserMessage(nil), messages...), nil
 }
 
 func (r *Runner) ListQueuedMessages(ctx context.Context) ([]api.UserMessage, error) {
@@ -65,5 +72,5 @@ func (r *Runner) ListQueuedMessages(ctx context.Context) ([]api.UserMessage, err
 	if err != nil {
 		return nil, err
 	}
-	return messages, nil
+	return append([]api.UserMessage(nil), messages...), nil
 }

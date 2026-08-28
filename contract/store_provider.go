@@ -1373,6 +1373,8 @@ func runResumeAndOutboxSuite(t *testing.T, factory ProviderFactory) {
 		{"TestMessageOutbox_ScanReturnsQueued", testOutboxScanReturnsQueued},
 		{"TestMessageOutbox_FIFO", testOutboxFIFO},
 		{"TestMessageOutbox_UpdateRemovesFromQueue", testOutboxUpdateRemovesFromQueue},
+		{"TestMessageOutbox_ClaimRemovesFromQueue", testOutboxClaimRemovesFromQueue},
+		{"TestMessageOutbox_ConcurrentClaimOnlyOneWins", testOutboxConcurrentClaimOnlyOneWins},
 	})
 }
 
@@ -1481,6 +1483,117 @@ func testOutboxFIFO(t *testing.T, factory ProviderFactory) {
 			if got[i].ID != want {
 				t.Fatalf("FIFO order broken at %d: got %q, want %q", i, got[i].ID, want)
 			}
+		}
+		return nil
+	})
+}
+
+// The runtime publishes a message at most once by claiming it — moving it
+// from queued to publishing inside the transaction that selects it — before
+// it calls the output gateway. A store must therefore treat publishing as
+// no longer queued, or a second drain would hand the same message to the
+// gateway again while the first call is still in flight.
+func testOutboxClaimRemovesFromQueue(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	caps := capabilities(t, p)
+	if !caps.SupportsListPending {
+		t.Skip("provider does not support list-pending")
+	}
+	ctx := context.Background()
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		return uow.UserMessages().QueueMessage(ctx, api.UserMessage{ID: "m-claim", RunID: "r-claim", Status: api.UserMessageQueued, Type: api.UserMessageTypeProgressUpdate})
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		msg, err := uow.UserMessages().LoadMessage(ctx, "r-claim", "m-claim")
+		if err != nil {
+			return err
+		}
+		msg.Status = api.UserMessagePublishing
+		return uow.UserMessages().UpdateMessage(ctx, msg)
+	})
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		msg, err := uow.UserMessages().LoadMessage(ctx, "r-claim", "m-claim")
+		if err != nil {
+			return err
+		}
+		if msg.Status != api.UserMessagePublishing {
+			t.Fatalf("claimed message status = %q, want %q", msg.Status, api.UserMessagePublishing)
+		}
+		got, err := uow.UserMessages().ListPendingFor(ctx, api.UserMessageSelector{RunID: "r-claim", Statuses: []string{string(api.UserMessageQueued)}})
+		if err != nil {
+			return err
+		}
+		for _, m := range got {
+			if m.ID == "m-claim" {
+				t.Fatal("claimed message is still listed as queued")
+			}
+		}
+		return nil
+	})
+}
+
+// Publication is at-most-once because the runtime claims a message —
+// queued → publishing, committed before the output gateway is called — and
+// only the winner delivers it. That rests entirely on the store: if two
+// transactions can both read the message as queued and both commit the
+// claim, two publishers call the gateway and the user gets the message
+// twice. This is the UserMessageStore.UpdateMessage analog of
+// TestLease_ConcurrentAcquireOnlyOneWins.
+//
+// A provider serialized by a single write lock passes trivially, because the
+// loser reads the winner's committed status. One that admits concurrent
+// writers must reject the losing claim — via a conditional update on the
+// prior status, row locking, or serializable isolation.
+func testOutboxConcurrentClaimOnlyOneWins(t *testing.T, factory ProviderFactory) {
+	p := newProvider(t, factory)
+	ctx := context.Background()
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		return uow.UserMessages().QueueMessage(ctx, api.UserMessage{
+			ID: "m-claim-race", RunID: "r-claim-race",
+			Status: api.UserMessageQueued, Type: api.UserMessageTypeProgressUpdate,
+		})
+	})
+
+	const claimers = 8
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(claimers)
+	for range claimers {
+		go func() {
+			defer wg.Done()
+			uow, err := p.Begin(ctx)
+			if err != nil {
+				return
+			}
+			message, err := uow.UserMessages().LoadMessage(ctx, "r-claim-race", "m-claim-race")
+			if err != nil || message.Status != api.UserMessageQueued {
+				_ = uow.Rollback(ctx)
+				return
+			}
+			message.Status = api.UserMessagePublishing
+			if err := uow.UserMessages().UpdateMessage(ctx, message); err != nil {
+				_ = uow.Rollback(ctx)
+				return
+			}
+			if err := uow.Commit(ctx); err != nil {
+				_ = uow.Rollback(ctx)
+				return
+			}
+			wins.Add(1)
+		}()
+	}
+	wg.Wait()
+
+	if got := wins.Load(); got != 1 {
+		t.Fatalf("ConcurrentClaim: want exactly 1 winner, got %d", got)
+	}
+	withUoW(t, p, func(uow api.UnitOfWork) error {
+		message, err := uow.UserMessages().LoadMessage(ctx, "r-claim-race", "m-claim-race")
+		if err != nil {
+			return err
+		}
+		if message.Status != api.UserMessagePublishing {
+			t.Fatalf("claimed message status = %q, want %q", message.Status, api.UserMessagePublishing)
 		}
 		return nil
 	})

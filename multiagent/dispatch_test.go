@@ -32,3 +32,45 @@ func TestValidateDispatchTypedHandoff(t *testing.T) {
 		t.Fatal("ValidateDispatch() accepted a non-handoff input that violates the task schema")
 	}
 }
+
+func TestValidateDispatchRequiresExecutableIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		current Dispatch
+		wantErr bool
+	}{
+		{
+			name:    "target required",
+			current: Dispatch{Task: api.Task{ID: "run-1-worker", RunID: "run-1"}},
+			wantErr: true,
+		},
+		{
+			name: "retry task requires explicit class",
+			current: Dispatch{
+				To:   "agent-1",
+				Task: api.Task{ID: "run-1-worker-attempt-2", RunID: "run-1"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "explicit retry class is unambiguous",
+			current: Dispatch{
+				To:        "agent-1",
+				ClassName: "worker",
+				Task:      api.Task{ID: "run-1-worker-attempt-2", RunID: "run-1"},
+			},
+		},
+		{
+			name:    "skip placeholder needs no target",
+			current: Dispatch{Skip: true},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateDispatch(test.current)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("ValidateDispatch() error = %v, wantErr %t", err, test.wantErr)
+			}
+		})
+	}
+}

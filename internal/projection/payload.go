@@ -73,6 +73,17 @@ func stringFromPayload(value any) string {
 	return ""
 }
 
+// MapFromPayload and StringFromPayload are the exported forms of
+// mapFromPayload/stringFromPayload, shared with package core to avoid
+// duplicating this decoding logic (internal package sharing, not public API).
+func MapFromPayload(value any) map[string]any {
+	return mapFromPayload(value)
+}
+
+func StringFromPayload(value any) string {
+	return stringFromPayload(value)
+}
+
 func intFromPayload(value any) int {
 	switch current := value.(type) {
 	case int:

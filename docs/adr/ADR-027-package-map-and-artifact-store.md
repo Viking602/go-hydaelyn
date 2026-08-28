@@ -2,9 +2,14 @@
 
 ## Status
 
-Accepted — 2026-08-15. Effective from v0.15.0. Amends ADR-011's
-"filesystem and inmem Artifact backends" clause. Alias-package deletion
-is deferred to a later minor (same window as `memory/`).
+Accepted — 2026-08-15. Effective from v0.15.0. Amended ADR-011's
+"filesystem and inmem Artifact backends" clause.
+
+**Amended for v0.16.0 — 2026-08-28.** The `flow/` and `blackboard/`
+compatibility packages are removed. The unconsumed `api.Artifact`,
+`ArtifactSelector`, and `ArtifactStore` surface is removed under the
+demand-driven API rule. `BlackboardItem.ArtifactRefs` remains an opaque,
+application-owned reference list.
 
 ## Context
 

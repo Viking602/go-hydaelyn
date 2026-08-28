@@ -132,6 +132,14 @@ type AgentProfile struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
+// Validate reports whether the profile can be registered.
+func (p AgentProfile) Validate() error {
+	if strings.TrimSpace(p.ID) == "" {
+		return fmt.Errorf("%w: agent id is required", ErrInvalidCommand)
+	}
+	return nil
+}
+
 type BlackboardVisibility string
 
 const (
@@ -223,6 +231,7 @@ const (
 	EventExecutionCheckpointed       EventType = "ExecutionCheckpointed"
 	EventTypedReportSubmitted        EventType = "TypedReportSubmitted"
 	EventTaskCompleted               EventType = "TaskCompleted"
+	EventTaskPartiallyCompleted      EventType = "TaskPartiallyCompleted"
 	EventTaskFailed                  EventType = "TaskFailed"
 	EventTaskBlocked                 EventType = "TaskBlocked"
 	EventTaskPaused                  EventType = "TaskPaused"
@@ -261,20 +270,6 @@ type Event struct {
 	// godoc-allow-any: event payloads are typed by EventType, not one global Go struct.
 	Payload    map[string]any `json:"payload,omitempty"`
 	RecordedAt time.Time      `json:"recordedAt"`
-}
-
-// Flow is a named combination of preset adapters that the Runner uses to
-// resolve planner / router / policy / projector behaviour for a Run. Flows
-// compose runtime primitives; they cannot bypass any runtime invariant
-// (TaskStore, PolicyEngine, TaskExecutionLease, Handoff, ResponseLayer,
-// OutputGateway). The bypass concept was removed in v0.8.0 — Runner now
-// enforces all primitives unconditionally.
-type Flow struct {
-	Name            string `json:"name"`
-	PlannerPreset   string `json:"plannerPreset,omitempty"`
-	RouterPreset    string `json:"routerPreset,omitempty"`
-	PolicyPreset    string `json:"policyPreset,omitempty"`
-	ProjectorPreset string `json:"projectorPreset,omitempty"`
 }
 
 // StartRunResult is the typed result of StartRunCommand.
@@ -481,15 +476,16 @@ type MessagePolicyChecker func(UserMessage) PolicyDecision
 type PolicyOperation string
 
 const (
-	PolicyOperationDispatch        PolicyOperation = "dispatch"
-	PolicyOperationBlackboardRead  PolicyOperation = "blackboard_read"
-	PolicyOperationBlackboardWrite PolicyOperation = "blackboard_write"
-	PolicyOperationHandoff         PolicyOperation = "handoff"
-	PolicyOperationToolCall        PolicyOperation = "tool_call"
-	PolicyOperationAction          PolicyOperation = "action"
-	PolicyOperationResponseCompose PolicyOperation = "response_compose"
-	PolicyOperationResponsePublish PolicyOperation = "response_publish"
-	PolicyOperationTraceRead       PolicyOperation = "trace_read"
+	PolicyOperationDispatch          PolicyOperation = "dispatch"
+	PolicyOperationBlackboardRead    PolicyOperation = "blackboard_read"
+	PolicyOperationBlackboardWrite   PolicyOperation = "blackboard_write"
+	PolicyOperationHandoff           PolicyOperation = "handoff"
+	PolicyOperationToolCall          PolicyOperation = "tool_call"
+	PolicyOperationAction            PolicyOperation = "action"
+	PolicyOperationResponseCompose   PolicyOperation = "response_compose"
+	PolicyOperationResponsePublish   PolicyOperation = "response_publish"
+	PolicyOperationResponseReconcile PolicyOperation = "response_reconcile"
+	PolicyOperationTraceRead         PolicyOperation = "trace_read"
 )
 
 type PolicyRequest struct {
@@ -513,17 +509,14 @@ const (
 	ReplayModeRecovery ReplayMode = "recovery"
 )
 
+// Projection is the read model rebuilt from a run's event log. Replay is
+// pure: it never re-issues the side effects the original events recorded
+// (mailbox deliveries, response publications, tool calls), so a Projection
+// only ever describes state.
 type Projection struct {
-	Run         Run               `json:"run"`
-	Tasks       map[string]Task   `json:"tasks,omitempty"`
-	Messages    []UserMessage     `json:"messages,omitempty"`
-	SideEffects ReplaySideEffects `json:"sideEffects"`
-}
-
-type ReplaySideEffects struct {
-	MailboxDeliveries       int `json:"mailboxDeliveries"`
-	UserMessagePublications int `json:"userMessagePublications"`
-	ActionExecutions        int `json:"actionExecutions"`
+	Run      Run             `json:"run"`
+	Tasks    map[string]Task `json:"tasks,omitempty"`
+	Messages []UserMessage   `json:"messages,omitempty"`
 }
 
 type RunTimelineKind string
@@ -562,14 +555,28 @@ type TypedReport struct {
 	Handoff       *HandoffRequest `json:"handoff,omitempty"`
 }
 
+// UserMessageStatus is the state of one outbound user message. The publish
+// path walks queued → publishing → published:
+//
+//   - queued is claimable. The runtime moves a message out of queued and
+//     into publishing inside the transaction that claims it, so a second
+//     concurrent publisher finds it already claimed and does not call the
+//     output gateway again.
+//   - publishing means the gateway call is in flight. A message left in
+//     publishing by a crash is in doubt — the gateway may or may not have
+//     delivered it — and the runtime will not republish it on its own; a
+//     host that can determine the outcome must resolve it. An in-process
+//     gateway failure returns the message to queued, so the outbox retries.
+//   - published is terminal for a delivered message.
 type UserMessageStatus string
 
 const (
-	UserMessageComposed  UserMessageStatus = "composed"
-	UserMessageQueued    UserMessageStatus = "queued"
-	UserMessagePublished UserMessageStatus = "published"
-	UserMessageFailed    UserMessageStatus = "failed"
-	UserMessageCancelled UserMessageStatus = "cancelled"
+	UserMessageComposed   UserMessageStatus = "composed"
+	UserMessageQueued     UserMessageStatus = "queued"
+	UserMessagePublishing UserMessageStatus = "publishing"
+	UserMessagePublished  UserMessageStatus = "published"
+	UserMessageFailed     UserMessageStatus = "failed"
+	UserMessageCancelled  UserMessageStatus = "cancelled"
 )
 
 type UserMessageType string
@@ -885,10 +892,21 @@ type Capability struct {
 // that Tool does not (description, input/output schema, version) are left
 // empty so callers can layer them on top.
 //
-// The conversion is intentionally lossy in one direction only: round-
-// tripping Tool → Capability → Tool drops fields like Description and
-// Schemas because they have no Tool counterpart. The reverse direction
-// (Capability.AsTool) drops Version, AgentID, schemas, and Tags.
+// The projection is lossy in both directions, because Tool and Capability
+// model governance at different granularities. Tool has a single
+// RequiresActionTask flag meaning "this call must run as a governed action
+// task"; Capability splits that into RequiresApproval, RequiresLease, and
+// RequiresPolicy. AsCapability fans the one flag out to all three, so a
+// Capability produced here cannot express "needs a lease but no approval" —
+// callers that need that granularity must set the three fields themselves.
+// PolicyTags map onto Tags, and Description, Version, AgentID, and the
+// schemas have no Tool counterpart.
+//
+// Round-tripping Tool → Capability → Tool preserves RequiresActionTask,
+// because AsTool ORs the three flags back together. Round-tripping
+// Capability → Tool → Capability does not preserve a Capability whose three
+// requirement flags differ from one another: the intermediate Tool collapses
+// them to one bit and AsCapability re-expands it to all three.
 func (t Tool) AsCapability(agentID string) Capability {
 	return Capability{
 		Name:             t.Name,
@@ -909,11 +927,17 @@ func (t Tool) AsCapability(agentID string) Capability {
 // carries that Tool cannot represent (description, schemas, AgentID,
 // version) are dropped; callers needing them should keep the Capability
 // alongside the Tool.
+//
+// RequiresActionTask is the OR of RequiresApproval, RequiresLease, and
+// RequiresPolicy: Tool has a single "must run as a governed action task"
+// bit, so any one of the three requirements forces it on. Which of the
+// three demanded it is not recoverable from the Tool — see
+// Tool.AsCapability for the reverse direction's loss.
 func (c Capability) AsTool() Tool {
 	return Tool{
 		Name:               c.Name,
 		EffectType:         c.EffectType,
-		RequiresActionTask: c.RequiresApproval,
+		RequiresActionTask: c.RequiresApproval || c.RequiresLease || c.RequiresPolicy,
 		RiskLevel:          c.RiskLevel,
 		Idempotent:         c.Idempotent,
 		PolicyTags:         append([]string(nil), c.Tags...),

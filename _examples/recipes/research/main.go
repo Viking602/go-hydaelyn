@@ -31,9 +31,9 @@ func main() {
 
 	researchers := []string{"alpha", "beta", "gamma"}
 	for _, id := range researchers {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleResearcher})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleResearcher}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: roleSynthesizer})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: roleSynthesizer}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "compare Go agent runtimes"})
 	must(err)

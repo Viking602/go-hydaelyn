@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/api"
@@ -26,18 +28,53 @@ type Dispatch struct {
 
 // ValidateDispatch enforces the typed handoff contract before execution.
 func ValidateDispatch(dispatch Dispatch) error {
-	handoff := dispatch.Handoff
-	if handoff != nil {
-		if handoff.RunID != "" && handoff.RunID != dispatch.Task.RunID {
-			return fmt.Errorf("multiagent: handoff run %q does not match task run %q", handoff.RunID, dispatch.Task.RunID)
-		}
-		if handoff.To != "" && handoff.To != dispatch.To {
-			return fmt.Errorf("multiagent: handoff target %q does not match dispatch target %q", handoff.To, dispatch.To)
-		}
+	if dispatch.Skip {
+		return nil
 	}
+	if err := validateDispatchIdentity(dispatch); err != nil {
+		return err
+	}
+	if err := validateDispatchHandoff(dispatch); err != nil {
+		return err
+	}
+	input, err := canonicalDispatchInput(dispatch)
+	if err != nil {
+		return err
+	}
+	if err := agent.ValidateJSON(dispatch.Task.InputSchema, input); err != nil {
+		return fmt.Errorf("multiagent: dispatch input: %w", err)
+	}
+	return validateDispatchOutput(dispatch)
+}
+
+func validateDispatchIdentity(dispatch Dispatch) error {
+	if dispatch.To == "" {
+		return fmt.Errorf("multiagent: dispatch target is required")
+	}
+	if dispatch.ClassName == "" && hasNumericAttemptSuffix(dispatch.Task.ID) {
+		return fmt.Errorf("multiagent: dispatch class name is required for retry task %q", dispatch.Task.ID)
+	}
+	return nil
+}
+
+func validateDispatchHandoff(dispatch Dispatch) error {
+	handoff := dispatch.Handoff
+	if handoff == nil {
+		return nil
+	}
+	if handoff.RunID != "" && handoff.RunID != dispatch.Task.RunID {
+		return fmt.Errorf("multiagent: handoff run %q does not match task run %q", handoff.RunID, dispatch.Task.RunID)
+	}
+	if handoff.To != "" && handoff.To != dispatch.To {
+		return fmt.Errorf("multiagent: handoff target %q does not match dispatch target %q", handoff.To, dispatch.To)
+	}
+	return nil
+}
+
+func canonicalDispatchInput(dispatch Dispatch) (json.RawMessage, error) {
 	inputs := []json.RawMessage{dispatch.Task.Input, dispatch.Input}
-	if handoff != nil {
-		inputs = append(inputs, handoff.Payload)
+	if dispatch.Handoff != nil {
+		inputs = append(inputs, dispatch.Handoff.Payload)
 	}
 	var input json.RawMessage
 	for _, candidate := range inputs {
@@ -45,28 +82,40 @@ func ValidateDispatch(dispatch Dispatch) error {
 			continue
 		}
 		if !json.Valid(candidate) {
-			return fmt.Errorf("multiagent: dispatch input is not valid JSON")
+			return nil, fmt.Errorf("multiagent: dispatch input is not valid JSON")
 		}
 		if len(input) == 0 {
 			input = candidate
 			continue
 		}
 		if !jsonEqual(input, candidate) {
-			return fmt.Errorf("multiagent: task, dispatch, and handoff inputs do not match")
+			return nil, fmt.Errorf("multiagent: task, dispatch, and handoff inputs do not match")
 		}
 	}
-	if err := agent.ValidateJSON(dispatch.Task.InputSchema, input); err != nil {
-		return fmt.Errorf("multiagent: dispatch input: %w", err)
+	return input, nil
+}
+
+func validateDispatchOutput(dispatch Dispatch) error {
+	handoff := dispatch.Handoff
+	if handoff == nil || len(handoff.RequiredOutputSchema) == 0 {
+		return nil
 	}
-	if handoff != nil && len(handoff.RequiredOutputSchema) > 0 {
-		if len(dispatch.Task.OutputSchema) == 0 || !jsonEqual(handoff.RequiredOutputSchema, dispatch.Task.OutputSchema) {
-			return fmt.Errorf("multiagent: handoff required output schema does not match task output schema")
-		}
-		if len(dispatch.OutputPolicy.Schema) > 0 && !jsonEqual(handoff.RequiredOutputSchema, dispatch.OutputPolicy.Schema) {
-			return fmt.Errorf("multiagent: handoff required output schema does not match output policy")
-		}
+	if len(dispatch.Task.OutputSchema) == 0 || !jsonEqual(handoff.RequiredOutputSchema, dispatch.Task.OutputSchema) {
+		return fmt.Errorf("multiagent: handoff required output schema does not match task output schema")
+	}
+	if len(dispatch.OutputPolicy.Schema) > 0 && !jsonEqual(handoff.RequiredOutputSchema, dispatch.OutputPolicy.Schema) {
+		return fmt.Errorf("multiagent: handoff required output schema does not match output policy")
 	}
 	return nil
+}
+
+func hasNumericAttemptSuffix(taskID string) bool {
+	marker := strings.LastIndex(taskID, "-attempt-")
+	if marker < 0 {
+		return false
+	}
+	_, err := strconv.Atoi(taskID[marker+len("-attempt-"):])
+	return err == nil
 }
 
 func jsonEqual(left, right json.RawMessage) bool {

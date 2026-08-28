@@ -18,7 +18,7 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment(api.Config{PolicyEngine: policy.DenySideEffectsByDefault()})
-	runner.RegisterAgent(api.AgentProfile{ID: "agent-a"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "agent-a"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "try a write tool"})
 	must(err)

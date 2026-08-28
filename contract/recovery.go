@@ -220,7 +220,9 @@ func testUnresolvedActionRecovery(t *testing.T, actionA, actionB *venat.Runner) 
 func testResumeReconstructsStepTrace(t *testing.T, open func() api.StoreProvider) {
 	ctx := context.Background()
 	runtimeA := openRecoveryRunner(t, open)
-	runtimeA.RegisterAgent(api.AgentProfile{ID: "trace-agent"})
+	if err := runtimeA.RegisterAgent(api.AgentProfile{ID: "trace-agent"}); err != nil {
+		t.Fatalf("RegisterAgent() error = %v", err)
+	}
 	run, _, err := runtimeA.StartRun(ctx, api.StartRunCommand{RunID: "recovery-step-trace", RootTaskID: "root", Request: "record a step"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)

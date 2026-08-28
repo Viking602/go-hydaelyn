@@ -149,10 +149,15 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		if leaseHandled {
 			return
 		}
-		_ = w.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
+		// A lease this worker fails to release stays active until it expires
+		// and blocks every retry until then, so the failure is reported
+		// rather than dropped.
+		if releaseErr := w.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
 			LeaseID:  lease.ID,
 			HolderID: w.AgentID,
-		})
+		}); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("worker: release task execution lease: %w", releaseErr))
+		}
 	}()
 	execCtx, stopHeartbeat, err := startLeaseHeartbeat(ctx, ttl, leaseRenewalPulse(lease.ExpiresAt, ttl, func(hbCtx context.Context) error {
 		return w.Runner.HeartbeatTaskExecution(hbCtx, api.HeartbeatTaskExecutionCommand{
@@ -189,7 +194,14 @@ func (w AgentWorker) ExecuteEnvelope(ctx context.Context, req ExecuteEnvelopeReq
 		return ExecutionOutcome{}, err
 	}
 
-	engine := w.executionEngine(task, lease)
+	engine, err := w.executionEngine(task, lease)
+	if err != nil {
+		heartbeatErr := stopHeartbeat()
+		heartbeatStopped = true
+		err = combineExecutionErrors(err, heartbeatErr)
+		leaseHandled = w.submitFailureReportHandled(ctx, task, lease, err)
+		return failedExecutionOutcome(task, lease, agent.Result{}, err), errors.Join(err, heartbeatErr)
+	}
 	defer w.Runner.RemoveToolsForInvocation(task.RunID, task.ID, api.HolderAgent, w.AgentID)
 	checkpoint, hasCheckpoint, err := w.latestExecutionCheckpoint(execCtx, task)
 	if err != nil {
@@ -341,8 +353,11 @@ func (w AgentWorker) executionErrorOutcome(
 	return failedExecutionOutcome(task, lease, result, runErr), handled, runErr
 }
 
-func (w AgentWorker) executionEngine(task api.Task, lease api.TaskExecutionLease) agent.Engine {
-	engine := w.governedEngine(task, lease)
+func (w AgentWorker) executionEngine(task api.Task, lease api.TaskExecutionLease) (agent.Engine, error) {
+	engine, err := w.governedEngine(task, lease)
+	if err != nil {
+		return agent.Engine{}, err
+	}
 	if engine.Model == "" {
 		engine.Model = w.Model
 	}
@@ -352,7 +367,7 @@ func (w AgentWorker) executionEngine(task api.Task, lease api.TaskExecutionLease
 	if engine.LoopPolicy.MaxIterations == 0 {
 		engine.LoopPolicy.MaxIterations = w.MaxIterations
 	}
-	return engine
+	return engine, nil
 }
 
 func failedExecutionOutcome(task api.Task, lease api.TaskExecutionLease, result agent.Result, cause error) ExecutionOutcome {
@@ -753,12 +768,12 @@ func (w AgentWorker) loadEnvelopeTaskRun(ctx context.Context, envelope api.TaskE
 	return task, run, nil
 }
 
-func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease) agent.Engine {
+func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease) (agent.Engine, error) {
 	engine := w.Engine
 	if engine.Tools == nil {
-		return engine
+		return engine, nil
 	}
-	engine.Tools = GovernedToolBus{
+	tools, err := (GovernedToolBus{
 		Runner:      w.Runner,
 		Bus:         engine.Tools,
 		RunID:       task.RunID,
@@ -768,8 +783,12 @@ func (w AgentWorker) governedEngine(task api.Task, lease api.TaskExecutionLease)
 		HolderID:    w.AgentID,
 		TaskVersion: task.Version,
 		UsagePricer: w.UsagePricer,
-	}.ToolBus()
-	return engine
+	}).ToolBus()
+	if err != nil {
+		return agent.Engine{}, err
+	}
+	engine.Tools = tools
+	return engine, nil
 }
 
 func (w AgentWorker) stepRecorder(task api.Task, lease api.TaskExecutionLease, started time.Time, engine agent.Engine, caller agent.StepRecorder) agent.StepRecorder {
@@ -1032,15 +1051,13 @@ func (w AgentWorker) prepareSuccessReport(task api.Task, result agent.Result) (a
 		Status:  api.ReportStatusSuccess,
 		Summary: summary,
 	}
-	// Carry the schema-validated structured output onto the report so durable
-	// downstream readers (routers, graph edges) observe the same
-	// Task.Result.Structured the in-process report path exposes. result.Structured
-	// is populated only when the terminal output validated against the task's
-	// OutputSchema; without this, a schema-backed worker output is validated and
-	// then silently dropped. The report contract is object-shaped (map[string]any),
-	// matching the in-process path (see multiagent voting/router/graph consumers),
-	// so a validated non-object output is surfaced as a worker failure rather than
-	// quietly discarded.
+	// Carry schema-validated structured output onto the report so durable
+	// schedulers and graph edges observe the same Task.Result.Structured as the
+	// in-process report path. result.Structured is populated only after terminal
+	// output validation; without this assignment, a schema-backed worker output
+	// would be validated and then silently dropped. The report contract is
+	// object-shaped (map[string]any), so a validated non-object output is a
+	// worker failure rather than an unrouteable result.
 	if len(result.Structured) > 0 {
 		structured := map[string]any{}
 		if err := json.Unmarshal(result.Structured, &structured); err != nil {
@@ -1199,14 +1216,27 @@ func leaseRenewalPulse(expiresAt time.Time, ttl time.Duration, heartbeat, valida
 	}
 }
 
+// leaseLost reports whether a heartbeat failure means the execution lease is
+// no longer held here, as opposed to a round-trip that failed for an
+// unrelated reason.
+func leaseLost(err error) bool {
+	return errors.Is(err, api.ErrLeaseNotActive) ||
+		errors.Is(err, api.ErrLeaseHolderMismatch) ||
+		errors.Is(err, api.ErrNotFound)
+}
+
 func pulseLeaseHeartbeat(ctx context.Context, pulse func(context.Context) error) error {
-	if err := pulse(ctx); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return err
+	err := pulse(ctx)
+	if err == nil {
+		return nil
 	}
-	return nil
+	// A cancelled context explains away a failed round-trip, but never a lost
+	// lease: dropping that would let the execution keep running — and later
+	// report — under a lease some other holder now owns.
+	if ctx.Err() != nil && !leaseLost(err) {
+		return nil
+	}
+	return err
 }
 
 func tickLeaseHeartbeat(ctx context.Context, ttl time.Duration, pulse func(context.Context) error) error {

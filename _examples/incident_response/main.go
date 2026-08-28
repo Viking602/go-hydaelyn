@@ -51,11 +51,11 @@ func main() {
 	// --- topology ----------------------------------------------------------
 	specialists := []string{"monitor", "logreader", "changelog"}
 	for _, id := range specialists {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleSpecialist, Groups: []string{"incident"}})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleSpecialist, Groups: []string{"incident"}}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "summarizer", Role: roleAggregator})
-	runner.RegisterAgent(api.AgentProfile{ID: "reviewer", Role: roleReviewer})
-	runner.RegisterAgent(api.AgentProfile{ID: "actuator", Role: roleActuator})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "summarizer", Role: roleAggregator}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "reviewer", Role: roleReviewer}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "actuator", Role: roleActuator}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "deploy regression — investigate"})
 	must(err)
@@ -131,12 +131,12 @@ func main() {
 		DependsOn: []string{reviewTask.ID}, AllowsAction: true,
 	})
 	must(err)
-	runner.RegisterToolForInvocation(run.ID, actionTask.ID, api.HolderAgent, "actuator", api.Tool{
+	must(runner.RegisterToolForInvocation(run.ID, actionTask.ID, api.HolderAgent, "actuator", api.Tool{
 		Name:               toolRollback,
 		EffectType:         api.ToolEffectWrite,
 		RequiresActionTask: true,
 		RiskLevel:          "high",
-	})
+	}))
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: actionTask.ID, TargetAgentID: "actuator",
 	})

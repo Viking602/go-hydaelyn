@@ -29,7 +29,8 @@ StartRun
   -> SubmitTypedReport validates lease + owner + task_version
   -> TaskStore/EventStore/Blackboard projections update
   -> ResponseTask queues sanitized UserMessage
-  -> OutputGateway marks the queued message published
+  -> PublishResponse claims the queued message (queued -> publishing)
+  -> OutputGateway delivers it, and the claim resolves to published
 ```
 
 Mailbox delivery is notification only. The execution permission boundary is
@@ -51,9 +52,17 @@ terminalizing a concurrent winner.
 - Events are append-only replay/audit input.
 - Blackboard items store shared facts and handoff context, never task ownership.
 - Response outbox stores only policy-checked, redacted user payloads.
-- `OutputGateway` is the only code path that marks a user message as published.
+- `OutputGateway` is the external delivery boundary. `PublishResponse` commits
+  `queued -> publishing` before calling it, so a concurrent publisher receives
+  `api.ErrResponsePublishInFlight` instead of delivering twice. Any gateway
+  error leaves the message in `publishing`: an error can arrive after the
+  external side effect, so the runtime does not assume non-delivery or retry.
+  After inspecting the delivery channel, the host settles the claim with
+  policy-authorized `Runner.ReconcileResponsePublication`, which records
+  delivery or returns a confirmed-undelivered message to the outbox.
 - `PolicyEngine.Authorize(ctx, PolicyRequest)` governs dispatch, blackboard
-  read/write, handoff, tool call, action, and response publish boundaries.
+  read/write, handoff, tool call, action, response compose/publish, and response
+  reconciliation boundaries.
 - `TraceStore` records spans for pipeline, mailbox, lease, blackboard, policy,
   handoff, action, response, and replay-facing operations.
 
@@ -81,8 +90,6 @@ The in-memory implementation covers the contract-level primitives:
 - EventStore replay that rebuilds Run/Task/UserMessage projections without
   redelivering mailbox messages, republishing user messages, or rerunning
   action tools.
-- Flow registration as a preset boundary; flows that bypass runner primitives
-  are rejected.
 
 ## Naming
 

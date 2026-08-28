@@ -14,6 +14,7 @@ var (
 	ErrActionTaskRequired      = api.ErrActionTaskRequired
 	ErrActionReconcileRequired = api.ErrActionReconcileRequired
 	ErrResponseTaskRequired    = api.ErrResponseTaskRequired
+	ErrResponsePublishInFlight = api.ErrResponsePublishInFlight
 	ErrPolicyDenied            = api.ErrPolicyDenied
 	ErrPolicyObligationFailed  = api.ErrPolicyObligationFailed
 	ErrHandoffCycle            = api.ErrHandoffCycle

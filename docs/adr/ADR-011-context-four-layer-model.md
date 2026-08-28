@@ -8,6 +8,11 @@ Accepted — enforced from v0.8.0 onward. Anchor document: `docs/product-spec/v0
 contract only. The framework does not ship `artifact/filesystem` or
 `artifact/inmem` backends. Applications implement the interface.
 
+**Amended 2026-08-28 for v0.16.0:** Artifact remains a conceptual,
+application-owned context layer, but the unused kernel `api.ArtifactStore`
+contract is removed. Framework values carry opaque artifact reference strings;
+applications own artifact metadata, validation, and storage verbs.
+
 ## Context
 
 By v0.7.x the only structured context surface was Blackboard. Several distinct categories of "context" were being shoved into it and onto each other:
@@ -21,13 +26,15 @@ Each category has a distinct scope axis and lifetime. Mixing them produced three
 
 ## Decision
 
-Four layers, four interfaces. Each layer has its own scope axis and lifetime. The framework defines them as **separate types** in `api/` to prevent conflation.
+Four layers, four ownership boundaries. Blackboard, Memory, and ContextSource
+have kernel contracts; Artifact remains application-owned and is referenced
+opaquely so the layers cannot be conflated.
 
 | Layer | Scope | Lifetime | Typical content | Interface |
 | ----- | ----- | -------- | --------------- | --------- |
 | **Blackboard** | Run | Run | Claims, evidence, findings, task outputs, handoff snapshots | `BlackboardReadWriter` (unchanged) |
 | **Memory** | Agent / User / Tenant | Cross-run, long-term | Conversation history, preferences, learned facts | `api.Memory` (new) |
-| **Artifact** | Run / Project | Long-term | Binary or large structured output | `api.ArtifactStore` (new) |
+| **Artifact** | Run / Project | Long-term | Binary or large structured output | Application contract; framework stores opaque refs |
 | **ContextSource** | Reference | N/A (pointer) | URL, vector index, file path, API endpoint, knowledge graph (reserved) | `api.ContextSource` type (resolution lives in packs) |
 
 ### ContextScope axis

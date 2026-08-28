@@ -2,20 +2,23 @@
 
 ## Plugin Model
 
-Venat uses an internal `plugin.Registry` with `type/name` keys for runtime
-composition experiments and tests.
+Venat has no plugin registry. Extension is done by implementing public `api`
+interfaces (and the `provider`/`tool` driver interfaces) and passing them in
+through `api.Config` or the constructor that accepts them. There is no
+runtime `type/name` lookup and no dynamic plugin loading.
 
-Supported plugin types:
+Extension points:
 
-- `provider`
-- `tool`
-- `planner`
-- `verifier`
-- `storage`
-- `memory`
-- `observer`
-- `scheduler`
-- `mcp_gateway`
+- `api.StoreProvider` — durable storage backend (ADR-012, Position D; the
+  framework ships no reference implementation).
+- `api.PolicyEngine` — authorization for dispatch, blackboard, handoff, tool
+  calls, actions, and response publish.
+- `api.Memory[T Identified]` — optional keyed memory plugin (ADR-013); no
+  reference implementation ships.
+- `provider.Driver` — model provider drivers (Anthropic, OpenAI, scripted).
+- `tool.Driver` — tool execution drivers.
+- `api.Planner` — task-planning integrations.
+- `api.OutputGateway` — response/output delivery.
 
 ## Recommended Public Integration
 

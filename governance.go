@@ -159,7 +159,7 @@ func (r *Runner) ListActionAttempts(ctx context.Context, selector api.ActionAtte
 	if err != nil {
 		return nil, err
 	}
-	return attempts, nil
+	return append([]api.ActionAttempt(nil), attempts...), nil
 }
 
 func (r *Runner) StartTraceSpan(ctx context.Context, cmd api.StartTraceSpanCommand) (api.TraceSpan, error) {

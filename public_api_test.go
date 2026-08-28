@@ -1,5 +1,3 @@
-//lint:file-ignore SA1019 This compatibility smoke test intentionally imports deprecated alias packages.
-
 package venat
 
 import (
@@ -9,8 +7,6 @@ import (
 
 	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/blackboard"
-	"github.com/Viking602/venat/flow"
 	"github.com/Viking602/venat/policy"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
@@ -29,10 +25,6 @@ func TestPublicAPISmoke(t *testing.T) {
 	var _ agent.AgentProfile
 	var _ api.BlackboardItem
 	var _ api.BlackboardSelector
-	var _ api.Flow
-	var _ blackboard.Item
-	var _ blackboard.Selector
-	var _ flow.Flow
 	var _ policy.Engine = policy.EngineFunc(func(context.Context, policy.Request) (policy.Decision, error) {
 		return policy.Decision{Effect: policy.EffectAllow}, nil
 	})

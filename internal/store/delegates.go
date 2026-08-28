@@ -135,11 +135,9 @@ func (d *Delegates) ListQueuedMessages(ctx context.Context) ([]api.UserMessage, 
 		return nil, err
 	}
 	defer func() { _ = done() }()
-	scanner, ok := uow.UserMessages().(ports.UserMessageOutboxScanner)
-	if !ok {
-		return nil, fmt.Errorf("user message store does not support queued outbox scanning: %w", api.ErrInvalidConfiguration)
-	}
-	return scanner.ListQueuedMessages(ctx)
+	return uow.UserMessages().ListPendingFor(ctx, api.UserMessageSelector{
+		Statuses: []string{string(api.UserMessageQueued)},
+	})
 }
 
 func (d *Delegates) QueueEnvelope(ctx context.Context, env api.TaskEnvelope) error {

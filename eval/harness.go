@@ -34,7 +34,7 @@ type Harness interface {
 	Runner() *venat.Runner
 	// RegisterAgent registers an agent profile with the runner so the run
 	// can dispatch tasks to it.
-	RegisterAgent(profile api.AgentProfile)
+	RegisterAgent(profile api.AgentProfile) error
 	// Cleanup releases any resources held by the harness. Safe to call once
 	// per harness; the framework always calls it after the case completes.
 	Cleanup()
@@ -95,8 +95,8 @@ func WithEmbeddingProvider(p EmbeddingProvider) HarnessOption {
 // NewHarness constructs a DefaultHarness backed by a fresh in-memory runner and
 // a deterministic scripted provider. The single registered agent (id from
 // WithAgentID, default "agent") owns the case's task; the run is driven to a
-// terminal api.RunStatus by runCase. Pass api.Config-aware options later as
-// needed; M1 keeps the default in-memory config.
+// terminal api.RunStatus by runCase. It panics when an option produces an
+// invalid initial agent because EvalCase.Setup cannot return an error.
 func NewHarness(opts ...HarnessOption) *DefaultHarness {
 	h := &DefaultHarness{
 		runner:  venat.NewDevelopment(),
@@ -110,7 +110,9 @@ func NewHarness(opts ...HarnessOption) *DefaultHarness {
 	for _, opt := range opts {
 		opt(h)
 	}
-	h.runner.RegisterAgent(api.AgentProfile{ID: h.agentID})
+	if err := h.runner.RegisterAgent(api.AgentProfile{ID: h.agentID}); err != nil {
+		panic(err)
+	}
 	return h
 }
 
@@ -118,7 +120,9 @@ func NewHarness(opts ...HarnessOption) *DefaultHarness {
 func (h *DefaultHarness) Runner() *venat.Runner { return h.runner }
 
 // RegisterAgent registers an additional agent profile with the runner.
-func (h *DefaultHarness) RegisterAgent(profile api.AgentProfile) { h.runner.RegisterAgent(profile) }
+func (h *DefaultHarness) RegisterAgent(profile api.AgentProfile) error {
+	return h.runner.RegisterAgent(profile)
+}
 
 // Cleanup is a no-op for the in-memory default harness; the runner and its
 // stores are garbage-collected once the harness goes out of scope.

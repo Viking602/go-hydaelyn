@@ -17,8 +17,8 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
-	runner.RegisterAgent(api.AgentProfile{ID: "triage"})
-	runner.RegisterAgent(api.AgentProfile{ID: "specialist"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "triage"}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "specialist"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "investigate error spike"})
 	must(err)

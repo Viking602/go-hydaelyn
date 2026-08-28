@@ -368,64 +368,15 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		}
 		assistant, usage, stopReason, identity, opened, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
-			var streamInterrupt *StreamRuleInterruptError
-			if errors.As(turnErr, &streamInterrupt) {
-				if streamInterrupt.KeepPartial {
-					current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
-				} else {
-					totalUsage = totalUsage.Add(usage)
-					turnsRun = max(turnsRun, iteration+1)
-				}
-				if opened {
-					steps = append(steps, Step{
-						Index: iteration,
-						ModelCall: &ModelCall{
-							Provider: identity.Provider.Name, Model: identity.Model,
-							InputTokens: usage.InputTokens, CachedInputTokens: usage.CachedInputTokens,
-							CachedInputTokensReported:     usage.CachedInputTokensReported,
-							CacheWriteInputTokens:         usage.CacheWriteInputTokens,
-							CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
-							OutputTokens:                  usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens,
-							TotalTokens: usage.TotalTokens, StopReason: provider.StopReasonAborted,
-						},
-						Decision:   StepDecisionContinue,
-						BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-					})
-					if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-						return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), errors.Join(turnErr, recordErr)
-					}
-				}
+			failure := handleTurnFailure(
+				ctx, input, current, totalUsage, steps, turnsRun, iteration, toolCallsUsed,
+				assistant, usage, stopReason, identity, opened, turnErr,
+			)
+			current, totalUsage, steps, turnsRun = failure.current, failure.usage, failure.steps, failure.turnsRun
+			if failure.retry {
 				continue
 			}
-			// A turn can fail after its stream opens: preserve a failed ModelCall
-			// with the selected stream identity so durable usage cannot fall back
-			// to the wrapper's primary metadata.
-			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
-			if opened {
-				turnsRun = max(turnsRun, iteration+1)
-				steps = append(steps, Step{
-					Index: iteration,
-					ModelCall: &ModelCall{
-						Provider:                      identity.Provider.Name,
-						Model:                         identity.Model,
-						InputTokens:                   usage.InputTokens,
-						CachedInputTokens:             usage.CachedInputTokens,
-						CachedInputTokensReported:     usage.CachedInputTokensReported,
-						CacheWriteInputTokens:         usage.CacheWriteInputTokens,
-						CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
-						OutputTokens:                  usage.OutputTokens,
-						ReasoningTokens:               usage.ReasoningTokens,
-						TotalTokens:                   usage.TotalTokens,
-						StopReason:                    stopReason,
-					},
-					Decision:   StepDecisionFail,
-					BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-				})
-				if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-					return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), errors.Join(turnErr, recordErr)
-				}
-			}
-			return loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed), turnErr
+			return failure.output, failure.err
 		}
 		totalUsage = totalUsage.Add(usage)
 		// The model turn ran and its usage is now counted, so a panic from here on
@@ -487,6 +438,95 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		Steps:         steps,
 		ToolCallsUsed: toolCallsUsed,
 	}, nil
+}
+
+type turnFailureResult struct {
+	current  []message.Message
+	usage    provider.Usage
+	steps    []Step
+	turnsRun int
+	retry    bool
+	output   LoopOutput
+	err      error
+}
+
+func handleTurnFailure(
+	ctx context.Context,
+	input LoopInput,
+	current []message.Message,
+	totalUsage provider.Usage,
+	steps []Step,
+	turnsRun, iteration, toolCallsUsed int,
+	assistant message.Message,
+	usage provider.Usage,
+	stopReason provider.StopReason,
+	identity provider.StreamIdentity,
+	opened bool,
+	turnErr error,
+) turnFailureResult {
+	var interrupt *StreamRuleInterruptError
+	if errors.As(turnErr, &interrupt) {
+		if interrupt.KeepPartial {
+			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+		} else {
+			totalUsage = totalUsage.Add(usage)
+			turnsRun = max(turnsRun, iteration+1)
+		}
+		if opened {
+			steps = append(steps, turnFailureStep(iteration, identity, usage, provider.StopReasonAborted, StepDecisionContinue, totalUsage, toolCallsUsed))
+			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+				return turnFailureResult{
+					current: current, usage: totalUsage, steps: steps, turnsRun: turnsRun,
+					output: loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed),
+					err:    errors.Join(turnErr, recordErr),
+				}
+			}
+		}
+		return turnFailureResult{current: current, usage: totalUsage, steps: steps, turnsRun: turnsRun, retry: true}
+	}
+
+	current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
+	if opened {
+		turnsRun = max(turnsRun, iteration+1)
+		steps = append(steps, turnFailureStep(iteration, identity, usage, stopReason, StepDecisionFail, totalUsage, toolCallsUsed))
+		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
+			turnErr = errors.Join(turnErr, recordErr)
+		}
+	}
+	return turnFailureResult{
+		current: current, usage: totalUsage, steps: steps, turnsRun: turnsRun,
+		output: loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed),
+		err:    turnErr,
+	}
+}
+
+func turnFailureStep(
+	iteration int,
+	identity provider.StreamIdentity,
+	usage provider.Usage,
+	stopReason provider.StopReason,
+	decision StepDecision,
+	totalUsage provider.Usage,
+	toolCallsUsed int,
+) Step {
+	return Step{
+		Index: iteration,
+		ModelCall: &ModelCall{
+			Provider:                      identity.Provider.Name,
+			Model:                         identity.Model,
+			InputTokens:                   usage.InputTokens,
+			CachedInputTokens:             usage.CachedInputTokens,
+			CachedInputTokensReported:     usage.CachedInputTokensReported,
+			CacheWriteInputTokens:         usage.CacheWriteInputTokens,
+			CacheWriteInputTokensReported: usage.CacheWriteInputTokensReported,
+			OutputTokens:                  usage.OutputTokens,
+			ReasoningTokens:               usage.ReasoningTokens,
+			TotalTokens:                   usage.TotalTokens,
+			StopReason:                    stopReason,
+		},
+		Decision:   decision,
+		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+	}
 }
 
 func handleBeforeModelControl(
@@ -573,33 +613,11 @@ func (e Engine) runToolStep(
 		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, ctxErr
 	}
 
-	beforeResults, controlBatch, controlErr := prepareBeforeToolControl(
-		ctx, input.Control, assistant.ToolCalls, current, input.Sink,
+	handled, out, stop, controlErr := handleBeforeToolBatchControl(
+		ctx, *input, current, *totalUsage, steps, assistant, modelCall, iteration, *toolCallsUsed,
 	)
-	if controlErr != nil {
-		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, controlErr
-	}
-	if len(controlBatch) > 0 {
-		*current = append(*current, controlMessages(controlBatch)...)
-		if controlAborts(controlBatch) {
-			*steps = append(*steps, Step{
-				Index:      iteration,
-				ModelCall:  modelCall,
-				ToolCalls:  toolCallTraces(assistant.ToolCalls, beforeResults),
-				Decision:   StepDecisionFail,
-				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
-			})
-			if err := recordTurnBoundary(ctx, *input, *current, *totalUsage, *steps, *toolCallsUsed); err != nil {
-				return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, errors.Join(ErrTurnControlAbort, err)
-			}
-			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, ErrTurnControlAbort
-		}
-		nextSteps, out, stop, err := finalizeToolStep(
-			ctx, *input, *current, *totalUsage, *steps, assistant, modelCall,
-			beforeResults, false, iteration, *toolCallsUsed,
-		)
-		*steps = nextSteps
-		return out, stop, err
+	if handled {
+		return out, stop, controlErr
 	}
 
 	// Reserve the whole batch before hooks or drivers run. This prevents one
@@ -696,6 +714,47 @@ func (e Engine) runToolStep(
 	)
 	*steps = nextSteps
 	return out, stop, err
+}
+
+func handleBeforeToolBatchControl(
+	ctx context.Context,
+	input LoopInput,
+	current *[]message.Message,
+	totalUsage provider.Usage,
+	steps *[]Step,
+	assistant message.Message,
+	modelCall *ModelCall,
+	iteration, toolCallsUsed int,
+) (bool, LoopOutput, bool, error) {
+	results, controlBatch, err := prepareBeforeToolControl(
+		ctx, input.Control, assistant.ToolCalls, current, input.Sink,
+	)
+	if err != nil {
+		return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, err
+	}
+	if len(controlBatch) == 0 {
+		return false, LoopOutput{}, false, nil
+	}
+	*current = append(*current, controlMessages(controlBatch)...)
+	if controlAborts(controlBatch) {
+		*steps = append(*steps, Step{
+			Index:      iteration,
+			ModelCall:  modelCall,
+			ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
+			Decision:   StepDecisionFail,
+			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
+		})
+		if recordErr := recordTurnBoundary(ctx, input, *current, totalUsage, *steps, toolCallsUsed); recordErr != nil {
+			return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, errors.Join(ErrTurnControlAbort, recordErr)
+		}
+		return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, ErrTurnControlAbort
+	}
+	nextSteps, out, stop, err := finalizeToolStep(
+		ctx, input, *current, totalUsage, *steps, assistant, modelCall,
+		results, false, iteration, toolCallsUsed,
+	)
+	*steps = nextSteps
+	return true, out, stop, err
 }
 
 func prepareBeforeToolControl(

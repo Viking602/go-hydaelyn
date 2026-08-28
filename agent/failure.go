@@ -2,21 +2,18 @@ package agent
 
 // FailureKind enumerates the typed failure modes Engine.Run may surface.
 // Multi-agent schedulers may branch on FailureKind to decide retry / handoff /
-// escalate / approval / terminate. v0.8.0 reference schedulers do not
-// automatically dispatch upstream evidence-gathering work for
-// FailureKindInsufficientEvidence; that table in the spec is advisory.
+// escalate / approval / terminate.
 type FailureKind string
 
 const (
-	FailureKindBudgetExhausted      FailureKind = "budget_exhausted"
-	FailureKindToolUnavailable      FailureKind = "tool_unavailable"
-	FailureKindSchemaInvalid        FailureKind = "schema_invalid"
-	FailureKindRepairFailed         FailureKind = "repair_failed"
-	FailureKindUnsafeAction         FailureKind = "unsafe_action"
-	FailureKindInsufficientEvidence FailureKind = "insufficient_evidence"
-	FailureKindContextBuildFailed   FailureKind = "context_build_failed"
-	FailureKindEngineError          FailureKind = "engine_error"
-	FailureKindStepAborted          FailureKind = "step_aborted"
+	FailureKindBudgetExhausted    FailureKind = "budget_exhausted"
+	FailureKindToolUnavailable    FailureKind = "tool_unavailable"
+	FailureKindSchemaInvalid      FailureKind = "schema_invalid"
+	FailureKindRepairFailed       FailureKind = "repair_failed"
+	FailureKindUnsafeAction       FailureKind = "unsafe_action"
+	FailureKindContextBuildFailed FailureKind = "context_build_failed"
+	FailureKindEngineError        FailureKind = "engine_error"
+	FailureKindStepAborted        FailureKind = "step_aborted"
 )
 
 // AgentFailure is the only failure shape that crosses the agent →
@@ -32,7 +29,6 @@ type AgentFailure struct {
 	Reason      string      `json:"reason,omitempty"`
 	Retryable   bool        `json:"retryable,omitempty"`
 	Escalatable bool        `json:"escalatable,omitempty"`
-	EvidenceIDs []string    `json:"evidenceIds,omitempty"`
 
 	// cause is the underlying error (if any). Intentionally unexported
 	// so it does not serialize through JSON marshaling and so the only

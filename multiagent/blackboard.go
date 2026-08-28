@@ -11,8 +11,8 @@ import (
 // the runner-scoped api.BlackboardItem with provenance fields required
 // for typed cross-agent collaboration: WrittenBy is the AgentInstance
 // that produced the entry, StepID ties it back to one agent.Step in the
-// loop trace, and EvidenceID lets supervisor / voting schedulers
-// reason about the chain of evidence that led to a decision.
+// loop trace, and EvidenceID preserves the evidence chain consumed by later
+// scheduler decisions.
 //
 // Spec anchor: docs/product-spec/v0.8.0/05-multi-agent-layer.md.
 type BlackboardEntry struct {
@@ -42,22 +42,4 @@ func (e BlackboardEntry) Item(runID string) api.BlackboardItem {
 		item.EvidenceRefs = []string{e.EvidenceID}
 	}
 	return item
-}
-
-// EntryFromItem reconstructs a scheduler-side entry from a durable row.
-// Spec anchor: ADR-026.
-func EntryFromItem(item api.BlackboardItem) BlackboardEntry {
-	entry := BlackboardEntry{
-		Key:       item.Key,
-		Value:     json.RawMessage(item.Payload),
-		WrittenBy: item.Source.ID,
-		CreatedAt: item.CreatedAt,
-	}
-	if entry.Key == "" {
-		entry.Key = item.ID
-	}
-	if len(item.EvidenceRefs) > 0 {
-		entry.EvidenceID = item.EvidenceRefs[0]
-	}
-	return entry
 }

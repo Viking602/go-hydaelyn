@@ -74,17 +74,6 @@ func Envelope(env api.TaskEnvelope) map[string]any {
 	}
 }
 
-func RetryPolicy(policy api.RetryPolicy) map[string]any {
-	if policy.MaxAttempts == 0 && policy.Backoff == 0 && policy.MaxBackoff == 0 {
-		return nil
-	}
-	return map[string]any{
-		"maxAttempts": policy.MaxAttempts,
-		"backoff":     policy.Backoff,
-		"maxBackoff":  policy.MaxBackoff,
-	}
-}
-
 func CloneAnyMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil

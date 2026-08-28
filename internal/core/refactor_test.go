@@ -794,11 +794,16 @@ func TestPublishResponseFailureCommitsAuditWithoutPublishing(t *testing.T) {
 		t.Fatalf("PublishResponse(failing gateway) error = %v, want %v", err, errPublishFailed)
 	}
 	after := mustResponseOutbox(context.Background(), t, rt, run.ID)[0]
-	if after.Status != UserMessageQueued {
-		t.Fatalf("failed publish must leave message queued, got %#v", after)
+	if after.Status != UserMessagePublishing {
+		t.Fatalf("failed publish must leave message outcome in doubt, got %#v", after)
 	}
 	if !collectEventTypes(rt.Events(context.Background(), run.ID)).Contains(EventResponsePublishFailed) {
 		t.Fatalf("failed publish should commit audit event, got %#v", rt.Events(context.Background(), run.ID))
+	}
+	if _, err := rt.ReconcileResponsePublication(ctx, ReconcileResponsePublicationCommand{
+		RunID: run.ID, MessageID: message.ID, Delivered: false, Reason: "gateway confirmed non-delivery",
+	}); err != nil {
+		t.Fatalf("ReconcileResponsePublication() error = %v", err)
 	}
 	rt.SetOutputGateway(nil)
 	if err := rt.PublishResponse(ctx, PublishResponseCommand{RunID: run.ID, MessageID: message.ID}); err != nil {

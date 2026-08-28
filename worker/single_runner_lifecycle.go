@@ -25,7 +25,7 @@ func (s *SingleRunner) Cancel(ctx context.Context, runID string) error {
 // It acquires the pending task atomically, submits the report under that lease,
 // and reconciles task, run, and admission state through the same terminal path
 // used by Execute.
-func (s *SingleRunner) Report(ctx context.Context, runID string, report api.TypedReport) (SingleRun, error) {
+func (s *SingleRunner) Report(ctx context.Context, runID string, report api.TypedReport) (_ SingleRun, err error) {
 	if err := s.validate(runID); err != nil {
 		return SingleRun{}, err
 	}
@@ -73,9 +73,13 @@ func (s *SingleRunner) Report(ctx context.Context, runID string, report api.Type
 		if leaseHandled {
 			return
 		}
-		_ = s.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
+		// An unreleased report lease keeps the task locked until it expires,
+		// so surface the failure instead of dropping it.
+		if releaseErr := s.Runner.ReleaseTaskExecution(context.WithoutCancel(ctx), api.ReleaseTaskExecutionCommand{
 			LeaseID: lease.ID, HolderID: s.Worker.AgentID,
-		})
+		}); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("worker: release single-run report lease: %w", releaseErr))
+		}
 	}()
 	if err := s.Runner.SubmitTypedReport(ctx, api.SubmitTypedReportCommand{
 		RunID: runID, TaskID: state.Task.ID, LeaseID: lease.ID,

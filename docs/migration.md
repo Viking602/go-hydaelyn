@@ -1,5 +1,55 @@
 # Migration Notes
 
+## v0.15 → v0.16 — demand-driven surface and durable publication
+
+v0.16 completes the compatibility windows opened by ADR-021, ADR-025, and
+ADR-027. It also makes publication and the experimental durable agent harness
+fail closed under ambiguous external outcomes.
+
+Source migrations:
+
+- Import canonical `api` types directly. The deprecated `memory/`, `flow/`, and
+  `blackboard/` packages are removed.
+- Call typed methods directly on `*venat.Runner`. The intermediate
+  `Runner.Admin()`, `Runner.Governance()`, and `Runner.Blackboard()` façades are
+  removed.
+- Replace `ReplayContext` with `ReplayRunStateContext` or `Recover`; replace
+  `ReadyTasksContext` with `ListTasks` plus application readiness rules; replace
+  `ResponseOutboxContext` with `ListMessages` or `ListQueuedMessages`.
+- Handle errors from `RegisterAgent`, `RegisterTool`, and
+  `RegisterToolForInvocation`. Empty identities are no longer ignored.
+- Remove `api.Flow`, `Runner.RegisterFlow`, the `workflow/` package, and the
+  built-in `multiagent.Graph`/`CompiledGraph` DAG surface. Fixed pipelines use
+  `SequentialScheduler`; conditional or parallel policies move into an
+  application `Scheduler` or `SchedulerFunc`, executed by `multiagent.Drive`.
+- Remove uses of `api.Artifact`, `api.ArtifactStore`, `api.Projector`, and
+  `api.UserTimelineProjector`. Artifact references remain opaque strings on
+  blackboard/action values; replay uses the built-in pure projection.
+- Replace `multiagent.RouterScheduler`, `SupervisorScheduler`, voting helpers,
+  `ObservedExecutor`, and Graph/DAG helpers with `SequentialScheduler` or an
+  application `Scheduler`, as appropriate. The framework no longer claims one
+  generic model for supervisor, voting, branching, fan-in, or failure policy.
+- Replace `stream.Channel` and `stream.Merge` with host-owned channels/fan-in.
+  `stream.Sink`, `Broadcast`, and `Accumulator` remain.
+- `eval.Harness.RegisterAgent` now returns `error`.
+  `worker.GovernedToolBus.ToolBus` now returns `(*tool.Bus, error)`.
+- `agent.AgentFailure` no longer carries `EvidenceIDs`, and
+  `FailureKindInsufficientEvidence` is removed.
+
+Storage and operational migrations:
+
+- `api.TraceStore` now includes `LoadTraceSpan` and `UpdateTraceSpan`, matching
+  the methods already required by `EndTraceSpan`.
+- `api.UserMessageStore.UpdateMessage` must provide atomic status CAS semantics.
+  Publication commits `queued -> publishing` before the gateway call.
+- Any `OutputGateway.Publish` error leaves the message in `publishing`; an error
+  does not prove non-delivery. After checking the delivery channel, call
+  `ReconcileResponsePublication` with the observed result. Reconciliation is
+  policy-authorized through `PolicyOperationResponseReconcile`.
+- The experimental `session.Storage` contract adds atomic register sequence
+  checks and `GetUsage`. `agent.Harness` uses renewable lane leases so two
+  processes cannot drive the same operation concurrently.
+
 ## v0.14 → v0.15 — architecture program
 
 v0.15 starts the structural repair recorded in

@@ -13,6 +13,7 @@ var (
 	ErrActionReconcileRequired   = errors.New("orchestrator: action reconcile required")
 	ErrIdempotencyConflict       = errors.New("orchestrator: idempotency conflict")
 	ErrResponseTaskRequired      = errors.New("orchestrator: response task required")
+	ErrResponsePublishInFlight   = errors.New("orchestrator: response publication already in flight")
 	ErrPolicyDenied              = errors.New("orchestrator: policy denied")
 	ErrPolicyObligationFailed    = errors.New("orchestrator: policy obligation failed")
 	ErrDefinitionVersionConflict = errors.New("orchestrator: agent definition version conflict")

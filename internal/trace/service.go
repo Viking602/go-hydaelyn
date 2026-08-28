@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"time"
 
@@ -49,11 +48,7 @@ func StartSpan(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, inp
 }
 
 func EndSpan(ctx context.Context, uow ports.UnitOfWork, spanID, spanError string) (api.TraceSpan, error) {
-	updater, ok := uow.Trace().(ports.TraceSpanUpdater)
-	if !ok {
-		return api.TraceSpan{}, fmt.Errorf("trace store does not implement TraceSpanUpdater: %w", api.ErrInvalidConfiguration)
-	}
-	span, err := updater.LoadTraceSpan(ctx, spanID)
+	span, err := uow.Trace().LoadTraceSpan(ctx, spanID)
 	if err != nil {
 		return api.TraceSpan{}, err
 	}
@@ -63,7 +58,7 @@ func EndSpan(ctx context.Context, uow ports.UnitOfWork, spanID, spanError string
 		span.Error = spanError
 	}
 	span.EndedAt = time.Now().UTC()
-	if err := updater.UpdateTraceSpan(ctx, span); err != nil {
+	if err := uow.Trace().UpdateTraceSpan(ctx, span); err != nil {
 		return api.TraceSpan{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: span.RunID, TaskID: span.TaskID, Type: api.EventTraceSpanEnded, Payload: Payload(span), RecordedAt: time.Now().UTC()}); err != nil {

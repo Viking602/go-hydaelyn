@@ -21,10 +21,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Files in scope: api/ (the canonical surface), agent/ + skill/ +
-# multiagent/ + workflow/ (the v0.8.0 agent loop, reusable skill
-# instructions, multi-agent layer, and workflow modeling public surfaces per
-# spec 01-public-api §Change 6 / Change 7), and root-package *.go. Test files
-# are excluded — tests may legitimately need []any helpers.
+# multiagent/ (the agent loop, reusable skill instructions, and multi-agent
+# layer), and root-package *.go. Test files are excluded — tests may
+# legitimately need []any helpers.
 files=()
 while IFS= read -r f; do
   files+=("$f")
@@ -34,7 +33,6 @@ done < <(
     find agent -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
     find skill -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
     find multiagent -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
-    find workflow -maxdepth 2 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
     find . -maxdepth 1 -type f -name '*.go' -not -name '*_test.go' 2>/dev/null
   } | sort -u
 )

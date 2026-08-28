@@ -616,15 +616,14 @@ func TestHandoffPolicyResponseReplayAndFlowContracts(t *testing.T) {
 		t.Fatalf("expected PolicyObligationFailed event, got %#v", rt.Events(context.Background(), run.ID))
 	}
 
-	if err := rt.RegisterFlow(Flow{Name: "smoke", PlannerPreset: "default"}); err != nil {
-		t.Fatalf("expected flow registration to succeed, got %v", err)
-	}
+	eventsBeforeReplay := len(rt.Events(context.Background(), run.ID))
 	projection, err := rt.Replay(context.Background(), run.ID, ReplayModeAudit)
 	if err != nil {
 		t.Fatalf("Replay() error = %v", err)
 	}
-	if projection.SideEffects.MailboxDeliveries != 0 || projection.SideEffects.UserMessagePublications != 0 || projection.SideEffects.ActionExecutions != 0 {
-		t.Fatalf("audit replay performed side effects: %#v", projection.SideEffects)
+	assertAuditReplayIsPure(context.Background(), t, rt, run.ID, eventsBeforeReplay)
+	if projection.Run.ID != run.ID {
+		t.Fatalf("audit replay projection = %#v, want run %q", projection.Run, run.ID)
 	}
 
 	env, err := rt.DispatchTask(ctx, DispatchTaskCommand{RunID: run.ID, TaskID: handedOff.ID, TargetAgentID: "agent-b"})

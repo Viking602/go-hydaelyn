@@ -27,10 +27,10 @@ func main() {
 
 	researchers := []string{"r1", "r2"}
 	for _, id := range researchers {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Role: "deepsearch.researcher"})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Role: "deepsearch.researcher"}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "verifier", Role: "deepsearch.verifier"})
-	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "deepsearch.synthesizer"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "verifier", Role: "deepsearch.verifier"}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "deepsearch.synthesizer"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "deep dive on rate-limiting"})
 	must(err)

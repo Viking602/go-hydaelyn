@@ -16,8 +16,8 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
-	runner.RegisterAgent(api.AgentProfile{ID: "producer"})
-	runner.RegisterAgent(api.AgentProfile{ID: "consumer"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "producer"}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "consumer"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "share artifact"})
 	must(err)

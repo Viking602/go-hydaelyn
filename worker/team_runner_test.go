@@ -752,28 +752,44 @@ func TestTeamRunnerResumeStopsAfterRecoveryQuarantine(t *testing.T) {
 	}
 }
 
-func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
+func TestTeamRunnerPersistsDistinctSchedulerAndAgentClassIdentity(t *testing.T) {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
-	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-graph", RootTaskID: "root"})
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{RunID: "run-team-identities", RootTaskID: "root"})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
 	writer := multiagent.AgentClass{Name: "writer", Instructions: "draft", Model: "scripted"}
-	graph, err := multiagent.NewGraph().
-		AddNode("draft-left", writer).
-		AddNode("draft-right", writer).
-		Compile()
-	if err != nil {
-		t.Fatalf("Compile() error = %v", err)
-	}
+	scheduler := multiagent.SchedulerFunc(func(_ context.Context, state multiagent.TeamState) ([]multiagent.Dispatch, error) {
+		if len(state.Instances) > 0 {
+			return nil, nil
+		}
+		nodes := []string{"draft-left", "draft-right"}
+		dispatches := make([]multiagent.Dispatch, 0, len(nodes))
+		for _, node := range nodes {
+			taskID := state.RunID + "-" + node
+			dispatches = append(dispatches, multiagent.Dispatch{
+				To:             node + "-instance",
+				ClassName:      node,
+				AgentClassName: writer.Name,
+				Task: api.Task{
+					ID:     taskID,
+					RunID:  state.RunID,
+					Type:   api.TaskTypeWorker,
+					Goal:   writer.Instructions,
+					Status: api.TaskStatusCreated,
+				},
+			})
+		}
+		return dispatches, nil
+	})
 	driver := scripted.New([]provider.Event{
 		{Kind: provider.EventTextDelta, Text: "drafted"},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 	})
 	result, err := (TeamRunner{
 		Runner:    runner,
-		Team:      multiagent.Team{Agents: []multiagent.AgentClass{writer}, Scheduler: graph},
+		Team:      multiagent.Team{Agents: []multiagent.AgentClass{writer}, Scheduler: scheduler},
 		BuildDeps: agent.BuildDeps{Providers: provider.Single(driver)},
 		Options:   multiagent.DriveOptions{MaxConcurrency: 2},
 	}).Start(ctx, run.ID)
@@ -781,14 +797,14 @@ func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	if len(result.State.Instances) != 2 || len(result.State.Tasks) != 2 {
-		t.Fatalf("graph result = %#v, want two nodes", result.State)
+		t.Fatalf("scheduler result = %#v, want two logical nodes", result.State)
 	}
 	nodes := map[string]string{}
 	for _, instance := range result.State.Instances {
 		nodes[instance.ClassName] = instance.TaskID
 	}
 	if nodes["draft-left"] != run.ID+"-draft-left" || nodes["draft-right"] != run.ID+"-draft-right" {
-		t.Fatalf("durable graph node identities = %#v", nodes)
+		t.Fatalf("durable scheduler identities = %#v", nodes)
 	}
 	uow, err := runner.Begin(ctx)
 	if err != nil {
@@ -807,7 +823,7 @@ func TestTeamRunnerExecutesGraphNodesSharingAgentClass(t *testing.T) {
 		recordNodes[record.ClassName] = record.TaskID
 	}
 	if recordNodes["draft-left"] != run.ID+"-draft-left" || recordNodes["draft-right"] != run.ID+"-draft-right" {
-		t.Fatalf("persisted graph node identities = %#v", recordNodes)
+		t.Fatalf("persisted scheduler identities = %#v", recordNodes)
 	}
 }
 
@@ -885,6 +901,58 @@ func TestWaitForEnvelopeReadyHonorsBackoffAndCancellation(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForEnvelopeReady(cancelled) error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunnerExecutorWaitsForRetryBeforePreparingEngine(t *testing.T) {
+	ctx := context.Background()
+	runner := venat.NewDevelopment()
+	run, _, err := runner.StartRun(ctx, api.StartRunCommand{
+		RunID:      "run-retry-before-prepare",
+		RootTaskID: "root",
+		Request:    "wait before engine setup",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	task, err := runner.Task(ctx, run.ID, run.RootTaskID)
+	if err != nil {
+		t.Fatalf("Task() error = %v", err)
+	}
+	readyAt := time.Now().Add(30 * time.Millisecond)
+	if err := runner.QueueEnvelope(ctx, api.TaskEnvelope{
+		ID:            "env-retry-before-prepare",
+		RunID:         run.ID,
+		TaskID:        task.ID,
+		TargetAgentID: "instance-retry",
+		Status:        "pending",
+		NextRetryAt:   readyAt,
+	}); err != nil {
+		t.Fatalf("QueueEnvelope() error = %v", err)
+	}
+	class := multiagent.AgentClass{Name: "worker", Model: "scripted"}
+	prepareErr := errors.New("stop after prepare")
+	var preparedAt time.Time
+	executor := RunnerExecutor{
+		Runner:    runner,
+		Classes:   map[string]multiagent.AgentClass{class.Name: class},
+		BuildDeps: agent.BuildDeps{Providers: provider.Single(scripted.New(nil))},
+		PrepareEngine: func(_ context.Context, engine agent.Engine, _ multiagent.Dispatch, _ multiagent.AgentClass) (agent.Engine, error) {
+			preparedAt = time.Now()
+			return engine, prepareErr
+		},
+	}
+	_, err = executor.Execute(ctx, multiagent.Dispatch{
+		To:             "instance-retry",
+		ClassName:      class.Name,
+		AgentClassName: class.Name,
+		Task:           task,
+	})
+	if !errors.Is(err, prepareErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, prepareErr)
+	}
+	if preparedAt.Before(readyAt) {
+		t.Fatalf("PrepareEngine ran at %v before retry became ready at %v", preparedAt, readyAt)
 	}
 }
 
@@ -1034,5 +1102,64 @@ func TestRunnerExecutorPreservesDisabledTaskRetries(t *testing.T) {
 	}
 	if persisted.Status != api.TaskStatusFailed || persisted.Attempts != 1 {
 		t.Fatalf("persisted task = %#v, want failed after one attempt", persisted)
+	}
+}
+
+func TestRunnerExecutorResolveClassPreservesAttemptSuffixes(t *testing.T) {
+	classes := map[string]multiagent.AgentClass{
+		"researcher":               {Name: "researcher", Instructions: "research"},
+		"researcher-attempt-2":     {Name: "researcher-attempt-2", Instructions: "numeric class name"},
+		"researcher-attempt-final": {Name: "researcher-attempt-final", Instructions: "not a retry"},
+		"writer":                   {Name: "writer", Instructions: "write"},
+	}
+	executor := RunnerExecutor{Classes: classes}
+	tests := []struct {
+		name      string
+		dispatch  multiagent.Dispatch
+		wantClass string
+	}{
+		{
+			name: "numeric attempt suffix is a class name without dispatch metadata",
+			dispatch: multiagent.Dispatch{
+				Task: api.Task{RunID: "run-1", ID: "run-1-researcher-attempt-2"},
+			},
+			wantClass: "researcher-attempt-2",
+		},
+		{
+			name: "first attempt task id",
+			dispatch: multiagent.Dispatch{
+				Task: api.Task{RunID: "run-1", ID: "run-1-researcher"},
+			},
+			wantClass: "researcher",
+		},
+		{
+			name: "explicit class name wins",
+			dispatch: multiagent.Dispatch{
+				ClassName: "writer",
+				Task:      api.Task{RunID: "run-1", ID: "run-1-researcher-attempt-2"},
+			},
+			wantClass: "writer",
+		},
+		{
+			name: "non-numeric attempt suffix stays part of the class name",
+			dispatch: multiagent.Dispatch{
+				Task: api.Task{RunID: "run-1", ID: "run-1-researcher-attempt-final"},
+			},
+			wantClass: "researcher-attempt-final",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instanceClassName, class, err := executor.resolveClass(test.dispatch)
+			if err != nil {
+				t.Fatalf("resolveClass() error = %v", err)
+			}
+			if instanceClassName != test.wantClass {
+				t.Fatalf("instance class name = %q, want %q", instanceClassName, test.wantClass)
+			}
+			if class.Name != test.wantClass {
+				t.Fatalf("resolved class = %q, want %q", class.Name, test.wantClass)
+			}
+		})
 	}
 }

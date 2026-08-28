@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Viking602/venat/api"
@@ -11,21 +12,37 @@ import (
 
 // PublishResponse drives the multi-phase response publication flow:
 //
-//	Phase 1: load + validate + authorize, then commit so the runtime lock
-//	         is released before the gateway call.
+//	Phase 1: load + validate + authorize, claim the message by moving it
+//	         from Queued to Publishing, then commit so the runtime lock is
+//	         released before the gateway call.
 //	Phase 2: invoke the configured output gateway without holding any lock,
 //	         so gateway implementations may re-enter the runtime.
-//	Phase 3: persist the success/failure outcome in a fresh UoW.
+//	Phase 3: persist Published on success. Any gateway error leaves the claim
+//	         in Publishing because the external delivery outcome is unknown.
+//
+// The Phase 1 claim is what makes publication idempotent: the transition out
+// of Queued commits before the gateway is called, so a concurrent
+// PublishResponse for the same message finds it claimed and fails with
+// ErrResponsePublishInFlight instead of delivering it a second time.
 func (r *Runtime) PublishResponse(ctx context.Context, cmd PublishResponseCommand) error {
+	_, err := r.publishResponse(ctx, cmd)
+	return err
+}
+
+// publishResponse reports whether this call completed a successful gateway
+// invocation. An already-published message is an idempotent no-op and reports
+// false, which lets DrainResponseOutbox count only work it performed.
+func (r *Runtime) publishResponse(ctx context.Context, cmd PublishResponseCommand) (bool, error) {
 	message, err := r.publishResponsePrepare(ctx, cmd)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if message.Status == api.UserMessagePublished {
-		return nil
+		return false, nil
 	}
 	publishErr := r.currentOutputGateway().Publish(ctx, message)
-	return r.publishResponseFinalize(ctx, cmd, message, publishErr)
+	finalizeErr := r.publishResponseFinalize(ctx, cmd, message, publishErr)
+	return publishErr == nil, finalizeErr
 }
 
 func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishResponseCommand) (api.UserMessage, error) {
@@ -49,6 +66,9 @@ func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishRespons
 		}
 		committed = true
 		return message, nil
+	}
+	if message.Status == api.UserMessagePublishing {
+		return api.UserMessage{}, fmt.Errorf("message %q: %w", cmd.MessageID, ErrResponsePublishInFlight)
 	}
 	if message.Status != api.UserMessageQueued {
 		return api.UserMessage{}, ErrInvalidCommand
@@ -76,6 +96,8 @@ func (r *Runtime) publishResponsePrepare(ctx context.Context, cmd PublishRespons
 		committed = true
 		return api.UserMessage{}, err
 	}
+	message.Status = api.UserMessagePublishing
+	message.UpdatedAt = time.Now().UTC()
 	if err := uow.UserMessages().UpdateMessage(ctx, message); err != nil {
 		return api.UserMessage{}, err
 	}
@@ -105,7 +127,7 @@ func (r *Runtime) publishResponseFinalize(ctx context.Context, cmd PublishRespon
 			RunID:      cmd.RunID,
 			TaskID:     message.TaskID,
 			Type:       api.EventResponsePublishFailed,
-			Payload:    map[string]any{"messageId": message.ID, "reason": publishErr.Error()},
+			Payload:    map[string]any{"messageId": message.ID, "reason": publishErr.Error(), "outcome": "unknown"},
 			RecordedAt: time.Now().UTC(),
 		}); appendErr != nil {
 			return errors.Join(publishErr, appendErr)
@@ -134,7 +156,7 @@ func (r *Runtime) applyPublishedTransition(ctx context.Context, uow ports.UnitOf
 	if current.Status == api.UserMessagePublished {
 		return nil
 	}
-	if current.Status != api.UserMessageQueued {
+	if current.Status != api.UserMessagePublishing {
 		return ErrInvalidCommand
 	}
 	if err := r.recordEndedTraceUoW(ctx, uow, cmd.RunID, current.TaskID, "response.publish", "response"); err != nil {

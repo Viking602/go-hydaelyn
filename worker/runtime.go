@@ -67,9 +67,24 @@ type RuntimeOptions struct {
 	BatchSize int
 
 	// PollInterval is the sleep between polls when the last poll returned
-	// no envelopes. Defaults to 250ms. Polls that returned envelopes do
-	// not sleep — the loop re-polls immediately.
+	// no envelopes. Defaults to 250ms. Polls that returned envelopes do not
+	// sleep — the loop waits for that batch to finish and re-polls
+	// immediately, unless every envelope in the batch failed, in which case
+	// FailureBackoff applies.
 	PollInterval time.Duration
+
+	// FailureBackoff is the sleep applied after a batch in which every
+	// envelope failed, doubled for each further consecutive fully failed
+	// batch, up to MaxFailureBackoff. A batch that executed at least one
+	// envelope is making progress and resets it. Without a backoff a failed
+	// envelope that stays pending (an unacknowledged lease denial, for
+	// instance) is re-polled immediately, spinning the loop, the store and
+	// OnError. Defaults to PollInterval.
+	FailureBackoff time.Duration
+
+	// MaxFailureBackoff caps the exponential failure backoff. Defaults to
+	// 30s, raised to FailureBackoff when that is larger.
+	MaxFailureBackoff time.Duration
 
 	// PerEnvelopeTTL is the default lease TTL applied when the envelope
 	// itself doesn't carry one. Defaults to AgentWorker's own TTL fallback.
@@ -80,8 +95,14 @@ type RuntimeOptions struct {
 	// executor errors as fatal — it logs (via this hook) and moves on.
 	OnError ErrorHandler
 
-	// ShutdownDrainTimeout is how long Stop waits for in-flight envelopes
-	// to finish before returning. Defaults to 30s.
+	// ShutdownDrainTimeout is how long in-flight envelopes have to finish
+	// once Stop signals shutdown. Defaults to 30s.
+	//
+	// Stop normally returns as soon as Run does, within this budget. Its
+	// worst case is twice the value: when the loop has not returned at the
+	// deadline — a poller blocked past it — Stop cancels the run context and
+	// allows one more full budget for Run to unwind before giving up and
+	// reporting that the loop is still running.
 	ShutdownDrainTimeout time.Duration
 }
 
@@ -100,6 +121,12 @@ type RuntimeOptions struct {
 // Run blocks until ctx is cancelled or Stop is called. Stop returns a
 // drain-timeout error only if running envelopes don't finish within
 // ShutdownDrainTimeout.
+//
+// The loop processes one poll batch at a time: it dispatches the batch
+// across Concurrency workers, collects that batch's outcomes, and only then
+// polls again. Waiting for the batch it just dispatched is what lets the
+// backoff decision rest on real results instead of on whichever outcomes
+// happened to land first.
 type Runtime struct {
 	poller   EnvelopePoller
 	executor EnvelopeExecutor
@@ -118,6 +145,21 @@ type Runtime struct {
 	runDone    chan struct{}
 	runErr     error
 	cancel     atomic.Value // context.CancelFunc set by Run
+	stopAt     atomic.Value // time.Time recorded by Stop
+
+	// failures counts consecutive fully failed batches and drives the
+	// poll-loop backoff. Only the loop goroutine writes it, after collecting
+	// a batch's outcomes; it is atomic so tests can observe it.
+	failures atomic.Int64
+
+	// inFlight mirrors the WaitGroup so Stop can tell "still executing
+	// envelopes at the deadline" from "loop simply had not noticed the stop
+	// signal yet", which a WaitGroup cannot answer without waiting.
+	inFlight atomic.Int64
+
+	// sleep is the delay hook used for poll intervals and failure backoff.
+	// Tests replace it to observe the schedule without burning wall time.
+	sleep func(ctx context.Context, stop <-chan struct{}, d time.Duration) bool
 }
 
 // NewRuntime wires a poller + executor with options. Both arguments are
@@ -135,12 +177,22 @@ func NewRuntime(p EnvelopePoller, e EnvelopeExecutor, opts RuntimeOptions) *Runt
 	if opts.ShutdownDrainTimeout <= 0 {
 		opts.ShutdownDrainTimeout = 30 * time.Second
 	}
+	if opts.FailureBackoff <= 0 {
+		opts.FailureBackoff = opts.PollInterval
+	}
+	if opts.MaxFailureBackoff <= 0 {
+		opts.MaxFailureBackoff = 30 * time.Second
+	}
+	if opts.MaxFailureBackoff < opts.FailureBackoff {
+		opts.MaxFailureBackoff = opts.FailureBackoff
+	}
 	return &Runtime{
 		poller:   p,
 		executor: e,
 		opts:     opts,
 		stopCh:   make(chan struct{}),
 		runDone:  make(chan struct{}),
+		sleep:    sleepOrStop,
 	}
 }
 
@@ -193,61 +245,175 @@ func (r *Runtime) run(ctx context.Context) error {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				r.report(ctx, api.TaskEnvelope{}, fmt.Errorf("poll: %w", err))
 			}
-			if !sleepOrStop(ctx, r.stopCh, r.opts.PollInterval) {
+			if !r.sleepFor(ctx, r.opts.PollInterval) {
 				return r.drain(nil)
 			}
 			continue
 		}
 		if len(envs) == 0 {
-			if !sleepOrStop(ctx, r.stopCh, r.opts.PollInterval) {
+			if !r.sleepFor(ctx, r.opts.PollInterval) {
 				return r.drain(nil)
 			}
 			continue
 		}
 
-		for _, env := range envs {
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return r.drain(ctx.Err())
-			case <-r.stopCh:
+		executed, failed, err := r.executeBatch(ctx, sem, envs)
+		if err != nil {
+			if errors.Is(err, errRuntimeStopped) {
 				return r.drain(nil)
 			}
-			r.wg.Add(1)
-			go func(env api.TaskEnvelope) {
-				defer r.wg.Done()
-				defer func() { <-sem }()
-				if _, err := r.executor.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
-					Envelope: env,
-					TTL:      r.opts.PerEnvelopeTTL,
-				}); err != nil {
-					r.report(ctx, env, err)
-				}
-			}(env)
+			return r.drain(err)
 		}
+
+		// Every envelope in the batch failed, so they are all still pending:
+		// polling again immediately would hand the same work straight back.
+		// A batch that executed anything is making progress and keeps its
+		// full speed.
+		if failed > 0 && executed == 0 {
+			if !r.sleepFor(ctx, r.failureBackoff(r.failures.Add(1))) {
+				return r.drain(nil)
+			}
+			continue
+		}
+		r.failures.Store(0)
 	}
 }
 
-// Stop signals Run to exit after draining in-flight envelopes. Returns
-// nil on clean drain, or a timeout error if ShutdownDrainTimeout elapses
-// before workers finish.
+var errRuntimeStopped = errors.New("worker: runtime stopped")
+
+func (r *Runtime) executeBatch(ctx context.Context, sem chan struct{}, envs []api.TaskEnvelope) (int, int, error) {
+	outcomes := make(chan bool, len(envs))
+	for _, env := range envs {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		case <-r.stopCh:
+			return 0, 0, errRuntimeStopped
+		}
+		r.wg.Add(1)
+		r.inFlight.Add(1)
+		go func() {
+			defer r.wg.Done()
+			defer r.inFlight.Add(-1)
+			defer func() { <-sem }()
+			outcomes <- r.executeEnvelope(ctx, env)
+		}()
+	}
+
+	executed, failed := 0, 0
+	for range envs {
+		select {
+		case succeeded := <-outcomes:
+			if succeeded {
+				executed++
+			} else {
+				failed++
+			}
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		case <-r.stopCh:
+			return 0, 0, errRuntimeStopped
+		}
+	}
+	return executed, failed, nil
+}
+
+func (r *Runtime) executeEnvelope(ctx context.Context, env api.TaskEnvelope) bool {
+	outcome, err := r.executor.ExecuteEnvelope(ctx, ExecuteEnvelopeRequest{
+		Envelope: env,
+		TTL:      r.opts.PerEnvelopeTTL,
+	})
+	progress := executionMadeProgress(outcome, err)
+	switch {
+	case err != nil:
+		r.report(ctx, env, err)
+	case !progress:
+		r.report(ctx, env, fmt.Errorf("worker: executor returned non-progress state %q without an error", outcome.State))
+	}
+	return progress
+}
+
+func executionMadeProgress(outcome ExecutionOutcome, err error) bool {
+	if err != nil {
+		return false
+	}
+	switch outcome.State {
+	case ExecutionCompleted, ExecutionSuspended, ExecutionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// failureBackoff doubles FailureBackoff once per consecutive fully failed
+// batch and clamps the result to MaxFailureBackoff.
+func (r *Runtime) failureBackoff(failures int64) time.Duration {
+	if failures <= 0 {
+		return 0
+	}
+	backoff := r.opts.FailureBackoff
+	for i := int64(1); i < failures && backoff < r.opts.MaxFailureBackoff; i++ {
+		backoff *= 2
+	}
+	if backoff <= 0 || backoff > r.opts.MaxFailureBackoff {
+		return r.opts.MaxFailureBackoff
+	}
+	return backoff
+}
+
+// sleepFor waits d, reporting false when ctx or the stop signal fires first.
+func (r *Runtime) sleepFor(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	return r.sleep(ctx, r.stopCh, d)
+}
+
+// Stop signals Run to exit after draining in-flight envelopes and blocks
+// until Run has actually returned. Returns nil on clean drain, or the
+// drain-timeout error Run reported when in-flight envelopes did not finish
+// within ShutdownDrainTimeout.
 //
 // Stop blocks on Run's exit (not directly on the WaitGroup) so that the
 // only goroutine calling wg.Add is also the one calling wg.Wait via
 // drain — eliminating the Add/Wait race that arises when an external
 // caller waits on the WaitGroup concurrently with the loop still
 // dispatching envelopes.
+//
+// There is a single drain deadline, ShutdownDrainTimeout measured from the
+// stop signal: Run's drain shares it (see drainBudget), so Stop never
+// cancels envelopes that are still inside their budget. The timer below is
+// only a backstop for a loop that never observes the stop signal — a poller
+// blocking past the deadline. That case cancels the run context to unblock
+// it, and gives up with an error only if Run still fails to return.
 func (r *Runtime) Stop() error {
-	r.stopOnce.Do(func() { close(r.stopCh) })
+	r.stopOnce.Do(func() {
+		r.stopAt.Store(time.Now())
+		close(r.stopCh)
+	})
 	if !r.runStarted.Load() {
 		return nil
 	}
+	timeout := r.opts.ShutdownDrainTimeout
 	select {
 	case <-r.runDone:
 		return r.runErr
-	case <-time.After(r.opts.ShutdownDrainTimeout):
-		r.cancelInFlight()
-		return fmt.Errorf("worker: drain timed out after %s", r.opts.ShutdownDrainTimeout)
+	case <-time.After(timeout):
+	}
+	drained := r.inFlight.Load() == 0
+	r.cancelInFlight()
+	select {
+	case <-r.runDone:
+		if r.runErr != nil {
+			return r.runErr
+		}
+		if drained {
+			return nil
+		}
+		return fmt.Errorf("worker: drain timed out after %s", timeout)
+	case <-time.After(timeout):
+		return fmt.Errorf("worker: run loop still running %s after drain timed out", timeout)
 	}
 }
 
@@ -258,10 +424,29 @@ func (r *Runtime) cancelInFlight() {
 }
 
 func (r *Runtime) drain(cause error) error {
-	if drainErr := r.waitDrain(r.opts.ShutdownDrainTimeout); drainErr != nil {
+	if drainErr := r.waitDrain(r.drainBudget()); drainErr != nil {
 		return drainErr
 	}
 	return cause
+}
+
+// drainBudget is what is left of ShutdownDrainTimeout. When Stop started the
+// shutdown, the budget runs from the stop signal rather than from the moment
+// the loop noticed it, so Stop and the drain share one deadline instead of
+// racing two timers over the same in-flight envelopes.
+func (r *Runtime) drainBudget() time.Duration {
+	stopAt, ok := r.stopAt.Load().(time.Time)
+	if !ok {
+		return r.opts.ShutdownDrainTimeout
+	}
+	remaining := r.opts.ShutdownDrainTimeout - time.Since(stopAt)
+	if remaining <= 0 {
+		// The shared budget is spent. Keep a token wait so a loop that is
+		// already idle still drains cleanly instead of reporting a timeout
+		// it never actually hit.
+		return time.Millisecond
+	}
+	return remaining
 }
 
 func (r *Runtime) waitDrain(timeout time.Duration) error {

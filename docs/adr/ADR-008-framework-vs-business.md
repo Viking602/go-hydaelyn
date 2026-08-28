@@ -122,7 +122,7 @@ The original §1/§2/§3 split holds:
 
 The intent of ADR-008 — "framework primitives are mechanism, business concepts are policy" — is unchanged. The revision recognizes that multi-agent coordination *is* a framework mechanism, and gives it vocabulary accordingly.
 
-## Current package map (2026-08-15)
+## Current package map (2026-08-28)
 
 The live tree (ADR-024 five layers):
 
@@ -133,8 +133,7 @@ multiagent/          scheduler layer; must not import root, worker, internal/
 worker/              integration layer; may import root; must not import packs/ or coding/
 coding/              domain runtime; must not import worker/, packs/, or root
 packs/               domain manifests; must not import coding/, worker/, or root
-memory/              deprecated Memory compatibility surface (ADR-021)
-flow/, blackboard/   deprecated api aliases (ADR-027)
+session/             experimental durable conversation store; imports only message/
 internal/core        durable runner composition root
 internal/memory      process-local development/test StoreProvider; not Position D
 internal/*           domain services behind the runner

@@ -32,9 +32,9 @@ func main() {
 
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleExpert, Groups: []string{"panel"}})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Role: roleExpert, Groups: []string{"panel"}}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "panel.synthesizer"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "panel.synthesizer"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "review feature launch"})
 	must(err)

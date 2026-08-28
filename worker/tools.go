@@ -28,33 +28,43 @@ type GovernedToolBus struct {
 	UsagePricer UsagePricer
 }
 
-func (b GovernedToolBus) registerTool(def tool.Definition) {
+func (b GovernedToolBus) registerTool(def tool.Definition) error {
 	if b.Runner == nil {
-		return
+		return ErrRunnerMissing
 	}
 	registered := toolDefinitionToRunnerTool(def)
 	if b.HolderType == api.HolderAgent || (b.HolderType != "" && b.HolderID != "") {
-		b.Runner.RegisterToolForInvocation(b.RunID, b.TaskID, b.HolderType, b.HolderID, registered)
-		return
+		return b.Runner.RegisterToolForInvocation(b.RunID, b.TaskID, b.HolderType, b.HolderID, registered)
 	}
-	b.Runner.RegisterTool(registered)
+	return b.Runner.RegisterTool(registered)
 }
 
-func (b GovernedToolBus) ToolBus() *tool.Bus {
+func (b GovernedToolBus) ToolBus() (*tool.Bus, error) {
 	if b.Bus == nil {
-		return tool.NewBus()
+		return tool.NewBus(), nil
 	}
-	return b.Bus.MapDrivers(func(def tool.Definition, driver tool.Driver) tool.Driver {
-		b.registerTool(def)
+	var registerErr error
+	mapped := b.Bus.MapDrivers(func(def tool.Definition, driver tool.Driver) tool.Driver {
+		if registerErr == nil {
+			registerErr = b.registerTool(def)
+		}
 		return governedToolDriver{bus: b, driver: driver, definition: def}
 	})
+	if registerErr != nil {
+		return nil, registerErr
+	}
+	return mapped, nil
 }
 
 func (b GovernedToolBus) Execute(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
 	if b.Bus == nil {
 		return tool.Result{}, tool.ErrToolNotFound
 	}
-	return b.ToolBus().Execute(ctx, call, sink)
+	bus, err := b.ToolBus()
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return bus.Execute(ctx, call, sink)
 }
 
 type governedToolDriver struct {

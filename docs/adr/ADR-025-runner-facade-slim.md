@@ -4,6 +4,11 @@
 
 Implemented — 2026-08-23. Effective from v0.15.0.
 
+**Amended for v0.16.0 — 2026-08-28.** The temporary `RunAdmin`,
+`Governance`, and `Blackboard` sub-façades and the remaining duplicate read
+helpers are removed. Typed methods directly on `*Runner` are the canonical
+surface; raw store methods remain explicitly low-level administration.
+
 ## Context
 
 `Runner` accumulated every lifecycle, governance, blackboard, mailbox,

@@ -6,23 +6,28 @@ import (
 	"github.com/Viking602/venat/api"
 )
 
-func (r *Runner) RegisterAgent(profile api.AgentProfile) {
-	_ = r.rt.RegisterAgent(profile)
+// RegisterAgent registers an agent profile. It reports api.ErrInvalidCommand
+// when the profile carries no ID.
+func (r *Runner) RegisterAgent(profile api.AgentProfile) error {
+	return r.rt.RegisterAgent(profile)
 }
 
 func (r *Runner) Agents() []api.AgentProfile {
 	return r.rt.Agents()
 }
 
-func (r *Runner) RegisterTool(tool api.Tool) {
-	_ = r.rt.RegisterTool(tool)
+// RegisterTool registers a tool globally. It reports api.ErrInvalidCommand when
+// the tool carries no name.
+func (r *Runner) RegisterTool(tool api.Tool) error {
+	return r.rt.RegisterTool(tool)
 }
 
 // RegisterToolForInvocation scopes governed tool metadata to one run, task,
 // holder, and tool name. RegisterTool remains the legacy global registration
-// API for direct non-agent callers.
-func (r *Runner) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) {
-	_ = r.rt.RegisterToolForInvocation(runID, taskID, api.HolderType(holderType), holderID, tool)
+// API for direct non-agent callers. It reports api.ErrInvalidCommand when any
+// part of the invocation identity or the tool name is missing.
+func (r *Runner) RegisterToolForInvocation(runID, taskID string, holderType api.HolderType, holderID string, tool api.Tool) error {
+	return r.rt.RegisterToolForInvocation(runID, taskID, api.HolderType(holderType), holderID, tool)
 }
 
 // RemoveToolsForInvocation releases all scoped tool metadata for one exact
@@ -31,21 +36,20 @@ func (r *Runner) RemoveToolsForInvocation(runID, taskID string, holderType api.H
 	r.rt.RemoveToolsForInvocation(runID, taskID, api.HolderType(holderType), holderID)
 }
 
-func (r *Runner) RegisterFlow(flow api.Flow) error {
-	return r.rt.RegisterFlow(flow)
+// SetMessagePolicy installs the message-scoped policy checker. It composes with
+// SetPolicyEngine rather than replacing it: a message must clear both, and the
+// stricter decision wins. Passing nil clears only the message checker.
+func (r *Runner) SetMessagePolicy(policy api.MessagePolicyChecker) {
+	r.rt.SetMessagePolicy(policy)
 }
 
-func (r *Runner) SetMessagePolicy(policy api.MessagePolicyChecker) {
-	if policy == nil {
-		r.rt.SetMessagePolicy(nil)
+// SetPolicyEngine installs the engine that authorizes every operation. Passing
+// nil clears only the engine, leaving any message checker in force; a
+// production runner ignores the nil because NewProduction requires an engine.
+func (r *Runner) SetPolicyEngine(policy api.PolicyEngine) {
+	if policy == nil && r.mode == api.RuntimeModeProduction {
 		return
 	}
-	r.rt.SetMessagePolicy(func(message api.UserMessage) api.PolicyDecision {
-		return policy(message)
-	})
-}
-
-func (r *Runner) SetPolicyEngine(policy api.PolicyEngine) {
 	r.rt.SetPolicyEngine(policy)
 }
 
@@ -57,8 +61,8 @@ func (r *Runner) SetPipeline(components api.PipelineComponents) {
 	r.rt.SetPipeline(components)
 }
 
-// StoreProvider returns the configured provider. Prefer Admin() when
-// passing the raw store into host helpers (ADR-025).
+// StoreProvider returns the configured provider for low-level host
+// administration and contract integration.
 func (r *Runner) StoreProvider() api.StoreProvider {
 	return r.rt.StoreProvider()
 }
@@ -75,8 +79,7 @@ func (r *Runner) Close(ctx context.Context) error {
 	return r.rt.Close(ctx)
 }
 
-// Begin opens a host-owned UnitOfWork. Prefer Admin() for raw store
-// access (ADR-025).
+// Begin opens a host-owned UnitOfWork for low-level administration.
 func (r *Runner) Begin(ctx context.Context) (api.UnitOfWork, error) {
 	uow, err := r.rt.Begin(ctx)
 	if err != nil {

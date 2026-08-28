@@ -21,7 +21,7 @@ func WriteItem(ctx context.Context, uow ports.UnitOfWork, newID IDGenerator, ite
 		return api.BlackboardItem{}, err
 	}
 	now := time.Now().UTC()
-	if err := uow.Trace().SaveTraceSpan(ctx, api.TraceSpan{RunID: item.RunID, TaskID: item.TaskID, Name: "blackboard.write", Component: "blackboard", Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}); err != nil {
+	if err := uow.Trace().SaveTraceSpan(ctx, api.TraceSpan{ID: newID("span"), RunID: item.RunID, TaskID: item.TaskID, Name: "blackboard.write", Component: "blackboard", Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}); err != nil {
 		return api.BlackboardItem{}, err
 	}
 	if err := uow.Events().AppendEvent(ctx, api.Event{RunID: item.RunID, TaskID: item.TaskID, Type: api.EventBlackboardItemWritten, Payload: map[string]any{"itemId": item.ID, "sourceType": string(item.Source.Type), "sourceId": item.Source.ID, "visibility": string(item.Visibility), "key": item.Key}, RecordedAt: now}); err != nil {

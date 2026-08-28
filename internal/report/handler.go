@@ -121,7 +121,7 @@ func (h submitTypedHandler) applyActionOutcome(ctx context.Context, uow ports.Un
 		if err := h.writeBlackboard(ctx, uow, m, item); err != nil {
 			return api.Task{}, api.Run{}, api.TaskExecutionLease{}, api.TypedReport{}, err
 		}
-		if err := h.emit(ctx, uow, m, api.Event{RunID: next.RunID, TaskID: next.ID, Type: api.EventActionReconcileRequired, Payload: map[string]any{"attemptId": report.ActionOutcome.AttemptID, "status": string(report.ActionOutcome.Status)}, RecordedAt: time.Now().UTC()}); err != nil {
+		if err := h.emit(ctx, uow, m, api.Event{RunID: next.RunID, TaskID: next.ID, Type: api.EventActionReconcileRequired, Payload: map[string]any{"attemptId": report.ActionOutcome.AttemptID, "status": string(report.ActionOutcome.Status), "task": eventpayload.Task(next)}, RecordedAt: time.Now().UTC()}); err != nil {
 			return api.Task{}, api.Run{}, api.TaskExecutionLease{}, api.TypedReport{}, err
 		}
 		lease, err = h.releaseLease(ctx, uow, m, lease)
@@ -158,8 +158,7 @@ func (h submitTypedHandler) applyReportStatus(ctx context.Context, uow ports.Uni
 	case api.ReportStatusSuccess:
 		return h.applySuccessfulReport(ctx, uow, m, task, lease, report)
 	case api.ReportStatusPartialSuccess:
-		task.Result = &report
-		return h.saveTask(ctx, uow, m, task)
+		return h.applyPartialReport(ctx, uow, m, task, report)
 	case api.ReportStatusFailed:
 		return h.applyFailedReport(ctx, uow, m, task, lease, report)
 	case api.ReportStatusBlocked:
@@ -203,6 +202,21 @@ func (h submitTypedHandler) applySuccessfulReport(ctx context.Context, uow ports
 		return err
 	}
 	return h.emit(ctx, uow, m, api.Event{RunID: task.RunID, TaskID: task.ID, Type: api.EventTaskCompleted, Payload: map[string]any{"summary": report.Summary, "task": eventpayload.Task(next)}, RecordedAt: time.Now().UTC()})
+}
+
+// applyPartialReport records an interim result. Partial success is a progress
+// report, not the end of the holder's turn: the task stays in its current
+// status, downstream dependencies stay unsatisfied, and — unlike every other
+// branch here — the lease is deliberately NOT released, because the holder
+// keeps working and submits a terminal report under the same lease later.
+// Only the event was missing, which left the recorded result invisible to
+// replay; the payload carries the task so the result survives.
+func (h submitTypedHandler) applyPartialReport(ctx context.Context, uow ports.UnitOfWork, m *SubmitTypedResult, task api.Task, report api.TypedReport) error {
+	task.Result = &report
+	if err := h.saveTask(ctx, uow, m, task); err != nil {
+		return err
+	}
+	return h.emit(ctx, uow, m, api.Event{RunID: task.RunID, TaskID: task.ID, Type: api.EventTaskPartiallyCompleted, Payload: map[string]any{"summary": report.Summary, "task": eventpayload.Task(task)}, RecordedAt: time.Now().UTC()})
 }
 
 func (h submitTypedHandler) applyFailedReport(ctx context.Context, uow ports.UnitOfWork, m *SubmitTypedResult, task api.Task, lease api.TaskExecutionLease, report api.TypedReport) error {
@@ -444,7 +458,7 @@ func (h submitTypedHandler) emit(ctx context.Context, uow ports.UnitOfWork, m *S
 
 func (h submitTypedHandler) recordTrace(ctx context.Context, uow ports.UnitOfWork, m *SubmitTypedResult, runID, taskID, name, component string) error {
 	now := time.Now().UTC()
-	span := api.TraceSpan{RunID: runID, TaskID: taskID, Name: name, Component: component, Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}
+	span := api.TraceSpan{ID: h.options.NewID("span"), RunID: runID, TaskID: taskID, Name: name, Component: component, Status: api.TraceSpanEnded, StartedAt: now, EndedAt: now}
 	if err := uow.Trace().SaveTraceSpan(ctx, span); err != nil {
 		return err
 	}

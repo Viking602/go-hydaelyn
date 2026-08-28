@@ -60,7 +60,7 @@ type EvalCase struct {
 
 type Harness interface {
     Runner() *venat.Runner
-    RegisterAgent(profile api.AgentProfile)
+    RegisterAgent(profile api.AgentProfile) error
     Cleanup()
     EmbeddingProvider() EmbeddingProvider // nil unless EmbeddingSimilarity is used
 }

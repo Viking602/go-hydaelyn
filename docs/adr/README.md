@@ -48,6 +48,13 @@ All six v0.8.0 ADRs are locked before Phase 1 implementation begins. Each carrie
 - [ADR-026 Identity and collaboration types](ADR-026-identity-and-collaboration-types.md) — `api.AgentProfile` / `AgentDefinition`; persist Handoff and BlackboardEntry
 - [ADR-027 Package map and ArtifactStore](ADR-027-package-map-and-artifact-store.md) — alias packages deprecated; ArtifactStore is contract-only
 
+## v0.16.0 candidate
+
+- ADR-016/020/021/025/026/027 amendments complete the compatibility windows,
+  remove the redundant Flow/workflow and speculative DAG surfaces, and record
+  the demand-driven public-surface cutover.
+- [ADR-028 Agent harness and the session store](ADR-028-agent-harness-and-session.md) — **Experimental**; durable CAS lane ownership, bounded finalization, strict restore validation, and no tools/hooks/budgets until Engine convergence
+
 ## Convention
 
 All ADRs MUST be written in English. Conversation language with users may be Chinese, but the artifact in the repo is English.

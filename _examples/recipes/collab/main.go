@@ -29,10 +29,10 @@ func main() {
 
 	branches := []string{"api", "ui", "data"}
 	for _, b := range branches {
-		runner.RegisterAgent(api.AgentProfile{ID: "impl-" + b, Role: "collab.implementer"})
-		runner.RegisterAgent(api.AgentProfile{ID: "review-" + b, Role: "collab.reviewer"})
+		must(runner.RegisterAgent(api.AgentProfile{ID: "impl-" + b, Role: "collab.implementer"}))
+		must(runner.RegisterAgent(api.AgentProfile{ID: "review-" + b, Role: "collab.reviewer"}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "collab.synthesizer"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "collab.synthesizer"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "ship feature X across 3 branches"})
 	must(err)

@@ -16,8 +16,8 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
-	runner.RegisterAgent(api.AgentProfile{ID: "alice"})
-	runner.RegisterAgent(api.AgentProfile{ID: "bob"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "alice"}))
+	must(runner.RegisterAgent(api.AgentProfile{ID: "bob"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "ping pong"})
 	must(err)

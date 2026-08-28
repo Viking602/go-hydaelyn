@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted — 2026-08-15. Effective from v0.15.0. Amends ADR-013. The
-`memory/` package is removed in a later minor after the deprecation
-window (not in v0.15.0).
+Accepted — 2026-08-15. Effective from v0.15.0. Amends ADR-013.
+Compatibility window completed in v0.16.0 on 2026-08-28: the deprecated
+`memory/` package is removed; `api.Memory[T]` is the only Memory contract.
 
 ## Context
 

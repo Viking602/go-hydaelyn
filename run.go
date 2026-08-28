@@ -65,14 +65,6 @@ func (r *Runner) RunEvents(ctx context.Context, runID string) ([]api.Event, erro
 	return events, nil
 }
 
-func (r *Runner) ReplayContext(ctx context.Context, runID string, mode api.ReplayMode) (api.Projection, error) {
-	projection, err := r.rt.Replay(ctx, runID, api.ReplayMode(mode))
-	if err != nil {
-		return api.Projection{}, err
-	}
-	return projection, nil
-}
-
 func (r *Runner) ReplayRunStateContext(ctx context.Context, runID string) (api.Projection, error) {
 	projection, err := r.rt.ReplayRunState(ctx, runID)
 	if err != nil {

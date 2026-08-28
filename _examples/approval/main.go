@@ -28,7 +28,7 @@ func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment(api.Config{PolicyEngine: approvalGate{}})
 
-	runner.RegisterAgent(api.AgentProfile{ID: "actuator"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "actuator"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "rollback bad release"})
 	must(err)
@@ -36,11 +36,11 @@ func main() {
 		RunID: run.ID, TaskID: "rollback", OwnerAgentID: "actuator", AllowsAction: true,
 	})
 	must(err)
-	runner.RegisterToolForInvocation(run.ID, task.ID, api.HolderAgent, "actuator", api.Tool{
+	must(runner.RegisterToolForInvocation(run.ID, task.ID, api.HolderAgent, "actuator", api.Tool{
 		Name:               "deploy.rollback",
 		EffectType:         api.ToolEffectWrite,
 		RequiresActionTask: true,
-	})
+	}))
 	env, err := runner.DispatchTask(ctx, api.DispatchTaskCommand{
 		RunID: run.ID, TaskID: task.ID, TargetAgentID: "actuator",
 	})

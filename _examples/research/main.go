@@ -21,7 +21,7 @@ func main() {
 
 	pool := []string{"r1", "r2", "r3"}
 	for _, id := range pool {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Groups: []string{groupResearchers}})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Groups: []string{groupResearchers}}))
 	}
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "compare Go agent runtimes"})

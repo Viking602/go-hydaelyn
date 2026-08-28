@@ -22,14 +22,6 @@ func (r *Runner) Task(ctx context.Context, runID, taskID string) (api.Task, erro
 	return task, nil
 }
 
-func (r *Runner) ReadyTasksContext(ctx context.Context, runID string) ([]api.Task, error) {
-	tasks, err := r.rt.ReadyTasks(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
 func (r *Runner) TransitionTask(ctx context.Context, cmd api.TransitionTaskCommand) error {
 	return r.rt.TransitionTask(ctx, cmd)
 }
@@ -51,5 +43,5 @@ func (r *Runner) ListTasks(ctx context.Context, runID string) ([]api.Task, error
 	if err != nil {
 		return nil, err
 	}
-	return tasks, nil
+	return append([]api.Task(nil), tasks...), nil
 }

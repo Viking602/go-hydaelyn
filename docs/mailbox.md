@@ -19,8 +19,12 @@ through the same durable stores as the rest of the run.
 
 ```go
 runner := venat.NewDevelopment()
-runner.RegisterAgent(api.AgentProfile{ID: "alice"})
-runner.RegisterAgent(api.AgentProfile{ID: "bob"})
+if err := runner.RegisterAgent(api.AgentProfile{ID: "alice"}); err != nil {
+    panic(err)
+}
+if err := runner.RegisterAgent(api.AgentProfile{ID: "bob"}); err != nil {
+    panic(err)
+}
 
 run, _, _ := runner.StartRun(ctx, api.StartRunCommand{Request: "ping pong"})
 

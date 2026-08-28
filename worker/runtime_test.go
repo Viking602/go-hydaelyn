@@ -138,6 +138,86 @@ func TestRuntime_StopDrainsInFlight(t *testing.T) {
 	}
 }
 
+// blockingPoller hands out each envelope once and then blocks until its
+// context is cancelled, the way a queue-backed poller waiting for new work
+// does. It never watches the runtime stop signal, which is what makes Stop's
+// deadline the only thing that can unblock the loop.
+func blockingPoller(envelopes ...api.TaskEnvelope) (worker.PollerFunc, <-chan struct{}) {
+	blocked := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	return func(ctx context.Context, _ int) ([]api.TaskEnvelope, error) {
+		mu.Lock()
+		pending := envelopes
+		envelopes = nil
+		mu.Unlock()
+		if len(pending) > 0 {
+			return pending, nil
+		}
+		once.Do(func() { close(blocked) })
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, blocked
+}
+
+func TestRuntime_StopReportsCleanExitWhenPollOutlastsDrain(t *testing.T) {
+	poller, blocked := blockingPoller()
+	rt := worker.NewRuntime(poller,
+		worker.ExecutorFunc(func(context.Context, worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
+			return worker.ExecutionOutcome{State: worker.ExecutionCompleted}, nil
+		}),
+		worker.RuntimeOptions{
+			Concurrency:          1,
+			PollInterval:         10 * time.Millisecond,
+			ShutdownDrainTimeout: 50 * time.Millisecond,
+		})
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- rt.Run(context.Background()) }()
+	<-blocked
+
+	if err := rt.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v, want nil: no envelope was draining", err)
+	}
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop returned before Run exited")
+	}
+}
+
+func TestRuntime_StopBlocksUntilRunExitsOnDrainTimeout(t *testing.T) {
+	const drainTimeout = 200 * time.Millisecond
+	poller, _ := blockingPoller(api.TaskEnvelope{ID: "uninterruptible"})
+	started := make(chan struct{})
+	rt := worker.NewRuntime(poller,
+		worker.ExecutorFunc(func(context.Context, worker.ExecuteEnvelopeRequest) (worker.ExecutionOutcome, error) {
+			close(started)
+			// Deliberately ignores cancellation, so the drain cannot finish
+			// within its budget.
+			time.Sleep(3 * drainTimeout)
+			return worker.ExecutionOutcome{State: worker.ExecutionCompleted}, nil
+		}),
+		worker.RuntimeOptions{
+			Concurrency:          1,
+			PollInterval:         10 * time.Millisecond,
+			ShutdownDrainTimeout: drainTimeout,
+		})
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- rt.Run(context.Background()) }()
+	<-started
+
+	if err := rt.Stop(); err == nil {
+		t.Fatal("Stop() error = nil, want the drain timeout")
+	}
+	select {
+	case <-runDone:
+	case <-time.After(drainTimeout / 2):
+		t.Fatal("Stop returned while Run was still draining")
+	}
+}
+
 func TestRuntime_StopTimeoutCancelsInFlight(t *testing.T) {
 	p := worker.NewChannelPoller(1)
 	started := make(chan struct{})

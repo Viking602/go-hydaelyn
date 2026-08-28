@@ -20,9 +20,9 @@ func main() {
 	runner := venat.NewDevelopment()
 	experts := []string{"security", "frontend", "platform"}
 	for _, id := range experts {
-		runner.RegisterAgent(api.AgentProfile{ID: id, Role: "panel.expert"})
+		must(runner.RegisterAgent(api.AgentProfile{ID: id, Role: "panel.expert"}))
 	}
-	runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "panel.synthesizer"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "synth", Role: "panel.synthesizer"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "feature launch panel"})
 	must(err)

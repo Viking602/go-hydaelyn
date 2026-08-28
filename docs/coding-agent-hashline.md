@@ -48,8 +48,8 @@ Boundaries (unchanged from v1):
 
 ## 2. Package layout (decision-complete)
 
-`coding/` is a **new top-level runtime package**, a sibling of `provider/`,
-`tool/`, `policy/`, `memory/`. Tool implementations live here. `packs/coding/` is a
+`coding/` is a top-level runtime package, a sibling of `provider/`, `tool/`,
+`policy/`, and `message/`. Tool implementations live here. `packs/coding/` is a
 thin **declarative manifest only** (per `packs/packs.go`: packs must not touch the
 kernel; the host binds capabilities to implementations).
 

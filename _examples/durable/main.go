@@ -18,7 +18,7 @@ import (
 func main() {
 	ctx := context.Background()
 	runner := venat.NewDevelopment()
-	runner.RegisterAgent(api.AgentProfile{ID: "worker"})
+	must(runner.RegisterAgent(api.AgentProfile{ID: "worker"}))
 
 	run, _, err := runner.StartRun(ctx, api.StartRunCommand{Request: "recoverable run"})
 	must(err)

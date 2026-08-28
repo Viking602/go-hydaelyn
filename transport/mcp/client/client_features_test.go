@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/transport/mcpcontract"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Viking602/venat/transport/mcpcontract"
 )
 
 func TestClientListToolsMapsOfficialTool(t *testing.T) {

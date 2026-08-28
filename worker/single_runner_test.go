@@ -643,3 +643,26 @@ var (
 	_ provider.Driver = (*suspendThenCompleteProvider)(nil)
 	_ provider.Stream = (*cancelAwareStream)(nil)
 )
+
+func TestFinishActiveReleasesExecutionContext(t *testing.T) {
+	runner := &SingleRunner{active: map[string]*activeSingleRun{}}
+	ctx, cancel := context.WithCancelCause(context.WithoutCancel(context.Background()))
+	entry := &activeSingleRun{cancel: cancel, done: make(chan struct{})}
+	runner.active["run-finish"] = entry
+
+	runner.finishActive("run-finish", entry)
+
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("finishActive left the execution context uncancelled")
+	}
+	select {
+	case <-entry.done:
+	default:
+		t.Fatal("finishActive did not close the entry done channel")
+	}
+	if _, tracked := runner.active["run-finish"]; tracked {
+		t.Fatal("finishActive left the run in the active map")
+	}
+}

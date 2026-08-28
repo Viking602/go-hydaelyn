@@ -421,6 +421,10 @@ func (s *messageStore) ListPendingFor(_ context.Context, sel api.UserMessageSele
 	return out, nil
 }
 
+// SaveTraceSpan stages a span. The ID / StartedAt / Status defaults below are
+// tolerance for a malformed span, not part of the TraceStore contract: every
+// runtime call site generates the span ID itself, because a third-party store
+// is free to reject an empty ID rather than mint one.
 func (s *traceStore) SaveTraceSpan(_ context.Context, span api.TraceSpan) error {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
@@ -507,7 +511,7 @@ func (s *leaseStore) SaveLease(_ context.Context, lease api.TaskExecutionLease) 
 
 // AcquireWithExpectedVersion atomically persists lease iff the latest lease
 // slot for the same task has Version == expectedVersion and is not live.
-// Satisfies ports.LeaseCAS — see api/store.go for the full contract.
+// See api.LeaseStore for the full CAS contract.
 func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease api.TaskExecutionLease, expectedVersion uint64) (bool, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {
@@ -544,7 +548,6 @@ func (s *leaseStore) AcquireWithExpectedVersion(_ context.Context, lease api.Tas
 
 // ExtendLease atomically advances Expiry iff the current holder == workerID
 // and the lease has not expired. Returns (false, nil) on rotation/expiry.
-// Satisfies ports.LeaseCAS.
 func (s *leaseStore) ExtendLease(_ context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error) {
 	u := s.uow()
 	if err := u.ensureOpen(); err != nil {

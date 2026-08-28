@@ -7,8 +7,7 @@ import (
 
 // Sink is the push interface a producer (the agent loop) emits Frames to.
 // Implementations must be safe to call from the goroutine that drives the
-// provider stream; they are not required to be safe for concurrent Emit
-// unless documented (Broadcast and Merge handle their own serialization).
+// provider stream; concurrent Emit safety is implementation-specific.
 type Sink interface {
 	Emit(ctx context.Context, frame Frame) error
 }

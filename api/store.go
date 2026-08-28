@@ -33,14 +33,13 @@ type EventStore interface {
 	ListAfter(ctx context.Context, runID string, afterSeq uint64) ([]Event, error)
 }
 
+// TraceStore persists complete spans and supports the read-modify-write path
+// used by EndTraceSpan. Implementations MUST preserve the span ID on update.
 type TraceStore interface {
 	SaveTraceSpan(context.Context, TraceSpan) error
-	ListTraceSpans(context.Context, string) ([]TraceSpan, error)
-}
-
-type TraceSpanUpdater interface {
 	LoadTraceSpan(context.Context, string) (TraceSpan, error)
 	UpdateTraceSpan(context.Context, TraceSpan) error
+	ListTraceSpans(context.Context, string) ([]TraceSpan, error)
 }
 
 type BlackboardReadWriter interface {
@@ -48,21 +47,33 @@ type BlackboardReadWriter interface {
 	SelectItems(context.Context, string, BlackboardSelector) ([]BlackboardItem, error)
 }
 
-type BlackboardCommittedReader interface {
-	SelectItems(context.Context, string, BlackboardSelector) ([]BlackboardItem, error)
-}
-
 type BlackboardSubscriber interface {
 	Subscribe(context.Context, string, BlackboardSelector) (<-chan BlackboardItem, func() error, error)
-}
-
-type BlackboardWaiter interface {
-	WaitForBlackboard(context.Context, string, BlackboardSelector, func([]BlackboardItem) bool, time.Duration) ([]BlackboardItem, error)
 }
 
 type UserMessageStore interface {
 	QueueMessage(context.Context, UserMessage) error
 	LoadMessage(context.Context, string, string) (UserMessage, error)
+	// UpdateMessage persists message under its existing ID.
+	//
+	// A status transition MUST be atomic with respect to concurrent
+	// UpdateMessage calls for the same message: when two transactions both
+	// read a message in one status and both try to move it out of that
+	// status, at most one may commit. The loser MUST either fail to commit
+	// or observe the winner's write — it MUST NOT silently overwrite it.
+	// Providers can satisfy this with a conditional update that checks the
+	// prior status and reports no rows affected, with row locking, or with
+	// serializable isolation; a plain read-modify-write under READ COMMITTED
+	// does NOT satisfy it.
+	//
+	// This is what makes response publication at-most-once. The runtime
+	// claims a message by moving it from UserMessageQueued to
+	// UserMessagePublishing and committing that before it calls the output
+	// gateway, so exactly one publisher may deliver it. A store that lets
+	// both writers commit the claim delivers the same message to the user
+	// twice.
+	//
+	// Contract test: TestMessageOutbox_ConcurrentClaimOnlyOneWins.
 	UpdateMessage(context.Context, UserMessage) error
 	ListMessages(context.Context, string) ([]UserMessage, error)
 	// ListPendingFor restricts to one recipient / run; FIFO within the
@@ -71,10 +82,6 @@ type UserMessageStore interface {
 	//
 	// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Outbox FIFO".
 	ListPendingFor(context.Context, UserMessageSelector) ([]UserMessage, error)
-}
-
-type UserMessageOutboxScanner interface {
-	ListQueuedMessages(context.Context) ([]UserMessage, error)
 }
 
 type MailboxOutboxStore interface {
@@ -365,16 +372,4 @@ type CapabilityReporter interface {
 // Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Top-level provider".
 type ProviderCloser interface {
 	Close(ctx context.Context) error
-}
-
-// LeaseCAS is kept as a documentary alias of the lease CAS contract; the
-// underlying methods are now REQUIRED on LeaseStore. External code that
-// needs to identify the CAS contract specifically can use this alias for
-// readability — but every LeaseStore implementation already satisfies it.
-//
-// Spec anchor: docs/product-spec/v0.8.0/05-storage.md §"Lease CAS — the
-// critical contract".
-type LeaseCAS interface {
-	AcquireWithExpectedVersion(ctx context.Context, lease TaskExecutionLease, expectedVersion uint64) (bool, error)
-	ExtendLease(ctx context.Context, leaseID string, workerID string, newExpiry time.Time) (bool, error)
 }

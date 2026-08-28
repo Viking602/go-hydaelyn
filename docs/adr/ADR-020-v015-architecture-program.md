@@ -6,6 +6,12 @@ Accepted and implemented — 2026-08-23. Effective from v0.15.0.
 Companion ADRs: ADR-021 through ADR-027. Builds on ADR-008, ADR-011,
 ADR-012, ADR-013, ADR-015, ADR-016, and ADR-017.
 
+**Amended for v0.16.0 — 2026-08-28.** The compatibility windows opened by
+ADR-021, ADR-025, and ADR-027 are complete. The deprecated alias packages and
+intermediate domain façades are removed. The unused `api.ArtifactStore`
+contract is also removed under the demand-driven API rule; opaque artifact
+references remain application-owned values.
+
 ## Context
 
 A full-tree review recorded architecture, runtime, and extension defects

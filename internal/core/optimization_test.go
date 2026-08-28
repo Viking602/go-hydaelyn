@@ -252,12 +252,34 @@ func TestReplayRunStateRebuildsFromEventsAndResponsePublishIsIdempotent(t *testi
 	if len(projection.Messages) != 1 || projection.Messages[0].Status != UserMessagePublished {
 		t.Fatalf("expected replayed published user message, got %#v", projection.Messages)
 	}
+	before := len(rt.Events(context.Background(), run.ID))
 	audit, err := rt.Replay(context.Background(), run.ID, ReplayModeAudit)
 	if err != nil {
 		t.Fatalf("Replay(audit) error = %v", err)
 	}
-	if audit.SideEffects.MailboxDeliveries != 0 || audit.SideEffects.UserMessagePublications != 0 || audit.SideEffects.ActionExecutions != 0 {
-		t.Fatalf("audit replay performed side effects: %#v", audit.SideEffects)
+	assertAuditReplayIsPure(context.Background(), t, rt, run.ID, before)
+	if len(audit.Messages) != 1 || audit.Messages[0].Status != UserMessagePublished {
+		t.Fatalf("audit replay messages = %#v", audit.Messages)
+	}
+}
+
+// assertAuditReplayIsPure checks that an audit replay only rebuilt a read
+// model: it appended no events and re-published no message. Replay purity
+// used to be reported through api.Projection.SideEffects, a counter set that
+// nothing ever incremented.
+func assertAuditReplayIsPure(ctx context.Context, t *testing.T, rt *Runtime, runID string, eventsBefore int) {
+	t.Helper()
+	if after := len(rt.Events(ctx, runID)); after != eventsBefore {
+		t.Fatalf("audit replay appended events: %d before, %d after", eventsBefore, after)
+	}
+	messages, err := rt.ResponseOutbox(ctx, runID)
+	if err != nil {
+		t.Fatalf("ResponseOutbox() error = %v", err)
+	}
+	for _, message := range messages {
+		if message.Status == UserMessagePublishing {
+			t.Fatalf("audit replay left message %q mid-publication: %#v", message.ID, message)
+		}
 	}
 }
 

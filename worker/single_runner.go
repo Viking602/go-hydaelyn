@@ -415,9 +415,24 @@ func (s *SingleRunner) advanceSingleRunToRunning(ctx context.Context, runID stri
 		api.RunStatusDispatching,
 		api.RunStatusRunning,
 	}
+	// A healthy advance needs one iteration per remaining status plus the
+	// final confirmation. The extra budget absorbs a few conflicting writes
+	// from another process; beyond it the loop is livelocked against a
+	// writer that keeps moving the run, so it must fail instead of spinning.
+	attempts := 0
+	maxAttempts := 2 * len(path)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		attempts++
+		if attempts > maxAttempts {
+			return fmt.Errorf(
+				"%w: repeated run status conflict while advancing run %q to %s",
+				ErrSingleRunAlreadyExecuting,
+				runID,
+				api.RunStatusRunning,
+			)
 		}
 		run, err := s.Runner.Run(ctx, runID)
 		if err != nil {
@@ -718,6 +733,9 @@ func (s *SingleRunner) finishActive(runID string, entry *activeSingleRun) {
 	if entry.stopParent != nil {
 		entry.stopParent()
 	}
+	// The execution context is detached from the caller, so nothing else will
+	// ever release it: cancel it here or it leaks for the process lifetime.
+	entry.cancel(context.Canceled)
 	delete(s.active, runID)
 	close(entry.done)
 	s.lifecycleMu.Unlock()

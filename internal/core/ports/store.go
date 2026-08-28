@@ -1,11 +1,6 @@
 package ports
 
-import (
-	"context"
-	"time"
-
-	"github.com/Viking602/venat/api"
-)
+import "github.com/Viking602/venat/api"
 
 type (
 	RunStore                       = api.RunStore
@@ -13,6 +8,7 @@ type (
 	EventStore                     = api.EventStore
 	TraceStore                     = api.TraceStore
 	BlackboardReadWriter           = api.BlackboardReadWriter
+	BlackboardSubscriber           = api.BlackboardSubscriber
 	UserMessageStore               = api.UserMessageStore
 	MailboxOutboxStore             = api.MailboxOutboxStore
 	LeaseStore                     = api.LeaseStore
@@ -37,34 +33,7 @@ type (
 	StoreCapabilities              = api.StoreCapabilities
 	CapabilityReporter             = api.CapabilityReporter
 	ProviderCloser                 = api.ProviderCloser
-	LeaseCAS                       = api.LeaseCAS
 )
-
-// TraceSpanUpdater is the optional mutable trace extension used by the runtime.
-type TraceSpanUpdater interface {
-	LoadTraceSpan(context.Context, string) (api.TraceSpan, error)
-	UpdateTraceSpan(context.Context, api.TraceSpan) error
-}
-
-// BlackboardCommittedReader reads committed blackboard state outside a write transaction.
-type BlackboardCommittedReader interface {
-	SelectItems(context.Context, string, api.BlackboardSelector) ([]api.BlackboardItem, error)
-}
-
-// BlackboardSubscriber is the optional push subscription extension.
-type BlackboardSubscriber interface {
-	Subscribe(context.Context, string, api.BlackboardSelector) (<-chan api.BlackboardItem, func() error, error)
-}
-
-// BlackboardWaiter is the optional store-native wait extension.
-type BlackboardWaiter interface {
-	WaitForBlackboard(context.Context, string, api.BlackboardSelector, func([]api.BlackboardItem) bool, time.Duration) ([]api.BlackboardItem, error)
-}
-
-// UserMessageOutboxScanner enumerates every queued user message for recovery.
-type UserMessageOutboxScanner interface {
-	ListQueuedMessages(context.Context) ([]api.UserMessage, error)
-}
 
 func DefaultStoreCapabilities() StoreCapabilities {
 	return api.DefaultStoreCapabilities()

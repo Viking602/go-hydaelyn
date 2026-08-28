@@ -10,8 +10,6 @@ type Command interface {
 	CommandName() string
 }
 
-type RuntimeCommand = Command
-
 type StartRunCommand struct {
 	RunID        string
 	RootTaskID   string
@@ -179,6 +177,40 @@ type SubmitResponseOutputCommand struct {
 type PublishResponseCommand struct {
 	RunID     string
 	MessageID string
+}
+
+// ReconcileResponsePublicationCommand records the host's determination of
+// what happened to a message the runtime left mid-publication. A crash
+// between the publish claim and the outcome leaves a message in
+// UserMessagePublishing: the output gateway may or may not have delivered
+// it, and the runtime will not guess. Only something that can inspect the
+// delivery channel — the host — can settle it.
+//
+// Delivered reports that determination. True marks the message published
+// without calling the gateway again; false returns it to the outbox for a
+// normal retry. Reason is recorded on the audit event either way.
+//
+// Re-submitting the same determination is a no-op, so a retried
+// reconciliation is safe; submitting the opposite one for a message that has
+// already been settled returns ErrIdempotencyConflict.
+//
+// Operational contract: this command is only for crash residue — a claim
+// left behind by a publisher that is no longer running. A publish claim
+// carries no holder identity and no expiry, unlike TaskExecutionLease, so
+// the runtime cannot tell a dead publisher's claim from a live one and will
+// not judge staleness on the host's behalf. Reconciling a message whose
+// publisher is still alive races that publisher: both may then write the
+// message's terminal status, and marking it published while the gateway call
+// is still in flight can leave a real delivery unrecorded or a failed one
+// recorded as delivered. The caller MUST establish that no publisher for the
+// message survives before invoking this — typically because the process that
+// held the claim is known dead. This is an accepted design gap, not an
+// oversight: closing it needs a holder and expiry on the claim itself.
+type ReconcileResponsePublicationCommand struct {
+	RunID     string
+	MessageID string
+	Delivered bool
+	Reason    string
 }
 
 type RequestApprovalCommand struct {

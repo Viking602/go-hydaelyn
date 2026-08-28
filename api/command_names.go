@@ -42,6 +42,10 @@ func (SubmitResponseOutputCommand) CommandName() string { return "response.submi
 
 func (PublishResponseCommand) CommandName() string { return "response.publish" }
 
+func (ReconcileResponsePublicationCommand) CommandName() string {
+	return "response.reconcile_publication"
+}
+
 func (RequestApprovalCommand) CommandName() string { return "approval.request" }
 
 func (DecideApprovalCommand) CommandName() string { return "approval.decide" }

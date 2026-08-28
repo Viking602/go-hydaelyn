@@ -28,18 +28,44 @@ type replayState struct {
 
 func newReplayState() replayState {
 	return replayState{
-		projection: api.Projection{
-			Tasks: map[string]api.Task{},
-			SideEffects: api.ReplaySideEffects{
-				MailboxDeliveries:       0,
-				UserMessagePublications: 0,
-				ActionExecutions:        0,
-			},
-		},
-		messages: map[string]api.UserMessage{},
+		projection: api.Projection{Tasks: map[string]api.Task{}},
+		messages:   map[string]api.UserMessage{},
 	}
 }
 
+// applyEvent folds one event into the projection. Only events that carry
+// authoritative Run / Task / UserMessage state are applied; every other
+// event type is intentionally ignored, because applying it would mean
+// *deriving* state that the emitting command already recorded in a
+// state-carrying event within the same commit. Deriving it again here can
+// only make the projection disagree with the store.
+//
+// Intentionally ignored, with the event that carries the state instead:
+//
+//   - IntentAnalyzed, PlanCreated, PlanValidated, RoutingPlanCreated,
+//     TypedReportSubmitted, TaskMonitorDecision, PolicyDecisionRecorded,
+//     PolicyObligationFailed, SystemResponseBypassAudited,
+//     ResumeTokenCreated, TraceSpanStarted, TraceSpanEnded — audit and
+//     progress notifications; no Run/Task/message state of their own.
+//   - EnvelopeAcked, HandoffEnvelopeQueued, TaskExecutionHeartbeat,
+//     ExecutionCheckpointed — envelope and lease bookkeeping; Projection
+//     models neither.
+//   - TaskExecutionReleased — releasing a lease does not by itself move the
+//     task. Callers that do move it emit TaskCompleted / TaskFailed /
+//     TaskBlocked / TaskPaused / TaskDispatched / ActionReconcileRequired
+//     alongside; a bare ReleaseTaskExecution leaves the task Running in the
+//     store, and so must leave it Running here.
+//   - HandoffApplied — preceded by TaskOwnerChanged, which carries the task.
+//   - ApprovalRequested, ApprovalDecided — a resumed task is dispatched by a
+//     following TaskDispatched; the run move arrives as RunStatusChanged.
+//   - UserInputSubmitted — a redispatched task arrives as TaskDispatched.
+//   - ActionAttemptStarted, ActionAttemptUpdated, BlackboardItemWritten,
+//     HandoffRequested — action attempts, blackboard items, and handoff
+//     requests are not part of Projection.
+//   - UserMessageComposed, UserMessagePolicyChecked — a composed message is
+//     queued in the same commit; UserMessageQueued carries it.
+//     ResponsePublishFailed leaves the message queued for retry, so there is
+//     nothing to apply.
 func (state *replayState) applyEvent(event api.Event) {
 	switch event.Type {
 	case api.EventRunStarted:
@@ -55,7 +81,7 @@ func (state *replayState) applyEvent(event api.Event) {
 		state.applyTaskDispatched(event)
 	case api.EventTaskExecutionAcquired:
 		state.applyTaskExecutionAcquired(event)
-	case api.EventTaskCompleted, api.EventTaskFailed, api.EventTaskBlocked, api.EventTaskPaused, api.EventTaskOwnerChanged, api.EventUserMessageQueued, api.EventEnvelopeDeadLettered, api.EventActionReconcileRequired:
+	case api.EventTaskCompleted, api.EventTaskPartiallyCompleted, api.EventTaskFailed, api.EventTaskBlocked, api.EventTaskPaused, api.EventTaskOwnerChanged, api.EventUserMessageQueued, api.EventEnvelopeDeadLettered, api.EventActionReconcileRequired:
 		state.applyTaskAndMessagePayload(event)
 	case api.EventResponsePublished:
 		state.upsertMessage(userMessageFromPayload(mapFromPayload(event.Payload["message"])))

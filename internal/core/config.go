@@ -2,7 +2,6 @@ package core
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/Viking602/venat/api"
 	commandbus "github.com/Viking602/venat/internal/command"
@@ -13,9 +12,8 @@ import (
 const maxHandoffDepth = 8
 
 type Runtime struct {
-	configMu sync.RWMutex // guards policy, outputGateway, pipeline
-	mu       sync.Mutex   // guards agents, tools, flows
-	idSeq    atomic.Int64
+	configMu sync.RWMutex // guards policyEngine, messagePolicy, outputGateway, pipeline
+	mu       sync.Mutex   // guards agents and tools
 
 	memProvider   *memory.Provider
 	storeProvider StoreProvider // non-nil only for external Config.StoreProvider
@@ -26,9 +24,9 @@ type Runtime struct {
 	scopedTools map[toolHolderKey]map[string]api.Tool
 	agents      map[string]AgentProfile
 	agentOrder  []string
-	flows       map[string]api.Flow
 
-	policy         PolicyEngine
+	policyEngine   PolicyEngine
+	messagePolicy  api.MessagePolicyChecker
 	policyEnforcer PolicyObligationEnforcer
 	outputGateway  OutputGateway
 	pipeline       PipelineComponents
@@ -46,8 +44,6 @@ func NewRuntime(config Config) *Runtime {
 		scopedTools:    map[toolHolderKey]map[string]api.Tool{},
 		agents:         map[string]AgentProfile{},
 		agentOrder:     []string{},
-		flows:          map[string]api.Flow{},
-		policy:         allowPolicyEngine{},
 		policyEnforcer: defaultPolicyObligationEnforcer{},
 		outputGateway:  memoryOutputGateway{},
 		memProvider:    memory.NewProvider(),
@@ -57,7 +53,7 @@ func NewRuntime(config Config) *Runtime {
 		rt.storeProvider = config.StoreProvider
 	}
 	if config.PolicyEngine != nil {
-		rt.policy = config.PolicyEngine
+		rt.policyEngine = config.PolicyEngine
 	}
 	if config.PolicyEnforcer != nil {
 		rt.policyEnforcer = config.PolicyEnforcer
