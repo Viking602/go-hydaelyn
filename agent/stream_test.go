@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Viking602/venat/message"
+	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
 	"github.com/Viking602/venat/tool/kit"
 )
@@ -110,6 +111,102 @@ func TestEngineStreamsFramesWithoutChangingResult(t *testing.T) {
 	}
 	if results := acc.ToolResults(); len(results) != 1 || results[0].Content != "result:venat" {
 		t.Fatalf("accumulated tool results = %#v", results)
+	}
+}
+
+func TestCollectSinkCannotMutateRetainedProviderPayloads(t *testing.T) {
+	accumulator := NewAccumulator()
+	sink := NewBroadcast(
+		SinkFunc(func(_ context.Context, frame Frame) error {
+			if frame.ToolCall != nil {
+				frame.ToolCall.Name = "corrupted"
+				frame.ToolCall.Arguments = json.RawMessage(`{"query":"corrupted"}`)
+			}
+			if frame.Kind == FrameDone && len(frame.ProviderState) > 0 {
+				frame.ProviderState[0] = '['
+			}
+			return nil
+		}),
+		accumulator,
+	)
+	assistant, _, _, err := (Engine{}).collect(
+		context.Background(),
+		provider.NewSliceStream([]provider.Event{
+			{
+				Kind: provider.EventToolCall,
+				ToolCall: &message.ToolCall{
+					ID:        "call-1",
+					Name:      "lookup",
+					Arguments: json.RawMessage(`{"query":"venat"}`),
+				},
+			},
+			{
+				Kind:          provider.EventDone,
+				StopReason:    provider.StopReasonToolUse,
+				ProviderState: json.RawMessage(`{"state":"original"}`),
+			},
+		}),
+		nil,
+		sink,
+	)
+	if err != nil {
+		t.Fatalf("collect() error = %v", err)
+	}
+	if len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].Name != "lookup" ||
+		string(assistant.ToolCalls[0].Arguments) != `{"query":"venat"}` ||
+		string(assistant.ProviderState) != `{"state":"original"}` {
+		t.Fatalf("assistant = %#v, want original provider payloads", assistant)
+	}
+	accumulated, err := accumulator.Message()
+	if err != nil {
+		t.Fatalf("accumulator Message() error = %v", err)
+	}
+	if len(accumulated.ToolCalls) != 1 || accumulated.ToolCalls[0].Name != "lookup" ||
+		string(accumulated.ToolCalls[0].Arguments) != `{"query":"venat"}` ||
+		string(accumulated.ProviderState) != `{"state":"original"}` {
+		t.Fatalf("accumulated message = %#v, want isolated provider payloads", accumulated)
+	}
+}
+
+func TestAccumulatorToolResultsAreDeepCloned(t *testing.T) {
+	result := message.ToolResult{
+		ToolCallID: "call-1",
+		Name:       "lookup",
+		Parts: []message.ContentPart{{
+			Kind:         message.ContentImage,
+			Data:         []byte{1, 2},
+			ProviderData: json.RawMessage(`{"opaque":true}`),
+			Source:       &message.Source{Title: "original"},
+		}},
+		Structured: json.RawMessage(`{"answer":"original"}`),
+	}
+	accumulator := NewAccumulator()
+	if err := accumulator.Emit(context.Background(), Frame{Kind: FrameToolResult, ToolResult: &result}); err != nil {
+		t.Fatalf("Emit() error = %v", err)
+	}
+	result.Parts[0].Data[0] = 9
+	result.Parts[0].ProviderData[0] = '['
+	result.Parts[0].Source.Title = "mutated"
+	result.Structured[0] = '['
+
+	first := accumulator.ToolResults()
+	if len(first) != 1 || first[0].Parts[0].Data[0] != 1 ||
+		string(first[0].Parts[0].ProviderData) != `{"opaque":true}` ||
+		first[0].Parts[0].Source.Title != "original" ||
+		string(first[0].Structured) != `{"answer":"original"}` {
+		t.Fatalf("first ToolResults() = %#v, want retained clone", first)
+	}
+	first[0].Parts[0].Data[0] = 8
+	first[0].Parts[0].ProviderData[0] = '['
+	first[0].Parts[0].Source.Title = "returned"
+	first[0].Structured[0] = '['
+
+	second := accumulator.ToolResults()
+	if second[0].Parts[0].Data[0] != 1 ||
+		string(second[0].Parts[0].ProviderData) != `{"opaque":true}` ||
+		second[0].Parts[0].Source.Title != "original" ||
+		string(second[0].Structured) != `{"answer":"original"}` {
+		t.Fatalf("second ToolResults() = %#v, want independent clone", second)
 	}
 }
 

@@ -198,10 +198,20 @@ func continuationResult(continuation Continuation) Result {
 }
 
 func continuationStopReason(continuation Continuation) provider.StopReason {
-	if len(continuation.Steps) == 0 || continuation.Steps[len(continuation.Steps)-1].ModelCall == nil {
+	if len(continuation.Steps) == 0 {
 		return ""
 	}
-	return continuation.Steps[len(continuation.Steps)-1].ModelCall.StopReason
+	latest := continuation.Steps[len(continuation.Steps)-1]
+	switch latest.Decision {
+	case StepDecisionFinish:
+		return provider.StopReasonComplete
+	case StepDecisionFail:
+		return provider.StopReasonError
+	}
+	if latest.ModelCall == nil {
+		return ""
+	}
+	return latest.ModelCall.StopReason
 }
 
 func continuationThinking(messages []message.Message) string {

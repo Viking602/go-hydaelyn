@@ -757,7 +757,7 @@ func stepDecisionOverride(input LoopInput, current []message.Message, usage prov
 	if input.StepDecider == nil {
 		return LoopOutput{}, false, nil
 	}
-	decision, decideErr := input.StepDecider.Decide(LoopSnapshot{Steps: steps})
+	decision, decideErr := input.StepDecider.Decide(LoopSnapshot{Steps: cloneSteps(steps)})
 	if decideErr != nil {
 		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
 			fmt.Errorf("%w: step decider: %w", ErrStepAborted, decideErr)
@@ -1341,11 +1341,11 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 // than being discarded.
 func appendToolResults(ctx context.Context, current *[]message.Message, results []message.ToolResult, sink Sink) error {
 	for _, result := range results {
-		*current = append(*current, message.NewToolResult(result))
+		*current = append(*current, message.NewToolResult(message.CloneToolResult(result)))
 		if sink == nil {
 			continue
 		}
-		toolResult := result
+		toolResult := message.CloneToolResult(result)
 		if err := sink.Emit(ctx, Frame{Kind: FrameToolResult, ToolResult: &toolResult}); err != nil {
 			return err
 		}
@@ -1435,7 +1435,7 @@ func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onE
 		// errors or panics must not discard the response already streamed, so both
 		// the recover above and the error return below normalize the events held so
 		// far rather than starting from an empty turn.
-		events = append(events, event)
+		events = append(events, cloneProviderEvent(event))
 		if cbErr := e.fanOutEvent(ctx, event, onEvent, sink); cbErr != nil {
 			usage, stop, _ = applyNormalized(&assistant, events, false)
 			return assistant, usage, stop, cbErr
@@ -1474,11 +1474,11 @@ func providerEventSize(event provider.Event) int {
 // response streamed so far already preserved for the partial trace.
 func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent func(provider.Event) error, sink Sink) error {
 	if onEvent != nil {
-		if err := onEvent(event); err != nil {
+		if err := onEvent(cloneProviderEvent(event)); err != nil {
 			return err
 		}
 	}
-	if err := e.Hooks.OnEvent(ctx, event); err != nil {
+	if err := e.Hooks.OnEvent(ctx, cloneProviderEvent(event)); err != nil {
 		return err
 	}
 	if sink != nil {

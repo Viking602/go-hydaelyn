@@ -75,6 +75,44 @@ func TestEngineResumeMatchesUninterruptedResultAtEveryBoundary(t *testing.T) {
 	}
 }
 
+func TestEngineResumeTerminalToolPreservesCompleteStopReason(t *testing.T) {
+	var checkpoint Continuation
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{
+			Kind: provider.EventToolCall,
+			ToolCall: &message.ToolCall{
+				ID:        "call-1",
+				Name:      "submit_report",
+				Arguments: []byte(`{"answer":"done"}`),
+			},
+		},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+	}}}
+	engine := Engine{
+		Model:    "test-model",
+		Provider: driver,
+		Tools:    tool.NewBus(terminalTool{}),
+		Boundaries: BoundaryObserverFunc(func(_ context.Context, continuation Continuation) error {
+			if continuation.Phase == ContinuationToolsComplete {
+				checkpoint = cloneContinuation(continuation)
+			}
+			return nil
+		}),
+	}
+	baseline := engine.Run(context.Background(), Request{Prompt: "finish"}, OutputPolicy{})
+	if baseline.Failure != nil || baseline.StopReason != provider.StopReasonComplete {
+		t.Fatalf("Run() = %#v, want complete terminal result", baseline)
+	}
+	if checkpoint.Phase != ContinuationToolsComplete {
+		t.Fatalf("checkpoint phase = %q, want tools_complete", checkpoint.Phase)
+	}
+
+	resumed := (Engine{}).Resume(context.Background(), checkpoint)
+	if resumed.Failure != nil || resumed.StopReason != provider.StopReasonComplete {
+		t.Fatalf("Resume() = %#v, want complete terminal result", resumed)
+	}
+}
+
 func TestEngineEffectOperationIDsAreStableAcrossHooksAndInterceptors(t *testing.T) {
 	var modelIDs, toolIDs []string
 	engine := continuationTestEngine(t, nil)

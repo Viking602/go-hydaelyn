@@ -44,6 +44,29 @@ func TestRunMessagesStepDeciderFinishStopsEarly(t *testing.T) {
 	}
 }
 
+func TestRunMessagesStepDeciderCannotMutateTrace(t *testing.T) {
+	engine := newLoopToolEngine(t, &alwaysToolProvider{})
+	output, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:    "test-model",
+		Messages: []message.Message{message.NewText(message.RoleUser, "loop")},
+		StepDecider: stepDeciderFunc(func(snapshot LoopSnapshot) (StepDecision, error) {
+			snapshot.Steps[0].ModelCall.Model = "mutated"
+			arguments := snapshot.Steps[0].ToolCalls[0].Arguments
+			arguments[len(arguments)-3] = 'z'
+			return StepDecisionFinish, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if output.Steps[0].ModelCall.Model != "test-model" {
+		t.Fatalf("model trace = %q, want test-model", output.Steps[0].ModelCall.Model)
+	}
+	if got := string(output.Steps[0].ToolCalls[0].Arguments); got != `{"query":"x"}` {
+		t.Fatalf("tool arguments = %s, want original trace", got)
+	}
+}
+
 func TestRunMessagesStepDeciderContinueIsTransparent(t *testing.T) {
 	for _, test := range []struct {
 		name     string

@@ -45,6 +45,50 @@ type Frame struct {
 	Err              error                   `json:"-"`
 }
 
+func cloneToolCall(call *message.ToolCall) *message.ToolCall {
+	if call == nil {
+		return nil
+	}
+	cloned := *call
+	cloned.Arguments = append(json.RawMessage(nil), call.Arguments...)
+	return &cloned
+}
+
+func cloneToolCallDelta(delta *provider.ToolCallDelta) *provider.ToolCallDelta {
+	if delta == nil {
+		return nil
+	}
+	cloned := *delta
+	if delta.Index != nil {
+		index := *delta.Index
+		cloned.Index = &index
+	}
+	return &cloned
+}
+
+func cloneProviderEvent(event provider.Event) provider.Event {
+	event.ToolCall = cloneToolCall(event.ToolCall)
+	event.ToolCallDelta = cloneToolCallDelta(event.ToolCallDelta)
+	event.ProviderState = append(json.RawMessage(nil), event.ProviderState...)
+	event.Response = message.CloneResponseMetadata(event.Response)
+	return event
+}
+
+func cloneFrame(frame Frame) Frame {
+	frame.ToolCall = cloneToolCall(frame.ToolCall)
+	frame.ToolCallDelta = cloneToolCallDelta(frame.ToolCallDelta)
+	if frame.ToolResult != nil {
+		result := message.CloneToolResult(*frame.ToolResult)
+		frame.ToolResult = &result
+	}
+	if frame.ToolUpdate != nil {
+		update := tool.CloneUpdate(*frame.ToolUpdate)
+		frame.ToolUpdate = &update
+	}
+	frame.ProviderState = append(json.RawMessage(nil), frame.ProviderState...)
+	return frame
+}
+
 // FrameFromEvent maps a provider event to its consumer-facing frame.
 func FrameFromEvent(event provider.Event) (Frame, bool) {
 	switch event.Kind {
@@ -53,11 +97,11 @@ func FrameFromEvent(event provider.Event) (Frame, bool) {
 	case provider.EventThinkingDelta:
 		return Frame{Kind: FrameThinking, Thinking: event.Thinking, Signature: event.Signature, RedactedThinking: event.RedactedThinking, Usage: event.Usage}, true
 	case provider.EventToolCall:
-		return Frame{Kind: FrameToolCall, ToolCall: event.ToolCall, Usage: event.Usage}, true
+		return cloneFrame(Frame{Kind: FrameToolCall, ToolCall: event.ToolCall, Usage: event.Usage}), true
 	case provider.EventToolCallDelta:
-		return Frame{Kind: FrameToolCallDelta, ToolCallDelta: event.ToolCallDelta, Usage: event.Usage}, true
+		return cloneFrame(Frame{Kind: FrameToolCallDelta, ToolCallDelta: event.ToolCallDelta, Usage: event.Usage}), true
 	case provider.EventDone:
-		return Frame{Kind: FrameDone, StopReason: event.StopReason, Usage: event.Usage, ProviderState: event.ProviderState}, true
+		return cloneFrame(Frame{Kind: FrameDone, StopReason: event.StopReason, Usage: event.Usage, ProviderState: event.ProviderState}), true
 	case provider.EventError:
 		return Frame{Kind: FrameError, Err: event.Err, Usage: event.Usage}, true
 	default:
@@ -74,6 +118,7 @@ func FrameFromToolUpdate(update tool.Update) Frame {
 
 // ToEvent maps provider-derived frame kinds back to provider events.
 func (f Frame) ToEvent() (provider.Event, bool) {
+	f = cloneFrame(f)
 	switch f.Kind {
 	case FrameText:
 		return provider.Event{Kind: provider.EventTextDelta, Text: f.Text, TextPhase: f.TextPhase, Usage: f.Usage}, true
@@ -135,7 +180,7 @@ func (b *Broadcast) Emit(ctx context.Context, frame Frame) error {
 			joined = append(joined, err)
 			break
 		}
-		if err := sink.Emit(ctx, frame); err != nil {
+		if err := sink.Emit(ctx, cloneFrame(frame)); err != nil {
 			joined = append(joined, err)
 		}
 	}
@@ -158,7 +203,7 @@ func (a *Accumulator) Emit(_ context.Context, frame Frame) error {
 	defer a.mu.Unlock()
 	if frame.Kind == FrameToolResult {
 		if frame.ToolResult != nil {
-			a.tools = append(a.tools, *frame.ToolResult)
+			a.tools = append(a.tools, message.CloneToolResult(*frame.ToolResult))
 		}
 		return nil
 	}
@@ -253,9 +298,16 @@ func mergeNormalizedResponse(target *provider.NormalizedResponse, source provide
 	}
 }
 
-// ToolResults returns a positional copy of observed tool results.
+// ToolResults returns deep-cloned observed tool results.
 func (a *Accumulator) ToolResults() []message.ToolResult {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]message.ToolResult(nil), a.tools...)
+	if a.tools == nil {
+		return nil
+	}
+	results := make([]message.ToolResult, len(a.tools))
+	for index := range a.tools {
+		results[index] = message.CloneToolResult(a.tools[index])
+	}
+	return results
 }
