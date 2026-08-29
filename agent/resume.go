@@ -202,11 +202,13 @@ func continuationStopReason(continuation Continuation) provider.StopReason {
 		return ""
 	}
 	latest := continuation.Steps[len(continuation.Steps)-1]
-	switch latest.Decision {
-	case StepDecisionFinish:
-		return provider.StopReasonComplete
-	case StepDecisionFail:
-		return provider.StopReasonError
+	if continuation.Phase == ContinuationToolsComplete {
+		switch latest.Decision {
+		case StepDecisionFinish:
+			return provider.StopReasonComplete
+		case StepDecisionFail:
+			return provider.StopReasonError
+		}
 	}
 	if latest.ModelCall == nil {
 		return ""

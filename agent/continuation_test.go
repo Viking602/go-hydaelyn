@@ -113,6 +113,43 @@ func TestEngineResumeTerminalToolPreservesCompleteStopReason(t *testing.T) {
 	}
 }
 
+func TestEngineResumeEarlyFailurePreservesProviderStopReason(t *testing.T) {
+	stopAtBoundary := errors.New("stop at validating-output boundary")
+	var checkpoint Continuation
+	driver := &scriptedProvider{turns: [][]provider.Event{{
+		{Kind: provider.EventTextDelta, Text: "partial"},
+		{Kind: provider.EventDone, StopReason: provider.StopReasonLength},
+	}}}
+	engine := Engine{
+		Model:    "test-model",
+		Provider: driver,
+		Boundaries: BoundaryObserverFunc(func(_ context.Context, continuation Continuation) error {
+			if continuation.Phase != ContinuationValidatingOutput {
+				return nil
+			}
+			checkpoint = cloneContinuation(continuation)
+			return stopAtBoundary
+		}),
+	}
+	interrupted := engine.Run(context.Background(), Request{Prompt: "answer"}, OutputPolicy{})
+	if interrupted.Failure == nil || !errors.Is(interrupted.Failure, stopAtBoundary) {
+		t.Fatalf("Run() failure = %#v, want boundary failure", interrupted.Failure)
+	}
+	if checkpoint.Phase != ContinuationValidatingOutput {
+		t.Fatalf("checkpoint phase = %q, want validating_output", checkpoint.Phase)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resumed := (Engine{}).Resume(ctx, checkpoint)
+	if resumed.Failure == nil || !errors.Is(resumed.Failure, context.Canceled) {
+		t.Fatalf("Resume() failure = %#v, want context cancellation", resumed.Failure)
+	}
+	if resumed.StopReason != provider.StopReasonLength {
+		t.Fatalf("Resume() stop reason = %q, want length", resumed.StopReason)
+	}
+}
+
 func TestEngineEffectOperationIDsAreStableAcrossHooksAndInterceptors(t *testing.T) {
 	var modelIDs, toolIDs []string
 	engine := continuationTestEngine(t, nil)
