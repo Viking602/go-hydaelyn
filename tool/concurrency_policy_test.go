@@ -58,7 +58,7 @@ func TestSequentialToolMakesParallelBatchOrdered(t *testing.T) {
 		{ID: "second", Name: "skill", Arguments: json.RawMessage(`{}`)},
 		{ID: "third", Name: "skill", Arguments: json.RawMessage(`{}`)},
 	}
-	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, nil); err != nil {
+	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if tracker.maxActive.Load() != 1 || !slices.Equal(tracker.order, []string{"first", "second", "third"}) {
@@ -73,7 +73,7 @@ func TestExclusiveConcurrencyGroupSerializesDifferentTools(t *testing.T) {
 		concurrencyDriver{definition: Definition{Name: "two", InputSchema: Schema{Type: "object"}, Concurrency: ConcurrencyExclusive, ConcurrencyGroup: "workspace"}, tracker: tracker},
 	)
 	calls := []Call{{ID: "one", Name: "one", Arguments: json.RawMessage(`{}`)}, {ID: "two", Name: "two", Arguments: json.RawMessage(`{}`)}}
-	if _, err := bus.ExecuteBatch(context.Background(), calls, ModeParallel, nil); err != nil {
+	if _, err := bus.ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if tracker.maxActive.Load() != 1 {
@@ -96,7 +96,7 @@ func TestClonedAndSubsetBusesShareConcurrencyLimiters(t *testing.T) {
 			defer group.Done()
 			_, err := bus.Execute(context.Background(), Call{
 				ID: string(rune('a' + index)), Name: "write", Arguments: json.RawMessage(`{}`),
-			}, nil)
+			}, ExecuteOptions{})
 			errs <- err
 		}(index, bus)
 	}
@@ -121,7 +121,7 @@ func TestPerToolMaxConcurrencyCapsParallelBatch(t *testing.T) {
 	for index := range calls {
 		calls[index] = Call{ID: string(rune('a' + index)), Name: "bounded", Arguments: json.RawMessage(`{}`)}
 	}
-	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, nil); err != nil {
+	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if tracker.maxActive.Load() != 2 {
@@ -139,7 +139,7 @@ func TestToolBatchRejectsUnboundedProviderFanout(t *testing.T) {
 	for index := range calls {
 		calls[index] = Call{ID: fmt.Sprintf("call-%d", index), Name: "lookup", Arguments: json.RawMessage(`{}`)}
 	}
-	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, nil); !errors.Is(err, ErrTooManyToolCalls) {
+	if _, err := NewBus(driver).ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{}); !errors.Is(err, ErrTooManyToolCalls) {
 		t.Fatalf("oversized batch error = %v", err)
 	}
 	if tracker.maxActive.Load() != 0 {

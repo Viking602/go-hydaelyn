@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Enforce ADR-008 framework-vs-business boundary.
-# Counts business-domain literals leaked into framework Go code.
-# Fails if the count exceeds the locked baseline.
 
 set -euo pipefail
 
@@ -9,60 +6,55 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 BASELINE_FILE=".sentrux/business-words.baseline"
+required_scopes=(message provider tool skill agent orchestration durable)
+
 if [[ ! -f "$BASELINE_FILE" ]]; then
-  echo "missing baseline file: $BASELINE_FILE" >&2
-  exit 2
-fi
-
-baseline="$(tr -d '[:space:]' < "$BASELINE_FILE")"
-
-# Identifier-safe subset of the ADR-008 closed list. Generic English nouns
-# (change, document, repository, action, review, lead, sales, deploy) are
-# banned as TaskType / domain identifiers by the ADR, but grepping them as
-# bare words produces false positives. Packs, examples, and docs may use
-# the full list.
-# Word boundaries on Hazard/Incident/Ticket/Customer avoid false positives
-# like incident_response_example.
-pattern='Synthesis|ReviewResult|ActionResult|TaskTypeAction|TaskTypeReview|TaskTypeSynthesis|\bHazard\b|\bIncident\b|\bTicket\b|\bCustomer\b|agent_review'
-
-count="$(
-  {
-    grep -rEc "$pattern" \
-      --include="*.go" \
-      --exclude-dir=legacy \
-      --exclude-dir=_examples \
-      --exclude-dir=docs \
-      --exclude-dir=testdata \
-      --exclude-dir=pattern \
-      --exclude-dir=packs \
-      --exclude-dir=.git \
-      . 2>/dev/null || true
-  } \
-  | awk -F: '$2 != 0 {s+=$2} END {print s+0}'
-)"
-
-echo "framework business-word count: $count (baseline: $baseline)"
-
-if (( count > baseline )); then
-  echo
-  echo "FAIL: $((count - baseline)) new business-word occurrence(s) leaked into framework code." >&2
-  echo "See docs/adr/ADR-008-framework-vs-business.md." >&2
-  echo "Offending lines:" >&2
-  grep -rnE "$pattern" \
-    --include="*.go" \
-    --exclude-dir=legacy \
-    --exclude-dir=_examples \
-    --exclude-dir=docs \
-    --exclude-dir=testdata \
-    --exclude-dir=pattern \
-    --exclude-dir=packs \
-    --exclude-dir=.git \
-    . >&2 || true
+  echo "FAIL: missing baseline file: $BASELINE_FILE" >&2
   exit 1
 fi
+for scope in "${required_scopes[@]}"; do
+  if [[ ! -d "$scope" ]]; then
+    echo "FAIL: required scope $scope is missing" >&2
+    exit 1
+  fi
+  if ! find "$scope" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print -quit | grep -q .; then
+    echo "FAIL: required scope $scope has no production Go files" >&2
+    exit 1
+  fi
+done
 
-if (( count < baseline )); then
-  echo "tip: count dropped below baseline ($count < $baseline). Update $BASELINE_FILE to lock the win."
-fi
+python3 - "$BASELINE_FILE" "${required_scopes[@]}" <<'PY'
+import pathlib
+import re
+import sys
 
-echo "OK: framework boundary preserved."
+baseline_text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").strip()
+if not baseline_text.isdigit():
+    raise SystemExit(f"FAIL: invalid business-word baseline {baseline_text!r}")
+baseline = int(baseline_text)
+scopes = sys.argv[2:]
+pattern = re.compile(
+    r"Synthesis|ReviewResult|ActionResult|TaskTypeAction|TaskTypeReview|"
+    r"TaskTypeSynthesis|\bHazard\b|\bIncident\b|\bTicket\b|\bCustomer\b|agent_review"
+)
+
+offenses = []
+for scope in scopes:
+    for path in sorted(pathlib.Path(scope).rglob("*.go")):
+        if path.name.endswith("_test.go"):
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for match in pattern.finditer(line):
+                offenses.append((str(path), line_number, match.group(0), line.strip()))
+
+count = len(offenses)
+print(f"framework business-word count: {count} (baseline: {baseline})")
+if count > baseline:
+    for path, line_number, word, line in offenses:
+        print(f"{path}:{line_number}: {word}: {line}", file=sys.stderr)
+    print(f"FAIL: {count - baseline} new business-word occurrence(s) leaked into SDK code.", file=sys.stderr)
+    raise SystemExit(1)
+if count < baseline:
+    print(f"tip: count dropped below baseline ({count} < {baseline}); lock the lower baseline")
+print("OK: framework vocabulary boundary preserved.")
+PY

@@ -1,375 +1,133 @@
-# Migration Notes
+# Migration to the direct Agent SDK
 
-## v0.15 → v0.16 — demand-driven surface and durable publication
+ADR-029 is a breaking clean cutover. The former platform façade and platform-owned storage, worker, collaboration, policy, session, transport, bundle, sandbox, evaluation, and command packages were removed. No compatibility aliases or deprecated shims remain.
 
-v0.16 completes the compatibility windows opened by ADR-021, ADR-025, and
-ADR-027. It also makes publication and the experimental durable agent harness
-fail closed under ambiguous external outcomes.
+This document may name deleted APIs for migration purposes. Current API guidance lives in [Public API](public-api.md).
 
-Source migrations:
+## Package migration map
 
-- Import canonical `api` types directly. The deprecated `memory/`, `flow/`, and
-  `blackboard/` packages are removed.
-- Call typed methods directly on `*venat.Runner`. The intermediate
-  `Runner.Admin()`, `Runner.Governance()`, and `Runner.Blackboard()` façades are
-  removed.
-- Replace `ReplayContext` with `ReplayRunStateContext` or `Recover`; replace
-  `ReadyTasksContext` with `ListTasks` plus application readiness rules; replace
-  `ResponseOutboxContext` with `ListMessages` or `ListQueuedMessages`.
-- Handle errors from `RegisterAgent`, `RegisterTool`, and
-  `RegisterToolForInvocation`. Empty identities are no longer ignored.
-- Remove `api.Flow`, `Runner.RegisterFlow`, the `workflow/` package, and the
-  built-in `multiagent.Graph`/`CompiledGraph` DAG surface. Fixed pipelines use
-  `SequentialScheduler`; conditional or parallel policies move into an
-  application `Scheduler` or `SchedulerFunc`, executed by `multiagent.Drive`.
-- Remove uses of `api.Artifact`, `api.ArtifactStore`, `api.Projector`, and
-  `api.UserTimelineProjector`. Artifact references remain opaque strings on
-  blackboard/action values; replay uses the built-in pure projection.
-- Replace `multiagent.RouterScheduler`, `SupervisorScheduler`, voting helpers,
-  `ObservedExecutor`, and Graph/DAG helpers with `SequentialScheduler` or an
-  application `Scheduler`, as appropriate. The framework no longer claims one
-  generic model for supervisor, voting, branching, fan-in, or failure policy.
-- Replace `stream.Channel` and `stream.Merge` with host-owned channels/fan-in.
-  `stream.Sink`, `Broadcast`, and `Accumulator` remain.
-- `eval.Harness.RegisterAgent` now returns `error`.
-  `worker.GovernedToolBus.ToolBus` now returns `(*tool.Bus, error)`.
-- `agent.AgentFailure` no longer carries `EvidenceIDs`, and
-  `FailureKindInsufficientEvidence` is removed.
+| Removed surface | Current composition |
+| --- | --- |
+| root `venat.Runner` and `NewDevelopment` | import `agent`, `orchestration`, and optional `durable` directly |
+| `api.Task` | `agent.Request` |
+| `api.TaskBudget` | `agent.Budget` |
+| `hook.Handler` / `hook.Chain` | `agent.Hook` / `agent.HookChain` |
+| `stream.Frame` / `stream.Sink` | `agent.Frame` / `agent.Sink` |
+| `multiagent` scheduling types | policy-free `orchestration.Scheduler`, `Dispatch`, `State`, `Executor`, and `Drive` |
+| `api.StoreProvider`, `api.UnitOfWork`, and table stores | execution-semantic `durable.Backend` when single-Agent durability is required |
+| `agent.Harness` and `session.Storage` | one `agent.Engine` loop with `agent.Continuation`; optionally wrap it in `durable.Runtime` |
+| turn checkpoint callbacks | `agent.BoundaryObserver` and `agent.Continuation` |
+| step routing that included handoff | `agent.StepDecider` for continue/finish/fail; put peer routing in an application scheduler |
+| built-in Agent-as-tool helpers | use `agent.NewAgentTool` for synchronous in-process delegation; use an application `tool.Driver`, `orchestration.Executor`, or coordinator for registries, workflows, process isolation, or independently durable children |
+| MCP, cron, webhook, sandbox, bundle, and evaluation integrations | application or ecosystem adapters over current interfaces |
 
-Storage and operational migrations:
+Platform concepts such as application identity, approvals, quotas, resource claims, mailboxes, registries, pricing, tracing, triggers, deployment, and domain manifests no longer have core replacement symbols. Keep those models in the application that owns their policy and persistence.
 
-- `api.TraceStore` now includes `LoadTraceSpan` and `UpdateTraceSpan`, matching
-  the methods already required by `EndTraceSpan`.
-- `api.UserMessageStore.UpdateMessage` must provide atomic status CAS semantics.
-  Publication commits `queued -> publishing` before the gateway call.
-- Any `OutputGateway.Publish` error leaves the message in `publishing`; an error
-  does not prove non-delivery. After checking the delivery channel, call
-  `ReconcileResponsePublication` with the observed result. Reconciliation is
-  policy-authorized through `PolicyOperationResponseReconcile`.
-- The experimental `session.Storage` contract adds atomic register sequence
-  checks and `GetUsage`. `agent.Harness` uses renewable lane leases so two
-  processes cannot drive the same operation concurrently.
+## Before: platform-wide construction
 
-## v0.14 → v0.15 — architecture program
+Earlier applications created a root object, supplied a broad store provider, persisted task records, and invoked lifecycle commands through that façade. This forced even a single model/tool loop to adopt unrelated platform records.
 
-v0.15 starts the structural repair recorded in
-[ADR-020](adr/ADR-020-v015-architecture-program.md). Source breaks in
-this drop:
-
-- No-context Runner helpers are gone. Use `RunEvents`, `ReplayContext`,
-  `ReplayRunStateContext`, `ReadyTasksContext`,
-  `ActiveLeaseCountContext`, `ListTraceSpans`, and
-  `ResponseOutboxContext`.
-- `memory.Memory[T]` is deprecated. New code implements
-  `api.Memory[T api.Identified]` (`Write` / `Read` / `Forget`).
-- `flow/` and `blackboard/` are deprecated aliases of `api` types.
-- `ExecuteCommand` remains but is deprecated; prefer typed Runner
-  methods.
-- Domain sub-façades are available: `Runner.Admin()`,
-  `Runner.Governance()`, `Runner.Blackboard()`.
-  They expose only their named domain methods; embedding no longer promotes
-  the complete `Runner` surface.
-- `api.ArtifactStore` exists as a contract only. The framework ships no
-  blob backend (ADR-027 / Position D).
-- `api.UnitOfWork` now embeds capability interfaces (`RunStores`,
-  `CollaborationStores`, …). Full providers do not need to change.
-
-`api` types are now the canonical runtime and persistence model.
-`internal/core/model` and `internal/core/adapter` are deleted (ADR-023);
-application `api.StoreProvider` implementations bind directly to the runtime.
-
-The default `New` / `NewDevelopment` store remains process-local memory
-and is not crash-durable.
-
-
-## Pack eval cases moved to tests
-
-`packs.Pack.EvalCases` remains for existing pack literals but is
-deprecated. Shipped packs leave it empty. `research.SmokeCases` and
-`coding.SmokeCases` remain as deprecated compatibility aliases.
-Hosts should keep new suites in `_test.go` and call `eval.RunSuite`
-there.
-
-`transport/mcp.ToolDescriptor` now uses MCP wire names (`name`,
-`description`, `inputSchema`) when serialized as JSON. Capabilities
-without an input schema export `{"type":"object"}` so the required
-MCP field is always present.
-
-## Coding sandbox rejects FIFOs and replacement links
-
-`coding.Workspace` reads Lstat the leaf before opening it. FIFOs, devices,
-sockets, and directories return `ErrNotRegularFile` instead of blocking on
-`os.Open`. In-workspace symlinks are resolved and the target must be a
-regular file inside the workspace.
-
-`WriteFile` creates with `O_EXCL` after re-resolving the parent. In-place
-writes (`WriteText` / `RestoreText`) re-evaluate the path, re-check
-containment, and require a regular file. Unix opens use `O_NOFOLLOW`;
-Windows opens the leaf with `FILE_FLAG_OPEN_REPARSE_POINT` and rejects a
-reparse point so a swapped symlink cannot leave the workspace.
-Hosts do not need to change call sites.
-
-## ProcessTool owns stdout/stderr pipes
-
-`tool/kit.ProcessTool` now creates parent-owned `os.Pipe` pairs, assigns the
-write ends to the child, and closes those write ends after `Start`. Copies
-run concurrently with `Wait`. After the launched process exits, remaining
-output is drained for up to 100ms; if copies are still blocked, the parent
-closes the read ends. A descendant that still holds stdout or stderr cannot
-block the tool, including on Windows where pipe deadlines do not interrupt a
-blocked read. Cancellation closes the read ends immediately.
-The previous `StdoutPipe`/`StderrPipe` path could close the pipes under the
-readers during `Wait`. Hosts do not need to change call sites.
-
-## Read APIs fail closed
-
-`ReadyTasks`, `ReadyTasksContext`, `ActiveLeaseCount`,
-`ActiveLeaseCountContext`, `ResponseOutbox`, `ResponseOutboxContext`,
-`ResumeTokens`, and `ResumeTokensContext` now return `(T, error)`. Store and
-unit-of-work failures are returned instead of collapsing to an empty slice,
-`0`, or an empty map.
-
-Hosts that treated a missing error as "no ready tasks / no lease / no outbox /
-no resume tokens" must check the error. `0` from `ActiveLeaseCount` now means
-the store confirmed there is no active lease.
-
-`ResumeTokens` and `PendingResumeTokens` load pending tokens from the
-configured store. Providers that do not advertise `SupportsListPending`
-return `ErrInvalidConfiguration` instead of an empty map. Prefer
-`PendingResumeTokens` for new crash-recovery code.
-
-## Lease heartbeat starts at acquire
-
-`worker.AgentWorker` and `worker.TeamRunner` now heartbeat immediately after
-a successful lease acquire, then every `ttl/3`. Previously the first
-heartbeat waited for the first ticker, so a slow ack/load or short TTL
-could expire the lease and let recovery redispatch while the original
-worker was still running. Hosts do not need to change call sites.
-
-## Empty policy Effect is denied
-
-A `PolicyEngine` that returns `(PolicyDecision{}, nil)` or any empty or
-unknown `Effect` is now denied with reason `policy returned an unknown
-effect`. The runner previously rewrote an empty Effect to `allow`. Hosts
-that omitted `Effect` on an allow decision must set
-`Effect: api.PolicyEffectAllow` (or `policy.EffectAllow`) explicitly.
-
-`policy.Chain` applies the same rule: an engine that returns an empty
-Effect fails closed instead of being treated as allow.
-
-## OpenAI provider default: Responses API
-
-An empty `openai.Config.WireAPI` now selects `/responses` instead of
-`/chat/completions`. The default model catalog is now `gpt-5.6-sol`,
-`gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.3-codex`.
-
-Applications that depend on an OpenAI-compatible Chat Completions endpoint must
-opt in explicitly:
+## After: direct Agent execution
 
 ```go
-driver := openai.New(openai.Config{
-	APIKey:  os.Getenv("OPENAI_API_KEY"),
-	BaseURL: compatibleEndpoint,
-	WireAPI: openai.WireChatCompletions,
-})
+engine := agent.Engine{
+    Provider: modelDriver,
+    Tools:    tool.NewBus(toolDrivers...),
+    Model:    modelName,
+    ToolMode: tool.ModeSequential,
+}
+
+result := engine.Run(ctx, agent.Request{
+    Prompt: prompt,
+    Budget: &agent.Budget{
+        MaxTokens:    tokenLimit,
+        MaxToolCalls: toolLimit,
+        MaxSteps:     stepLimit,
+    },
+}, agent.OutputPolicy{})
 ```
 
-For Responses requests:
+Update behavior at the same time:
 
-- remove `StopSequences`, which the Responses API does not support;
-- use `openai.ResponsesOptions.ExtraBody()` for output limits, storage,
-  prompt-cache, reasoning, and text-verbosity controls;
-- Responses requests send `store: false` by default; set
-  `ResponsesOptions.Store` to `true` only to opt into provider-side retention;
-- preserve `message.Message.ProviderState` across persistence and resume so
-  encrypted reasoning and function-call items can be replayed;
-- use `message.Message.CacheBoundary` only when an explicit cache breakpoint is
-  required; automatic OpenAI prefix caching needs no marker;
-- read `CachedInputTokens` for cache hits and `CacheWriteInputTokens` for cache
-  creation usage.
-- update column-mapped `api.UsageStore` implementations to persist the additive
-  `cacheWriteInputTokens` field.
+- inspect `result.Failure` as terminal Agent data
+- use the Go error boundary of the host or durable runtime for infrastructure failure
+- replace shared stream imports with `agent.Sink` and `agent.Frame`
+- handle `agent.FrameToolUpdate` as transient progress/content and keep only the final tool result in Agent history
+- replace ad hoc string update kinds with `tool.UpdateProgress` or `tool.UpdateOutput`; output updates require content parts
+- move approval and retry decisions outside `agent.Engine`
+- do not recreate deleted task or run records merely to call an Agent
 
-See [Runtime Extension Points](extensions.md#openai-wire-apis) for the complete
-request and prompt-caching examples.
+## Orchestration migration
 
-## v0.11 → v0.12 — project rename to Venat
-
-v0.12.0 moves the project from `Hydaelyn` / `go-hydaelyn` to the canonical
-`Venat` identity. This is a pre-v1 breaking module-path change; there is no
-compatibility package or second CLI.
-
-Update dependencies and imports:
-
-```bash
-go get github.com/Viking602/venat@v0.12.0
-go mod tidy
-```
-
-| Old | New |
-| --- | --- |
-| `github.com/Viking602/go-hydaelyn` | `github.com/Viking602/venat` |
-| `hydaelyn.NewDevelopment()` | `venat.NewDevelopment()` |
-| `hydaelyn.NewProduction(...)` | `venat.NewProduction(...)` |
-| `go install github.com/Viking602/go-hydaelyn/cmd/hydaelyn@...` | `go install github.com/Viking602/venat/cmd/venat@v0.12.0` |
-| `hydaelyn version` | `venat version` |
-| `.hydaelyn/skills` | `.venat/skills` |
-
-After changing the import prefix, rename the root import qualifier from
-`hydaelyn` to `venat`. Package-specific qualifiers such as `api`, `agent`, and
-`tool` do not change.
-
-Move product-owned skill files explicitly. Discovery scans `.venat/skills` and
-reports a diagnostic when `.hydaelyn/skills` still exists; it does not merge
-both directories. Explicit `AdditionalDirs` continue to work unchanged.
-
-Three persisted skill wire identifiers deliberately keep the old prefix:
-`hydaelyn_activate_skill`, `hydaelyn_read_skill_resource`, and
-`hydaelyn.skill.context`. Do not rewrite stored transcripts or external
-allowlists containing those values.
-
-Published `github.com/Viking602/go-hydaelyn` versions remain immutable and
-resolvable through the renamed GitHub repository's redirect. New releases use
-only `github.com/Viking602/venat`. See
-[ADR-019](adr/ADR-019-project-identity-venat.md) for the full decision.
-
-## v0.7 → v0.8 — public framework release
-
-v0.8.0 promotes Hydaelyn from "runnable runtime" to "publishable framework." Most v0.7 callers can upgrade with a single search-and-replace pass. The full plan, including the Path A (use a reference store impl) vs Path B (bring-your-own-provider) decision rule and an end-to-end ent-based provider template, lives in `docs/product-spec/v0.8.0/12-migration-guide.md`.
-
-### Mechanical breaking changes
-
-| Old | New |
-| --- | --- |
-| `api.Flow{BypassTaskStore, BypassPolicyEngine, BypassTaskExecutionLease, BypassHandoff, BypassResponseLayer, BypassOutputGateway}` | removed — recipes do not bypass runtime invariants |
-| `api.ErrFlowBypass` | removed |
-| `runner.ExecuteCommand(StartRunCommand)` returning `[]any{Run, RootTask}` | returns `api.StartRunResult{Run, RootTask, Created}` |
-| `runner.ExecuteCommand(RequestApprovalCommand)` returning `[]any{Approval, Token}` | returns `api.RequestApprovalResult{Approval, Token}` |
-| `runner.ExecuteCommand(AcquireTaskExecutionCommand)` returning `[]any{Lease, bool}` | returns `api.AcquireTaskExecutionResult{Lease, Acquired}` |
-
-Use `Runner.StartRunWithResult` instead of the deprecated generic command path
-when a coordinator must distinguish first creation from an idempotent retry.
-
-`api.AgentProfile` itself is unchanged; new declarative fields land on the new `api.AgentDefinition` type instead.
-
-### New surfaces to discover
-
-| Need | Reach for |
-| --- | --- |
-| Declare an agent (instructions, model, tools, schemas, named hooks, triggers, governance) ahead of time | `api.AgentDefinition` (then `.AsProfile()` for runtime attribution) |
-| Publish a system's callable surface to MCP / future renderers | `api.Capability` + `api.CapabilityManifest` |
-| Cron / webhook / event / manual entrypoints | `transport/cron`, `transport/webhook`, `transport/event`, `api.Trigger` |
-| Background worker that polls envelopes, leases, heartbeats, drains | `worker.Runtime` (plug your own `EnvelopePoller`) |
-| Production-grade durable store | implement `api.StoreProvider` and run `contract.RunStoreProviderContractTests` against it |
-| Local durable store for development | Implement `api.StoreProvider` against your own data stack — see `docs/product-spec/v0.8.0/12-migration-guide.md` for the ent-based template. The framework no longer ships reference storage backends; see ADR-012 (revised, Position D). |
-| Bundle a vertical "research / support / devops / aiops" preset | `packs.Pack` + `packs.Registry` |
-| Grade an agent run in CI | `eval.Eval` / `eval.Run` with assertions from `eval/assert` |
-
-`AgentDefinition.Tools` now selects the exact executable tool subset.
-`AgentDefinition.Capabilities` remains discovery/authorization metadata; it no
-longer doubles as a tool list. Definition deployments persist resolved
-`ToolMode`, `MaxIterations`, and `TTL` values so a resumed revision does not
-inherit newer deployment defaults.
-
-> Schedule-based triggers now live in `transport/cron`. The old
-> `transport/scheduler` import path remains as a deprecated compatibility shim
-> that re-exports `cron.Driver`, `cron.Options`, and `cron.New`; switch to
-> `transport/cron` and update your imports.
-
-Naming boundaries:
-- `transport/cron`: time-based trigger transport; decides when a run starts.
-- `workflow`: user-facing workflow definitions; compiles to `multiagent.Graph`.
-- `multiagent.Scheduler`: dispatch decision primitive; decides which agent/task runs next.
-- `flow` / `api.Flow`: preset adapter metadata; configures runtime adapters and never bypasses Runner invariants.
-
-### What's not in v0.8.0 yet
-
-- OpenAPI / CLI renderers for `CapabilityManifest` (MCP renderer ships).
-- `api.ArtifactStore`, `api.BudgetPolicy`, `api.PolicyEnforcer` — types and interfaces deferred to v0.8.1+. The data shapes they will consume (UsageRecord, Budget, ContextSource) are stable in v0.8.0.
-- `api.Memory[T Identified]` — ships in v0.8.0 as an optional plugin. The framework defines the verbs (Write/Read/Forget) and the identity contract (Identified). The application defines `T` and provides the storage backend; no reference implementation ships. See ADR-013 (revised) and `docs/product-spec/v0.8.0/13-memory-optional-plugin.md`.
-- OpenTelemetry exporter (`observe/otel/`).
-
-See `docs/release-notes/v0.8.0.md` for the full deferral list.
-
----
-
-## 从旧 Team + Pattern 风格迁移到 Runner API
-
-旧模型：
-
-- pattern 或 host drive loop 直接推进 runnable task。
-- mailbox、blackboard、queue lease 分散表达任务进度。
-- 用户常需要记住多个入口名称。
-
-当前模型：
-
-- `venat.NewDevelopment()` 创建本地/测试 `Runner`；生产环境使用
-  `venat.NewProduction(api.Config)`。
-- `Runner.StartRun` 创建 `Run + RootTask`。
-- `Runner.ExecuteCommand` 作为命令层入口，状态变更走 `api.StoreProvider + api.UnitOfWork`。
-- planner/router adapter 创建一等 `api.Task`。
-- `DispatchTask` 只写任务信封，不能授予执行权限。
-- agent/component 必须 `AcquireTaskExecution` 后才能执行。
-- `SubmitTypedReport` 是唯一正式任务提交协议。
-- `ResponseTask` 和 `OutputGateway` 是唯一用户消息链路。
-- `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)` 统一覆盖 dispatch、blackboard、
-  handoff、tool call、action、response publish。
-- `needs_clarification` 进入 `waiting_user_input`，并通过 resume token 或用户输入恢复。
-
-## 推荐入口
-
-默认：
+Define application routing data as opaque strings or JSON and implement:
 
 ```go
-runner := venat.NewDevelopment()
+type Scheduler interface {
+    Next(context.Context, orchestration.State) ([]orchestration.Dispatch, error)
+}
+
+type Executor interface {
+    Execute(context.Context, orchestration.Dispatch, agent.Sink) (agent.Result, error)
+}
 ```
 
-自定义配置：
+`orchestration.Drive` supplies bounded mechanical execution, not identity or strategy. Persist `orchestration.State` in application storage if scheduling must survive a restart. Use globally stable dispatch IDs; the SDK rejects reuse across ticks.
+
+## Durability migration
+
+Do not map every former table into `durable`. Implement only the twelve execution-semantic backend operations in `durable.Backend` and run `durable/contract.RunBackendContractTests`.
+
+The durable data model contains:
+
+- immutable execution spec and canonical hash
+- status, version, fenced lease, checkpoint, and terminal Agent result
+- model/tool attempts with input hash, independent version, opaque payload, and failure fact
+
+Typical flow:
 
 ```go
-runner := venat.NewDevelopment(api.Config{
-	PolicyEngine: customPolicy,
-})
+runtime, err := durable.New(backend, durable.Options{OwnerID: processID})
+if err != nil {
+    return err
+}
+result, err := runtime.Start(ctx, executionID, engine, request, outputPolicy)
 ```
 
-内部 `Runtime` 仍存在于实现层，但新代码应通过 `Runner` + `api` 契约扩展，
-不要直接 import `internal/core`。
+On process recovery, construct a new runtime over a reopened backend handle and call `Resume`. A typed `durable.ReconcileRequiredError` means a provider or tool may have executed without a proven result. Investigate externally, call `Reconcile` with `succeed`, `fail`, or `retry`, then explicitly call `Resume` again.
 
-## API 映射
+Controllers that previously resumed through application tokens should persist their own decision record, load the latest checkpoint, and call `ResumeWithOptions` with sequence, phase, and operation assertions. The SDK does not store approval policy or decision payloads in continuation state.
 
-- old team start -> explicit constructor + `Runner.StartRun` / `Runner.QueueRun`
-- team events -> `Runner.RunEvents`
-- team timeline -> `Runner.RunTimeline`
-- replay team state -> `Runner.ReplayRunState`
-- pattern -> `api.Flow`
-- message-only policy -> `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)`
-- direct user message write/publish -> `ResponseTask + ResponseOutbox + OutputGateway`
+Do not automatically retry an unknown effect. Only `provider.ErrNotStarted` and `tool.ErrNotExecuted` prove that no effect began.
 
-## Tool 与治理迁移
+Version `1` is the first supported continuation wire format. Before enabling a v1 writer, drain pre-contract candidate executions, restart them under new execution IDs, or convert them offline with application knowledge; the SDK does not guess a v0 representation. Do not mix v1 writers with binaries that do not understand v1. After the first v1 checkpoint, rollback requires restoring application storage or a pre-write rollback point.
 
-Side-effecting tool 必须补齐：
+## Backend cutover checklist
 
-- `EffectType`
-- `RequiresActionTask`
-- `Idempotent`
-- `PolicyTags` / risk metadata as needed
+- [ ] Choose an application execution ID namespace and revision strategy.
+- [ ] Implement trusted-time lease expiry and monotonic fencing tokens.
+- [ ] Implement exact claim and mutation replay.
+- [ ] Keep execution-version and attempt-version CAS independent.
+- [ ] Validate every save, load, and reopen checkpoint with `durable.ValidateCheckpoint`.
+- [ ] Convert stranded running attempts to unknown on release, expiry, suspend, and later claim.
+- [ ] Reject finish while an attempt is running or unknown.
+- [ ] Implement all three explicit reconciliation resolutions.
+- [ ] Return ownership-independent values.
+- [ ] Pass the complete backend conformance suite, including reopen and concurrency cases.
 
-下游展示最终答案时优先消费 response outbox / `UserMessage`，不要让普通
-agent 直接创建或发布用户可见消息。
+## Source cleanup checklist
 
-## Durable runtime
+- [ ] Replace root-module imports with direct package imports.
+- [ ] Remove platform record conversion code and broad storage adapters.
+- [ ] Replace old hook and stream package imports with Agent equivalents.
+- [ ] Move routing, identity, approval, quota, and deployment policy into the application.
+- [ ] Replace former recipe or bundle dependencies with application modules.
+- [ ] Run `go mod tidy` to remove obsolete protocol and scheduler dependencies.
+- [ ] Run `go test ./...`, race tests, and backend conformance tests.
 
-当前版本支持：
+## Semantic differences to preserve
 
-- append-only events
-- replay
-- `api.StoreProvider / api.UnitOfWork` runtime contract
-- durable mailbox and response outbox contracts
-- approval / resume token / action attempt lifecycle
-
-仍待后续补齐：
-
-- 分布式 worker 调度
-- 更完整的 governed tool bus
-- 官方外部 durable storage driver
-- 外部 observability backend
+1. A non-nil `agent.Result.Failure` is terminal data, not an infrastructure error.
+2. `durable.Runtime` returns partial results on infrastructure errors; a result is terminal only when the Go error is nil.
+3. Streaming is transient and not an exactly-once event log.
+4. Durable execution covers provider and tool effects only. Hook, observer, guardrail, context-manager, and sink side effects need their own idempotency.
+5. Durable state covers one Agent execution. Application orchestration state remains separate.

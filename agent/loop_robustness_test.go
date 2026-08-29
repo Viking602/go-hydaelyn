@@ -7,11 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
-	"github.com/Viking602/venat/stream"
 	"github.com/Viking602/venat/tool"
 	"github.com/Viking602/venat/tool/kit"
 )
@@ -32,7 +29,7 @@ func TestRunRecoversGuardrailPanicAsEngineError(t *testing.T) {
 		},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure == nil {
 		t.Fatal("expected a failure when a guardrail panics")
@@ -45,14 +42,14 @@ func TestRunRecoversGuardrailPanicAsEngineError(t *testing.T) {
 	}
 }
 
-// panicBeforeModelHook panics from BeforeModelCall, the first hook stage a
-// no-tool turn reaches, so the test can prove a hook panic is contained by
-// hook.Chain and surfaces end-to-end as a typed failure.
+// panicBeforeModelHook panics from BeforeModelCall, proving HookChain contains
+// caller panics before they reach the Engine loop.
 type panicBeforeModelHook struct{}
 
 func (panicBeforeModelHook) TransformContext(_ context.Context, m []message.Message) ([]message.Message, error) {
 	return m, nil
 }
+
 func (panicBeforeModelHook) BeforeModelCall(_ context.Context, _ *provider.Request) error {
 	panic("hook exploded")
 }
@@ -60,18 +57,16 @@ func (panicBeforeModelHook) BeforeToolCall(_ context.Context, _ *tool.Call) erro
 func (panicBeforeModelHook) AfterToolCall(_ context.Context, _ *tool.Result) error { return nil }
 func (panicBeforeModelHook) OnEvent(_ context.Context, _ provider.Event) error     { return nil }
 
-// TestRunRecoversHookPanicAsEngineError pins the end-to-end path for a
-// panicking hook: hook.Chain converts it to an ErrHandlerPanic error one level
-// down, and Engine.Run reports it as an engine_error whose cause still walks to
-// hook.ErrHandlerPanic.
+// TestRunRecoversHookPanicAsEngineError pins HookChain panic recovery and the
+// typed Engine failure path.
 func TestRunRecoversHookPanicAsEngineError(t *testing.T) {
 	engine := Engine{
 		Provider: singleTurnProvider("answer"),
 		Model:    "test-model",
-		Hooks:    hook.NewChain(panicBeforeModelHook{}),
+		Hooks:    NewHookChain(panicBeforeModelHook{}),
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure == nil {
 		t.Fatal("expected a failure when a hook panics")
@@ -79,8 +74,8 @@ func TestRunRecoversHookPanicAsEngineError(t *testing.T) {
 	if result.Failure.Kind != FailureKindEngineError {
 		t.Fatalf("Failure.Kind = %s, want engine_error", result.Failure.Kind)
 	}
-	if !errors.Is(result.Failure, hook.ErrHandlerPanic) {
-		t.Fatalf("errors.Is(Failure, hook.ErrHandlerPanic) = false, Failure = %v", result.Failure)
+	if !errors.Is(result.Failure, ErrHookPanic) {
+		t.Fatalf("errors.Is(Failure, ErrHookPanic) = false, Failure = %v", result.Failure)
 	}
 }
 
@@ -118,7 +113,8 @@ func (p *erroringSecondTurnProvider) Stream(_ context.Context, _ provider.Reques
 func TestRunMessagesPreservesTraceOnNonBudgetError(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
@@ -161,7 +157,8 @@ func TestRunMessagesPreservesTraceOnNonBudgetError(t *testing.T) {
 func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
@@ -169,10 +166,10 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 	}
 
 	sinkErr := errors.New("sink delivery failed")
-	failingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+	failingSink := SinkFunc(func(_ context.Context, frame Frame) error {
 		// Let the model turn stream cleanly; fail only on the tool result so the
 		// failure lands inside appendToolResults, the path under test.
-		if frame.Kind == stream.FrameToolResult {
+		if frame.Kind == FrameToolResult {
 			return sinkErr
 		}
 		return nil
@@ -223,17 +220,18 @@ func TestRunMessagesPreservesTraceWhenSinkEmitFails(t *testing.T) {
 func TestRunMessagesPreservesTraceWhenSinkEmitPanics(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
 		t.Fatalf("tool setup: %v", err)
 	}
 
-	panickingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+	panickingSink := SinkFunc(func(_ context.Context, frame Frame) error {
 		// Let the model turn stream cleanly; panic only on the tool result so the
 		// panic unwinds out of appendToolResults, the path under test.
-		if frame.Kind == stream.FrameToolResult {
+		if frame.Kind == FrameToolResult {
 			panic("sink delivery panicked")
 		}
 		return nil
@@ -295,10 +293,10 @@ func TestRunMessagesPreservesStreamedTurnWhenSinkPanicsOnDoneFrame(t *testing.T)
 		}},
 	}
 
-	panickingSink := stream.SinkFunc(func(_ context.Context, frame stream.Frame) error {
+	panickingSink := SinkFunc(func(_ context.Context, frame Frame) error {
 		// Let the text frames stream cleanly; panic on the terminal done frame so
 		// the panic unwinds from inside collect, after the response has streamed.
-		if frame.Kind == stream.FrameDone {
+		if frame.Kind == FrameDone {
 			panic("sink panicked on done frame")
 		}
 		return nil
@@ -348,6 +346,7 @@ type afterToolCallFailOnSecond struct{ seen int }
 func (*afterToolCallFailOnSecond) TransformContext(_ context.Context, m []message.Message) ([]message.Message, error) {
 	return m, nil
 }
+
 func (*afterToolCallFailOnSecond) BeforeModelCall(_ context.Context, _ *provider.Request) error {
 	return nil
 }
@@ -376,7 +375,8 @@ var errAfterToolCall = errors.New("after-tool-call rejected result")
 func TestRunMessagesPreservesPrefixWhenAfterToolCallFails(t *testing.T) {
 	driver, err := kit.Tool("lookup", func(_ context.Context, _ struct {
 		Query string `json:"query"`
-	}) (string, error) {
+	},
+	) (string, error) {
 		return "result", nil
 	})
 	if err != nil {
@@ -394,7 +394,7 @@ func TestRunMessagesPreservesPrefixWhenAfterToolCallFails(t *testing.T) {
 	engine := Engine{
 		Provider: prov,
 		Tools:    tool.NewBus(driver),
-		Hooks:    hook.NewChain(&afterToolCallFailOnSecond{}),
+		Hooks:    NewHookChain(&afterToolCallFailOnSecond{}),
 	}
 
 	out, runErr := engine.RunMessages(context.Background(), LoopInput{
@@ -638,6 +638,37 @@ func (h aliasRewriteHook) BeforeToolCall(_ context.Context, call *tool.Call) err
 func (aliasRewriteHook) AfterToolCall(_ context.Context, _ *tool.Result) error { return nil }
 func (aliasRewriteHook) OnEvent(_ context.Context, _ provider.Event) error     { return nil }
 
+type argumentMutatingHook struct{ aliasRewriteHook }
+
+func (argumentMutatingHook) BeforeToolCall(_ context.Context, call *tool.Call) error {
+	call.Arguments[0] = '['
+	return nil
+}
+
+func TestPrepareToolCallsIsolatesModelArgumentsFromHooks(t *testing.T) {
+	calls := []message.ToolCall{{
+		ID:        "call-1",
+		Name:      "side_effect",
+		Arguments: json.RawMessage(`{}`),
+	}}
+	want := string(calls[0].Arguments)
+	engine := Engine{
+		Tools: tool.NewBus(&recordingDriver{}),
+		Hooks: NewHookChain(argumentMutatingHook{}),
+	}
+
+	prepared, _, err := engine.prepareToolCalls(context.Background(), calls)
+	if err != nil {
+		t.Fatalf("prepareToolCalls() error = %v", err)
+	}
+	if string(calls[0].Arguments) != want {
+		t.Fatalf("model arguments = %q, want unchanged %q", calls[0].Arguments, want)
+	}
+	if len(prepared) != 1 || string(prepared[0].Arguments) == want {
+		t.Fatalf("prepared calls = %#v, want isolated hook mutation", prepared)
+	}
+}
+
 // TestRunMessagesValidatesAvailabilityAfterHookRewritesToolName pins the order of
 // the tool-call hooks and the availability check. A BeforeToolCall hook is the
 // documented way to rewrite a model-emitted alias or hallucinated tool name onto
@@ -670,7 +701,7 @@ func TestRunMessagesValidatesAvailabilityAfterHookRewritesToolName(t *testing.T)
 		Provider: driver,
 		Model:    "test-model",
 		Tools:    tool.NewBus(sideEffect),
-		Hooks:    hook.NewChain(aliasRewriteHook{from: "alias", to: "side_effect"}),
+		Hooks:    NewHookChain(aliasRewriteHook{from: "alias", to: "side_effect"}),
 	}
 
 	out, runErr := engine.RunMessages(context.Background(), LoopInput{
@@ -832,7 +863,7 @@ func TestRunFastExitsOnCancelledContext(t *testing.T) {
 	driver := singleTurnProvider("answer")
 	engine := Engine{Provider: driver, Model: "test-model"}
 
-	result := engine.Run(ctx, api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(ctx, Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure == nil {
 		t.Fatal("expected a failure when the context is already cancelled")

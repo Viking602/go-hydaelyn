@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/tool"
 	"github.com/Viking602/venat/tool/tooltest"
 )
@@ -58,36 +59,28 @@ func TestToolWrapsFunctionAndGeneratesSchema(t *testing.T) {
 	}
 }
 
-func TestToolCarriesRuntimeGovernanceMetadata(t *testing.T) {
+func TestToolCarriesExecutionSettings(t *testing.T) {
 	type input struct {
 		Target string `json:"target"`
 	}
 	driver, err := Tool("deploy", func(context.Context, input) (string, error) {
 		return "ok", nil
 	},
-		Effect(tool.EffectExternalSideEffect),
-		RequiresActionTask(),
-		Idempotent(false),
+		Terminal(),
 		Timeout(5*time.Second),
-		Retry(tool.RetryPolicy{MaxAttempts: 2, Backoff: time.Second}),
-		PolicyTags("prod", "approval"),
-		RiskLevel("high"),
+		Concurrency(tool.ConcurrencySequential),
+		ConcurrencyGroup("deployments"),
+		MaxConcurrency(1),
 	)
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
 	def := driver.Definition()
-	if def.EffectType != tool.EffectExternalSideEffect || !def.RequiresActionTask {
-		t.Fatalf("expected action-gated side-effect metadata, got %#v", def)
+	if !def.Terminal || def.Timeout != 5*time.Second {
+		t.Fatalf("terminal/timeout settings = %#v", def)
 	}
-	if def.Timeout != 5*time.Second || def.RetryPolicy.MaxAttempts != 2 || def.RetryPolicy.Backoff != time.Second {
-		t.Fatalf("expected timeout/retry metadata, got %#v", def)
-	}
-	if len(def.PolicyTags) != 2 || def.PolicyTags[0] != "prod" || def.PolicyTags[1] != "approval" {
-		t.Fatalf("expected policy tags, got %#v", def.PolicyTags)
-	}
-	if def.RiskLevel != "high" {
-		t.Fatalf("expected risk level, got %q", def.RiskLevel)
+	if def.Concurrency != tool.ConcurrencySequential || def.ConcurrencyGroup != "deployments" || def.MaxConcurrency != 1 {
+		t.Fatalf("concurrency settings = %#v", def)
 	}
 }
 
@@ -96,7 +89,10 @@ func TestToolSupportsStreamingUpdates(t *testing.T) {
 		Name string `json:"name"`
 	}
 	driver, err := Tool("greeter", func(_ context.Context, in input, sink tool.UpdateSink) (map[string]string, error) {
-		if err := sink(tool.Update{Kind: "progress", Message: "started"}); err != nil {
+		if err := sink(tool.Update{Kind: tool.UpdateProgress, Message: "started"}); err != nil {
+			return nil, err
+		}
+		if err := sink(tool.Update{Kind: tool.UpdateOutput, Parts: []message.ContentPart{message.TextPart("hello " + in.Name)}}); err != nil {
 			return nil, err
 		}
 		return map[string]string{"message": "hello " + in.Name}, nil
@@ -104,22 +100,28 @@ func TestToolSupportsStreamingUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tool() error = %v", err)
 	}
-	updates := make([]tool.Update, 0, 1)
-	result, err := driver.Execute(context.Background(), tool.Call{
-		ID:        "call-1",
-		Name:      "greeter",
-		Arguments: json.RawMessage(`{"name":"mcp"}`),
-	}, func(update tool.Update) error {
-		updates = append(updates, update)
+	updates := make([]tool.Update, 0, 2)
+	result, err := tool.NewBus(driver).Execute(context.Background(), tool.Call{
+		ID:          "call-1",
+		Name:        "greeter",
+		OperationID: "turn:0:call:0",
+		Arguments:   json.RawMessage(`{"name":"mcp"}`),
+	}, tool.ExecuteOptions{Sink: func(update tool.Update) error {
+		updates = append(updates, tool.CloneUpdate(update))
 		return nil
-	})
+	}})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if len(updates) != 1 || updates[0].Kind != "progress" {
+	if len(updates) != 2 || updates[0].Kind != tool.UpdateProgress || updates[1].Kind != tool.UpdateOutput {
 		t.Fatalf("unexpected updates: %#v", updates)
 	}
-	if result.Name != "greeter" {
-		t.Fatalf("unexpected result name: %q", result.Name)
+	for index, update := range updates {
+		if update.ToolCallID != "call-1" || update.OperationID != "turn:0:call:0" || update.Sequence != uint64(index+1) {
+			t.Fatalf("update[%d] identity = %#v", index, update)
+		}
+	}
+	if result.Name != "greeter" || result.Content != "hello mcp" || len(result.Parts) != 1 {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 }

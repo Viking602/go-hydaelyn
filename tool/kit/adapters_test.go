@@ -104,6 +104,71 @@ func TestProcessToolCapturesStdoutAndStderr(t *testing.T) {
 	}
 }
 
+func TestProcessToolStreamsOutputBeforeReturning(t *testing.T) {
+	if os.Getenv("VENAT_PROCESS_STREAM_HELPER") == "1" {
+		_, _ = os.Stdout.WriteString("streamed")
+		os.Exit(0)
+	}
+
+	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestProcessToolStreamsOutputBeforeReturning$"},
+		Env:     append(os.Environ(), "VENAT_PROCESS_STREAM_HELPER=1"),
+	})
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	updates := make(chan tool.Update, 1)
+	type outcome struct {
+		result tool.Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := tool.NewBus(driver).Execute(context.Background(), tool.Call{
+			ID:          "call-process-stream",
+			Name:        "run",
+			OperationID: "turn:0:call:0",
+			Arguments:   json.RawMessage(`{}`),
+		}, tool.ExecuteOptions{Sink: func(update tool.Update) error {
+			updates <- tool.CloneUpdate(update)
+			<-release
+			return nil
+		}})
+		done <- outcome{result: result, err: err}
+	}()
+
+	var update tool.Update
+	select {
+	case update = <-updates:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process output update")
+	}
+	if update.Kind != tool.UpdateOutput || update.ToolCallID != "call-process-stream" ||
+		update.OperationID != "turn:0:call:0" || update.Sequence != 1 ||
+		len(update.Parts) != 1 || update.Parts[0].Text != "streamed" {
+		t.Fatalf("process update = %#v", update)
+	}
+	select {
+	case current := <-done:
+		t.Fatalf("Execute() returned before sink released: %#v", current)
+	default:
+	}
+	close(release)
+	current := <-done
+	if current.err != nil {
+		t.Fatalf("Execute() error = %v", current.err)
+	}
+	if current.result.Content != "streamed" || len(current.result.Parts) != 1 || current.result.Parts[0].Text != "streamed" {
+		t.Fatalf("process result = %#v", current.result)
+	}
+}
+
 func TestProcessToolDrainsPipeBeforeWait(t *testing.T) {
 	const payloadSize = 256 << 10
 	if os.Getenv("VENAT_PROCESS_DRAIN_HELPER") == "1" {
@@ -238,77 +303,28 @@ func TestProcessToolPreservesCommandContextCancel(t *testing.T) {
 	}
 }
 
-func TestHTTPToolCarriesRuntimeGovernanceMetadata(t *testing.T) {
-	driver := HTTPTool("remote", tool.Schema{Type: "object"}, HTTPToolConfig{URL: "https://example.test/tool"},
-		Effect(tool.EffectExternalSideEffect),
-		RequiresActionTask(),
-		RequiresApproval(),
-		RiskLevel("high"),
-		Idempotent(false),
-		Timeout(5*time.Second),
-		Retry(tool.RetryPolicy{MaxAttempts: 2, Backoff: time.Second}),
-		PolicyTags("prod", "approval"),
-		RequiredPermissions("network:egress"),
-	)
-
-	def := driver.Definition()
-	if def.Origin != "http" {
-		t.Fatalf("expected http origin, got %q", def.Origin)
+func TestAdapterToolsCarryExecutionSettings(t *testing.T) {
+	drivers := []tool.Driver{
+		HTTPTool("remote", tool.Schema{Type: "object"}, HTTPToolConfig{URL: "https://example.test/tool"},
+			Timeout(5*time.Second),
+			Concurrency(tool.ConcurrencySequential),
+			ConcurrencyGroup("adapters"),
+			MaxConcurrency(1),
+		),
+		ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{Command: "printf"},
+			Timeout(5*time.Second),
+			Concurrency(tool.ConcurrencySequential),
+			ConcurrencyGroup("adapters"),
+			MaxConcurrency(1),
+		),
 	}
-	assertGovernanceMetadata(t, def, false, "network:egress")
-}
-
-func TestProcessToolCarriesRuntimeGovernanceMetadata(t *testing.T) {
-	driver := ProcessTool("run", tool.Schema{Type: "object"}, ProcessToolConfig{Command: "printf"},
-		Effect(tool.EffectExternalSideEffect),
-		RequiresActionTask(),
-		RequiresApproval(),
-		RiskLevel("high"),
-		Idempotent(true),
-		Timeout(5*time.Second),
-		Retry(tool.RetryPolicy{MaxAttempts: 2, Backoff: time.Second}),
-		PolicyTags("prod", "approval"),
-		RequiredPermissions("process:exec"),
-	)
-
-	def := driver.Definition()
-	if def.Origin != "process" {
-		t.Fatalf("expected process origin, got %q", def.Origin)
-	}
-	assertGovernanceMetadata(t, def, true, "process:exec")
-}
-
-func assertGovernanceMetadata(t *testing.T, def tool.Definition, idempotent bool, permission string) {
-	t.Helper()
-
-	if def.EffectType != tool.EffectExternalSideEffect {
-		t.Fatalf("expected external side-effect metadata, got %#v", def)
-	}
-	if !def.RequiresActionTask {
-		t.Fatalf("expected action task requirement, got %#v", def)
-	}
-	if !def.RequiresApproval || !def.Security.RequiresApproval {
-		t.Fatalf("expected approval requirement in definition and security, got %#v", def)
-	}
-	if def.RiskLevel != "high" || def.Security.RiskLevel != "high" {
-		t.Fatalf("expected high risk level in definition and security, got %#v", def)
-	}
-	if def.Idempotent != idempotent || def.Security.Idempotent != idempotent {
-		t.Fatalf("expected idempotent %v in definition and security, got %#v", idempotent, def)
-	}
-	if def.Timeout != 5*time.Second {
-		t.Fatalf("expected timeout metadata, got %#v", def)
-	}
-	if def.RetryPolicy.MaxAttempts != 2 || def.RetryPolicy.Backoff != time.Second {
-		t.Fatalf("expected retry metadata, got %#v", def)
-	}
-	if len(def.PolicyTags) != 2 || def.PolicyTags[0] != "prod" || def.PolicyTags[1] != "approval" {
-		t.Fatalf("expected policy tags, got %#v", def.PolicyTags)
-	}
-	if len(def.RequiredPermissions) != 1 || def.RequiredPermissions[0] != permission {
-		t.Fatalf("expected required permission %q, got %#v", permission, def.RequiredPermissions)
-	}
-	if len(def.Security.RequiredPermissions) != 1 || def.Security.RequiredPermissions[0] != permission {
-		t.Fatalf("expected security required permission %q, got %#v", permission, def.Security.RequiredPermissions)
+	for _, driver := range drivers {
+		def := driver.Definition()
+		if def.Timeout != 5*time.Second {
+			t.Fatalf("%s timeout = %s, want 5s", def.Name, def.Timeout)
+		}
+		if def.Concurrency != tool.ConcurrencySequential || def.ConcurrencyGroup != "adapters" || def.MaxConcurrency != 1 {
+			t.Fatalf("%s concurrency settings = %#v", def.Name, def)
+		}
 	}
 }

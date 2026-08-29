@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/tool"
 )
 
@@ -33,7 +34,7 @@ type HTTPToolConfig struct {
 }
 
 func HTTPTool(name string, schema tool.Schema, cfg HTTPToolConfig, options ...ToolOption) tool.Driver {
-	config := toolConfig{origin: "http"}
+	config := toolConfig{}
 	for _, option := range options {
 		option(&config)
 	}
@@ -76,10 +77,9 @@ func HTTPTool(name string, schema tool.Schema, cfg HTTPToolConfig, options ...To
 	return driver
 }
 
-// ProcessToolConfig describes an unsandboxed local process. Prefer
-// coding.Workspace command tools when the caller is a model: this helper
-// does not apply an argv allowlist. When Env is empty the child receives a
-// minimal PATH/HOME/LANG environment instead of the parent process env.
+// ProcessToolConfig describes an unsandboxed local process. This helper does
+// not apply an argv allowlist. When Env is empty the child receives a minimal
+// PATH/HOME/LANG environment instead of the parent process environment.
 type ProcessToolConfig struct {
 	Command   string
 	Args      []string
@@ -89,14 +89,14 @@ type ProcessToolConfig struct {
 }
 
 func ProcessTool(name string, schema tool.Schema, cfg ProcessToolConfig, options ...ToolOption) tool.Driver {
-	config := toolConfig{origin: "process"}
+	config := toolConfig{}
 	for _, option := range options {
 		option(&config)
 	}
 	return staticDriver{
 		definition: definitionFromConfig(name, schema, config),
-		execute: func(ctx context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
-			output, err := runProcess(ctx, cfg, call.Arguments)
+		execute: func(ctx context.Context, call tool.Call, sink tool.UpdateSink) (tool.Result, error) {
+			output, err := runProcess(ctx, cfg, call.Arguments, sink)
 			if err != nil {
 				return tool.Result{}, err
 			}
@@ -126,7 +126,7 @@ func readLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
 	return body, nil
 }
 
-func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byte, error) {
+func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte, sink tool.UpdateSink) ([]byte, error) {
 	commandCtx, cancel := context.WithCancel(ctx)
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		commandCtx, cancel = context.WithTimeout(ctx, defaultProcessTimeout)
@@ -172,7 +172,7 @@ func runProcess(ctx context.Context, cfg ProcessToolConfig, input []byte) ([]byt
 		return nil, errors.Join(err, command.Wait())
 	}
 
-	output := &limitedOutputBuffer{max: defaultMaxProcessOutputBytes}
+	output := &limitedOutputBuffer{max: defaultMaxProcessOutputBytes, sink: sink}
 	copyErrs := make(chan error, 2)
 	copyOutput := func(reader io.ReadCloser) {
 		_, copyErr := io.Copy(output, reader)
@@ -266,6 +266,7 @@ type limitedOutputBuffer struct {
 	mu       sync.Mutex
 	buf      bytes.Buffer
 	max      int64
+	sink     tool.UpdateSink
 	tooLarge bool
 }
 
@@ -277,11 +278,31 @@ func (b *limitedOutputBuffer) Write(p []byte) (int, error) {
 		remaining := int(b.max) - b.buf.Len()
 		if remaining > 0 {
 			_, _ = b.buf.Write(p[:remaining])
+			if err := b.emit(p[:remaining]); err != nil {
+				return remaining, err
+			}
 		}
 		b.tooLarge = true
 		return len(p), errProcessOutputTooLarge
 	}
-	return b.buf.Write(p)
+	written, err := b.buf.Write(p)
+	if err != nil {
+		return written, err
+	}
+	if err := b.emit(p[:written]); err != nil {
+		return written, err
+	}
+	return written, nil
+}
+
+func (b *limitedOutputBuffer) emit(chunk []byte) error {
+	if b.sink == nil || len(chunk) == 0 {
+		return nil
+	}
+	return b.sink(tool.Update{
+		Kind:  tool.UpdateOutput,
+		Parts: []message.ContentPart{message.TextPart(string(chunk))},
+	})
 }
 
 func (b *limitedOutputBuffer) Bytes() []byte {

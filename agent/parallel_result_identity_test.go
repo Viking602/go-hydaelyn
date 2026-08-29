@@ -40,7 +40,7 @@ func TestDispatchPreparedToolsPreservesParallelResultIdentityAfterEarlierFailure
 	results, err := engine.dispatchPreparedTools(context.Background(), []tool.Call{
 		{ID: "call-1", Name: "first"},
 		{ID: "call-2", Name: "second"},
-	}, tool.ModeParallel)
+	}, tool.ModeParallel, nil)
 
 	if !errors.Is(err, errParallelToolFailure) {
 		t.Fatalf("dispatchPreparedTools() error = %v, want %v", err, errParallelToolFailure)

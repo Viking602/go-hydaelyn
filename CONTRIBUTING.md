@@ -1,107 +1,106 @@
 # Contributing to Venat
 
-This document defines the coding standards for the Venat repository.
+Venat is a small, typed Agent SDK. Changes must preserve the direct package graph, observable contracts, and optional nature of durability.
 
-## Formatting
+## Setup
 
-Use `gofmt`. It is the only sanctioned formatter.
+Requirements:
+
+- Go 1.25 or newer
+- `goimports`
+- `golangci-lint`
+- `staticcheck`
+- `govulncheck`
+- `sentrux` with the Go plugin for architecture checks
+
+Run:
 
 ```bash
-gofmt -w .
+go mod download
+make verify
 ```
 
-No other formatters (gofumpt, goimports in write mode) are required or recommended.
-
-## File Naming
-
-### Anti-Stutter Rule
-
-Avoid repeating the package name in file or symbol names. Rely on package context instead.
-
-```go
-// package deepsearch
-// GOOD: task.go (not deepsearch_task.go)
-// GOOD: registry.go (not deepsearch_registry.go)
-
-// package worker
-// GOOD: worker.go (the file contains worker execution glue)
-```
-
-### Package-Context Naming
-
-Names should make sense at the call site. When a type or function is used through its package, the combination should read naturally.
-
-```go
-// GOOD: venat.New(), venat.Config, venat.Runner
-// The root package provides the runner, not "venat.VenatRunner"
-
-// GOOD: team.Profile, team.RoleSupervisor
-// "team" context makes "Profile" and "Role" clear
-```
-
-### Responsibility-Based File Names
-
-Name files after what they contain, not generic categories.
-
-```go
-// GOOD: registry.go (contains registry logic)
-// GOOD: supervisor.go (contains supervisor orchestration)
-// AVOID: types.go, utils.go, helpers.go (vague)
-```
-
-### When to Split Files
-
-Split files only when there is a clean responsibility seam. Do not split by size alone.
-
-```go
-// GOOD: Separate files for distinct components
-//   - registry.go (pattern registry)
-//   - supervisor.go (supervisor orchestration)
-//   - worker.go (worker task execution)
-
-// AVOID: Splitting just because a file exceeds N lines
-```
-
-### Runner/Core Files
-
-Prefer `runner` for public entrypoint naming and `core` for internal mechanism.
-Use `runtime` only for historical compatibility aliases or when it is the
-clearest domain term in surrounding context.
-
-```go
-// GOOD: venat.Runner, worker.AgentWorker, internal/core
-// AVOID: NewRuntime-style names for new public APIs
-```
-
-## Verification Commands
-
-Before submitting changes, run the local CI parity gate with Go 1.25.10:
+Before a substantial change, run:
 
 ```bash
 make ci-local
 ```
 
-This target runs formatting, module-tidy, `go vet`, `staticcheck`,
-`govulncheck`, `golangci-lint`, normal tests, race tests, Sentrux, and
-the framework boundary scripts.
+## Package boundaries
 
-## Guardrails
+Production capability families are exhaustive:
 
-These constraints apply to all changes:
+- `message`
+- `provider`
+- `tool`
+- `skill`
+- `agent`
+- `orchestration`
+- `durable`
 
-1. **No package/directory renames** - Current package structure is stable
-2. **No exported symbol renames** - Public API changes require explicit approval
-3. **No new linting stack** - Keep linting centralized in `.golangci.yml`, CI, and the existing Makefile targets
+Examples, documentation, scripts, and the nested durable conformance package are supporting surfaces rather than new capability families. Applications are the composition root.
 
-## Architecture
+Read [docs/architecture-boundaries.md](docs/architecture-boundaries.md) before adding imports or directories. Do not bypass a boundary with aliases, bridge packages, generated code, or test-only reverse imports.
 
-Live import seams, ownership rules, and the six principles are in
-[docs/architecture-boundaries.md](docs/architecture-boundaries.md).
-`make verify` and `make architecture-check` enforce them.
+## API design
 
-## References
+- Prefer package-context names that read naturally at call sites.
+- Add an interface only with its second implementation.
+- Export a symbol only with its first non-test consumer outside the package.
+- Avoid generic files such as `types.go`, `helpers.go`, or `utils.go`.
+- Use typed result values instead of exported `[]any`.
+- Add `// godoc-allow-any` only for a genuinely open public field.
+- Make ownership explicit: clone mutable inputs before retaining them and return ownership-independent values.
+- Preserve context cancellation and deterministic ordering.
+- Keep policy, identity, schema, deployment, and domain vocabulary in applications.
 
-- [Architecture Boundaries](docs/architecture-boundaries.md)
-- [Effective Go](https://go.dev/doc/effective_go) - Official Go style guide
-- [Package Names](https://go.dev/blog/package-names) - Go blog on package naming conventions
-- [Google Go Style Guide](https://google.github.io/styleguide/go/) - Comprehensive Go conventions
+Breaking clean cutovers update every in-repository caller and remove obsolete code. Do not leave compatibility aliases or deprecated paths unless an accepted decision explicitly requires them.
+
+## Testing
+
+Use the standard `testing` package. Keep tests beside the package and name them `TestThing_Behavior`. Mark helpers with `t.Helper()` and use `errors.Is` / `errors.As` for typed error contracts.
+
+Tests should defend observable behavior, boundaries, invariants, transitions, and real failure modes. Avoid tests of source text or incidental implementation details.
+
+Relevant focused commands:
+
+```bash
+go test ./agent ./message ./provider/... ./tool/... ./skill/...
+go test ./orchestration
+go test ./durable/...
+```
+
+Every durable backend must run `durable/contract.RunBackendContractTests`, including its process-reopen path.
+
+## Formatting and verification
+
+Go files and the Makefile use tabs. Markdown uses two-space list continuation where needed, LF endings, and final newlines.
+
+```bash
+make fmt
+make verify
+make ci-local
+```
+
+Architecture checks are fail-closed. A missing required package scope is a failure, not an empty success.
+
+## Commits and pull requests
+
+Use Conventional Commits with a focused scope, for example:
+
+```text
+feat(agent): add continuation boundary
+fix(durable): fence stale attempt settlement
+test(orchestration): cover deterministic concurrent fold
+docs(migration): explain direct package cutover
+```
+
+A pull request should:
+
+- explain the behavioral need and chosen boundary
+- identify public API or backend-contract impact
+- list exact validation commands run
+- include migration guidance for breaking changes
+- link the relevant issue or architecture decision
+
+Do not include generated-by or AI co-author attribution in commit messages or pull request bodies.

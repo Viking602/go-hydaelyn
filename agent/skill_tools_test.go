@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
@@ -47,7 +46,7 @@ func TestBuildAvailableSkillsDisclosesCatalogWithoutBody(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "inspect a PDF"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "inspect a PDF"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run() failure = %v", result.Failure)
 	}
@@ -93,7 +92,7 @@ func TestSkillActivationLoadsBodyOnce(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "process"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "process"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run() failure = %v", result.Failure)
 	}
@@ -126,7 +125,7 @@ func TestSkillActivationAuthorizationRestoresWithoutChangingProviderPrefix(t *te
 		Provider: firstProvider, Model: "m", AvailableSkills: []skill.Skill{loaded},
 		LoopPolicy: LoopPolicy{MaxIterations: 2},
 	}
-	firstResult := first.Run(context.Background(), api.Task{Goal: "activate"}, OutputPolicy{})
+	firstResult := first.Run(context.Background(), Request{Prompt: "activate"}, OutputPolicy{})
 	if firstResult.Failure != nil {
 		t.Fatalf("first run failure = %v", firstResult.Failure)
 	}
@@ -141,12 +140,12 @@ func TestSkillActivationAuthorizationRestoresWithoutChangingProviderPrefix(t *te
 	second := Engine{
 		Provider: secondProvider, Model: "m", AvailableSkills: []skill.Skill{loaded},
 		LoopPolicy: LoopPolicy{MaxIterations: 2},
-		ContextBuilder: ContextBuilderFunc(func(context.Context, api.Task) ([]message.Message, error) {
+		ContextBuilder: ContextBuilderFunc(func(context.Context, Request) ([]message.Message, error) {
 			history := message.CloneMessages(firstResult.Messages)
 			return append(history, message.NewText(message.RoleUser, "read the resource")), nil
 		}),
 	}
-	secondResult := second.Run(context.Background(), api.Task{Goal: "continue"}, OutputPolicy{})
+	secondResult := second.Run(context.Background(), Request{Prompt: "continue"}, OutputPolicy{})
 	if secondResult.Failure != nil {
 		t.Fatalf("second run failure = %v", secondResult.Failure)
 	}
@@ -226,7 +225,7 @@ func TestSkillCompactorDoesNotDuplicatePreservedActivationResult(t *testing.T) {
 		message.NewText(message.RoleAssistant, "activating"),
 		message.NewToolResult(result),
 	}
-	engine := Engine{ContextBuilder: ContextBuilderFunc(func(context.Context, api.Task) ([]message.Message, error) {
+	engine := Engine{ContextBuilder: ContextBuilderFunc(func(context.Context, Request) ([]message.Message, error) {
 		return nil, nil
 	})}
 	compacted, err := engine.compactor(runtime)(context.Background(), history)
@@ -322,22 +321,22 @@ func TestSkillResourceToolRequiresActivationAndReadsManifest(t *testing.T) {
 		t.Fatalf("attachTools() error = %v", err)
 	}
 	read := message.ToolCall{ID: "read", Name: readSkillResourceToolName, Arguments: json.RawMessage(`{"skill":"resource-skill","path":"references/guide.md"}`)}
-	blocked, err := bus.Execute(context.Background(), read, nil)
+	blocked, err := bus.Execute(context.Background(), read, tool.ExecuteOptions{})
 	if err != nil || !blocked.IsError || !strings.Contains(blocked.Content, "not active") {
 		t.Fatalf("read before activation = %#v, %v, want error result", blocked, err)
 	}
 	activate := message.ToolCall{ID: "activate", Name: activateSkillToolName, Arguments: json.RawMessage(`{"name":"resource-skill"}`)}
-	if _, err := bus.Execute(context.Background(), activate, nil); err != nil {
+	if _, err := bus.Execute(context.Background(), activate, tool.ExecuteOptions{}); err != nil {
 		t.Fatalf("activate error = %v", err)
 	}
-	result, err := bus.Execute(context.Background(), read, nil)
+	result, err := bus.Execute(context.Background(), read, tool.ExecuteOptions{})
 	if err != nil || result.Content != "resource body" {
 		t.Fatalf("read after activation = %q, %v", result.Content, err)
 	}
 	missing, err := bus.Execute(context.Background(), message.ToolCall{
 		ID: "read-skill-md", Name: readSkillResourceToolName,
 		Arguments: json.RawMessage(`{"skill":"resource-skill","path":"SKILL.md"}`),
-	}, nil)
+	}, tool.ExecuteOptions{})
 	if err != nil || !missing.IsError || !strings.Contains(missing.Content, "SKILL.md") {
 		t.Fatalf("SKILL.md read = %#v, %v, want error result", missing, err)
 	}
@@ -362,7 +361,7 @@ func TestRunContinuesAfterUndeclaredSkillResource(t *testing.T) {
 	result := (Engine{
 		Provider: driver, Model: "test-model", Skills: []skill.Skill{loaded},
 		LoopPolicy: LoopPolicy{MaxIterations: 3},
-	}).Run(context.Background(), api.Task{Goal: "read the skill"}, OutputPolicy{})
+	}).Run(context.Background(), Request{Prompt: "read the skill"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("SKILL.md miss failed the run: %#v", result.Failure)
 	}
@@ -404,6 +403,7 @@ func assertParallelSkillActivationAndRead(t *testing.T, loaded skill.Skill, acti
 		context.Background(),
 		[]tool.Call{activate, read},
 		tool.ModeParallel,
+		nil,
 	)
 	if err != nil || len(results) != 2 || results[1].Content != "resource body" {
 		t.Fatalf("parallel-mode activate/read = %#v, %v", results, err)
@@ -449,7 +449,7 @@ func hasToolDefinition(definitions []message.ToolDefinition, name string) bool {
 
 type droppingContextManager struct{}
 
-func (droppingContextManager) Build(context.Context, api.Task) ([]message.Message, error) {
+func (droppingContextManager) Build(context.Context, Request) ([]message.Message, error) {
 	return nil, nil
 }
 
@@ -459,7 +459,7 @@ func (droppingContextManager) Compact(context.Context, []message.Message) ([]mes
 
 type summarizingSkillContextManager struct{}
 
-func (summarizingSkillContextManager) Build(context.Context, api.Task) ([]message.Message, error) {
+func (summarizingSkillContextManager) Build(context.Context, Request) ([]message.Message, error) {
 	return nil, nil
 }
 

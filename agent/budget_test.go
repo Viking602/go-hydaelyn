@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
@@ -323,9 +322,9 @@ func TestRunMessagesBudgetNotChargedWhenRunFinishes(t *testing.T) {
 
 func TestEngineRunMapsBudgetExhaustionToFailure(t *testing.T) {
 	engine := newLoopToolEngine(t, &alwaysToolProvider{})
-	engine.LoopPolicy = LoopPolicy{Budget: &api.TaskBudget{MaxToolCalls: 2}}
+	engine.LoopPolicy = LoopPolicy{Budget: &Budget{MaxToolCalls: 2}}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "loop"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "loop"}, OutputPolicy{})
 
 	if result.Failure == nil || result.Failure.Kind != FailureKindBudgetExhausted {
 		t.Fatalf("Failure = %#v, want budget_exhausted", result.Failure)
@@ -338,12 +337,9 @@ func TestEngineRunMapsBudgetExhaustionToFailure(t *testing.T) {
 func TestEngineRunPerTaskBudgetOverridesLoopPolicy(t *testing.T) {
 	engine := newLoopToolEngine(t, &alwaysToolProvider{})
 	// The engine default would allow five tool calls; the task tightens it to one.
-	engine.LoopPolicy = LoopPolicy{Budget: &api.TaskBudget{MaxToolCalls: 5}}
+	engine.LoopPolicy = LoopPolicy{Budget: &Budget{MaxToolCalls: 5}}
 
-	result := engine.Run(context.Background(), api.Task{
-		Goal:   "loop",
-		Budget: &api.TaskBudget{MaxToolCalls: 1},
-	}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "loop", Budget: &Budget{MaxToolCalls: 1}}, OutputPolicy{})
 
 	if result.Failure == nil || result.Failure.Kind != FailureKindBudgetExhausted {
 		t.Fatalf("Failure = %#v, want budget_exhausted", result.Failure)
@@ -358,12 +354,9 @@ func TestEngineRunTaskBudgetIsAuthoritativeAndDoesNotInheritEngineCaps(t *testin
 	// The engine default caps tool calls at 2 and allows up to 5 iterations.
 	// The task supplies its own Budget that bounds only tokens, leaving
 	// MaxToolCalls zero — which the api.TaskBudget contract defines as unbounded.
-	engine.LoopPolicy = LoopPolicy{MaxIterations: 5, Budget: &api.TaskBudget{MaxToolCalls: 2}}
+	engine.LoopPolicy = LoopPolicy{MaxIterations: 5, Budget: &Budget{MaxToolCalls: 2}}
 
-	result := engine.Run(context.Background(), api.Task{
-		Goal:   "loop",
-		Budget: &api.TaskBudget{MaxTokens: 1000},
-	}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "loop", Budget: &Budget{MaxTokens: 1000}}, OutputPolicy{})
 
 	// A present task budget is authoritative: its zero MaxToolCalls means
 	// unbounded, so the engine's cap of 2 must NOT be inherited (under the old
@@ -388,12 +381,12 @@ func TestEngineRepairStopsWhenBudgetExhaustedBeforeAttempt(t *testing.T) {
 		`{"status":"blocked","score":0.75,"count":2,"tags":["risk"],"accepted":true}`,
 		`{"status":"ok","score":0.75,"count":2,"tags":["risk"],"accepted":true}`,
 	)
-	engine.LoopPolicy = LoopPolicy{Budget: &api.TaskBudget{MaxSteps: 1}}
+	engine.LoopPolicy = LoopPolicy{Budget: &Budget{MaxSteps: 1}}
 	policy := outputPolicyReport()
 	policy.Repair = true
 	policy.MaxRepairAttempts = 2
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, policy)
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, policy)
 
 	if result.Failure == nil || result.Failure.Kind != FailureKindBudgetExhausted {
 		t.Fatalf("Failure = %#v, want budget_exhausted before repair", result.Failure)

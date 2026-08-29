@@ -1,42 +1,26 @@
-# Venat Active Plan
+# Active plan
 
-## Release state
+## Agent SDK, optional durability, and streaming cutover
 
-- v0.15.4 is the latest published release.
-- v0.16.0 is the active release candidate on `release/v0.16.0`.
-- Production pack content, OpenTelemetry, and application artifact backends
-  remain in the unversioned backlog.
+Status: implementation complete; focused tests, executable smoke scenarios, architecture proof, `make verify`, and `make ci-local` passed on 2026-08-29.
 
-See the [product specification index](../product-spec/README.md), the
-[v0.16.0 candidate notes](../release-notes/v0.16.0.md), and the
-[v0.15.4 release notes](../release-notes/v0.15.4.md).
+Sources of truth: [ADR-029](../adr/ADR-029-agent-sdk-and-optional-durable-runtime.md) for package placement, [ADR-030](../adr/ADR-030-stream-lifecycle-semantics.md) for streaming lifecycle/replay semantics, and the approved refactor plan for the implementation sequence.
 
-## Current candidate scope
+### Deliverables
 
-v0.16.0 completes deprecated-package and intermediate-façade removals, deletes
-the redundant Flow/workflow and speculative built-in DAG surfaces in favor of
-the `Scheduler` protocol, hardens response publication and worker recovery, and
-ships the Experimental Harness/session contract with durable lane ownership.
-It does not add Harness tools/hooks/budgets or move deferred artifact/memory
-pipeline work into the kernel.
+- [x] Application-neutral `agent.Request`, hooks, output frames, strict v1 continuation codec, resume, and effect interception.
+- [x] Policy-free `orchestration` scheduler, application catalog/event examples, and bounded deterministic drive loop.
+- [x] Execution-semantic `durable.Backend`, diagnostic conformance suite, private test backend, `durable.Runtime`, targeted resume, and application-owned approval example.
+- [x] Direct-import package graph, executable examples, current documentation, migration guidance, and fail-closed absence/boundary gates.
+- [x] Bounded real-time tool updates across tool, Agent frames, and transient durable semantics.
+- [x] ADR-030 stream lifecycle documentation and P2 focused verification.
+- [x] Final example smoke, package-graph proof, `make verify`, and `make ci-local`.
 
-## Release gates
+### Acceptance
 
-Before creating the v0.16.0 release commit or tag:
-
-1. Run focused changed-contract tests.
-2. Run `make verify`; it includes `architecture-check`.
-3. Run `make ci-local` for staticcheck, vulnerability, and race parity.
-4. Confirm release-note links and removed-API migration entries resolve.
-5. Create the release commit only from a clean candidate tree.
-6. Merge the candidate to `main` before pushing the annotated `v0.16.0` tag.
-
-Candidate evidence on 2026-08-28: gates 1–4 pass. The release commit, merge,
-tag, push, and GitHub Release remain intentionally unperformed during
-preparation.
-
-## Deferred work
-
-Advanced schedulers, memory pipelines, artifact storage, OpenTelemetry
-integration, and production pack content remain in the
-[unversioned future backlog](./future-backlog.md).
+- The production package graph contains only the approved capability families.
+- Agent and orchestration package dependencies do not include durability.
+- An application can execute one Agent without adopting persistence or orchestration.
+- An injected backend can recover checkpoints, replay settled effects, and block unknown effects until explicit reconciliation.
+- All examples execute as normal packages included by `go test ./...`.
+- Current documentation recommends only direct imports and application-owned composition.

@@ -31,8 +31,7 @@ go get github.com/Viking602/venat@v0.12.0
   - validates Go module major-version rules
   - validates release-note status and stable-release README metadata
   - runs the full test, race, static-analysis, vulnerability, architecture, and soak gates
-  - installs the tagged CLI with `GOPROXY=direct` and checks its reported version and command behavior
-  - builds and tests a temporary consumer module against the same tag
+  - builds and tests temporary direct Agent SDK and injected Durable consumers against the same tag
   - reads the remote tag again after all gates and creates a GitHub Release only
     when its final commit still matches the gated commit
   - marks prerelease tags correctly and prepends the checked-in release notes
@@ -70,19 +69,14 @@ git push origin v0.1.0
    lightweight and annotated tags, records the gated commit, then fetches the
    remote tag again immediately before release creation. A moved tag or a tag
    that leaves `origin/main` stops the release.
-7. Confirm the installed runtime reports the pushed tag:
+7. Confirm the tagged direct-import consumer gate passed. To inspect resolution manually:
 
 ```bash
-tmp_bin="$(mktemp -d)"
-GOBIN="$tmp_bin" GOPROXY=direct \
-  go install github.com/Viking602/venat/cmd/venat@v0.12.0
-test "$("$tmp_bin/venat" version)" = "v0.12.0"
-"$tmp_bin/venat" --help
-rm -rf "$tmp_bin"
+go list -m github.com/Viking602/venat@v0.12.0
 ```
 
-8. Confirm the GitHub Release exists and
-   `go list -m github.com/Viking602/venat@v0.12.0` resolves.
+8. Confirm the GitHub Release exists and the resolved module version matches the pushed tag.
+
 
 ## Updating release tooling
 

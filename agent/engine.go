@@ -7,38 +7,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
-	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
-	"github.com/Viking602/venat/stream"
 	"github.com/Viking602/venat/tool"
 )
 
-// Run drives the agent loop against one api.Task under the supplied
-// OutputPolicy. The typed Failure on the returned Result is the only
-// surface a failure crosses to the multi-agent layer (boundaries
-// Principle 6); Run intentionally does not return a bare error.
-//
-// When OutputPolicy.Validate is set with a Schema, Run validates the
-// terminal assistant JSON against that schema and, when requested,
-// re-prompts the model with validation feedback up to
-// MaxRepairAttempts.
-func (e Engine) Run(ctx context.Context, task api.Task, policy OutputPolicy) Result {
-	return e.run(ctx, task, policy, nil)
+// Run executes one Request under the supplied OutputPolicy.
+func (e Engine) Run(ctx context.Context, request Request, policy OutputPolicy) Result {
+	return e.run(ctx, request, policy, nil)
 }
 
-// RunStream is Run with a live stream.Sink attached: the Sink receives a
-// Frame for every provider event and tool result as the loop runs, while
-// the returned Result is byte-for-byte identical to Run's. The stream is a
-// transient side-channel (final-state-only durability) — it never changes
-// what the runner persists or replays. Pass nil to fall back to Run.
-func (e Engine) RunStream(ctx context.Context, task api.Task, policy OutputPolicy, sink stream.Sink) Result {
-	return e.run(ctx, task, policy, sink)
+// RunStream is Run with a transient live output Sink.
+func (e Engine) RunStream(ctx context.Context, request Request, policy OutputPolicy, sink Sink) Result {
+	return e.run(ctx, request, policy, sink)
 }
 
-func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sink stream.Sink) Result {
-	runCtx, cancelRun, budgetDriven := e.runContext(ctx, task)
+func (e Engine) run(ctx context.Context, request Request, policy OutputPolicy, sink Sink) Result {
+	started := time.Now()
+	runCtx, cancelRun, budgetDriven := e.runContext(ctx, request)
 	defer cancelRun()
 	runtime := newSkillRuntime(e.Skills, e.AvailableSkills)
 	e.AvailableSkills = runtime.availableSkills()
@@ -48,7 +34,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		return Result{Failure: (&AgentFailure{Kind: FailureKindEngineError, Reason: err.Error()}).WithCause(err)}
 	}
 
-	messages, err := e.buildContext(runCtx, task)
+	messages, err := e.buildContext(runCtx, request)
 	if err != nil {
 		kind := FailureKindContextBuildFailed
 		if budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
@@ -63,7 +49,7 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 	}
 	runtime.restoreActivations(messages)
 
-	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(task)
+	maxTokens, maxToolCalls, maxSteps := e.budgetLimits(request)
 	compact, compactTo := e.compactors(runtime)
 	input := LoopInput{
 		Model:               e.Model,
@@ -85,32 +71,30 @@ func (e Engine) run(ctx context.Context, task api.Task, policy OutputPolicy, sin
 		PromptCacheKey:      e.PromptCacheKey,
 		ServiceTier:         e.ServiceTier,
 		ParallelToolCalls:   cloneBoolPointer(e.ParallelToolCalls),
-		NativeToolHost:      e.NativeToolHost,
 		ContextUsage:        e.ContextUsage,
-		Control:             e.Control,
-		ContextTransition:   e.ContextTransition,
-		AppliedControlIDs:   append([]string(nil), e.AppliedControlIDs...),
 		OutputGuardrails:    e.OutputGuardrails,
-		OutputRecorder:      e.OutputRecorder,
+		OutputObserver:      e.OutputObserver,
 		Sink:                sink,
-		StepPolicy:          e.StepPolicy,
-		StepRecorder:        e.StepRecorder,
-		CheckpointRecorder:  e.CheckpointRecorder,
+		StepDecider:         e.StepDecider,
+		StepObserver:        e.StepObserver,
 		Compact:             compact,
 		CompactTo:           compactTo,
+		continuationRequest: cloneRequest(request),
+		continuationPolicy:  policy,
+		segmentStarted:      started,
 	}
 
 	output, runErr := e.RunMessages(runCtx, input)
 	if runErr != nil {
 		return Result{
-			Messages:                 output.Messages,
-			Usage:                    output.Usage,
-			ExternallyAccountedUsage: output.ExternallyAccountedUsage,
-			StopReason:               output.StopReason,
-			Thinking:                 output.Thinking,
-			ToolCallsUsed:            output.ToolCallsUsed,
-			Steps:                    output.Steps,
-			Failure:                  loopErrorFailure(runCtx, runErr, budgetDriven),
+			Messages:      output.Messages,
+			Usage:         output.Usage,
+			StopReason:    output.StopReason,
+			Thinking:      output.Thinking,
+			ToolCallsUsed: output.ToolCallsUsed,
+			RepairCount:   output.RepairCount,
+			Steps:         output.Steps,
+			Failure:       loopErrorFailure(runCtx, runErr, budgetDriven),
 		}
 	}
 
@@ -133,62 +117,46 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 	if validationErr == nil {
 		return result
 	}
-	if !policy.Repair || policy.MaxRepairAttempts <= 0 {
+	if !policy.Repair || output.RepairCount >= policy.MaxRepairAttempts {
 		result.Failure = schemaInvalidFailure(validationErr)
+		if policy.Repair && policy.MaxRepairAttempts > 0 {
+			result.Failure = &AgentFailure{
+				Kind:   FailureKindRepairFailed,
+				Reason: fmt.Sprintf("structured output repair failed after %d attempt(s): %s", output.RepairCount, validationErr),
+			}
+		}
 		return result
 	}
 
-	totalUsage := output.Usage
-	externallyAccountedUsage := output.ExternallyAccountedUsage
-	accumulatedSteps := output.Steps
-	toolCallsUsed := output.ToolCallsUsed
-	for repairCount := 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
-		// The loop budget spans the whole run, repairs included. Charge what
-		// the initial run and prior repairs already spent before issuing the
-		// next model call; if nothing is left, fail before calling out rather
-		// than overspending the budget on a repair turn.
-		repairInput, dimension := budgetRemaining(input, totalUsage, toolCallsUsed, len(accumulatedSteps))
-		if dimension != "" {
-			result.Usage = totalUsage
-			result.Steps = accumulatedSteps
-			result.ExternallyAccountedUsage = externallyAccountedUsage
+	for repairCount := output.RepairCount + 1; repairCount <= policy.MaxRepairAttempts; repairCount++ {
+		if _, dimension := budgetRemaining(input, output.Usage, output.ToolCallsUsed, len(output.Steps)); dimension != "" {
+			result.Usage = output.Usage
+			result.Steps = cloneSteps(output.Steps)
+			result.Messages = message.CloneMessages(output.Messages)
+			result.ToolCallsUsed = output.ToolCallsUsed
 			result.RepairCount = repairCount - 1
 			result.Failure = &AgentFailure{
-				Kind:      FailureKindBudgetExhausted,
-				Reason:    fmt.Sprintf("loop budget exhausted before repair attempt %d: %s", repairCount, dimension),
-				Retryable: false,
+				Kind:   FailureKindBudgetExhausted,
+				Reason: fmt.Sprintf("loop budget exhausted before repair attempt %d: %s", repairCount, dimension),
 			}
 			return result
 		}
-		if input.StepRecorder != nil {
-			recorder := input.StepRecorder
-			indexOffset := len(accumulatedSteps)
-			repairInput.StepRecorder = StepRecorderFunc(func(ctx context.Context, step Step) error {
-				step.Index += indexOffset
-				return recorder.RecordStep(ctx, step)
-			})
-		}
-		repairInput.Messages = append(cloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
+
+		repairInput := input
+		repairInput.Messages = append(message.CloneMessages(output.Messages), repairInstructionMessage(policy.Schema, validationErr))
+		repairInput.OperationTurn = output.NextOperationTurn
+		repairInput.initialUsage = output.Usage
+		repairInput.initialSteps = cloneSteps(output.Steps)
+		repairInput.initialToolCallsUsed = output.ToolCallsUsed
+		repairInput.activeElapsed = output.ActiveElapsed
+		repairInput.segmentStarted = time.Now()
+		repairInput.repairCount = repairCount
 		repairOutput, repairErr := e.RunMessages(ctx, repairInput)
 		if repairErr != nil {
-			return Result{
-				Messages:                 repairOutput.Messages,
-				Usage:                    totalUsage.Add(repairOutput.Usage),
-				ExternallyAccountedUsage: externallyAccountedUsage.Add(repairOutput.ExternallyAccountedUsage),
-				StopReason:               repairOutput.StopReason,
-				Thinking:                 repairOutput.Thinking,
-				Steps:                    appendReindexedSteps(accumulatedSteps, repairOutput.Steps),
-				RepairCount:              repairCount,
-				Failure:                  loopErrorFailure(ctx, repairErr, budgetDriven),
-			}
+			failed := resultFromLoopOutput(repairOutput, repairCount)
+			failed.Failure = loopErrorFailure(ctx, repairErr, budgetDriven)
+			return failed
 		}
-		totalUsage = totalUsage.Add(repairOutput.Usage)
-		externallyAccountedUsage = externallyAccountedUsage.Add(repairOutput.ExternallyAccountedUsage)
-		toolCallsUsed += repairOutput.ToolCallsUsed
-		accumulatedSteps = appendReindexedSteps(accumulatedSteps, repairOutput.Steps)
-		repairOutput.Usage = totalUsage
-		repairOutput.ExternallyAccountedUsage = externallyAccountedUsage
-		repairOutput.Steps = accumulatedSteps
 		output = repairOutput
 		result = resultFromLoopOutput(output, repairCount)
 		validationErr = validateResultStructuredOutput(&result, schema)
@@ -198,39 +166,24 @@ func (e Engine) validateAndRepairStructuredOutput(ctx context.Context, input Loo
 	}
 
 	result.Failure = &AgentFailure{
-		Kind:      FailureKindRepairFailed,
-		Reason:    fmt.Sprintf("structured output repair failed after %d attempt(s): %s", policy.MaxRepairAttempts, validationErr),
-		Retryable: false,
+		Kind:   FailureKindRepairFailed,
+		Reason: fmt.Sprintf("structured output repair failed after %d attempt(s): %s", policy.MaxRepairAttempts, validationErr),
 	}
-
 	return result
 }
 
 func resultFromLoopOutput(output LoopOutput, repairCount int) Result {
 	return Result{
-		Text:                     finalAssistantTextFromMessages(output.Messages),
-		Thinking:                 output.Thinking,
-		Usage:                    output.Usage,
-		ExternallyAccountedUsage: output.ExternallyAccountedUsage,
-		StopReason:               output.StopReason,
-		Messages:                 output.Messages,
-		Steps:                    output.Steps,
-		ToolCallsUsed:            output.ToolCallsUsed,
-		Valid:                    true,
-		RepairCount:              repairCount,
+		Text:          finalAssistantTextFromMessages(output.Messages),
+		Thinking:      output.Thinking,
+		Usage:         output.Usage,
+		StopReason:    output.StopReason,
+		Messages:      output.Messages,
+		Steps:         output.Steps,
+		ToolCallsUsed: output.ToolCallsUsed,
+		Valid:         true,
+		RepairCount:   repairCount,
 	}
-}
-
-// appendReindexedSteps appends src onto dst, rewriting each appended Step's
-// Index so the combined slice stays globally continuous. RunMessages numbers
-// steps from zero on every call, so a repair turn's steps would collide with
-// the original run's indices without reindexing here.
-func appendReindexedSteps(dst, src []Step) []Step {
-	for _, step := range src {
-		step.Index = len(dst)
-		dst = append(dst, step)
-	}
-	return dst
 }
 
 func validateResultStructuredOutput(result *Result, schema outputPolicySchema) error {
@@ -248,9 +201,8 @@ func validateResultStructuredOutput(result *Result, schema outputPolicySchema) e
 
 func schemaInvalidFailure(err error) *AgentFailure {
 	return &AgentFailure{
-		Kind:      FailureKindSchemaInvalid,
-		Reason:    err.Error(),
-		Retryable: false,
+		Kind:   FailureKindSchemaInvalid,
+		Reason: err.Error(),
 	}
 }
 
@@ -262,12 +214,20 @@ func repairInstructionMessage(schema []byte, validationErr error) message.Messag
 	))
 }
 
-func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context, context.CancelFunc, bool) {
-	maxWallClock := e.maxWallClock(task)
+func (e Engine) runContext(ctx context.Context, request Request) (context.Context, context.CancelFunc, bool) {
+	return e.runContextWithElapsed(ctx, request, 0)
+}
+
+func (e Engine) runContextWithElapsed(ctx context.Context, request Request, elapsed time.Duration) (context.Context, context.CancelFunc, bool) {
+	maxWallClock := e.maxWallClock(request)
 	if maxWallClock <= 0 {
 		return ctx, func() {}, false
 	}
-	deadline := time.Now().Add(maxWallClock)
+	remaining := maxWallClock - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	deadline := time.Now().Add(remaining)
 	if parentDeadline, ok := ctx.Deadline(); ok && !deadline.Before(parentDeadline) {
 		return ctx, func() {}, false
 	}
@@ -275,34 +235,19 @@ func (e Engine) runContext(ctx context.Context, task api.Task) (context.Context,
 	return runCtx, cancel, true
 }
 
-func (e Engine) maxWallClock(task api.Task) time.Duration {
-	// A present task.Budget is authoritative for the wall-clock dimension too
-	// (zero means unbounded), mirroring budgetLimits and the LoopPolicy contract
-	// that a per-Task Budget overrides the engine default when present.
-	if task.Budget != nil {
-		return task.Budget.MaxWallClock
+func (e Engine) maxWallClock(request Request) time.Duration {
+	if request.Budget != nil {
+		return request.Budget.MaxWallClock
 	}
-	// On the engine side a structured LoopPolicy.Budget likewise wins over the
-	// bare legacy LoopPolicy.MaxWallClock: a present Budget is authoritative, so
-	// its zero wall-clock means unbounded rather than inheriting the legacy
-	// deadline. The legacy field applies only when no Budget is set at all.
 	if e.LoopPolicy.Budget != nil {
 		return e.LoopPolicy.Budget.MaxWallClock
 	}
-	return e.LoopPolicy.MaxWallClock
+	return 0
 }
 
-// budgetLimits resolves the token, tool-call, and step ceilings the loop
-// enforces. A present task.Budget is authoritative: its fields are used as-is
-// and a zero dimension means unbounded (the api.TaskBudget contract), so it is
-// never backfilled from the engine default — otherwise a task that caps only
-// one dimension would silently inherit the engine's caps on the others. The
-// engine's LoopPolicy.Budget supplies all three ceilings only when the task
-// carries no Budget of its own. This mirrors maxWallClock and the LoopPolicy
-// contract that a per-Task Budget overrides the engine default when present.
-func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxSteps int) {
-	if task.Budget != nil {
-		return task.Budget.MaxTokens, task.Budget.MaxToolCalls, task.Budget.MaxSteps
+func (e Engine) budgetLimits(request Request) (maxTokens int64, maxToolCalls, maxSteps int) {
+	if request.Budget != nil {
+		return request.Budget.MaxTokens, request.Budget.MaxToolCalls, request.Budget.MaxSteps
 	}
 	if e.LoopPolicy.Budget != nil {
 		return e.LoopPolicy.Budget.MaxTokens, e.LoopPolicy.Budget.MaxToolCalls, e.LoopPolicy.Budget.MaxSteps
@@ -310,22 +255,8 @@ func (e Engine) budgetLimits(task api.Task) (maxTokens int64, maxToolCalls, maxS
 	return 0, 0, 0
 }
 
-// loopErrorFailure classifies a RunMessages error into the typed AgentFailure
-// that crosses the agent → multiagent boundary. An explicit loop-budget
-// exhaustion, or a wall-clock deadline on a budget-driven run, surfaces as a
-// budget failure. A tool the bus cannot serve — a name the model invoked that
-// is not registered (tool.ErrToolNotFound) or a missing bus altogether
-// (ErrToolBusMissing) — surfaces as FailureKindToolUnavailable, marked
-// retryable and escalatable so a scheduler applies the documented "retry with
-// backoff, then escalate" path (spec 03 §dispatch policy) instead of treating
-// an unavailable tool as an opaque engine error. An output guardrail that
-// refuses the terminal output — a tripwire block or a retry the loop could not
-// satisfy within MaxIterations — surfaces as FailureKindUnsafeAction, marked
-// escalatable but not retryable, matching the spec's "request human approval;
-// do not retry automatically" semantics: the guardrail already withheld the
-// output, so an automated re-run is not the right next step. Anything else is a
-// generic engine error. The Reason and cause mirror the source error so
-// errors.Is / errors.As still walk the chain across the boundary.
+// loopErrorFailure preserves factual failure classification and the original
+// error chain. Retry and escalation policy remain application-owned.
 func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentFailure {
 	failure := &AgentFailure{Reason: err.Error()}
 	var tripwire *OutputGuardrailTripwireTriggeredError
@@ -335,24 +266,11 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 		failure.Kind = FailureKindBudgetExhausted
 	case budgetDriven && errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		failure.Kind = FailureKindBudgetExhausted
-	case stateIntegrityFailure(err):
-		failure.Kind = FailureKindEngineError
-	case provider.IsRetryableError(err):
-		failure.Kind = FailureKindEngineError
-		failure.Retryable = true
 	case errors.Is(err, ErrToolBusMissing) || errors.Is(err, tool.ErrToolNotFound):
 		failure.Kind = FailureKindToolUnavailable
-		failure.Retryable = true
-		failure.Escalatable = true
 	case errors.As(err, &tripwire), errors.As(err, &retryLimit):
-		failure.Kind = FailureKindUnsafeAction
-		failure.Escalatable = true
+		failure.Kind = FailureKindOutputBlocked
 	case errors.Is(err, ErrStepAborted):
-		// A StepPolicy that stops the loop with a fail decision (or whose Next
-		// errors) is a deliberate control-flow choice, not a transient fault, so
-		// it is neither retryable nor escalatable: re-running would meet the same
-		// predicate. A Finish/Handoff override never reaches here — it ends the
-		// loop with no error.
 		failure.Kind = FailureKindStepAborted
 	default:
 		failure.Kind = FailureKindEngineError
@@ -360,27 +278,15 @@ func loopErrorFailure(ctx context.Context, err error, budgetDriven bool) *AgentF
 	return failure.WithCause(err)
 }
 
-func stateIntegrityFailure(err error) bool {
-	return errors.Is(err, api.ErrTerminalState) ||
-		errors.Is(err, api.ErrStaleTaskVersion) ||
-		errors.Is(err, api.ErrLeaseHolderMismatch) ||
-		errors.Is(err, api.ErrLeaseNotActive) ||
-		errors.Is(err, api.ErrOwnerMismatch) ||
-		errors.Is(err, api.ErrActionReconcileRequired) ||
-		errors.Is(err, api.ErrIdempotencyConflict) ||
-		errors.Is(err, api.ErrInvalidTransition) ||
-		errors.Is(err, api.ErrCheckpointLimitExceeded)
-}
-
-func (e Engine) buildContext(ctx context.Context, task api.Task) ([]message.Message, error) {
+func (e Engine) buildContext(ctx context.Context, request Request) ([]message.Message, error) {
 	var (
 		messages []message.Message
 		err      error
 	)
 	if e.ContextBuilder != nil {
-		messages, err = e.ContextBuilder.Build(ctx, task)
+		messages, err = e.ContextBuilder.Build(ctx, request)
 	} else {
-		messages, err = defaultContextBuilder{}.Build(ctx, task)
+		messages, err = defaultContextBuilder{}.Build(ctx, request)
 	}
 	if err != nil {
 		return nil, err
@@ -492,14 +398,14 @@ func validateSkillContextPreserved(before, after []message.Message) error {
 
 type defaultContextBuilder struct{}
 
-func (defaultContextBuilder) Build(_ context.Context, task api.Task) ([]message.Message, error) {
-	goal := strings.TrimSpace(task.Goal)
-	if goal == "" {
-		goal = "Complete the assigned task and return a concise result."
+func (defaultContextBuilder) Build(_ context.Context, request Request) ([]message.Message, error) {
+	prompt := strings.TrimSpace(request.Prompt)
+	if prompt == "" {
+		prompt = "Complete the assigned task and return a concise result."
 	}
 	return []message.Message{
 		message.NewText(message.RoleSystem, "You are a Venat agent."),
-		message.NewText(message.RoleUser, goal),
+		message.NewText(message.RoleUser, prompt),
 	}, nil
 }
 

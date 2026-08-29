@@ -156,32 +156,13 @@ jobs:
       - name: Run race soak
         run: go test -race -timeout=10m ./... -count=5
 
-      - name: Verify tagged install and consumer build
+      - name: Verify tagged Agent SDK and Durable consumers
         shell: bash
         run: |
           set -euo pipefail
           TMP_DIR="$(mktemp -d)"
           trap 'rm -rf "$TMP_DIR"' EXIT
-          export GOBIN="$TMP_DIR/bin"
           export GOPROXY=direct
-          mkdir -p "$GOBIN"
-
-          go install "github.com/Viking602/venat/cmd/venat@${GITHUB_REF_NAME}"
-          VENAT="$GOBIN/venat"
-          INSTALLED_VERSION="$("$VENAT" version)"
-          if [ "$INSTALLED_VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Installed version ${INSTALLED_VERSION} does not match tag ${GITHUB_REF_NAME}"
-            exit 1
-          fi
-          "$VENAT" --help >/dev/null
-
-          set +e
-          "$VENAT" unknown-command >"$TMP_DIR/unknown.stdout" 2>"$TMP_DIR/unknown.stderr"
-          UNKNOWN_STATUS=$?
-          set -e
-          test "$UNKNOWN_STATUS" -eq 1
-          test ! -s "$TMP_DIR/unknown.stdout"
-          test -s "$TMP_DIR/unknown.stderr"
 
           mkdir -p "$TMP_DIR/consumer"
           cd "$TMP_DIR/consumer"
@@ -190,51 +171,90 @@ jobs:
           package consumer
 
           import (
-              "github.com/Viking602/venat"
+              "context"
+              "errors"
+
               "github.com/Viking602/venat/agent"
+              "github.com/Viking602/venat/durable"
               "github.com/Viking602/venat/provider"
               "github.com/Viking602/venat/provider/scripted"
-              "github.com/Viking602/venat/skill"
           )
-          func NewRunner() *venat.Runner {
-              return venat.NewDevelopment()
+
+          func RunAgent(ctx context.Context) agent.Result {
+              engine := agent.Engine{
+                  Provider: scripted.New([]provider.Event{
+                      {Kind: provider.EventTextDelta, Text: "tagged consumer"},
+                      {Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
+                  }),
+                  Model: "scripted",
+              }
+              return engine.Run(ctx, agent.Request{Prompt: "verify"}, agent.OutputPolicy{})
           }
 
-          func NewEngine() (agent.Engine, error) {
-              registry := skill.NewRegistry()
-              for _, current := range []skill.Skill{
-                  {Name: "always-on", Description: "Always active", Body: "Always check."},
-                  {Name: "on-demand", Description: "Activate when needed", Body: "Check on demand."},
-              } {
-                  if err := skill.Register(registry, current); err != nil {
-                      return agent.Engine{}, err
-                  }
-              }
-              return agent.Build(agent.Spec{
-                  Model: "scripted",
-                  Skills: []string{"always-on"},
-                  AvailableSkills: []string{"on-demand"},
-              }, agent.BuildDeps{
-                  Providers: provider.Single(scripted.New(nil)),
-                  Skills: registry,
-              })
+          type minimalBackend struct{}
+
+          var errUnavailable = errors.New("compile-only backend is unavailable")
+
+          func (minimalBackend) StartExecution(context.Context, durable.StartExecutionRequest) (durable.StartResult, error) {
+              return durable.StartResult{}, errUnavailable
+          }
+          func (minimalBackend) ResumeExecution(context.Context, durable.ResumeExecutionRequest) (durable.ResumeResult, error) {
+              return durable.ResumeResult{}, errUnavailable
+          }
+          func (minimalBackend) RenewExecution(context.Context, durable.RenewExecutionRequest) (durable.Lease, error) {
+              return durable.Lease{}, errUnavailable
+          }
+          func (minimalBackend) SaveCheckpoint(context.Context, durable.SaveCheckpointRequest) (durable.Execution, error) {
+              return durable.Execution{}, errUnavailable
+          }
+          func (minimalBackend) SuspendExecution(context.Context, durable.SuspendExecutionRequest) (durable.Execution, error) {
+              return durable.Execution{}, errUnavailable
+          }
+          func (minimalBackend) FinishExecution(context.Context, durable.FinishExecutionRequest) (durable.Execution, error) {
+              return durable.Execution{}, errUnavailable
+          }
+          func (minimalBackend) ReleaseExecution(context.Context, durable.ReleaseExecutionRequest) (durable.ReleaseResult, error) {
+              return durable.ReleaseResult{}, errUnavailable
+          }
+          func (minimalBackend) StartAttempt(context.Context, durable.StartAttemptRequest) (durable.AttemptStart, error) {
+              return durable.AttemptStart{}, errUnavailable
+          }
+          func (minimalBackend) FinishAttempt(context.Context, durable.FinishAttemptRequest) (durable.Attempt, error) {
+              return durable.Attempt{}, errUnavailable
+          }
+          func (minimalBackend) MarkAttemptUnknown(context.Context, durable.MarkAttemptUnknownRequest) (durable.Attempt, error) {
+              return durable.Attempt{}, errUnavailable
+          }
+          func (minimalBackend) ReconcileAttempt(context.Context, durable.ReconcileAttemptRequest) (durable.Attempt, error) {
+              return durable.Attempt{}, errUnavailable
+          }
+          func (minimalBackend) LoadExecution(context.Context, durable.ExecutionID) (durable.Execution, error) {
+              return durable.Execution{}, errUnavailable
+          }
+
+          func NewDurableRuntime() (*durable.Runtime, error) {
+              return durable.New(minimalBackend{}, durable.Options{OwnerID: "tagged-consumer"})
           }
           EOF
           cat > consumer_test.go <<'EOF'
           package consumer
 
-          import "testing"
+          import (
+              "context"
+              "testing"
+          )
 
-          func TestNewEngine(t *testing.T) {
-              if NewRunner() == nil {
-                  t.Fatal("NewRunner() returned nil")
+          func TestDirectConsumers(t *testing.T) {
+              result := RunAgent(context.Background())
+              if result.Failure != nil || result.Text != "tagged consumer" {
+                  t.Fatalf("Agent result = %#v", result)
               }
-              engine, err := NewEngine()
+              runtime, err := NewDurableRuntime()
               if err != nil {
                   t.Fatal(err)
               }
-              if len(engine.Skills) != 1 || len(engine.AvailableSkills) != 1 {
-                  t.Fatalf("skills = %d available = %d", len(engine.Skills), len(engine.AvailableSkills))
+              if err := runtime.Close(context.Background()); err != nil {
+                  t.Fatal(err)
               }
           }
           EOF

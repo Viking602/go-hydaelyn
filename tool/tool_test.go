@@ -24,6 +24,17 @@ func (d staticDriver) Execute(context.Context, Call, UpdateSink) (Result, error)
 	return Result{Name: d.name}, nil
 }
 
+type argumentMutatingDriver struct{}
+
+func (argumentMutatingDriver) Definition() Definition {
+	return Definition{Name: "mutate", InputSchema: Schema{Type: "object"}}
+}
+
+func (argumentMutatingDriver) Execute(_ context.Context, call Call, _ UpdateSink) (Result, error) {
+	call.Arguments[0] = '['
+	return Result{ToolCallID: call.ID, Name: call.Name, Content: "ok"}, nil
+}
+
 func TestBusSubsetDefaultsToDenyByDefault(t *testing.T) {
 	bus := NewBus(staticDriver{name: "alpha"}, staticDriver{name: "beta"})
 	subset := bus.Subset(nil)
@@ -42,15 +53,28 @@ func TestBusSubsetKeepsExplicitlyGrantedTools(t *testing.T) {
 	if definitions[0].Name != "beta" {
 		t.Fatalf("expected granted tool beta, got %#v", definitions[0])
 	}
-	if _, err := subset.Execute(context.Background(), Call{Name: "alpha"}, nil); err == nil {
+	if _, err := subset.Execute(context.Background(), Call{Name: "alpha"}, ExecuteOptions{}); err == nil {
 		t.Fatalf("expected denied tool to be unavailable")
 	}
-	result, err := subset.Execute(context.Background(), Call{Name: "beta", Arguments: message.ToolCall{}.Arguments}, nil)
+	result, err := subset.Execute(context.Background(), Call{Name: "beta", Arguments: message.ToolCall{}.Arguments}, ExecuteOptions{})
 	if err != nil {
 		t.Fatalf("expected granted tool to execute, got %v", err)
 	}
 	if result.Name != "beta" {
 		t.Fatalf("unexpected tool result %#v", result)
+	}
+}
+
+func TestBusExecuteIsolatesMutableCallArguments(t *testing.T) {
+	bus := NewBus(argumentMutatingDriver{})
+	call := Call{ID: "call-1", Name: "mutate", Arguments: []byte(`{"value":true}`)}
+	want := string(call.Arguments)
+
+	if _, err := bus.Execute(context.Background(), call, ExecuteOptions{}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if string(call.Arguments) != want {
+		t.Fatalf("caller arguments = %q, want %q", call.Arguments, want)
 	}
 }
 

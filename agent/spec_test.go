@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
@@ -112,7 +111,7 @@ func TestBuild_CarriesModelPolicyToEveryRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	result := engine.Run(context.Background(), api.Task{Goal: "answer"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "answer"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
@@ -122,6 +121,51 @@ func TestBuild_CarriesModelPolicyToEveryRequest(t *testing.T) {
 	request := driver.requests[0]
 	if request.Temperature != 0.4 || request.TopP != 0.8 || request.MaxTokens != 321 {
 		t.Fatalf("provider model policy = temperature %v, topP %v, maxTokens %d", request.Temperature, request.TopP, request.MaxTokens)
+	}
+}
+
+func TestBuild_ClonesMutableSpecDefaults(t *testing.T) {
+	driver := &modeledProvider{name: "vendor", models: []string{"m"}}
+	budget := &Budget{MaxTokens: 10}
+	stopSequences := []string{"END"}
+	reasoning := map[string]any{"effort": "high"}
+	include := []string{"reasoning.encrypted_content"}
+	spec := Spec{
+		Model:         "m",
+		LoopPolicy:    LoopPolicy{Budget: budget},
+		StopSequences: stopSequences,
+		ExtraBody: map[string]any{
+			"reasoning": reasoning,
+			"include":   include,
+		},
+	}
+
+	engine, err := Build(spec, BuildDeps{Providers: provider.Single(driver)})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	budget.MaxTokens = 99
+	stopSequences[0] = "changed"
+	reasoning["effort"] = "low"
+	include[0] = "changed"
+	spec.ExtraBody["new"] = true
+
+	if engine.LoopPolicy.Budget == nil || engine.LoopPolicy.Budget.MaxTokens != 10 {
+		t.Fatalf("Engine LoopPolicy budget = %#v, want independent max tokens 10", engine.LoopPolicy.Budget)
+	}
+	if len(engine.StopSequences) != 1 || engine.StopSequences[0] != "END" {
+		t.Fatalf("Engine StopSequences = %#v, want independent END", engine.StopSequences)
+	}
+	gotReasoning, ok := engine.ExtraBody["reasoning"].(map[string]any)
+	if !ok || gotReasoning["effort"] != "high" {
+		t.Fatalf("Engine reasoning ExtraBody = %#v, want independent high effort", engine.ExtraBody["reasoning"])
+	}
+	gotInclude, ok := engine.ExtraBody["include"].([]string)
+	if !ok || len(gotInclude) != 1 || gotInclude[0] != "reasoning.encrypted_content" {
+		t.Fatalf("Engine include ExtraBody = %#v, want independent encrypted-content entry", engine.ExtraBody["include"])
+	}
+	if _, ok := engine.ExtraBody["new"]; ok {
+		t.Fatalf("Engine ExtraBody aliases Spec map: %#v", engine.ExtraBody)
 	}
 }
 
@@ -143,7 +187,7 @@ func TestBuild_FallbackModelSwitchesDriverAndRequestModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	result := engine.Run(context.Background(), api.Task{Goal: "answer"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "answer"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
@@ -234,7 +278,7 @@ func TestBuild_DefaultContextSeedsInstructionsAndGoal(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "route the request"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "route the request"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
@@ -275,7 +319,7 @@ func TestBuild_ResolvesSkillsIntoContext(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "review this change"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "review this change"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
@@ -369,7 +413,7 @@ func TestBuild_ContextManagerOverrideStillGetsSkills(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	if result := engine.Run(context.Background(), api.Task{Goal: "ignored by marker pair"}, OutputPolicy{}); result.Failure != nil {
+	if result := engine.Run(context.Background(), Request{Prompt: "ignored by marker pair"}, OutputPolicy{}); result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
 	got := driver.requests[0].Messages
@@ -402,7 +446,7 @@ func TestBuild_ContextManagerOverrideWins(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	if result := engine.Run(context.Background(), api.Task{Goal: "g"}, OutputPolicy{}); result.Failure != nil {
+	if result := engine.Run(context.Background(), Request{Prompt: "g"}, OutputPolicy{}); result.Failure != nil {
 		t.Fatalf("Run failed: %v", result.Failure)
 	}
 	got := driver.requests[0].Messages
@@ -439,7 +483,7 @@ func TestBuild_ForwardsTuningFields(t *testing.T) {
 // instructions context.
 type markerContext struct{}
 
-func (markerContext) Build(context.Context, api.Task) ([]message.Message, error) {
+func (markerContext) Build(context.Context, Request) ([]message.Message, error) {
 	return []message.Message{message.NewText(message.RoleSystem, "marker")}, nil
 }
 
@@ -449,7 +493,7 @@ func (markerContext) Compact(_ context.Context, history []message.Message) ([]me
 
 type markerPairContext struct{}
 
-func (markerPairContext) Build(context.Context, api.Task) ([]message.Message, error) {
+func (markerPairContext) Build(context.Context, Request) ([]message.Message, error) {
 	return []message.Message{
 		message.NewText(message.RoleSystem, "marker-system"),
 		message.NewText(message.RoleUser, "marker-user"),

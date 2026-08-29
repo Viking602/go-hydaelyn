@@ -28,6 +28,12 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+      - name: Smoke executable examples
+        run: |
+          go run ./examples/agent
+          go run ./examples/subagent
+          go run ./examples/orchestration
+          go run ./examples/durable
 
       - name: Run race tests
         run: go test -race -timeout=10m ./...
@@ -57,8 +63,8 @@ jobs:
 
       - name: Install analysis tools
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Verify gofmt
@@ -168,14 +174,17 @@ jobs:
       - name: Architectural rules (.sentrux/rules.toml)
         run: sentrux check .
 
-      - name: Framework business-word boundary (ADR-008)
+      - name: SDK business-word boundary (ADR-029)
         run: ./scripts/check-business-words.sh
 
-      - name: Public API any-return boundary (spec v0.8.0 §01 Change 5)
+      - name: Public API shape boundary (ADR-029)
         run: ./scripts/check-public-any.sh
 
-      - name: Package import boundaries (ADR-016)
+      - name: Package import boundaries (ADR-029)
         run: ./scripts/check-import-boundaries.sh
+
+      - name: Removed surface absence (ADR-029)
+        run: ./scripts/check-legacy-absence.sh
 
   release-soak:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

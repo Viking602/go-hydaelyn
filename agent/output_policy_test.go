@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 )
@@ -28,7 +27,7 @@ func TestEngineOutputPolicyValidObjectPassesAndSetsStructured(t *testing.T) {
 	text := `{"status":"ok","score":0.75,"count":2,"tags":["risk"],"accepted":true}`
 	_, engine := newOutputPolicyEngine(text)
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, outputPolicyReport())
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, outputPolicyReport())
 
 	if !result.Valid {
 		t.Fatalf("result.Valid = false, failure = %#v", result.Failure)
@@ -51,7 +50,7 @@ func TestEngineOutputPolicyValidObjectPassesAndSetsStructured(t *testing.T) {
 func TestEngineOutputPolicyMissingRequiredFieldFails(t *testing.T) {
 	_, engine := newOutputPolicyEngine(`{"status":"ok","score":0.75,"count":2,"tags":["risk"]}`)
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, outputPolicyReport())
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, outputPolicyReport())
 
 	requireOutputPolicyFailure(t, result, FailureKindSchemaInvalid)
 }
@@ -59,7 +58,7 @@ func TestEngineOutputPolicyMissingRequiredFieldFails(t *testing.T) {
 func TestEngineOutputPolicyWrongTypeFails(t *testing.T) {
 	_, engine := newOutputPolicyEngine(`{"status":"ok","score":0.75,"count":"2","tags":["risk"],"accepted":true}`)
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, outputPolicyReport())
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, outputPolicyReport())
 
 	requireOutputPolicyFailure(t, result, FailureKindSchemaInvalid)
 }
@@ -67,7 +66,7 @@ func TestEngineOutputPolicyWrongTypeFails(t *testing.T) {
 func TestEngineOutputPolicyEnumMismatchFails(t *testing.T) {
 	_, engine := newOutputPolicyEngine(`{"status":"blocked","score":0.75,"count":2,"tags":["risk"],"accepted":true}`)
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, outputPolicyReport())
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, outputPolicyReport())
 
 	requireOutputPolicyFailure(t, result, FailureKindSchemaInvalid)
 }
@@ -78,7 +77,7 @@ func TestEngineOutputPolicyNumericEnumAcceptsEquivalentJSONNumbers(t *testing.T)
 		t.Run(output, func(t *testing.T) {
 			_, engine := newOutputPolicyEngine(output)
 
-			result := engine.Run(context.Background(), api.Task{Goal: "classify score"}, OutputPolicy{
+			result := engine.Run(context.Background(), Request{Prompt: "classify score"}, OutputPolicy{
 				Schema:   schema,
 				Validate: true,
 			})
@@ -99,7 +98,7 @@ func TestEngineOutputPolicyNumericEnumAcceptsEquivalentJSONNumbers(t *testing.T)
 func TestEngineOutputPolicyAdditionalPropertiesFailWhenDisallowed(t *testing.T) {
 	_, engine := newOutputPolicyEngine(`{"status":"ok","score":0.75,"count":2,"tags":["risk"],"accepted":true,"extra":true}`)
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, outputPolicyReport())
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, outputPolicyReport())
 
 	requireOutputPolicyFailure(t, result, FailureKindSchemaInvalid)
 }
@@ -121,7 +120,7 @@ func TestEngineOutputPolicyInvalidSchemaWithRepairFailsWithoutRepairAttempts(t *
 				`{"status":"ok"}`,
 				`{"status":"ok"}`,
 			)
-			result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, OutputPolicy{
+			result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, OutputPolicy{
 				Schema:            tt.schema,
 				Validate:          true,
 				Repair:            true,
@@ -175,7 +174,7 @@ func TestEngineOutputPolicyUnsupportedSchemaKeywordsFailBeforeRepair(t *testing.
 				tt.output,
 			)
 
-			result := engine.Run(context.Background(), api.Task{Goal: "produce structured output"}, OutputPolicy{
+			result := engine.Run(context.Background(), Request{Prompt: "produce structured output"}, OutputPolicy{
 				Schema:            tt.schema,
 				Validate:          true,
 				Repair:            true,
@@ -219,7 +218,7 @@ func TestEngineOutputPolicyNestedNullSchemaFailsBeforeRepair(t *testing.T) {
 				tt.output,
 			)
 
-			result := engine.Run(context.Background(), api.Task{Goal: "produce structured output"}, OutputPolicy{
+			result := engine.Run(context.Background(), Request{Prompt: "produce structured output"}, OutputPolicy{
 				Schema:            tt.schema,
 				Validate:          true,
 				Repair:            true,
@@ -246,7 +245,7 @@ func TestEngineOutputPolicyRepairSuccessUsesRepairPrompt(t *testing.T) {
 	policy.Repair = true
 	policy.MaxRepairAttempts = 1
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, policy)
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, policy)
 
 	if !result.Valid {
 		t.Fatalf("result.Valid = false, failure = %#v", result.Failure)
@@ -285,14 +284,11 @@ func TestEngineOutputPolicyRepairExhaustedReturnsRepairFailed(t *testing.T) {
 	policy.Repair = true
 	policy.MaxRepairAttempts = 1
 
-	result := engine.Run(context.Background(), api.Task{Goal: "classify risk"}, policy)
+	result := engine.Run(context.Background(), Request{Prompt: "classify risk"}, policy)
 
 	requireOutputPolicyFailure(t, result, FailureKindRepairFailed)
 	if result.RepairCount != 1 {
 		t.Fatalf("RepairCount = %d, want 1", result.RepairCount)
-	}
-	if result.Failure.Retryable {
-		t.Fatalf("Failure.Retryable = true, want false")
 	}
 	if len(driver.requests) != 2 {
 		t.Fatalf("provider calls = %d, want 2", len(driver.requests))

@@ -1,45 +1,32 @@
-# Venat Future Backlog
+# Future backlog
 
-This backlog is intentionally unversioned. Items listed here have no release
-date or version commitment.
+This backlog is non-normative. Items require demonstrated consumers and a decision-complete design before implementation.
 
-## Scheduler and durable multi-agent integration
+## Provider and tool quality
 
-- Resolve the `Team.Start` and `Team.Resume` integration boundary without
-  importing the durable Runner into `multiagent`.
-- Evaluate debate, MapReduce, and swarm schedulers after production feedback
-  justifies their maintenance cost.
-- Complete automatic handoff validation and persistence through the existing
-  store contracts.
+- Expand adapter conformance fixtures for provider-specific streaming edge cases.
+- Add measured performance baselines for long streams and large tool schemas.
+- Publish separate ecosystem adapters only when ownership and maintenance are clear.
 
-## Memory, context, and artifacts
+## Agent execution
 
-- Define optional memory extraction and retrieval procedures over an
-  application-provided `Memory[T]` implementation.
-- Evaluate symbolic task context and knowledge-graph resolvers.
-- Add an artifact contract only after concrete downstream storage requirements
-  are available.
+- Improve context preparation benchmarks without adding hidden model calls.
+- Expand continuation compatibility fixtures for future schema evolution.
+- Add more output-policy schema coverage when real consumers need additional keywords.
 
-Venat does not plan to ship a general storage backend under
-[ADR-012](../adr/ADR-012-storage-contract-position-d.md), or a framework memory
-backend under [ADR-013](../adr/ADR-013-memory-kernel-vs-pipeline.md).
+## Orchestration
 
-## Observability
+- Document application patterns for persisting `orchestration.State`.
+- Add executor examples that combine stable dispatch IDs with `durable.ExecutionID`.
+- Evaluate additional mechanical fold helpers only after two applications repeat the same implementation.
 
-- Add an OpenTelemetry exporter that maps the existing trace and event data to
-  OTLP without changing Runner ownership.
-- Validate scheduler, dispatch, agent-loop, step, and tool parent links against
-  real collectors before supporting backend-specific integrations.
+## Durability
 
-## Packs and external surfaces
+- Support external backend repositories with shared conformance CI examples.
+- Add fault-injection guidance for ambiguous database commit responses and lease expiry.
+- Measure attempt payload size and checkpoint write amplification under realistic traces.
+- Define versioning rules for attempt envelopes before a payload format change is needed.
 
-- Replace skeleton packs with production-grade content only when each pack has
-  a maintained owner and evaluation suite.
-- Evaluate an MCP server surface and durable Runner streaming independently of
-  the MCP client.
-- Expand capability exports only when the high-level contracts remain neutral
-  across provider, CLI, and transport consumers.
+## Explicit non-goals
 
-The active execution scope is documented in
-[the current plan](./active-plan.md). The latest published release is
-described in [the v0.15.4 notes](../release-notes/v0.15.4.md).
+The backlog does not reserve core types for application identity, routing strategy, approvals, quotas, deployment, domain records, or backend schema. Those remain application or ecosystem responsibilities.

@@ -55,12 +55,6 @@ func TestNewText(t *testing.T) {
 			if msg.Kind != tt.wantKind {
 				t.Errorf("Kind = %v, want %v", msg.Kind, tt.wantKind)
 			}
-			if msg.Visibility != VisibilityShared {
-				t.Errorf("Visibility = %v, want %v", msg.Visibility, VisibilityShared)
-			}
-			if msg.CreatedAt.IsZero() {
-				t.Error("CreatedAt should not be zero")
-			}
 		})
 	}
 }
@@ -90,9 +84,6 @@ func TestNewToolResult(t *testing.T) {
 	if msg.ToolResult.Content != "tool output" {
 		t.Errorf("ToolResult.Content = %v, want tool output", msg.ToolResult.Content)
 	}
-	if msg.Visibility != VisibilityShared {
-		t.Errorf("Visibility = %v, want %v", msg.Visibility, VisibilityShared)
-	}
 }
 
 func TestMessageStructFields(t *testing.T) {
@@ -101,20 +92,14 @@ func TestMessageStructFields(t *testing.T) {
 	}
 
 	msg := Message{
-		ID:          "msg-1",
-		Role:        RoleAssistant,
-		Kind:        KindStandard,
-		Name:        "assistant",
-		Text:        "Hello",
-		Thinking:    "thinking process",
-		ToolCalls:   toolCalls,
-		TeamID:      "team-1",
-		AgentID:     "agent-1",
-		RunID:       "run-1",
-		ParentRunID: "parent-1",
-		Visibility:  VisibilityPrivate,
-		Metadata:    map[string]string{"key": "value"},
-		CreatedAt:   time.Now().UTC(),
+		ID:        "msg-1",
+		Role:      RoleAssistant,
+		Kind:      KindStandard,
+		Name:      "assistant",
+		Text:      "Hello",
+		Thinking:  "thinking process",
+		ToolCalls: toolCalls,
+		Metadata:  map[string]string{"key": "value"},
 	}
 
 	if msg.ID != "msg-1" {
@@ -135,11 +120,8 @@ func TestMessageStructFields(t *testing.T) {
 	if len(msg.ToolCalls) != 1 {
 		t.Errorf("len(ToolCalls) = %v, want 1", len(msg.ToolCalls))
 	}
-	if msg.TeamID != "team-1" {
-		t.Errorf("TeamID = %v, want team-1", msg.TeamID)
-	}
-	if msg.Visibility != VisibilityPrivate {
-		t.Errorf("Visibility = %v, want %v", msg.Visibility, VisibilityPrivate)
+	if msg.Metadata["key"] != "value" {
+		t.Errorf("Metadata = %#v, want key=value", msg.Metadata)
 	}
 }
 
@@ -154,19 +136,14 @@ func TestToolDefinitionStruct(t *testing.T) {
 	}
 
 	def := ToolDefinition{
-		Name:        "test-tool",
-		Description: "A test tool",
-		InputSchema: schema,
-		Tags:        []string{"test", "demo"},
-		Terminal:    true,
-		Metadata:    map[string]string{"version": "1.0"},
-		Origin:      "test",
-		Security: ToolSecurity{
-			RequiredPermissions: []string{"tool:test"},
-			RequiresApproval:    true,
-			RiskLevel:           "high",
-			Idempotent:          false,
-		},
+		Name:             "test-tool",
+		Description:      "A test tool",
+		InputSchema:      schema,
+		Terminal:         true,
+		Timeout:          5 * time.Second,
+		Concurrency:      ToolConcurrencySequential,
+		ConcurrencyGroup: "exclusive-test",
+		MaxConcurrency:   1,
 	}
 
 	if def.Name != "test-tool" {
@@ -178,14 +155,11 @@ func TestToolDefinitionStruct(t *testing.T) {
 	if def.InputSchema.Type != "object" {
 		t.Errorf("InputSchema.Type = %v, want object", def.InputSchema.Type)
 	}
-	if len(def.Tags) != 2 {
-		t.Errorf("len(Tags) = %v, want 2", len(def.Tags))
-	}
 	if !def.Terminal {
 		t.Errorf("Terminal = %v, want true", def.Terminal)
 	}
-	if len(def.Security.RequiredPermissions) != 1 || def.Security.RequiredPermissions[0] != "tool:test" {
-		t.Errorf("unexpected tool security %#v", def.Security)
+	if def.Timeout != 5*time.Second || def.Concurrency != ToolConcurrencySequential {
+		t.Errorf("unexpected execution settings %#v", def)
 	}
 }
 
@@ -308,17 +282,6 @@ func TestKindConstants(t *testing.T) {
 	for i, kind := range kinds {
 		if string(kind) != expected[i] {
 			t.Errorf("Kind %d = %v, want %v", i, kind, expected[i])
-		}
-	}
-}
-
-func TestVisibilityConstants(t *testing.T) {
-	visibilities := []Visibility{VisibilityShared, VisibilityPrivate}
-	expected := []string{"shared", "private"}
-
-	for i, vis := range visibilities {
-		if string(vis) != expected[i] {
-			t.Errorf("Visibility %d = %v, want %v", i, vis, expected[i])
 		}
 	}
 }
