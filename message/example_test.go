@@ -7,15 +7,12 @@ import (
 	"github.com/Viking602/venat/message"
 )
 
-// ExampleNewText demonstrates building a user-authored conversation turn.
-// CreatedAt is intentionally not part of the printed output because NewText
-// stamps it with time.Now() — only the deterministic fields are shown.
+// ExampleNewText demonstrates building a deterministic user-authored turn.
 func ExampleNewText() {
 	msg := message.NewText(message.RoleUser, "What is the weather today?")
-	fmt.Printf("role=%s kind=%s visibility=%s text=%q\n",
-		msg.Role, msg.Kind, msg.Visibility, msg.Text)
+	fmt.Printf("role=%s kind=%s text=%q\n", msg.Role, msg.Kind, msg.Text)
 	// Output:
-	// role=user kind=standard visibility=shared text="What is the weather today?"
+	// role=user kind=standard text="What is the weather today?"
 }
 
 // ExampleNewToolResult demonstrates wrapping a tool's structured output into

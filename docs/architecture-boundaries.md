@@ -1,144 +1,60 @@
-# Architecture Boundaries
+# Architecture boundaries
 
-Canonical live document for Venat import seams and ownership rules.
-Historical v0.8.0 wording lives in
-`docs/product-spec/v0.8.0/11-boundaries.md`. This file is what CI and
-`CONTRIBUTING.md` point at.
+ADR-029 defines an exhaustive production capability graph. New top-level Go package families require an approved architecture decision and an executable gate update.
 
-Anchors: ADR-008 (revised), ADR-009 (amended), ADR-012 Position D,
-ADR-015, ADR-016, ADR-017.
+## Package graph
 
-## Layers
-
-The five-layer stack is a documentation map, not a proof that every
-import is strictly downward:
-
-```
-Packs / Examples                domain configuration; host-mounted
-        ↓ host wiring
-Worker integration (worker/)    poll, lease, execute, team drive
-        ↓
-Multi-Agent (multiagent/)       schedule, dispatch, handoff, blackboard
-        ↓
-Agent Loop (agent/)             one-task bounded loop
-        ↓
-Durable Runner (root + internal) persist, recover, govern
+```text
+message      skill
+   │           │
+   ├── provider│
+   └── tool    │
+        \      /
+          agent
+         /     \
+orchestration  durable
 ```
 
-`coding/` is a domain runtime, not a sixth kernel layer. Packs name
-coding tools; hosts bind `coding.NewToolSet` drivers.
+Allowed project imports by package scope:
 
-`eval/` is a test harness. Its production import of `worker/` (and the
-root façade) is a declared bridge so cases can drive a real run. That
-bridge is not a license for packs or `coding/` production code to
-import `worker/` or the root module.
+| Scope | Allowed project package families |
+| --- | --- |
+| `message` | `message` |
+| `provider` | `provider`, `message` |
+| `tool` | `tool`, `message` |
+| `skill` | `skill` |
+| `agent` | `agent`, `message`, `provider`, `tool`, `skill` |
+| `orchestration` | `orchestration`, `agent`, `message` |
+| `durable` | `durable`, `agent`, `message`, `provider`, `tool` |
 
-`internal/memory` is the process-local development and test
-`StoreProvider`. It is not crash-durable and is not a Position D
-reference implementation.
+Subpackages may import their own package family. Tests follow the same graph; an external test package may import the package it tests.
 
-## Import seams
+## Consequences
 
-Enforced by `scripts/check-import-boundaries.sh` on production,
-`TestImports`, and `XTestImports`:
+- `message`, `provider`, `tool`, and `skill` remain leaf contracts.
+- `agent` owns one bounded model/tool loop and has no knowledge of scheduling or persistence.
+- `orchestration` depends inward on Agent values and never on durability.
+- `durable` depends inward on Agent and effect contracts and never on orchestration.
+- Applications are the composition root. They map routes to engines, persist orchestration state when needed, and inject a durable backend when needed.
+- Protocol adapters and domain integrations stay in application or ecosystem modules unless they implement an approved package-family extension.
+- Provider pull streams and tool push updates remain domain-specific under ADR-030; do not introduce a generic stream package or competing tool driver protocol.
 
-| Package | Must not import |
-| ------- | --------------- |
-| `api/` | any Venat package |
-| `agent/` | `multiagent/` |
-| `multiagent/` | root module, `worker/`, `internal/` |
-| root façade | `multiagent/` |
-| `worker/` | `packs/`, `coding/` |
-| `packs/` | `coding/`, `worker/`, root module |
-| `coding/` | `worker/`, `packs/`, root module |
-| `session/` | root module, `agent/`, `multiagent/`, `worker/`, `internal/`, `packs/`, `coding/` |
+## Executable enforcement
 
-Allowed on purpose:
+`make architecture-check` runs five fail-closed gates:
 
-- `multiagent/` → `stream/` (runtime-neutral collaboration primitive)
-- `worker/` → root `venat` (integration seam)
-- `agent/` → `api/`, `provider/`, `tool/`, `skill/`, `stream/`
-- `agent/` → `session/` (durable harness state, ADR-028, Experimental)
-- `eval/` → `worker/` and the root façade (declared harness bridge)
-- `coding/eval_regression_test.go` only → root façade and `worker/`
-  (named file exception; other coding tests stay banned)
+1. `sentrux check .` rejects cycles and excessive file coupling.
+2. `scripts/check-business-words.sh` scans every required production scope for domain vocabulary leakage.
+3. `scripts/check-public-any.sh` runs an AST command over every required public package scope.
+4. `scripts/check-import-boundaries.sh` checks production, internal-test, and external-test imports against the table above.
+5. `scripts/check-legacy-absence.sh` rejects removed package imports and symbols in production code and current documentation.
 
-Reverse-edge bans stay even when the five-layer picture is only
-documentation. Sentrux 0.5.7 `layer_direction` stays off. It cannot
-express the façade → `internal/core` composition root. Sentrux still
-enforces cycles, coupling, and god files.
+Each package scope must exist and contain production Go source. Deleting a directory cannot turn a gate green by producing an empty package list.
 
-## Six principles
+## Public API shape
 
-### 1. Core has no domain vocabulary
+Exported functions must not return `[]any`. Exported fields containing `any` require `// godoc-allow-any` immediately above the field. A genuinely open function result requires `//venat:allow-public-any` immediately above the declaration. The exception must identify a real provider, host payload, or JSON Schema boundary; convenience is not sufficient.
 
-Code under `api/`, `internal/**`, `agent/**`, and `multiagent/**` must
-not contain the closed business-word list. Multi-agent primitives
-(`Scheduler`, `Handoff`, `Dispatch`, `Team`, `AgentClass`,
-`AgentInstance`, `TypedReport`, `TeamState`) are framework words
-(ADR-008). Domain vocabulary belongs in `packs/`, `_examples/`, and
-docs.
+## Demand-driven extension
 
-Enforcement: `scripts/check-business-words.sh`.
-
-### 2. Packs and recipes compile to Run/Task; no second runtime
-
-Packs, recipes, and schedulers emit Commands or Dispatches that the Runner
-persists. A package that grows its own event store, lease, or outbox is a
-second runtime.
-
-### 3. Five concepts, five owners
-
-| Concept | Owner |
-| ------- | ----- |
-| Capability | `api.Capability` / `api.Tool` |
-| Procedure | packs, recipes, skills |
-| Policy | `api.PolicyEngine` |
-| Runtime | Runner, worker, storage contract |
-| Scheduling | `multiagent.Scheduler` |
-
-### 4. Side effects are auditable
-
-Mutations that leave the process produce an ActionAttempt or
-ToolInvocation, an Event, a TraceSpan when a trace is active, and a
-UsageRecord when metering applies.
-
-### 5. Long-running work is resumable
-
-Lease, heartbeat, resume, replay, dead-letter, and reconcile reconstruct
-run state, agent step traces, and scheduler snapshots independently.
-
-### 6. Typed failure crosses layers
-
-Bare `error` must not be the only signal at agent → multiagent or
-multiagent → pack boundaries. Use `agent.AgentFailure` and
-`multiagent.SchedulerFailureError` (or a terminal Run status).
-
-## Storage and memory
-
-- **Position D (ADR-012):** the framework ships `api.StoreProvider` and
-  `contract.RunStoreProviderContractTests`. Applications own schema and
-  implementation. `internal/memory` is a development default, not a
-  backend product.
-- **Memory (ADR-013):** `api.Memory[T]` is the optional plugin. The
-  deprecated `memory/` compatibility package was removed in v0.16.
-- **Durable agent session (ADR-028, Experimental):** `session.Storage`
-  requires atomic commits, register-sequence CAS, root-to-leaf branch scans,
-  and usage reads. `session.Memory` is process-local. `agent.Harness` owns a
-  renewable durable lane lease; custom stores must not weaken the CAS contract.
-
-## Public any-field contract
-
-Exported functions in `api/`, `agent/`, `multiagent/`, and the root
-package must not return `[]any`. Exported fields must not be loose
-`any` unless tagged `// godoc-allow-any`. Enforcement:
-`scripts/check-public-any.sh`.
-
-## Verification
-
-```
-make architecture-check
-```
-
-runs Sentrux, `check-business-words.sh`, `check-public-any.sh`, and
-`check-import-boundaries.sh`. `make verify` includes this target.
+Add an interface only with a second implementation. Export a symbol only with its first non-test consumer outside the package. Prefer an application adapter over a new core package when the behavior contains routing values, identity, approval, quota, storage schema, deployment, or domain policy.

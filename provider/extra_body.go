@@ -99,3 +99,52 @@ func validateRawExtraBody(raw []byte, depth int, path string) error {
 	}
 	return validateExtraBodyValue(reflect.ValueOf(decoded), depth+1, path)
 }
+
+func cloneExtraBody(body map[string]any) map[string]any {
+	if body == nil {
+		return nil
+	}
+	return cloneExtraBodyValue(reflect.ValueOf(body)).Interface().(map[string]any)
+}
+
+func cloneExtraBodyValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.New(value.Type()).Elem()
+		cloned.Set(cloneExtraBodyValue(value.Elem()))
+		return cloned
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iterator := value.MapRange()
+		for iterator.Next() {
+			cloned.SetMapIndex(iterator.Key(), cloneExtraBodyValue(iterator.Value()))
+		}
+		return cloned
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := range value.Len() {
+			cloned.Index(index).Set(cloneExtraBodyValue(value.Index(index)))
+		}
+		return cloned
+	case reflect.Array:
+		cloned := reflect.New(value.Type()).Elem()
+		for index := range value.Len() {
+			cloned.Index(index).Set(cloneExtraBodyValue(value.Index(index)))
+		}
+		return cloned
+	default:
+		return value
+	}
+}

@@ -1,51 +1,23 @@
-# Venat architectural rules — enforced via `sentrux check`.
-# See ADR-008 and ADR-024 for the framework-vs-business and five-layer
-# boundaries that motivate these rules.
+# Venat structural rules — enforced by `sentrux check .`.
 #
-# Strategy notes:
-# - Layers are documented as five (Packs → Worker integration →
-#   Multi-Agent → Agent Loop → Durable Runner) but are NOT modeled with
-#   Sentrux layer_direction. Sentrux 0.5.7 forbids any cross-layer import
-#   once layers are declared, which is too coarse for the façade →
-#   internal/core composition root and for worker → root integration.
-# - Path-scoped import seams are enforced by
-#   scripts/check-import-boundaries.sh from the compiled package graph:
+# ADR-029 defines the exhaustive production capability graph:
 #
-#   api                    — no Venat imports
-#   agent                  — no multiagent imports
-#   multiagent             — no root, worker, or internal imports
-#   root package facade    — no multiagent imports
-#   worker                 — no packs or coding imports (may import root)
-#   packs                  — no coding, worker, or root imports
-#   coding                 — no worker, packs, or root imports
+#   message      skill
+#      |           |
+#      +-- provider|
+#      +-- tool    |
+#           \      /
+#             agent
+#            /     \
+#   orchestration  durable
 #
-# multiagent → stream is intentionally allowed: stream is a runtime-neutral
-# collaboration primitive, not an upward dependency on the durable Runner.
-# worker → root is the integration seam (ADR-024).
-#
-#   api                      — sole persisted/runtime contract model
-#   internal/core/ports      — aliases api contracts plus narrow runtime-only extensions
-#   internal/memory          — development/test StoreProvider; not a
-#                              Position D reference implementation
-#   internal/core/state      — api only; pure transition functions
-#   internal/command         — api command bus contracts
-#   service/domain packages  — api, ports, state, other services
-#                              NO root internal/core import
-#                              NO venat / orchestrator / worker import
-#                              NO internal/core/application import
-#   internal/core            — Runtime façade/composition root; wires domain
-#                              packages without a duplicate model or adapter
-#   internal/{run,report,...} — domain behavior packages
-#
-# Script-based gates run in CI and `make architecture-check`:
-#   scripts/check-business-words.sh  — framework/business vocabulary boundary
-#   scripts/check-public-any.sh      — public []any return and any-field contract
-#   scripts/check-import-boundaries.sh — path-scoped import seams via go list
+# Sentrux enforces graph-wide cycles and file coupling. The exact package
+# allowlist, including Production/TestImports/XTestImports and fail-closed
+# required scopes, is enforced by scripts/check-import-boundaries.sh.
+# scripts/check-legacy-absence.sh rejects deleted surfaces and unexpected
+# production packages. scripts/check-public-any.sh enforces exported shapes.
 
 [constraints]
-# Acyclic always.
 max_cycles = 0
-# Per-file coupling ceiling.
 max_coupling = "B"
-# No file may depend on more than ~15 modules.
 no_god_files = true

@@ -1,113 +1,172 @@
 # Public API
 
-## Runner Construction
+The public surface is the set of directly importable package families below. The module root intentionally declares no Go package.
 
-Use `venat.NewDevelopment()` for local work and tests. It returns a Runner
-with in-memory storage and development policy defaults.
+## `message`
 
-Import `github.com/Viking602/venat/api` for all public contracts:
+Provider-neutral values shared by model and tool boundaries:
 
-```go
-runner := venat.NewDevelopment(api.Config{
-	PolicyEngine: customPolicy,
-})
-```
+- `Message`, `ContentPart`, and role/kind constants
+- `ToolDefinition`, `ToolCall`, and `ToolResult`
+- history validation and ownership-safe clone helpers
 
-Production startup is fail-closed at construction:
+Messages preserve structured content, provider state, response metadata, tool identities, and legacy text synchronization without embedding application policy.
 
-```go
-runner, err := venat.NewProduction(api.Config{
-	StoreProvider: durableStore,
-	PolicyEngine:  policy.DenySideEffectsByDefault(),
-})
-```
+## `provider`
 
-The legacy `venat.New` development constructor remains available during the
-pre-v1 migration and is deprecated.
+`provider.Driver` exposes `Metadata` and streaming `Stream`. A `provider.Stream` emits normalized events until a terminal `EventDone` or `EventError` and then EOF.
 
-## Stable Packages
+Important contracts:
 
-The major-version public surface includes:
+- `Request.OperationID` identifies one logical model slot.
+- `StreamInterceptor` invokes `next` zero or one time and receives immutable input.
+- `ErrNotStarted` is the only proof that a failed call did not start.
+- Conformance helpers validate event order, usage, terminal behavior, and adapter normalization.
+- `OpenRetryingStream` uses `StreamRetryOptions.ShouldRetry` only for open or pre-first-event failures; context cancellation, deadlines, and emitted output are hard stops.
+- A receive or terminal failure after valid output is a non-retryable `PartialStreamError` that preserves the cause.
 
-- `venat` — primary façade and recommended import path for construction
-- `api` — Config, commands, interfaces, Run/Task value contracts, constants, errors
-- `agent`
-- `blackboard`
-- `flow`
-- `hook`
-- `message`
-- `policy`
-- `provider`
-- `tool`
-- `transport/mcp`
-- `worker` — optional glue between `Runner` and `agent.Engine`
+Provider-specific adapters remain under `provider/<adapter>`.
 
-These packages follow the compatibility rules in [SemVer And Compatibility](semver.md).
+## `tool`
 
-## Runner Contract
+`tool.Driver` exposes a definition and executes one typed call. `tool.Bus` validates calls and dispatches sequentially or in bounded parallel mode.
 
-The primary contract is split across the root facade and the api package:
+Important contracts:
 
-- `venat.NewDevelopment`, `venat.NewProduction`, `venat.Runner`
-- `api.Config`
-- `api.StartRunCommand`, `api.CreateTaskCommand`, other `api.*Command` values
-- `api.Run`, `api.Task`, `api.TaskEnvelope`, `api.TaskExecutionLease`, `api.TypedReport`
-- `api.PolicyEngine.Authorize(ctx, api.PolicyRequest)`
-- `api.ApprovalRequest`, `api.ResumeToken`, `api.ActionAttempt`
-- `api.Flow` as preset metadata, not a state-transition bypass
-- `worker.AgentWorker` as optional task-envelope executor glue
+- `Call.OperationID` identifies one logical tool slot.
+- `Interceptor` invokes `next` zero or one time and receives immutable input.
+- `ErrNotExecuted` is the only proof that an effect did not start.
+- Parallel results retain call identity; partial results and per-call failures remain observable.
+- `UpdateProgress` carries `Message`/`Data`; `UpdateOutput` requires non-empty `Parts`. `UpdateSink` is the only live-output seam.
+- The Bus deep-clones updates, overwrites call identity, assigns per-call `Sequence`, serializes a shared parallel sink, and applies synchronous backpressure.
+- One call is limited to 65,536 updates and 64 MiB of decoded update data. Invalid lifecycle/content returns `ErrToolUpdateProtocol`; overflow returns `ErrToolUpdateLimit`.
+- Streamed output parts become the final result when `Result.Parts` is absent and must match when it is present. `Result.IsError` remains a completed business result.
 
-`internal/core` remains implementation detail. New code should not import it.
+`tool/kit` contains application-neutral function, HTTP, process, adapter, and bundle helpers. External protocol bridges belong in separate adapter modules.
 
-## Durable Storage Extension
+Function tools may accept an `UpdateSink`. Process tools emit `UpdateOutput` as stdout/stderr is read. Drivers that never invoke the sink retain one-shot behavior.
 
-Durable storage contracts are exposed through `api`:
+## `skill`
 
-- `api.StoreProvider`
-- `api.UnitOfWork`
-- `api.RunStore`
-- `api.TaskStore`
-- `api.EventStore`
-- `api.BlackboardReadWriter`
-- `api.MailboxOutboxStore`
-- `api.UserMessageStore`
-- `api.TraceStore`
+`skill.Skill`, registry, discovery, and resource APIs load reusable instructions. Skills contribute context only. They do not grant tools, create identities, schedule peers, or start another execution loop.
 
-Example:
+## `agent`
+
+`agent.Engine` owns one bounded Agent loop.
+
+Construct an Engine directly for explicit wiring, or use `Spec` with `Build` and
+`BuildDeps`. `Build` resolves the provider and optional fallback model, selects
+the named tool subset, resolves active and available skills, installs the hook
+chain and context manager, and snapshots mutable loop, stop-sequence, and
+provider-extension defaults. Missing providers, models, tools, or skills fail
+during construction rather than on the first model turn.
+
+Primary inputs and outputs:
 
 ```go
-runner, err := venat.NewProduction(api.Config{
-	StoreProvider: myStoreProvider,
-	PolicyEngine:  myPolicy,
-})
+type Request struct {
+    Prompt string
+    Budget *Budget
+}
+
+type Result struct {
+    Text          string
+    Structured    json.RawMessage
+    Valid         bool
+    Failure       *AgentFailure
+    Steps         []Step
+    Usage         provider.Usage
+    ToolCallsUsed int
+    StopReason    provider.StopReason
+    Messages      []message.Message
+}
 ```
 
-## CLI Surface
+Primary entry points:
 
-The v2 CLI is intentionally minimal:
+- `Engine.Run` / `Engine.RunStream`
+- `Engine.Resume` / `Engine.ResumeStream`
+- low-level `Engine.RunMessages`
 
-```text
-venat version
-venat inspect-events --events PATH [--task TASKID]
-venat help
+`AgentToolConfig` and `NewAgentTool` expose an already configured child
+`Engine` as a non-terminal `tool.Driver`.
+
+```go
+type AgentToolConfig struct {
+    Definition   tool.Definition
+    Budget       *Budget
+    OutputPolicy OutputPolicy
+    MaxDepth     int
+}
+
+func NewAgentTool(child Engine, config AgentToolConfig) (tool.Driver, error)
 ```
 
-The library is the primary surface.
+- A zero input schema becomes a strict required `{task: string}` object. A
+  custom schema passes the complete JSON arguments as the child prompt.
+- The child receives no parent transcript or output policy. `MaxDepth` defaults
+  to four and cannot loosen an ancestor limit.
+- Child Agent failures return as error ToolResult data. Cancellation and
+  update-sink failures remain Go errors after usage settlement.
+- Child frames emit progress-only updates without thinking, tool arguments, or
+  child result payloads.
+- Recursive usage enters the parent budget once. A bounded parent's AgentTool
+  calls serialize against one token pool; unbounded parents retain Tool
+  Definition concurrency.
 
-## Internal Surface
+Extension seams:
 
-These packages remain implementation details:
+- `Hook` and ordered `HookChain`
+- `StepDecider` and `StepObserver`
+- `OutputGuardrail` and output observer
+- `BoundaryObserver` for safe `Continuation` snapshots
+- provider/tool interceptors
+- `Sink` for transient output
+- context managers and skills
 
-- `internal/core/*`
-- runtime storage and UnitOfWork implementations
-- mailbox outbox dispatchers
-- command handlers and transition tables
-- replay/recovery internals
+`FrameToolUpdate` carries a deep-copied tool update. Normal turn order is provider tool-call/done frames, zero or more tool-update frames, the final tool-result frame, then the next model turn. The accumulator, messages, steps, and continuations ignore tool updates; only the final result enters history.
 
-Archived v1 package names such as `host`, `team`, `planner`, `scheduler`,
-`capability`, and `orchestrator` are not part of the current public import
-surface. Use the explicit development or production constructor plus `api`
-contracts for new code.
+A `Continuation` records the complete provider-neutral state at one of four phases: `ready`, `model_complete`, `tools_complete`, or `validating_output`. `ValidateContinuation` rejects missing, contradictory, reordered, or malformed state rather than repairing it.
 
-Venat does not ship endpoint catalogs, a standard-library router, or a
-canonical `net/http` route tree as part of the primary runner API.
+## `orchestration`
+
+`Scheduler.Next(context.Context, State)` is a policy-free scheduling boundary. It returns stable `Dispatch` values with an opaque route, Agent request, output policy, optional handoff payload, and metadata.
+
+`Executor.Execute` performs one dispatch. `Drive` provides only mechanical behavior:
+
+- validation and globally unique dispatch IDs
+- bounded ticks and concurrency
+- context cancellation and panic containment
+- deterministic success folding and multi-error ordering
+- source-labeled serialized output frames
+
+Agent failures remain `Result` data. The `error` return is reserved for infrastructure failure.
+
+## `durable`
+
+`durable.Backend` is an execution-semantic persistence interface with exactly these operations:
+
+- start, resume, renew, checkpoint, suspend, finish, release, and load execution
+- start, finish, mark unknown, and reconcile an effect attempt
+
+`durable.Runtime` uses that interface through:
+
+- `Start` / `StartStream`
+- `Resume` / `ResumeStream` and target-asserting `ResumeWithOptions` / `ResumeStreamWithOptions`
+- `Suspend`
+- `Reconcile`
+- `Close`
+
+Runtime errors preserve typed execution or attempt attribution and support `errors.Is` against the durable sentinels. Any Agent result available when infrastructure fails is returned as partial data. Callers may treat the result as a terminal execution outcome only when the Go error is nil.
+
+`ResumeTarget` can assert the checkpoint sequence, continuation phase, and pending operation slot after checkpoint/reconciliation validation but before Engine, hook, sink, provider, or tool work. A mismatch returns `ErrResumeTargetMismatch` with `ResumeTargetError` facts and best-effort releases the lease; it never changes the continuation.
+
+Durable provider attempts retain complete terminal event sequences. Tool attempts retain only the normalized final result or failure: transient tool updates are never stored in attempts or checkpoints, and reopen replay emits no historical updates. Tool settlement completes before the final tool-result frame can be delivered.
+
+See [Durable execution](durable-execution.md) for fencing and ambiguity rules.
+
+## Public-shape rules
+
+Exported functions in all public package families must not return `[]any`. Exported fields must not contain loose `any` unless the immediately preceding line carries `// godoc-allow-any`. A genuinely open function result requires `//venat:allow-public-any` immediately above its declaration.
+
+The AST-based architecture gate scans `message`, `provider`, `tool`, `skill`, `agent`, `orchestration`, and `durable`; missing or empty scopes fail the gate.

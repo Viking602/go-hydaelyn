@@ -29,7 +29,7 @@ func (d *panicDriver) Execute(_ context.Context, _ Call, _ UpdateSink) (Result, 
 func TestExecuteParallelRecoversDriverPanic(t *testing.T) {
 	bus := NewBus(&panicDriver{name: "boom"})
 
-	_, err := bus.ExecuteBatch(context.Background(), []Call{{Name: "boom"}}, ModeParallel, nil)
+	_, err := bus.ExecuteBatch(context.Background(), []Call{{Name: "boom"}}, ModeParallel, ExecuteOptions{})
 
 	if err == nil {
 		t.Fatal("expected an error from a panicking driver in parallel mode")
@@ -50,7 +50,7 @@ func TestMaxConcurrencyParallelToolsReduceLatency(t *testing.T) {
 	}
 
 	startedAt := time.Now()
-	sequential, err := bus.ExecuteBatch(context.Background(), calls, ModeSequential, nil)
+	sequential, err := bus.ExecuteBatch(context.Background(), calls, ModeSequential, ExecuteOptions{})
 	if err != nil {
 		t.Fatalf("ExecuteBatch(sequential) error = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestMaxConcurrencyParallelToolsReduceLatency(t *testing.T) {
 
 	driver.Reset()
 	startedAt = time.Now()
-	parallel, err := bus.ExecuteBatch(context.Background(), calls, ModeParallel, nil)
+	parallel, err := bus.ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{})
 	if err != nil {
 		t.Fatalf("ExecuteBatch(parallel) error = %v", err)
 	}
@@ -76,8 +76,8 @@ func TestMaxConcurrencyParallelToolsReduceLatency(t *testing.T) {
 	t.Logf("sequential=%s parallel=%s", sequentialDuration, parallelDuration)
 }
 
-func TestExecuteBatchWithOptionsParallelMaxConcurrency(t *testing.T) {
-	driver := &latencyDriver{name: "slow", latency: 20 * time.Millisecond}
+func TestExecuteBatchRespectsDefinitionMaxConcurrency(t *testing.T) {
+	driver := &latencyDriver{name: "slow", latency: 20 * time.Millisecond, maxConcurrency: 2}
 	bus := NewBus(driver)
 	calls := []Call{
 		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
@@ -87,11 +87,9 @@ func TestExecuteBatchWithOptionsParallelMaxConcurrency(t *testing.T) {
 		{Name: "slow", Arguments: message.ToolCall{}.Arguments},
 	}
 
-	results, err := bus.ExecuteBatchWithOptions(context.Background(), calls, ModeParallel, nil, BatchOptions{
-		MaxConcurrency: 2,
-	})
+	results, err := bus.ExecuteBatch(context.Background(), calls, ModeParallel, ExecuteOptions{})
 	if err != nil {
-		t.Fatalf("ExecuteBatchWithOptions(parallel) error = %v", err)
+		t.Fatalf("ExecuteBatch(parallel) error = %v", err)
 	}
 	if len(results) != len(calls) {
 		t.Fatalf("result length = %d, want %d", len(results), len(calls))
@@ -105,14 +103,15 @@ func TestExecuteBatchWithOptionsParallelMaxConcurrency(t *testing.T) {
 }
 
 type latencyDriver struct {
-	name    string
-	latency time.Duration
-	active  int64
-	max     int64
+	name           string
+	latency        time.Duration
+	maxConcurrency int
+	active         int64
+	max            int64
 }
 
 func (d *latencyDriver) Definition() Definition {
-	return Definition{Name: d.name, InputSchema: Schema{Type: "object"}}
+	return Definition{Name: d.name, InputSchema: Schema{Type: "object"}, MaxConcurrency: d.maxConcurrency}
 }
 
 func (d *latencyDriver) Execute(ctx context.Context, call Call, _ UpdateSink) (Result, error) {

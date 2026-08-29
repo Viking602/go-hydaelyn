@@ -83,8 +83,19 @@ type OutputGuardrailDecision struct {
 	Metadata      map[string]string
 }
 
-type OutputGuardrailRecorder interface {
-	RecordOutputGuardrailDecision(ctx context.Context, decision OutputGuardrailDecision)
+// OutputGuardrailObserver observes non-allow guardrail decisions.
+type OutputGuardrailObserver interface {
+	ObserveOutputGuardrailDecision(context.Context, OutputGuardrailDecision)
+}
+
+// OutputGuardrailObserverFunc adapts a function to OutputGuardrailObserver.
+type OutputGuardrailObserverFunc func(context.Context, OutputGuardrailDecision)
+
+// ObserveOutputGuardrailDecision delegates to f.
+func (f OutputGuardrailObserverFunc) ObserveOutputGuardrailDecision(ctx context.Context, decision OutputGuardrailDecision) {
+	if f != nil {
+		f(ctx, decision)
+	}
 }
 
 func AllowOutput() OutputGuardrailResult {

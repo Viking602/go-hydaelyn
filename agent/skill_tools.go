@@ -238,8 +238,6 @@ func (d skillActivationDriver) Definition() tool.Definition {
 			Required:             []string{"name"},
 			AdditionalProperties: &additional,
 		},
-		EffectType:       tool.EffectReadOnly,
-		Idempotent:       true,
 		Concurrency:      tool.ConcurrencySequential,
 		ConcurrencyGroup: "skills",
 	}
@@ -294,8 +292,6 @@ func (d skillResourceDriver) Definition() tool.Definition {
 			Required:             []string{"skill", "path"},
 			AdditionalProperties: &additional,
 		},
-		EffectType:       tool.EffectReadOnly,
-		Idempotent:       true,
 		Concurrency:      tool.ConcurrencySequential,
 		ConcurrencyGroup: "skills",
 	}

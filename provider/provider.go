@@ -108,12 +108,6 @@ type ToolCallDelta struct {
 	ArgumentsDelta string `json:"argumentsDelta,omitempty"`
 }
 
-// NativeToolHost executes provider-native tool calls through the caller's
-// governed host instead of smuggling a host object through ExtraBody.
-type NativeToolHost interface {
-	ExecuteNativeTool(context.Context, message.ToolCall) (message.ToolResult, error)
-}
-
 // ContextUsage reports non-billable provider context occupancy.
 type ContextUsage struct {
 	UsedTokens int `json:"usedTokens"`
@@ -126,6 +120,7 @@ type ResponseMetadata = message.ResponseMetadata
 
 type Request struct {
 	Model             string                   `json:"model"`
+	OperationID       string                   `json:"-"`
 	Messages          []message.Message        `json:"messages"`
 	Temperature       float64                  `json:"temperature,omitempty"`
 	TopP              float64                  `json:"topP,omitempty"`
@@ -138,10 +133,9 @@ type Request struct {
 	PromptCacheKey    string                   `json:"promptCacheKey,omitempty"`
 	ServiceTier       string                   `json:"serviceTier,omitempty"`
 	ParallelToolCalls *bool                    `json:"parallelToolCalls,omitempty"`
-	NativeToolHost    NativeToolHost           `json:"-"`
 	ContextUsage      ContextUsageObserver     `json:"-"`
-	// ExtraBody contains provider wire fields only. Host callbacks, services,
-	// filesystem roots, and other process objects belong on typed fields above.
+	// ExtraBody contains provider wire fields, not process objects.
+	// godoc-allow-any
 	ExtraBody map[string]any `json:"extraBody,omitempty"`
 }
 

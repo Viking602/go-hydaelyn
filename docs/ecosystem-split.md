@@ -1,33 +1,48 @@
-# Ecosystem Split Boundary
+# Ecosystem split
 
-## Core Repo
+Venat keeps only application-neutral execution contracts in the core module.
 
-`venat` now keeps the following in-tree:
+## Core module
 
-- runtime core
-- public `venat.Runner` and `api` Run/Task contracts
-- blackboard, policy, provider, tool, worker, and MCP integration packages
-- CLI and official examples
+The core module owns:
 
-These are kept in-tree because they define the authoring and verification surface for the core runtime.
+- provider-neutral messages and model streaming
+- typed tools and validation
+- reusable instruction resources
+- one bounded Agent loop and its continuation format
+- policy-free dispatch mechanics
+- optional durable execution verbs and backend conformance tests
 
-## Still Good Candidates For Extraction
+These contracts are useful across products without assuming identity, organization, deployment, business state, or storage schema.
 
-The following remain good ecosystem-layer candidates when they outgrow the core repo:
+## Application ownership
 
-- provider-specific packages
-- storage backends
-- OTEL / hosted observation integrations
-- MCP tool bridges
-- pattern packs
-- richer evaluation suites and datasets
+Applications own:
 
-## Current In-Tree Incubation Rule
+- Agent identity, roles, teams, and routing strategy
+- authorization, approvals, quotas, risk, and retry policy
+- domain records and state machines
+- orchestration-state persistence
+- durable backend schema and operations
+- credentials, tenancy, observability, and deployment
+- reconciliation investigations and decisions
 
-Incubating integrations should follow the same constraint:
+The application is the composition root. It selects concrete providers, tools, schedulers, executors, and backends.
 
-- compile into `api.PipelineComponents` or `worker.AgentWorker`
-- do not create a second runtime
-- keep external-service assumptions out of the minimal core
+## Adapter modules
 
-If they are extracted later, the compatibility goal is to preserve the public contracts rather than the directory layout.
+Protocol-specific or operational integrations should ship in separate modules when they do not belong to a model provider adapter already maintained here. Examples include external tool protocols, timers, webhooks, hosted queues, databases, workflow services, and sandboxes.
+
+An adapter should target one narrow current interface:
+
+- `provider.Driver`
+- `tool.Driver`
+- `skill` resource loading
+- `orchestration.Executor`
+- `durable.Backend`
+
+Durable adapters must expose their conformance test invocation and document operational guarantees beyond the core semantic contract.
+
+## Acceptance rule
+
+A capability belongs in the core only when its vocabulary and invariants remain useful without application policy. A second real implementation is required before adding a core interface. Otherwise, build the adapter in the consuming application or ecosystem module.

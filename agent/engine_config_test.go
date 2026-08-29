@@ -5,19 +5,43 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
+	"github.com/Viking602/venat/tool"
 )
 
-// recordingRecorder captures every guardrail decision the engine reports, so
-// tests can assert the OutputRecorder is wired through Engine.Run.
-type recordingRecorder struct {
+type recordingGuardrailObserver struct {
 	decisions []OutputGuardrailDecision
 }
 
-func (r *recordingRecorder) RecordOutputGuardrailDecision(_ context.Context, decision OutputGuardrailDecision) {
-	r.decisions = append(r.decisions, decision)
+func (o *recordingGuardrailObserver) ObserveOutputGuardrailDecision(_ context.Context, decision OutputGuardrailDecision) {
+	o.decisions = append(o.decisions, decision)
+}
+
+type mutatingProviderRequestHook struct{}
+
+func (mutatingProviderRequestHook) TransformContext(_ context.Context, messages []message.Message) ([]message.Message, error) {
+	return messages, nil
+}
+
+func (mutatingProviderRequestHook) BeforeModelCall(_ context.Context, request *provider.Request) error {
+	request.Metadata["scope"] = "hook"
+	request.StopSequences[0] = "HOOK"
+	request.ResponseFormat.Schema.Required[0] = "hook"
+	request.ExtraBody["nested"].(map[string]any)["enabled"] = false
+	return nil
+}
+
+func (mutatingProviderRequestHook) BeforeToolCall(context.Context, *tool.Call) error {
+	return nil
+}
+
+func (mutatingProviderRequestHook) AfterToolCall(context.Context, *tool.Result) error {
+	return nil
+}
+
+func (mutatingProviderRequestHook) OnEvent(context.Context, provider.Event) error {
+	return nil
 }
 
 func singleTurnProvider(text string) *scriptedProvider {
@@ -36,7 +60,7 @@ func TestEngineRunWiresThinkingBudgetAndStopSequencesToProvider(t *testing.T) {
 		StopSequences:  []string{"STOP", "END"},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure != nil {
 		t.Fatalf("unexpected failure: %#v", result.Failure)
@@ -61,7 +85,7 @@ func TestEngineRunWiresExtraBodyToProvider(t *testing.T) {
 		ExtraBody: map[string]any{"reasoning_effort": "high"},
 	}
 
-	engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if len(driver.requests) != 1 {
 		t.Fatalf("provider calls = %d, want 1", len(driver.requests))
@@ -71,13 +95,64 @@ func TestEngineRunWiresExtraBodyToProvider(t *testing.T) {
 	}
 }
 
+func TestRunMessages_ModelHookDoesNotAliasInputDefaults(t *testing.T) {
+	driver := singleTurnProvider("answer")
+	metadata := map[string]string{"scope": "caller"}
+	stopSequences := []string{"STOP"}
+	responseFormat := &provider.ResponseFormat{
+		Type: "json_schema",
+		Schema: &message.JSONSchema{
+			Type:     "object",
+			Required: []string{"answer"},
+		},
+	}
+	nested := map[string]any{"enabled": true}
+	extraBody := map[string]any{"nested": nested}
+	engine := Engine{
+		Provider: driver,
+		Hooks:    NewHookChain(mutatingProviderRequestHook{}),
+	}
+
+	_, err := engine.RunMessages(context.Background(), LoopInput{
+		Model:          "test-model",
+		Messages:       []message.Message{message.NewText(message.RoleUser, "work")},
+		MaxIterations:  1,
+		Metadata:       metadata,
+		StopSequences:  stopSequences,
+		ResponseFormat: responseFormat,
+		ExtraBody:      extraBody,
+	})
+	if err != nil {
+		t.Fatalf("RunMessages() error = %v", err)
+	}
+	if metadata["scope"] != "caller" || stopSequences[0] != "STOP" {
+		t.Fatalf("hook mutated caller metadata/stops: %#v %#v", metadata, stopSequences)
+	}
+	if responseFormat.Schema.Required[0] != "answer" {
+		t.Fatalf("hook mutated caller response schema: %#v", responseFormat.Schema)
+	}
+	if nested["enabled"] != true {
+		t.Fatalf("hook mutated caller ExtraBody: %#v", extraBody)
+	}
+	request := driver.requests[0]
+	if request.Metadata["scope"] != "hook" || request.StopSequences[0] != "HOOK" {
+		t.Fatalf("provider request did not receive hook rewrite: %#v", request)
+	}
+	if request.ResponseFormat.Schema.Required[0] != "hook" {
+		t.Fatalf("provider response schema = %#v, want hook rewrite", request.ResponseFormat.Schema)
+	}
+	if request.ExtraBody["nested"].(map[string]any)["enabled"] != false {
+		t.Fatalf("provider ExtraBody = %#v, want hook rewrite", request.ExtraBody)
+	}
+}
+
 func TestEngineRunAppliesOutputGuardrailsAndRecorder(t *testing.T) {
 	driver := singleTurnProvider("raw answer")
-	recorder := &recordingRecorder{}
+	observer := &recordingGuardrailObserver{}
 	engine := Engine{
 		Provider:       driver,
 		Model:          "test-model",
-		OutputRecorder: recorder,
+		OutputObserver: observer,
 		OutputGuardrails: []OutputGuardrail{
 			NewOutputGuardrail("redact", func(_ context.Context, in OutputGuardrailInput) (OutputGuardrailResult, error) {
 				if in.Output.Text == "raw answer" {
@@ -88,7 +163,7 @@ func TestEngineRunAppliesOutputGuardrailsAndRecorder(t *testing.T) {
 		},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure != nil {
 		t.Fatalf("unexpected failure: %#v", result.Failure)
@@ -96,11 +171,11 @@ func TestEngineRunAppliesOutputGuardrailsAndRecorder(t *testing.T) {
 	if result.Text != "clean answer" {
 		t.Fatalf("result.Text = %q, want the guardrail replacement", result.Text)
 	}
-	if len(recorder.decisions) != 1 {
-		t.Fatalf("recorded decisions = %d, want 1", len(recorder.decisions))
+	if len(observer.decisions) != 1 {
+		t.Fatalf("observed decisions = %d, want 1", len(observer.decisions))
 	}
-	if d := recorder.decisions[0]; d.GuardrailName != "redact" || d.Action != OutputGuardrailActionReplace {
-		t.Fatalf("decision = %#v, want redact/replace", d)
+	if decision := observer.decisions[0]; decision.GuardrailName != "redact" || decision.Action != OutputGuardrailActionReplace {
+		t.Fatalf("decision = %#v, want redact/replace", decision)
 	}
 }
 
@@ -116,19 +191,13 @@ func TestEngineRunBlockingGuardrailFailsRun(t *testing.T) {
 		},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure == nil {
 		t.Fatal("expected a failure when a guardrail blocks the output")
 	}
-	// A guardrail block is a safety refusal, not an opaque engine fault: it
-	// surfaces as unsafe_action so a scheduler escalates for human review
-	// rather than blindly retrying. The typed cause stays on the chain.
-	if result.Failure.Kind != FailureKindUnsafeAction {
-		t.Fatalf("Failure.Kind = %s, want unsafe_action", result.Failure.Kind)
-	}
-	if !result.Failure.Escalatable || result.Failure.Retryable {
-		t.Fatalf("Failure = %#v, want escalatable and not retryable", result.Failure)
+	if result.Failure.Kind != FailureKindOutputBlocked {
+		t.Fatalf("Failure.Kind = %s, want output_blocked", result.Failure.Kind)
 	}
 	var tripwire *OutputGuardrailTripwireTriggeredError
 	if !errors.As(result.Failure, &tripwire) {
@@ -140,7 +209,7 @@ func TestEngineRunBlockingGuardrailFailsRun(t *testing.T) {
 // failure-classification of context construction errors.
 type failingContextManager struct{}
 
-func (failingContextManager) Build(context.Context, api.Task) ([]message.Message, error) {
+func (failingContextManager) Build(context.Context, Request) ([]message.Message, error) {
 	return nil, errors.New("boom: context source unavailable")
 }
 
@@ -155,7 +224,7 @@ func TestRun_ContextBuildErrorMapsToContextBuildFailed(t *testing.T) {
 	}}}}
 	engine.ContextBuilder = failingContextManager{}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "g"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "g"}, OutputPolicy{})
 
 	if result.Failure == nil || result.Failure.Kind != FailureKindContextBuildFailed {
 		t.Fatalf("Failure = %#v, want Kind=context_build_failed", result.Failure)

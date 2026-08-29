@@ -3,23 +3,16 @@ package agent
 import (
 	"context"
 	"errors"
-	"net"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
 	"github.com/Viking602/venat/tool/kit"
 )
 
-// TestEngineRunClassifiesUnavailableToolAsToolUnavailable pins the contract
-// from spec 03 §dispatch policy: a tool the bus cannot serve surfaces as
-// FailureKindToolUnavailable — retryable and escalatable — so a scheduler can
-// apply the documented "retry with backoff, then escalate" path rather than
-// treating an unavailable tool as an opaque engine_error. It covers both a
-// name absent from a present bus (tool.ErrToolNotFound) and a missing bus
-// altogether (ErrToolBusMissing); both previously fell through to engine_error.
+// An unavailable tool is a factual tool_unavailable failure. Applications
+// choose whether to retry, reroute, or stop.
 func TestEngineRunClassifiesUnavailableToolAsToolUnavailable(t *testing.T) {
 	toolCallTurn := func(name string) [][]provider.Event {
 		return [][]provider.Event{{
@@ -53,7 +46,7 @@ func TestEngineRunClassifiesUnavailableToolAsToolUnavailable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			engine := Engine{Provider: &scriptedProvider{turns: toolCallTurn(tt.call)}, Tools: tt.bus}
 
-			result := engine.Run(context.Background(), api.Task{Goal: "use a tool"}, OutputPolicy{})
+			result := engine.Run(context.Background(), Request{Prompt: "use a tool"}, OutputPolicy{})
 
 			if result.Failure == nil {
 				t.Fatal("expected a failure for an unavailable tool")
@@ -61,24 +54,16 @@ func TestEngineRunClassifiesUnavailableToolAsToolUnavailable(t *testing.T) {
 			if result.Failure.Kind != FailureKindToolUnavailable {
 				t.Fatalf("Failure.Kind = %s, want %s", result.Failure.Kind, FailureKindToolUnavailable)
 			}
-			if !result.Failure.Retryable {
-				t.Fatal("tool_unavailable must be retryable (retry with backoff)")
-			}
-			if !result.Failure.Escalatable {
-				t.Fatal("tool_unavailable must be escalatable (then escalate)")
+			if result.Failure.Reason == "" {
+				t.Fatal("tool_unavailable failure must retain its reason")
 			}
 		})
 	}
 }
 
-// TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction pins the other
-// half of the guardrail-refusal contract (the block half lives in
-// engine_config_test.go): when an output guardrail keeps asking to retry but
-// the loop cannot satisfy it within MaxIterations, the run fails as
-// FailureKindUnsafeAction — escalatable, not retryable — rather than collapsing
-// into an opaque engine_error. The typed cause stays walkable across the
-// boundary so a scheduler can inspect which guardrail withheld the output.
-func TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction(t *testing.T) {
+// Guardrail retry exhaustion is a factual output_blocked failure with the
+// typed cause preserved for application policy.
+func TestEngineRunClassifiesGuardrailRetryExhaustionAsOutputBlocked(t *testing.T) {
 	engine := Engine{
 		Provider:   singleTurnProvider("draft answer"),
 		Model:      "test-model",
@@ -90,41 +75,16 @@ func TestEngineRunClassifiesGuardrailRetryExhaustionAsUnsafeAction(t *testing.T)
 		},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "do the thing"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "do the thing"}, OutputPolicy{})
 
 	if result.Failure == nil {
 		t.Fatal("expected a failure when guardrail retries are exhausted")
 	}
-	if result.Failure.Kind != FailureKindUnsafeAction {
-		t.Fatalf("Failure.Kind = %s, want unsafe_action", result.Failure.Kind)
-	}
-	if !result.Failure.Escalatable || result.Failure.Retryable {
-		t.Fatalf("Failure = %#v, want escalatable and not retryable", result.Failure)
+	if result.Failure.Kind != FailureKindOutputBlocked {
+		t.Fatalf("Failure.Kind = %s, want output_blocked", result.Failure.Kind)
 	}
 	var retryLimit *OutputGuardrailRetryLimitExceededError
 	if !errors.As(result.Failure, &retryLimit) {
 		t.Fatalf("Failure cause = %v, want OutputGuardrailRetryLimitExceededError", result.Failure)
-	}
-}
-
-func TestLoopErrorFailureNeverRetriesStateIntegrityErrors(t *testing.T) {
-	transient := &net.DNSError{IsTimeout: true}
-	for _, fatal := range []error{
-		api.ErrTerminalState,
-		api.ErrStaleTaskVersion,
-		api.ErrLeaseHolderMismatch,
-		api.ErrLeaseNotActive,
-		api.ErrActionReconcileRequired,
-		api.ErrIdempotencyConflict,
-		api.ErrCheckpointLimitExceeded,
-	} {
-		err := errors.Join(transient, fatal)
-		failure := loopErrorFailure(context.Background(), err, false)
-		if failure.Retryable {
-			t.Fatalf("%v joined with retryable transport error was marked retryable", fatal)
-		}
-		if !errors.Is(failure, fatal) {
-			t.Fatalf("failure %v lost fatal cause %v", failure, fatal)
-		}
 	}
 }

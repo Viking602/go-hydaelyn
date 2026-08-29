@@ -25,13 +25,6 @@ const (
 	KindCustom            Kind = "custom"
 )
 
-type Visibility string
-
-const (
-	VisibilityShared  Visibility = "shared"
-	VisibilityPrivate Visibility = "private"
-)
-
 type JSONSchema struct {
 	Type                 string                `json:"type,omitempty"`
 	Description          string                `json:"description,omitempty"`
@@ -40,26 +33,6 @@ type JSONSchema struct {
 	Items                *JSONSchema           `json:"items,omitempty"`
 	Enum                 []string              `json:"enum,omitempty"`
 	AdditionalProperties *bool                 `json:"additionalProperties,omitempty"`
-}
-
-type ToolSecurity struct {
-	RequiredPermissions []string `json:"requiredPermissions,omitempty"`
-	RequiresApproval    bool     `json:"requiresApproval,omitempty"`
-	RiskLevel           string   `json:"riskLevel,omitempty"`
-	Idempotent          bool     `json:"idempotent,omitempty"`
-}
-
-type ToolEffectType string
-
-const (
-	ToolEffectReadOnly           ToolEffectType = "read_only"
-	ToolEffectWrite              ToolEffectType = "write"
-	ToolEffectExternalSideEffect ToolEffectType = "external_side_effect"
-)
-
-type ToolRetryPolicy struct {
-	MaxAttempts int           `json:"maxAttempts,omitempty"`
-	Backoff     time.Duration `json:"backoff,omitempty"`
 }
 
 type ToolConcurrencyMode string
@@ -71,26 +44,14 @@ const (
 )
 
 type ToolDefinition struct {
-	Name                string              `json:"name"`
-	Description         string              `json:"description,omitempty"`
-	InputSchema         JSONSchema          `json:"inputSchema"`
-	Terminal            bool                `json:"terminal,omitempty"`
-	Tags                []string            `json:"tags,omitempty"`
-	Metadata            map[string]string   `json:"metadata,omitempty"`
-	Origin              string              `json:"origin,omitempty"`
-	Security            ToolSecurity        `json:"security,omitempty"`
-	RequiredPermissions []string            `json:"requiredPermissions,omitempty"`
-	RequiresApproval    bool                `json:"requiresApproval,omitempty"`
-	RiskLevel           string              `json:"riskLevel,omitempty"`
-	EffectType          ToolEffectType      `json:"effectType,omitempty"`
-	RequiresActionTask  bool                `json:"requiresActionTask,omitempty"`
-	Idempotent          bool                `json:"idempotent,omitempty"`
-	Timeout             time.Duration       `json:"timeout,omitempty"`
-	RetryPolicy         ToolRetryPolicy     `json:"retryPolicy,omitempty"`
-	PolicyTags          []string            `json:"policyTags,omitempty"`
-	Concurrency         ToolConcurrencyMode `json:"concurrency,omitempty"`
-	ConcurrencyGroup    string              `json:"concurrencyGroup,omitempty"`
-	MaxConcurrency      int                 `json:"maxConcurrency,omitempty"`
+	Name             string              `json:"name"`
+	Description      string              `json:"description,omitempty"`
+	InputSchema      JSONSchema          `json:"inputSchema"`
+	Terminal         bool                `json:"terminal,omitempty"`
+	Timeout          time.Duration       `json:"timeout,omitempty"`
+	Concurrency      ToolConcurrencyMode `json:"concurrency,omitempty"`
+	ConcurrencyGroup string              `json:"concurrencyGroup,omitempty"`
+	MaxConcurrency   int                 `json:"maxConcurrency,omitempty"`
 }
 
 type ToolCall struct {
@@ -138,23 +99,15 @@ type Message struct {
 	Response      ResponseMetadata  `json:"response,omitempty"`
 	ToolCalls     []ToolCall        `json:"toolCalls,omitempty"`
 	ToolResult    *ToolResult       `json:"toolResult,omitempty"`
-	TeamID        string            `json:"teamId,omitempty"`
-	AgentID       string            `json:"agentId,omitempty"`
-	RunID         string            `json:"runId,omitempty"`
-	ParentRunID   string            `json:"parentRunId,omitempty"`
-	Visibility    Visibility        `json:"visibility,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
-	CreatedAt     time.Time         `json:"createdAt,omitempty"`
 }
 
 func NewText(role Role, text string) Message {
 	return Message{
-		Role:       role,
-		Kind:       KindStandard,
-		Text:       text,
-		Content:    []ContentPart{TextPart(text)},
-		Visibility: VisibilityShared,
-		CreatedAt:  time.Now().UTC(),
+		Role:    role,
+		Kind:    KindStandard,
+		Text:    text,
+		Content: []ContentPart{TextPart(text)},
 	}
 }
 
@@ -165,7 +118,5 @@ func NewToolResult(result ToolResult) Message {
 		Kind:       KindStandard,
 		Name:       result.Name,
 		ToolResult: &result,
-		Visibility: VisibilityShared,
-		CreatedAt:  time.Now().UTC(),
 	}
 }

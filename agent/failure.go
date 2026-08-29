@@ -1,8 +1,7 @@
 package agent
 
-// FailureKind enumerates the typed failure modes Engine.Run may surface.
-// Multi-agent schedulers may branch on FailureKind to decide retry / handoff /
-// escalate / approval / terminate.
+// FailureKind classifies a factual Engine outcome. Applications decide retry,
+// escalation, approval, and routing from Kind, Reason, and the error chain.
 type FailureKind string
 
 const (
@@ -10,34 +9,23 @@ const (
 	FailureKindToolUnavailable    FailureKind = "tool_unavailable"
 	FailureKindSchemaInvalid      FailureKind = "schema_invalid"
 	FailureKindRepairFailed       FailureKind = "repair_failed"
-	FailureKindUnsafeAction       FailureKind = "unsafe_action"
+	FailureKindOutputBlocked      FailureKind = "output_blocked"
 	FailureKindContextBuildFailed FailureKind = "context_build_failed"
 	FailureKindEngineError        FailureKind = "engine_error"
 	FailureKindStepAborted        FailureKind = "step_aborted"
 )
 
-// AgentFailure is the only failure shape that crosses the agent →
-// multiagent boundary (boundaries doc Principle 6). Engine.Run must
-// surface failures here rather than via a bare error return.
-//
-// AgentFailure itself satisfies the error interface so call sites that
-// want to bubble it through err-typed plumbing can do so; the wrapped
-// cause (if any) is exposed via Unwrap, allowing errors.Is / errors.As
-// to walk the chain.
+// AgentFailure is the typed failure carried by Result. The unexported cause is
+// intentionally omitted from JSON while remaining available to errors.Is and
+// errors.As.
 type AgentFailure struct {
-	Kind        FailureKind `json:"kind"`
-	Reason      string      `json:"reason,omitempty"`
-	Retryable   bool        `json:"retryable,omitempty"`
-	Escalatable bool        `json:"escalatable,omitempty"`
+	Kind   FailureKind `json:"kind"`
+	Reason string      `json:"reason,omitempty"`
 
-	// cause is the underlying error (if any). Intentionally unexported
-	// so it does not serialize through JSON marshaling and so the only
-	// way to populate it is the WithCause builder, which the agent
-	// package owns. Crossing-boundary consumers use Unwrap.
 	cause error
 }
 
-// Error returns Reason or, when Reason is empty, the FailureKind value.
+// Error returns Reason or the failure kind.
 func (f *AgentFailure) Error() string {
 	if f == nil {
 		return "<nil agent failure>"
@@ -48,9 +36,7 @@ func (f *AgentFailure) Error() string {
 	return string(f.Kind)
 }
 
-// Unwrap returns the cause attached via WithCause, enabling
-// errors.Is / errors.As traversal across the agent → multiagent
-// boundary.
+// Unwrap exposes the attached cause.
 func (f *AgentFailure) Unwrap() error {
 	if f == nil {
 		return nil
@@ -58,14 +44,10 @@ func (f *AgentFailure) Unwrap() error {
 	return f.cause
 }
 
-// WithCause attaches an underlying error for errors.Is / errors.As
-// propagation. Returns the receiver to allow fluent chaining inside
-// Engine.Run; JSON marshaling of AgentFailure does not include the
-// cause (persistence relies on Kind + Reason).
+// WithCause attaches an error without changing the serializable failure.
 func (f *AgentFailure) WithCause(err error) *AgentFailure {
-	if f == nil {
-		return nil
+	if f != nil {
+		f.cause = err
 	}
-	f.cause = err
 	return f
 }

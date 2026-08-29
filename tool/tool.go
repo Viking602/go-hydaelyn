@@ -18,8 +18,6 @@ type (
 	Schema          = message.JSONSchema
 	Call            = message.ToolCall
 	Result          = message.ToolResult
-	EffectType      = message.ToolEffectType
-	RetryPolicy     = message.ToolRetryPolicy
 	ConcurrencyMode = message.ToolConcurrencyMode
 )
 
@@ -33,12 +31,9 @@ const (
 var ErrNotExecuted = errors.New("tool operation was not executed")
 
 const (
-	EffectReadOnly           = message.ToolEffectReadOnly
-	EffectWrite              = message.ToolEffectWrite
-	EffectExternalSideEffect = message.ToolEffectExternalSideEffect
-	ConcurrencyParallel      = message.ToolConcurrencyParallel
-	ConcurrencySequential    = message.ToolConcurrencySequential
-	ConcurrencyExclusive     = message.ToolConcurrencyExclusive
+	ConcurrencyParallel   = message.ToolConcurrencyParallel
+	ConcurrencySequential = message.ToolConcurrencySequential
+	ConcurrencyExclusive  = message.ToolConcurrencyExclusive
 )
 
 type Mode string
@@ -48,41 +43,41 @@ const (
 	ModeParallel   Mode = "parallel"
 )
 
-type BatchOptions struct {
-	MaxConcurrency int
-}
+// UpdateKind classifies one transient tool callback value.
+type UpdateKind string
 
+const (
+	// UpdateProgress reports message/data state and must not contain Parts.
+	UpdateProgress UpdateKind = "progress"
+	// UpdateOutput reports ordered output and must contain at least one Part.
+	UpdateOutput UpdateKind = "output"
+)
+
+// Update is one transient, per-call tool update. Bus overwrites identity and
+// sequence fields before delivery.
 type Update struct {
-	Kind    string            `json:"kind"`
-	Message string            `json:"message,omitempty"`
-	Data    map[string]string `json:"data,omitempty"`
+	Kind        UpdateKind            `json:"kind"`
+	ToolCallID  string                `json:"toolCallId,omitempty"`
+	OperationID string                `json:"operationId,omitempty"`
+	Sequence    uint64                `json:"sequence"`
+	Message     string                `json:"message,omitempty"`
+	Data        map[string]string     `json:"data,omitempty"`
+	Parts       []message.ContentPart `json:"parts,omitempty"`
 }
 
+// UpdateSink synchronously receives one update and applies backpressure by
+// returning only when the producer may continue.
 type UpdateSink func(Update) error
+
+// ExecuteOptions configures one Bus dispatch.
+type ExecuteOptions struct {
+	Sink        UpdateSink
+	Interceptor Interceptor
+}
 
 type Driver interface {
 	Definition() Definition
 	Execute(ctx context.Context, call Call, sink UpdateSink) (Result, error)
-}
-
-// PreparedExecution is the result of a side-effecting tool's preflight phase.
-// Complete means Result is final and the underlying operation must not be
-// journaled or executed. Otherwise Execute performs the already-authorized
-// operation after the durable action attempt has started.
-type PreparedExecution struct {
-	Call     Call
-	Result   Result
-	Complete bool
-	Execute  func(context.Context) (Result, error)
-}
-
-// PreparingDriver separates interactive authorization and input preparation
-// from the actual side effect. Durable workers run Prepare before creating an
-// action attempt, so a crash while waiting for approval cannot create a false
-// unknown outcome.
-type PreparingDriver interface {
-	Driver
-	Prepare(context.Context, Call, UpdateSink) (PreparedExecution, error)
 }
 
 var ErrToolNotFound = errors.New("tool not found")
@@ -151,29 +146,6 @@ func NotExecutedCallIDs(err error) (map[string]struct{}, bool) {
 		}
 	}
 	return ids, all
-}
-
-// CallerInfo identifies the agent invoking a tool. It is plumbed via context
-// by the runtime so tools (e.g. send_message) can discover their caller
-// without forcing the LLM to pass teamId/agentId as explicit arguments.
-type CallerInfo struct {
-	TeamRunID string
-	AgentID   string
-	TaskID    string
-	SessionID string
-}
-
-type callerKey struct{}
-
-// WithCaller returns a context carrying the given CallerInfo.
-func WithCaller(ctx context.Context, info CallerInfo) context.Context {
-	return context.WithValue(ctx, callerKey{}, info)
-}
-
-// CallerFromContext retrieves any CallerInfo previously stored via WithCaller.
-func CallerFromContext(ctx context.Context) (CallerInfo, bool) {
-	info, ok := ctx.Value(callerKey{}).(CallerInfo)
-	return info, ok
 }
 
 type concurrencyLimiter struct {
@@ -402,7 +374,7 @@ func (b *Bus) Driver(name string) (Driver, bool) {
 	return driver, ok
 }
 
-func (b *Bus) Execute(ctx context.Context, call Call, sink UpdateSink) (Result, error) {
+func (b *Bus) Execute(ctx context.Context, call Call, options ExecuteOptions) (Result, error) {
 	if err := b.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -440,23 +412,25 @@ func (b *Bus) Execute(ctx context.Context, call Call, sink UpdateSink) (Result, 
 		return Result{}, errors.Join(ErrNotExecuted, err)
 	}
 	defer release()
-	return driver.Execute(ctx, call, sink)
+	terminal := toolUpdateDriver{next: driver}
+	interceptor := ChainInterceptors(options.Interceptor)
+	if interceptor == nil {
+		return terminal.Execute(ctx, cloneCall(call), options.Sink)
+	}
+	return interceptor.Execute(ctx, terminal, call, options.Sink)
 }
 
-func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, sink UpdateSink) ([]Result, error) {
-	return b.ExecuteBatchWithOptions(ctx, calls, mode, sink, BatchOptions{})
-}
-
-func (b *Bus) ExecuteBatchWithOptions(ctx context.Context, calls []Call, mode Mode, sink UpdateSink, options BatchOptions) ([]Result, error) {
+func (b *Bus) ExecuteBatch(ctx context.Context, calls []Call, mode Mode, options ExecuteOptions) ([]Result, error) {
 	if len(calls) > MaxBatchCalls {
 		return nil, fmt.Errorf("%w: %d > %d", ErrTooManyToolCalls, len(calls), MaxBatchCalls)
 	}
 	if mode == ModeParallel && !b.requiresSequential(calls) {
-		return b.executeParallel(ctx, calls, sink, options)
+		options.Sink = synchronizeUpdateSink(options.Sink)
+		return b.executeParallel(ctx, calls, options)
 	}
 	results := make([]Result, 0, len(calls))
 	for index, call := range calls {
-		result, err := b.Execute(ctx, call, sink)
+		result, err := b.Execute(ctx, call, options)
 		if err != nil {
 			failures := make([]CallExecutionError, 0, len(calls)-index)
 			failures = append(failures, CallExecutionError{CallID: call.ID, Err: err})
@@ -484,14 +458,10 @@ func (b *Bus) requiresSequential(calls []Call) bool {
 	return false
 }
 
-func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink, options BatchOptions) ([]Result, error) {
+func (b *Bus) executeParallel(ctx context.Context, calls []Call, options ExecuteOptions) ([]Result, error) {
 	results := make([]Result, len(calls))
 	errs := make([]error, len(calls))
-	workerCount := options.MaxConcurrency
-	if workerCount <= 0 {
-		workerCount = DefaultBatchConcurrency
-	}
-	workerCount = min(workerCount, len(calls))
+	workerCount := min(DefaultBatchConcurrency, len(calls))
 	jobs := make(chan int)
 	var workers sync.WaitGroup
 	workers.Add(workerCount)
@@ -510,7 +480,7 @@ func (b *Bus) executeParallel(ctx context.Context, calls []Call, sink UpdateSink
 							errs[index] = fmt.Errorf("%w: %s: %v", ErrToolPanic, current.Name, recovered)
 						}
 					}()
-					results[index], errs[index] = b.Execute(ctx, current, sink)
+					results[index], errs[index] = b.Execute(ctx, current, options)
 				}()
 			}
 		}()
@@ -557,11 +527,6 @@ dispatch:
 
 func cloneDefinition(definition Definition) Definition {
 	definition.InputSchema = cloneSchema(definition.InputSchema)
-	definition.Tags = slices.Clone(definition.Tags)
-	definition.Metadata = maps.Clone(definition.Metadata)
-	definition.Security.RequiredPermissions = slices.Clone(definition.Security.RequiredPermissions)
-	definition.RequiredPermissions = slices.Clone(definition.RequiredPermissions)
-	definition.PolicyTags = slices.Clone(definition.PolicyTags)
 	return definition
 }
 

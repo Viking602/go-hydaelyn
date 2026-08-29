@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
@@ -15,6 +14,16 @@ import (
 )
 
 type fakeProvider struct{}
+
+type failingProvider struct{}
+
+func (failingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "failing"}
+}
+
+func (failingProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
+	return nil, errors.New("provider unavailable")
+}
 
 func (fakeProvider) Metadata() provider.Metadata {
 	return provider.Metadata{Name: "fake"}
@@ -144,18 +153,18 @@ func TestEnginePreservesFallbackIdentityOnPartialStreamError(t *testing.T) {
 	}
 }
 
-func TestEnginePartialStreamErrorJoinsStepRecorderFailure(t *testing.T) {
-	recordErr := errors.New("step persistence failed")
+func TestEnginePartialStreamErrorJoinsStepObserverFailure(t *testing.T) {
+	observeErr := errors.New("step observation failed")
 	engine := Engine{Provider: provider.Fallback(failingProvider{}, partialErrorProvider{})}
 	_, err := engine.RunMessages(context.Background(), LoopInput{
 		Model:    "selected-model",
 		Messages: []message.Message{message.NewText(message.RoleUser, "hi")},
-		StepRecorder: StepRecorderFunc(func(context.Context, Step) error {
-			return recordErr
+		StepObserver: StepObserverFunc(func(context.Context, Step) error {
+			return observeErr
 		}),
 	})
-	if !errors.Is(err, recordErr) || !strings.Contains(err.Error(), "partial stream failure") {
-		t.Fatalf("RunMessages() error = %v, want stream and recorder causes", err)
+	if !errors.Is(err, observeErr) || !strings.Contains(err.Error(), "partial stream failure") {
+		t.Fatalf("RunMessages() error = %v, want stream and observer causes", err)
 	}
 }
 
@@ -178,7 +187,7 @@ func TestEngineGuardrailPanicPreservesFallbackUsageIdentity(t *testing.T) {
 				panic("guardrail panic")
 			}),
 		},
-		StepRecorder: StepRecorderFunc(func(_ context.Context, step Step) error {
+		StepObserver: StepObserverFunc(func(_ context.Context, step Step) error {
 			recorded = append(recorded, step)
 			return nil
 		}),
@@ -291,7 +300,7 @@ func TestEngineRunForwardsUnlimitedIterations(t *testing.T) {
 	engine := newLoopToolEngine(t, prov)
 	engine.LoopPolicy = LoopPolicy{UnlimitedIterations: true}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "continue until done"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "continue until done"}, OutputPolicy{})
 
 	if result.Failure != nil {
 		t.Fatalf("Engine.Run() failure = %v", result.Failure)
@@ -423,30 +432,24 @@ func requireExtraBodyThinkingEnabled(t *testing.T, body map[string]any) {
 	}
 }
 
-type nativeToolHostStub struct{}
+type opaqueHostStub struct{}
 
-func (nativeToolHostStub) ExecuteNativeTool(_ context.Context, call message.ToolCall) (message.ToolResult, error) {
-	return message.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: "ok"}, nil
-}
-
-func TestEngineForwardsTypedProviderChannels(t *testing.T) {
+func TestEngineForwardsTypedProviderOptions(t *testing.T) {
 	driver := &scriptedProvider{turns: [][]provider.Event{{
 		{Kind: provider.EventTextDelta, Text: "ok"},
 		{Kind: provider.EventDone, StopReason: provider.StopReasonComplete},
 	}}}
 	parallel := true
 	observed := provider.ContextUsage{}
-	host := nativeToolHostStub{}
 	engine := Engine{
 		Provider:          driver,
 		Model:             "test-model",
 		PromptCacheKey:    "session-cache",
 		ServiceTier:       "priority",
 		ParallelToolCalls: &parallel,
-		NativeToolHost:    host,
 		ContextUsage:      func(usage provider.ContextUsage) { observed = usage },
 	}
-	result := engine.Run(context.Background(), api.Task{Goal: "test typed channels"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "test typed channels"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Run() failure = %#v", result.Failure)
 	}
@@ -458,8 +461,8 @@ func TestEngineForwardsTypedProviderChannels(t *testing.T) {
 		request.ParallelToolCalls == nil || !*request.ParallelToolCalls || request.ParallelToolCalls == &parallel {
 		t.Fatalf("typed request channels = %#v", request)
 	}
-	if request.NativeToolHost == nil || request.ContextUsage == nil {
-		t.Fatalf("host channels were not forwarded: %#v", request)
+	if request.ContextUsage == nil {
+		t.Fatalf("context usage observer was not forwarded: %#v", request)
 	}
 	request.ContextUsage(provider.ContextUsage{UsedTokens: 321, MaxTokens: 1000})
 	if observed.UsedTokens != 321 || observed.MaxTokens != 1000 {
@@ -476,7 +479,7 @@ func TestEngineRejectsHostObjectsInExtraBodyBeforeProviderCall(t *testing.T) {
 		Model:         "test-model",
 		Messages:      []message.Message{message.NewText(message.RoleUser, "hi")},
 		MaxIterations: 1,
-		ExtraBody:     map[string]any{"native_host": nativeToolHostStub{}},
+		ExtraBody:     map[string]any{"native_host": opaqueHostStub{}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "typed Request field") {
 		t.Fatalf("host-object ExtraBody error = %v", err)

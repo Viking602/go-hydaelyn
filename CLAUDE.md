@@ -1,50 +1,81 @@
-# CLAUDE.md
+# Repository guidance
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. `AGENTS.md` is a symlink to this file, so it is the single source of truth for all AI agents.
+`AGENTS.md` is a symlink to this file and is the single source of repository guidance for coding agents.
 
 ## Project overview
 
-Venat is a durable, typed multi-agent framework for Go (`github.com/Viking602/venat`, Go 1.25). Documentation map: Packs → Worker integration (`worker/`) → Multi-Agent Layer (`multiagent/`) → Agent Loop Layer (`agent/`) → Durable Runner (root + `internal/`). The linear picture is documentation only; reverse-edge bans stay. The root package exposes the public `Runner` façade; public contracts live in `api/`; implementation details stay under `internal/`. Extension/runtime packages: `provider/`, `tool/`, `policy/`, `hook/`, `message/`, `transport/`, `session/` (durable session tree used by `agent.Harness`), `coding/`, `packs/`, `eval/`. Storage conformance tests live in `contract/`, examples in `_examples/`, scripts in `scripts/`, docs (incl. ADRs) in `docs/`. `internal/memory` is the process-local development/test store, not a Position D reference backend. See `docs/architecture-boundaries.md`.
+Venat is a typed Agent SDK for Go (`github.com/Viking602/venat`, Go 1.25). The production capability graph is exhaustive:
+
+- `message/` — provider-neutral messages and tool values
+- `provider/` — model driver contract, interceptors, conformance, and adapters
+- `tool/` — typed tool drivers, bus, validation, interceptors, and application-neutral helpers
+- `skill/` — reusable instruction resources and discovery
+- `agent/` — one bounded Agent loop, hooks, outputs, continuation, and resume
+- `orchestration/` — pure scheduling protocol and bounded mechanical dispatch drive
+- `durable/` — optional execution backend contract, runtime, effect settlement, and reconciliation
+
+Supporting surfaces are `durable/contract`, `examples/`, `scripts/`, and `docs/`. Applications are the composition root and own identity, routing policy, schema, deployment, and operations. See `docs/architecture-boundaries.md` and ADR-029.
 
 ## Build, test, and development commands
 
-- `make verify` — fast local gate; run before routine changes (fmt-check + vet + tidy-check + lint + test + architecture-check).
-- `make ci-local` — full CI-parity gate; run before substantial changes (adds staticcheck, vulncheck, race).
-- `make fmt` / `make fmt-check` — format with gofmt + goimports / fail if not clean.
-- `make test` / `make test-race` — `go test ./...` / race-enabled with 10m timeout.
-- `make architecture-check` — runs `sentrux check .`, `scripts/check-business-words.sh`, `scripts/check-public-any.sh`, `scripts/check-import-boundaries.sh`.
-- Run an example with `go run ./_examples/<name>`.
+- `make verify` — fast local gate: formatting, vet, tidy check, lint, tests, and architecture checks.
+- `make ci-local` — full CI-parity gate: adds staticcheck, vulnerability scanning, and race tests.
+- `make fmt` / `make fmt-check` — format or verify Go formatting.
+- `make test` / `make test-race` — normal or race-enabled package tests.
+- `make architecture-check` — Sentrux plus vocabulary, public-shape, import-boundary, and removed-surface gates.
+- `go run ./examples/agent`
+- `go run ./examples/orchestration`
+- `go run ./examples/durable`
 
-## Critical gates
+Run `make verify` before routine changes and `make ci-local` before substantial changes.
 
-`make architecture-check` (and the four checks it runs) are hard gates — a violation fails CI even if tests pass. Run `make verify` before finishing routine work and `make ci-local` before substantial changes.
+## Public any-field contract
 
-## Public any-field contract (ADR-009)
+Exported functions in `message/`, `provider/`, `tool/`, `skill/`, `agent/`, `orchestration/`, and `durable/` must not return `[]any`; exported fields must not contain loose `any`.
 
-Exported functions in `api/`, `agent/`, `multiagent/`, and the root package must not return `[]any`, and exported fields must not be loose `any`. Add a typed result struct (e.g. `api.StartRunResult`) instead of returning `[]any`. Genuine exceptions (host payloads, provider bodies, JSON Schema objects) require an escape-hatch comment on the line immediately above:
+Genuine provider bodies, host payloads, or JSON Schema objects require an escape-hatch comment on the immediately preceding line:
 
-- `//venat:allow-public-any` — above a function signature.
-- `// godoc-allow-any` — above a struct field.
+- `//venat:allow-public-any` above a function signature
+- `// godoc-allow-any` above a struct field
 
-Enforced by `scripts/check-public-any.sh`. Test files are exempt.
+The AST gate in `scripts/publicany` enforces this contract and fails if a required scope is missing or empty. Test files are exempt.
 
-## Coding style & naming
+## Coding style and naming
 
-Use `gofmt` as the source of truth; goimports uses local prefix `github.com/Viking602/venat`. Go files and `Makefile` use tabs; Markdown uses two spaces, LF, final newlines (`.editorconfig`). Prefer package-context names that read naturally at call sites (`venat.New()`, `team.Profile`). Avoid package-name stutter, generic files (`types.go`, `helpers.go`, `utils.go`), package/directory renames, exported-symbol renames, and new linting stacks unless explicitly approved.
+Use `gofmt` as the source of truth; goimports uses local prefix `github.com/Viking602/venat`. Go files and the Makefile use tabs. Markdown uses two-space continuation, LF, and final newlines.
 
-Demand-driven API surface: introduce an interface only together with its second implementation, and export a symbol only together with its first consumer outside the package (tests and `_examples/` do not count). Speculative "reserved for later" interfaces, fields, and exported helpers are rejected in review — add them when the demand actually arrives.
+Prefer package-context names that read naturally at call sites. Avoid package-name stutter, generic files (`types.go`, `helpers.go`, `utils.go`), package or directory renames, exported-symbol renames, and new linting stacks unless explicitly approved.
+
+Demand-driven API surface: introduce an interface only with its second implementation, and export a symbol only with its first consumer outside the package. Tests and examples do not count as that consumer. Speculative fields, interfaces, and helpers are rejected.
+
+Clone mutable values before retaining or returning them. Keep cancellation, deterministic ordering, and ownership explicit. Do not add application identity, routing values, approval policy, quota policy, deployment records, or backend schema to the SDK.
 
 ## Testing
 
-Standard `testing` package; keep tests beside the package under test with `_test.go` suffixes and names like `TestThing_Behavior`. Mark helpers with `t.Helper()`, prefer table-driven cases, assert errors with `errors.Is`.
+Use the standard `testing` package. Keep tests beside the package under test with `_test.go` suffixes and names such as `TestThing_Behavior`. Mark helpers with `t.Helper()`. Prefer table-driven cases and assert typed errors with `errors.Is` / `errors.As`.
 
-## Commit & PR conventions
+Focused suites:
 
-Conventional Commits with scope, e.g. `feat(v0.8.0): ...`, `fix(lint,race,storage): ...`, `test(contract): ...`, `docs(readme): ...`. Keep commits focused and explain why API/behavior changes are needed. PRs should summarize scope, list validation commands run, link issues, and call out any public-API, storage-contract, or architecture-boundary impact.
+```bash
+go test ./agent ./message ./provider/... ./tool/... ./skill/...
+go test ./orchestration
+go test ./durable/...
+```
+
+Every external durable backend must run `durable/contract.RunBackendContractTests`, including a process-reopen implementation.
+
+## Commit and pull request conventions
+
+Use Conventional Commits with a focused scope, for example `feat(agent): ...`, `fix(durable): ...`, `test(orchestration): ...`, or `docs(migration): ...`. Explain why public behavior changes, list validation commands, link issues, and identify public API or backend-contract impact.
+
+Never include AI-generated or AI co-author attribution in commit messages or pull request bodies.
 
 ## Gotchas
 
-- CI lint (`golangci-lint`) runs with `only-new-issues: true` against the merge-base with `main` — there is a tracked baseline of pre-existing issues, so only NEW findings fail. Don't try to clear the baseline.
-- `_examples/` is excluded from `go build ./...` by its leading underscore.
-- Storage is Position D (ADR-012): the framework owns the contract verbs; applications own schema and implementation. `api.Memory[T]` is an optional plugin with no shipped reference implementation (ADR-013).
-- All architecture docs and specs are written in English (chat may be Chinese).
+- `agent.Result.Failure` is terminal Agent data; infrastructure failure remains outside the Agent result contract.
+- A durable result is terminal only when the runtime Go error is nil; infrastructure paths may return a partial result.
+- Only `provider.ErrNotStarted` and `tool.ErrNotExecuted` prove that an effect did not begin. All other ambiguous failures become unknown.
+- Streaming output is transient, not a durable exactly-once event log.
+- Durable execution covers one Agent loop. Persist `orchestration.State` separately when scheduling must survive restart.
+- The repository ships no production durable backend. `durable/internal/testbackend` is private test infrastructure; `examples/durable` is illustrative only.
+- Architecture gates are fail-closed. Missing required package scopes must fail rather than pass with an empty scan.

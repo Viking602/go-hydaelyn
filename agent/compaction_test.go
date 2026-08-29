@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 )
@@ -169,10 +168,10 @@ type recordingContextManager struct {
 	compactCalls int
 }
 
-func (*recordingContextManager) Build(_ context.Context, task api.Task) ([]message.Message, error) {
+func (*recordingContextManager) Build(_ context.Context, task Request) ([]message.Message, error) {
 	return []message.Message{
 		message.NewText(message.RoleSystem, "You are a test agent."),
-		message.NewText(message.RoleUser, task.Goal),
+		message.NewText(message.RoleUser, task.Prompt),
 	}, nil
 }
 
@@ -185,9 +184,9 @@ func TestEngineRunWiresContextManagerCompact(t *testing.T) {
 	cm := &recordingContextManager{}
 	engine := newLoopToolEngine(t, &usageToolProvider{perTurn: usagePerTurn(10)})
 	engine.ContextBuilder = cm
-	engine.LoopPolicy.Budget = &api.TaskBudget{MaxTokens: 45}
+	engine.LoopPolicy.Budget = &Budget{MaxTokens: 45}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "loop"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "loop"}, OutputPolicy{})
 	if cm.compactCalls == 0 {
 		t.Fatalf("Engine.Run did not invoke ContextManager.Compact; failure=%#v", result.Failure)
 	}
@@ -199,7 +198,7 @@ func TestEngineRunUsesLegacyCompactAsContextTargetFallback(t *testing.T) {
 	engine.ContextBuilder = cm
 	engine.LoopPolicy = LoopPolicy{MaxIterations: 2, ContextTokenTarget: 1_000}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "loop"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "loop"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Engine.Run failure = %#v", result.Failure)
 	}
@@ -216,8 +215,8 @@ type recordingTargetContextManager struct {
 	fail        error
 }
 
-func (*recordingTargetContextManager) Build(_ context.Context, task api.Task) ([]message.Message, error) {
-	return []message.Message{message.NewText(message.RoleUser, task.Goal)}, nil
+func (*recordingTargetContextManager) Build(_ context.Context, task Request) ([]message.Message, error) {
+	return []message.Message{message.NewText(message.RoleUser, task.Prompt)}, nil
 }
 
 func (c *recordingTargetContextManager) Compact(_ context.Context, history []message.Message) ([]message.Message, error) {
@@ -250,7 +249,7 @@ func TestEngineRunCompactsToContextTargetBeforeFirstRequest(t *testing.T) {
 		LoopPolicy:     LoopPolicy{ContextTokenTarget: 1_000},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "oversized history"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "oversized history"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Engine.Run failure = %#v", result.Failure)
 	}
@@ -281,7 +280,7 @@ func TestEngineRunPreparesContextAfterToolResult(t *testing.T) {
 	engine.ContextBuilder = cm
 	engine.LoopPolicy = LoopPolicy{ContextTokenTarget: 2_000}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "use a tool"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "use a tool"}, OutputPolicy{})
 	if result.Failure != nil {
 		t.Fatalf("Engine.Run failure = %#v", result.Failure)
 	}
@@ -313,7 +312,7 @@ func TestEngineRunContextPreparationFailureSkipsProvider(t *testing.T) {
 		LoopPolicy:     LoopPolicy{ContextTokenTarget: 1_000},
 	}
 
-	result := engine.Run(context.Background(), api.Task{Goal: "oversized history"}, OutputPolicy{})
+	result := engine.Run(context.Background(), Request{Prompt: "oversized history"}, OutputPolicy{})
 	if result.Failure == nil || !errors.Is(result.Failure, boom) {
 		t.Fatalf("Engine.Run failure = %#v, want wrapped compaction error", result.Failure)
 	}

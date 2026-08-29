@@ -16,78 +16,17 @@ import (
 type ToolOption func(*toolConfig)
 
 type toolConfig struct {
-	description         string
-	tags                []string
-	metadata            map[string]string
-	origin              string
-	requiredPermissions []string
-	requiresApproval    bool
-	riskLevel           string
-	effectType          tool.EffectType
-	requiresActionTask  bool
-	idempotent          bool
-	timeout             time.Duration
-	retryPolicy         tool.RetryPolicy
-	policyTags          []string
+	description      string
+	terminal         bool
+	timeout          time.Duration
+	concurrency      tool.ConcurrencyMode
+	concurrencyGroup string
+	maxConcurrency   int
 }
 
 func Description(description string) ToolOption {
 	return func(cfg *toolConfig) {
 		cfg.description = description
-	}
-}
-
-func Tags(tags ...string) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.tags = append([]string{}, tags...)
-	}
-}
-
-func Metadata(metadata map[string]string) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.metadata = metadata
-	}
-}
-
-func Origin(origin string) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.origin = origin
-	}
-}
-
-func RequiredPermissions(permissions ...string) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.requiredPermissions = append([]string{}, permissions...)
-	}
-}
-
-func RequiresApproval() ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.requiresApproval = true
-	}
-}
-
-func RiskLevel(level string) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.riskLevel = level
-	}
-}
-
-func Effect(effectType tool.EffectType) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.effectType = effectType
-	}
-}
-
-func RequiresActionTask() ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.requiresActionTask = true
-	}
-}
-
-func Idempotent(idempotent bool) ToolOption {
-	return func(cfg *toolConfig) {
-		cfg.idempotent = idempotent
 	}
 }
 
@@ -97,15 +36,27 @@ func Timeout(timeout time.Duration) ToolOption {
 	}
 }
 
-func Retry(policy tool.RetryPolicy) ToolOption {
+func Terminal() ToolOption {
 	return func(cfg *toolConfig) {
-		cfg.retryPolicy = policy
+		cfg.terminal = true
 	}
 }
 
-func PolicyTags(tags ...string) ToolOption {
+func Concurrency(mode tool.ConcurrencyMode) ToolOption {
 	return func(cfg *toolConfig) {
-		cfg.policyTags = append([]string{}, tags...)
+		cfg.concurrency = mode
+	}
+}
+
+func ConcurrencyGroup(group string) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.concurrencyGroup = group
+	}
+}
+
+func MaxConcurrency(limit int) ToolOption {
+	return func(cfg *toolConfig) {
+		cfg.maxConcurrency = limit
 	}
 }
 
@@ -153,27 +104,14 @@ func Tool(name string, fn any, options ...ToolOption) (tool.Driver, error) {
 
 func definitionFromConfig(name string, schema tool.Schema, cfg toolConfig) tool.Definition {
 	return tool.Definition{
-		Name:        name,
-		Description: cfg.description,
-		InputSchema: schema,
-		Tags:        cfg.tags,
-		Metadata:    cfg.metadata,
-		Origin:      cfg.origin,
-		Security: message.ToolSecurity{
-			RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
-			RequiresApproval:    cfg.requiresApproval,
-			RiskLevel:           cfg.riskLevel,
-			Idempotent:          cfg.idempotent,
-		},
-		RequiredPermissions: append([]string{}, cfg.requiredPermissions...),
-		RequiresApproval:    cfg.requiresApproval,
-		RiskLevel:           cfg.riskLevel,
-		EffectType:          cfg.effectType,
-		RequiresActionTask:  cfg.requiresActionTask,
-		Idempotent:          cfg.idempotent,
-		Timeout:             cfg.timeout,
-		RetryPolicy:         cfg.retryPolicy,
-		PolicyTags:          append([]string{}, cfg.policyTags...),
+		Name:             name,
+		Description:      cfg.description,
+		InputSchema:      schema,
+		Terminal:         cfg.terminal,
+		Timeout:          cfg.timeout,
+		Concurrency:      cfg.concurrency,
+		ConcurrencyGroup: cfg.concurrencyGroup,
+		MaxConcurrency:   cfg.maxConcurrency,
 	}
 }
 

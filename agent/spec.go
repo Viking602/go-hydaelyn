@@ -2,13 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/Viking602/venat/api"
-	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
@@ -23,25 +21,18 @@ var ErrProviderResolverMissing = errors.New("agent: build deps missing provider 
 // skills but BuildDeps carries no skill registry to resolve them.
 var ErrSkillRegistryMissing = errors.New("agent: build deps missing skill registry")
 
-// Spec is the neutral, executable declaration of a single agent: how to run one
-// bounded loop. It says nothing about how the agent is used — the same Spec can
-// be materialized and then driven as a standalone agent, wrapped as a subagent
-// tool (AsTool), or executed as a member of a multi-agent team. Positioning is
-// the caller's choice, never a property of the Spec.
-//
-// Build is the sole materialization path from a Spec to an Engine. Keeping
-// construction in one place means every usage — single agent, subagent, team
-// member — resolves models, selects tools, and wires instructions identically.
-//
-// Spec anchor: docs/adr/ADR-018-self-sufficient-agent-layer.md.
+// Spec declares how to materialize one Agent Engine. It contains executable
+// model, tool, skill, context, and loop defaults only; identity, routing, and
+// per-call input/output contracts belong to the application.
 type Spec struct {
 	// Instructions is the agent's system prompt. When BuildDeps supplies no
 	// ContextManager, Build wires a default one that seeds the loop with
-	// Instructions as the system message and the task goal as the user message.
+	// Instructions as the system message and Request.Prompt as the user
+	// message.
 	Instructions string
 
 	// Skills names reusable instruction bundles resolved against BuildDeps.Skills
-	// and injected into Engine.Run task context.
+	// and injected into Engine.Run context.
 	Skills []string
 
 	// AvailableSkills names reusable instruction bundles disclosed to the model
@@ -67,7 +58,7 @@ type Spec struct {
 	Tools []string
 
 	// LoopPolicy bounds one Engine.Run (iterations, wall-clock, budget). A
-	// per-Task Budget still overrides it at run time.
+	// per-request Budget still overrides it at run time.
 	LoopPolicy LoopPolicy
 
 	// ThinkingBudget caps provider reasoning tokens per turn; zero leaves the
@@ -77,14 +68,6 @@ type Spec struct {
 
 	// godoc-allow-any: provider-specific request extensions are intentionally open.
 	ExtraBody map[string]any
-
-	// InputSchema and OutputSchema are the declared typed-handoff contract.
-	// They travel with the Spec for callers that create tasks or advertise the
-	// agent; Build does not bake them into the Engine, because input/output
-	// validation is a per-task concern (api.Task.OutputSchema drives the
-	// OutputPolicy at Run time), not an Engine field.
-	InputSchema  json.RawMessage
-	OutputSchema json.RawMessage
 }
 
 // BuildDeps carries the live runtime dependencies a Spec cannot hold by value:
@@ -106,7 +89,7 @@ type BuildDeps struct {
 
 	// Hooks is the hook chain installed on the materialized Engine. The zero
 	// value is a valid empty chain.
-	Hooks hook.Chain
+	Hooks HookChain
 
 	// ContextManager, when set, overrides the default instructions-based
 	// context builder for every Engine built with these deps.
@@ -151,6 +134,8 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 	if contextManager == nil {
 		contextManager = instructionsContext{instructions: spec.Instructions}
 	}
+	loopPolicy := spec.LoopPolicy
+	loopPolicy.Budget = cloneBudget(spec.LoopPolicy.Budget)
 
 	return Engine{
 		Provider:        driver,
@@ -160,13 +145,13 @@ func Build(spec Spec, deps BuildDeps) (Engine, error) {
 		Temperature:     spec.Temperature,
 		TopP:            spec.TopP,
 		ModelMaxTokens:  spec.MaxTokens,
-		LoopPolicy:      spec.LoopPolicy,
+		LoopPolicy:      loopPolicy,
 		ContextBuilder:  contextManager,
 		Skills:          activeSkills,
 		AvailableSkills: availableSkills,
 		ThinkingBudget:  spec.ThinkingBudget,
-		StopSequences:   spec.StopSequences,
-		ExtraBody:       spec.ExtraBody,
+		StopSequences:   slices.Clone(spec.StopSequences),
+		ExtraBody:       cloneAnyMap(spec.ExtraBody),
 	}, nil
 }
 
@@ -232,26 +217,23 @@ func wrapSkillResolveError(err error) error {
 	return fmt.Errorf("agent: resolve skills: %w", err)
 }
 
-// instructionsContext is the default ContextManager Build installs when none is
-// supplied: it seeds the loop with the Spec's instructions as the system
-// message and the task goal as the user message. Compact is a pass-through;
-// tightening it lands when LoopPolicy.MaxTokens is wired.
+// instructionsContext is the default ContextManager installed by Build.
 type instructionsContext struct {
 	instructions string
 }
 
-func (c instructionsContext) Build(_ context.Context, task api.Task) ([]message.Message, error) {
+func (c instructionsContext) Build(_ context.Context, request Request) ([]message.Message, error) {
 	system := strings.TrimSpace(c.instructions)
 	if system == "" {
 		system = "You are a Venat agent."
 	}
-	goal := strings.TrimSpace(task.Goal)
-	if goal == "" {
-		goal = "Complete the assigned task and return a concise result."
+	prompt := strings.TrimSpace(request.Prompt)
+	if prompt == "" {
+		prompt = "Complete the assigned task and return a concise result."
 	}
 	return []message.Message{
 		message.NewText(message.RoleSystem, system),
-		message.NewText(message.RoleUser, goal),
+		message.NewText(message.RoleUser, prompt),
 	}, nil
 }
 

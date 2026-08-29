@@ -1,65 +1,32 @@
-# Documentation
+# Venat documentation
+
+Venat is a direct-import Agent SDK with an optional durable execution layer. Start with the package matching the behavior you need; no application-wide framework bootstrap is required.
 
 ## Start here
 
-- [Quickstart](quickstart.md): install Venat and run the first task.
-- [Public API](public-api.md): exported contracts and stability guarantees.
-- [Examples](../_examples/): runnable programs for common integration paths.
+1. [Quickstart](quickstart.md) — construct and run one Agent.
+2. [Public API](public-api.md) — package contracts and error semantics.
+3. [Architecture boundaries](architecture-boundaries.md) — permitted dependency graph.
+4. [Durable execution](durable-execution.md) — backend, lease, checkpoint, attempt, and reconciliation semantics.
+5. [Backend and extension development](plugin-development.md) — implement providers, tools, skills, and durable backends.
 
-## Runtime concepts
+## Composition
 
-- [Runner Runtime](orchestrator-runtime.md): command execution and state ownership.
-- [Durable Execution](durable-execution.md): storage, leases, events, and replay.
-- [Task Dataflow](task-dataflow.md): task state and report propagation.
-- [Evaluation](evaluation.md): cases, assertions, matchers, and reporters.
+- [Extensions](extensions.md) — hooks, interceptors, observers, sinks, and context managers.
+- [Ecosystem split](ecosystem-split.md) — SDK responsibilities versus application and adapter responsibilities.
+- [Breaking migration](migration.md) — move from the former platform surface to direct package composition.
 
-## Extensions
+## Project records
 
-- [Runtime Extension Points](extensions.md): storage, policy, output, pipeline,
-  and agent hooks.
-- [Plugin Development](plugin-development.md): plugin contracts and lifecycle.
-- [Recipe Compiler](recipe.md): YAML configuration.
+- [ADR index](adr/README.md) — ADR-029 defines the package graph; ADR-030 defines provider/tool stream lifecycle and replay semantics.
+- [Product-spec archive](product-spec/README.md) — versioned design snapshots, not current API guidance.
+- [Release notes](release-notes/) — behavior shipped by each historical release.
+- [Semantic versioning](semver.md)
+- [Active plan](plans/active-plan.md)
+- [Future backlog](plans/future-backlog.md)
 
-## Compatibility and releases
+Current package documentation remains authoritative for exact Go signatures:
 
-- [Migration Notes](migration.md): version-to-version API changes.
-- [SemVer and Compatibility](semver.md): stability policy.
-- [Product Release Status](product-spec/README.md): shipped and planned surfaces.
-- [v0.15.4 Release Notes](release-notes/v0.15.4.md): latest published release.
-- [v0.16.0 Release Candidate](release-notes/v0.16.0.md): prepared breaking-minor scope.
-- [Architecture Boundaries](architecture-boundaries.md): live import seams and ownership rules.
-
-## Package map
-
-| Path | Purpose |
-|------|---------|
-| `venat` (root) | `Runner` facade: construction, run/task commands, approvals, leases, action attempts, and event reads |
-| `api/` | Public contracts: configuration, commands, models, stores, and policy interfaces |
-| `agent/` | Bounded model/tool loop, output policy, tool safety, context management, and typed failures |
-| `skill/` | Agent Skills discovery, parsing, registry, activation rendering, and bounded resource access |
-| `multiagent/` | Teams, sequential and application-defined scheduling, dispatch, handoff, and blackboard |
-| `transport/` | MCP, cron, webhook, SSE, and event integrations |
-| `provider/` | Anthropic, OpenAI, and scripted provider drivers |
-| `tool/`, `hook/`, `policy/`, `message/` | Tool execution, hooks, policy, and messages |
-| `session/` | Experimental durable conversation tree and register storage contract |
-| `worker/` | Integration layer: poll, lease, execute, team drive |
-| `coding/` | Domain coding runtime; packs must not import it |
-| `packs/` | Vertical pack skeletons |
-| `eval/` | Evaluation cases, assertions, matchers, and reporters |
-| `contract/` | Storage conformance tests |
-
-## Architecture and maintenance
-
-- [Architecture Boundaries](architecture-boundaries.md)
-- [North Star Runtime](architecture/north-star-runtime.md)
-- [Ecosystem Split Boundary](ecosystem-split.md)
-- [ADR Index](adr/README.md)
-- [GoLand Go Format Standard](architecture/goland-format-standard.md)
-- [Active Plan](plans/active-plan.md)
-- [Architecture Safety Hardening](plans/architecture-safety-hardening.md)
-- [Future Backlog](plans/future-backlog.md)
-
-Plans use a dual-track layout: `docs/plans/` contains the current execution
-plan and backlog, while `docs/superpowers/` contains dated design and
-implementation records from earlier workflows. The current execution source of
-truth is `docs/plans/active-plan.md`.
+- [`agent`](https://pkg.go.dev/github.com/Viking602/venat/agent)
+- [`orchestration`](https://pkg.go.dev/github.com/Viking602/venat/orchestration)
+- [`durable`](https://pkg.go.dev/github.com/Viking602/venat/durable)

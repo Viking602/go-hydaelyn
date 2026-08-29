@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/api"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/tool"
@@ -14,155 +13,122 @@ import (
 
 func TestEngineRunMaxWallClockPrecedenceReturnsBudgetFailure(t *testing.T) {
 	tests := []struct {
-		name       string
-		taskBudget time.Duration
-		loopBudget time.Duration
-		loopMax    time.Duration
-		want       time.Duration
+		name          string
+		requestBudget time.Duration
+		engineBudget  time.Duration
+		want          time.Duration
 	}{
 		{
-			name:       "task budget overrides loop budgets",
-			taskBudget: 50 * time.Millisecond,
-			loopBudget: 10 * time.Millisecond,
-			loopMax:    5 * time.Millisecond,
-			want:       50 * time.Millisecond,
+			name:          "request budget overrides engine budget",
+			requestBudget: 50 * time.Millisecond,
+			engineBudget:  10 * time.Millisecond,
+			want:          50 * time.Millisecond,
 		},
 		{
-			name:       "loop budget overrides loop max",
-			loopBudget: 40 * time.Millisecond,
-			loopMax:    5 * time.Millisecond,
-			want:       40 * time.Millisecond,
-		},
-		{
-			name:    "loop max used when no budgets",
-			loopMax: 30 * time.Millisecond,
-			want:    30 * time.Millisecond,
+			name:         "engine budget applies without request budget",
+			engineBudget: 40 * time.Millisecond,
+			want:         40 * time.Millisecond,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := deadlineRecordingProvider{observed: make(chan time.Duration, 1)}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			driver := deadlineRecordingProvider{observed: make(chan time.Duration, 1)}
 			engine := Engine{
-				Provider: provider,
-				LoopPolicy: LoopPolicy{
-					MaxWallClock: tt.loopMax,
-				},
+				Provider:   driver,
+				LoopPolicy: LoopPolicy{Budget: &Budget{MaxWallClock: test.engineBudget}},
 			}
-			if tt.loopBudget > 0 {
-				engine.LoopPolicy.Budget = &api.TaskBudget{MaxWallClock: tt.loopBudget}
-			}
-			task := api.Task{Goal: "wait for deadline"}
-			if tt.taskBudget > 0 {
-				task.Budget = &api.TaskBudget{MaxWallClock: tt.taskBudget}
+			request := Request{Prompt: "wait for deadline"}
+			if test.requestBudget > 0 {
+				request.Budget = &Budget{MaxWallClock: test.requestBudget}
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 			defer cancel()
 
 			started := time.Now()
-			result := engine.Run(ctx, task, OutputPolicy{})
+			result := engine.Run(ctx, request, OutputPolicy{})
 			elapsed := time.Since(started)
-
-			if result.Failure == nil {
-				t.Fatal("expected budget failure, got nil")
-			}
-			if result.Failure.Kind != FailureKindBudgetExhausted {
-				t.Fatalf("failure kind = %s, want %s", result.Failure.Kind, FailureKindBudgetExhausted)
+			if result.Failure == nil || result.Failure.Kind != FailureKindBudgetExhausted {
+				t.Fatalf("Failure = %#v, want budget_exhausted", result.Failure)
 			}
 			if !errors.Is(result.Failure, context.DeadlineExceeded) {
 				t.Fatalf("failure cause = %v, want context deadline exceeded", result.Failure)
 			}
-			observed := <-provider.observed
-			assertDurationNear(t, observed, tt.want)
-			if elapsed > tt.want+100*time.Millisecond {
-				t.Fatalf("Engine.Run elapsed = %s, want deadline near %s", elapsed, tt.want)
+			observed := <-driver.observed
+			assertDurationNear(t, observed, test.want)
+			if elapsed > test.want+100*time.Millisecond {
+				t.Fatalf("Engine.Run elapsed = %s, want deadline near %s", elapsed, test.want)
 			}
 		})
 	}
 }
 
-func TestMaxWallClockEngineBudgetIsAuthoritativeOverLegacyMax(t *testing.T) {
-	// A present LoopPolicy.Budget is authoritative on the engine side too: a
-	// zero MaxWallClock in it means unbounded, so the legacy
-	// LoopPolicy.MaxWallClock must not be inherited (the same override contract
-	// as the per-Task budget).
-	engine := Engine{LoopPolicy: LoopPolicy{
-		MaxWallClock: 5 * time.Second,
-		Budget:       &api.TaskBudget{MaxTokens: 1000},
-	}}
-	if got := engine.maxWallClock(api.Task{}); got != 0 {
-		t.Fatalf("maxWallClock = %v, want 0 (engine budget present, wall-clock unbounded)", got)
+func TestMaxWallClockBudgetPrecedence(t *testing.T) {
+	engine := Engine{LoopPolicy: LoopPolicy{Budget: &Budget{MaxWallClock: 2 * time.Second}}}
+	if got := engine.maxWallClock(Request{}); got != 2*time.Second {
+		t.Fatalf("maxWallClock = %v, want engine default 2s", got)
 	}
-
-	// A present engine Budget that does set a wall-clock still wins over the
-	// legacy max.
-	engine.LoopPolicy.Budget = &api.TaskBudget{MaxWallClock: 2 * time.Second}
-	if got := engine.maxWallClock(api.Task{}); got != 2*time.Second {
-		t.Fatalf("maxWallClock = %v, want 2s (engine budget wall-clock wins)", got)
+	if got := engine.maxWallClock(Request{Budget: &Budget{}}); got != 0 {
+		t.Fatalf("maxWallClock = %v, want request zero to mean unbounded", got)
 	}
-
-	// With no engine Budget at all, the legacy bare max still applies.
+	if got := engine.maxWallClock(Request{Budget: &Budget{MaxWallClock: time.Second}}); got != time.Second {
+		t.Fatalf("maxWallClock = %v, want request override 1s", got)
+	}
 	engine.LoopPolicy.Budget = nil
-	if got := engine.maxWallClock(api.Task{}); got != 5*time.Second {
-		t.Fatalf("maxWallClock = %v, want 5s (legacy max applies when no budget)", got)
+	if got := engine.maxWallClock(Request{}); got != 0 {
+		t.Fatalf("maxWallClock = %v, want unbounded without a budget", got)
 	}
 }
 
 func TestEngineRunContextBuildHonorsMaxWallClock(t *testing.T) {
 	tests := []struct {
-		name       string
-		taskBudget time.Duration
-		loopMax    time.Duration
-		want       time.Duration
+		name          string
+		requestBudget time.Duration
+		engineBudget  time.Duration
+		want          time.Duration
 	}{
 		{
-			name:    "loop max wall clock bounds context build",
-			loopMax: 20 * time.Millisecond,
-			want:    20 * time.Millisecond,
+			name:         "engine budget bounds context build",
+			engineBudget: 20 * time.Millisecond,
+			want:         20 * time.Millisecond,
 		},
 		{
-			name:       "task budget max wall clock bounds context build",
-			taskBudget: 30 * time.Millisecond,
-			loopMax:    100 * time.Millisecond,
-			want:       30 * time.Millisecond,
+			name:          "request budget bounds context build",
+			requestBudget: 30 * time.Millisecond,
+			engineBudget:  100 * time.Millisecond,
+			want:          30 * time.Millisecond,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			builder := &blockingContextBuilder{observed: make(chan time.Duration, 1)}
 			engine := Engine{
 				ContextBuilder: builder,
-				LoopPolicy: LoopPolicy{
-					MaxWallClock: tt.loopMax,
-				},
+				LoopPolicy:     LoopPolicy{Budget: &Budget{MaxWallClock: test.engineBudget}},
 			}
-			task := api.Task{Goal: "build context"}
-			if tt.taskBudget > 0 {
-				task.Budget = &api.TaskBudget{MaxWallClock: tt.taskBudget}
+			request := Request{Prompt: "build context"}
+			if test.requestBudget > 0 {
+				request.Budget = &Budget{MaxWallClock: test.requestBudget}
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 			defer cancel()
 
 			started := time.Now()
-			result := engine.Run(ctx, task, OutputPolicy{})
+			result := engine.Run(ctx, request, OutputPolicy{})
 			elapsed := time.Since(started)
-
-			if result.Failure == nil {
-				t.Fatal("expected budget failure, got nil")
-			}
-			if result.Failure.Kind != FailureKindBudgetExhausted {
-				t.Fatalf("failure kind = %s, want %s", result.Failure.Kind, FailureKindBudgetExhausted)
+			if result.Failure == nil || result.Failure.Kind != FailureKindBudgetExhausted {
+				t.Fatalf("Failure = %#v, want budget_exhausted", result.Failure)
 			}
 			if !errors.Is(result.Failure, context.DeadlineExceeded) {
 				t.Fatalf("failure cause = %v, want context deadline exceeded", result.Failure)
 			}
 			observed := <-builder.observed
-			assertDurationNear(t, observed, tt.want)
-			if elapsed > tt.want+100*time.Millisecond {
-				t.Fatalf("Engine.Run elapsed = %s, want context build deadline near %s", elapsed, tt.want)
+			assertDurationNear(t, observed, test.want)
+			if elapsed > test.want+100*time.Millisecond {
+				t.Fatalf("Engine.Run elapsed = %s, want context build deadline near %s", elapsed, test.want)
 			}
 		})
 	}
@@ -231,14 +197,14 @@ func TestEngineRunToolDefinitionTimeoutWithActiveRunBudgetReturnsEngineError(t *
 		},
 		Tools: tool.NewBus(driver),
 		LoopPolicy: LoopPolicy{
-			Budget: &api.TaskBudget{MaxWallClock: 250 * time.Millisecond},
+			Budget: &Budget{MaxWallClock: 250 * time.Millisecond},
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	started := time.Now()
-	result := engine.Run(ctx, api.Task{Goal: "call slow"}, OutputPolicy{})
+	result := engine.Run(ctx, Request{Prompt: "call slow"}, OutputPolicy{})
 	elapsed := time.Since(started)
 
 	if result.Failure == nil {
@@ -268,7 +234,7 @@ type blockingContextBuilder struct {
 	observed chan time.Duration
 }
 
-func (b *blockingContextBuilder) Build(ctx context.Context, _ api.Task) ([]message.Message, error) {
+func (b *blockingContextBuilder) Build(ctx context.Context, _ Request) ([]message.Message, error) {
 	recordObservedDeadline(ctx, b.observed)
 	<-ctx.Done()
 	return nil, ctx.Err()

@@ -2,18 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"reflect"
-	"sync"
+	"slices"
+	"time"
 
-	"github.com/Viking602/venat/hook"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/skill"
-	"github.com/Viking602/venat/stream"
 	"github.com/Viking602/venat/tool"
 )
 
@@ -35,31 +34,16 @@ var ErrProviderTurnLimit = errors.New("provider turn exceeds safe stream limits"
 // FailureKindBudgetExhausted Result.
 var ErrBudgetExhausted = errors.New("agent loop budget exhausted")
 
-// ErrPanicRecovered wraps a panic recovered by RunMessages. The loop invokes
-// caller-supplied extension code — guardrails, recorders, sinks, the OnEvent
-// callback, the provider stream, and sequential tool drivers — any of which may
-// panic on the loop's own goroutine. RunMessages recovers such a panic, returns
-// the partial trace accumulated so far, and surfaces it through this sentinel so
-// the panic degrades to a typed FailureKindEngineError instead of crashing the
-// worker process. Two panic sources are contained one level lower so they carry
-// more precise provenance and never reach this defer: hook handlers, guarded by
-// hook.Chain (hook.ErrHandlerPanic), and parallel tool drivers, which run on
-// bus-spawned goroutines the loop's recover cannot see and are contained by the
-// bus itself (tool.ErrToolPanic). errors.Is(err, ErrPanicRecovered) reports
-// whether a loop error originated from a panic recovered here.
+// ErrPanicRecovered wraps a panic recovered by RunMessages. Caller extension
+// panics degrade to a typed engine failure instead of crashing the process.
+// HookChain and parallel tool execution recover their own panics closer to the
+// source; errors.Is(err, ErrPanicRecovered) still identifies loop recovery.
 var ErrPanicRecovered = errors.New("agent loop recovered a panic")
 
-// ErrStepAborted is returned by RunMessages when a StepPolicy deliberately stops
-// the loop at a continue boundary — its Next returns StepDecisionFail or itself
-// errors. The accompanying LoopOutput is the partial trace accumulated so far.
-// Engine.run maps it to a FailureKindStepAborted Result. It is distinct from a
-// StepDecisionFinish/Handoff override, which stops the loop cleanly (no error).
-var ErrStepAborted = errors.New("agent loop aborted by step policy")
+// ErrStepAborted reports a StepDecider failure or explicit fail decision.
+var ErrStepAborted = errors.New("agent loop aborted by step decider")
 
-// LoopInput is the message-level input to Engine.RunMessages, the
-// low-level loop entry preserved from v0.7. Most callers should use
-// Engine.Run(ctx, api.Task, OutputPolicy) Result instead — that is the
-// task-level entry the v0.8.0 multi-agent layer schedules against.
+// LoopInput is the low-level message-oriented input to RunMessages.
 type LoopInput struct {
 	Model       string
 	Messages    []message.Message
@@ -79,22 +63,9 @@ type LoopInput struct {
 	OperationTurn int
 	OnEvent       func(provider.Event) error
 
-	// Sink, when set, receives a live stream.Frame for every provider
-	// event and tool result as the loop runs. It is a transient
-	// side-channel: on success the durable LoopOutput is byte-for-byte
-	// identical to a run with no Sink, so streaming never changes what the
-	// runner persists or replays. A Sink.Emit error is not swallowed — it
-	// aborts the current turn and surfaces as the loop error, exactly like a
-	// failing OnEvent callback — so a Sink must absorb transient delivery
-	// hiccups it can tolerate rather than returning an error for them.
-	Sink              stream.Sink
-	Control           TurnControl
-	ContextTransition ContextTransition
-	// AppliedControlIDs come only from the latest host-owned durable
-	// checkpoint. They acknowledge controls already embedded in that checkpoint
-	// before a resumed loop reserves new work.
-	AppliedControlIDs        []string
-	externallyAccountedUsage *provider.Usage
+	// Sink receives transient provider and tool-result frames as the loop runs.
+	// Its errors abort the current turn.
+	Sink Sink
 
 	StopSequences  []string
 	ThinkingBudget int
@@ -104,11 +75,10 @@ type LoopInput struct {
 	PromptCacheKey    string
 	ServiceTier       string
 	ParallelToolCalls *bool
-	NativeToolHost    provider.NativeToolHost
 	ContextUsage      provider.ContextUsageObserver
 
 	OutputGuardrails []OutputGuardrail
-	OutputRecorder   OutputGuardrailRecorder
+	OutputObserver   OutputGuardrailObserver
 
 	// MaxTokens / MaxToolCalls / MaxSteps are the per-loop budget ceilings.
 	// Zero means unbounded on that dimension. They are enforced fail-closed
@@ -129,22 +99,11 @@ type LoopInput struct {
 	// prepares context before every model turn, including the first.
 	ContextTokenTarget int
 
-	// StepPolicy, when set, is consulted at each continue boundary (after a
-	// non-terminal tool turn) so a caller can override the loop's natural
-	// decision to iterate again — stopping early, diverting to a handoff, or
-	// failing the run once a predicate over the step trace holds. A nil policy
-	// leaves the loop's natural control flow unchanged. See StepPolicy.
-	StepPolicy StepPolicy
+	// StepDecider may override the natural decision at continue boundaries.
+	StepDecider StepDecider
 
-	// StepRecorder, when set, receives each Step exactly once after its final
-	// decision is known. A recording failure aborts the loop while preserving
-	// the finalized step in the returned partial trace.
-	StepRecorder StepRecorder
-
-	// CheckpointRecorder, when set, receives the provider-neutral transcript and
-	// cumulative budget at each completed model-turn boundary. Recording failure
-	// aborts before the loop advances, so a retry never skips unpersisted work.
-	CheckpointRecorder CheckpointRecorder
+	// StepObserver receives each finalized step before the loop advances.
+	StepObserver StepObserver
 
 	// Compact is the source-compatible history compaction hook. With no
 	// ContextTokenTarget it retains the legacy trigger: the loop invokes it once
@@ -172,40 +131,40 @@ type LoopInput struct {
 	// model-specific token estimation and should return history unchanged when it
 	// already fits. Engine.Run wires this from TargetContextManager.
 	CompactTo func(ctx context.Context, history []message.Message, targetTokens int) ([]message.Message, error)
+
+	continuationRequest  Request
+	continuationPolicy   OutputPolicy
+	repairCount          int
+	activeElapsed        time.Duration
+	segmentStarted       time.Time
+	initialUsage         provider.Usage
+	initialSteps         []Step
+	initialToolCallsUsed int
 }
 
 // LoopOutput is the message-level result from Engine.RunMessages. The
-// task-level Result type lives in result.go.
+// execution-level Result type lives in result.go.
 type LoopOutput struct {
-	Messages   []message.Message
-	Usage      provider.Usage
-	StopReason provider.StopReason
-	// ExternallyAccountedUsage is included in Usage for in-memory budget
-	// enforcement but was already durably recorded by a child scheduler.
-	ExternallyAccountedUsage provider.Usage
-	Iterations               int
-	Thinking                 string
-
-	// Steps is the per-iteration trace of the loop, one entry per model
-	// turn (including guardrail-retry turns). Steps carry no wall-clock
-	// timestamps so a replayed loop reproduces them byte-for-byte (ADR-007).
-	Steps []Step
-	// ToolCallsUsed is the total number of tool calls dispatched across all
-	// iterations. It is the carrier the budget enforcement in Engine.run
-	// reads to charge the per-task MaxToolCalls budget.
-	ToolCallsUsed int
+	Messages          []message.Message
+	Usage             provider.Usage
+	StopReason        provider.StopReason
+	Iterations        int
+	Thinking          string
+	Steps             []Step
+	ToolCallsUsed     int
+	RepairCount       int
+	ActiveElapsed     time.Duration
+	NextOperationTurn int
 }
 
-// Engine drives the bounded agent loop. Configure Provider/Tools/Hooks
-// at construction; the v0.8.0 fields (Model, ToolMode, LoopPolicy,
-// ContextBuilder) bind the defaults Engine.Run (the task-level entry)
-// needs. Engine.RunMessages remains available as the low-level
-// message-driven entry; it ignores the v0.8.0 fields and reads
+// Engine drives the bounded agent loop. Configure Provider, Tools, Hooks, and
+// execution defaults at construction. Engine.RunMessages remains available as
+// the low-level message-driven entry; it ignores the Engine defaults and reads
 // everything it needs from LoopInput.
 type Engine struct {
 	Provider provider.Driver
 	Tools    *tool.Bus
-	Hooks    hook.Chain
+	Hooks    HookChain
 
 	Model          string
 	Temperature    float64
@@ -215,10 +174,10 @@ type Engine struct {
 	LoopPolicy     LoopPolicy
 	ContextBuilder ContextManager
 	// OperationTurn seeds the next durable tool-call turn ordinal for resumed
-	// task executions. New executions leave it at zero.
+	// executions. New executions leave it at zero.
 	OperationTurn int
 
-	// Skills are active reusable instructions Engine.Run injects into task-level
+	// Skills are active reusable instructions Engine.Run injects into execution
 	// context. RunMessages is the low-level message API and does not read this
 	// Engine default.
 	Skills []skill.Skill
@@ -229,12 +188,9 @@ type Engine struct {
 	AvailableSkills []skill.Skill
 
 	// The fields below are the engine-level defaults Engine.Run threads into
-	// every LoopInput it builds, so the task-level entry can configure the
-	// provider request and output handling that previously only RunMessages
-	// callers could reach. ResponseFormat and per-request Metadata are
+	// every LoopInput it builds. ResponseFormat and per-request Metadata are
 	// deliberately not surfaced here: structured output on the Run path is
-	// owned by OutputPolicy, and request Metadata is a per-task value rather
-	// than an engine default.
+	// owned by OutputPolicy, and request Metadata has no Engine-level default.
 
 	// ThinkingBudget caps provider reasoning tokens per turn; zero leaves the
 	// provider default in place.
@@ -246,46 +202,35 @@ type Engine struct {
 	PromptCacheKey    string
 	ServiceTier       string
 	ParallelToolCalls *bool
-	NativeToolHost    provider.NativeToolHost
 	ContextUsage      provider.ContextUsageObserver
-	Control           TurnControl
-	ContextTransition ContextTransition
-	AppliedControlIDs []string
-	// SubagentScheduler routes agent-as-tool child executions through an
-	// application-owned durable scheduler. A nil scheduler keeps the embedded
-	// synchronous execution used by small in-process applications.
-	SubagentScheduler SubagentScheduler
+	ModelInterceptor  provider.StreamInterceptor
+	ToolInterceptor   tool.Interceptor
 
 	// OutputGuardrails run in order against the terminal assistant output and
 	// may allow, replace, retry, or block it.
 	OutputGuardrails []OutputGuardrail
-	// OutputRecorder, when set, receives a decision record for every
-	// non-allow guardrail action.
-	OutputRecorder OutputGuardrailRecorder
+	// OutputObserver receives every non-allow guardrail decision.
+	OutputObserver OutputGuardrailObserver
 
-	// StepPolicy, when set, Engine.Run threads into every LoopInput so the loop
-	// consults it at each continue boundary. Like OutputGuardrails it is an
-	// Engine-level field rather than a Spec field: set it on the built Engine.
-	// See StepPolicy and LoopInput.StepPolicy.
-	StepPolicy StepPolicy
+	// StepDecider may override the natural decision at continue boundaries.
+	StepDecider StepDecider
 
-	// StepRecorder, when set, Engine.Run threads into every LoopInput so each
-	// finalized step can be persisted before the loop advances.
-	StepRecorder StepRecorder
-	// CheckpointRecorder persists provider-neutral message/tool-result state at
-	// each completed turn so another worker execution can resume from it.
-	CheckpointRecorder CheckpointRecorder
+	// StepObserver receives each finalized step before the loop advances.
+	StepObserver StepObserver
+	// Boundaries observes safe continuation points before the next effect.
+	Boundaries BoundaryObserver
 }
 
 // RunMessages is the low-level loop that drives one LoopInput to
-// completion. Engine.Run is the task-level wrapper most callers want.
+// completion. Engine.Run is the execution-level wrapper most callers want.
 func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutput, err error) {
-	controlSession, controlErr := attachTurnControlSession(ctx, &input)
-	if controlErr != nil {
-		return LoopOutput{Messages: message.CloneMessages(input.Messages)}, controlErr
+	if input.segmentStarted.IsZero() {
+		input.segmentStarted = time.Now()
 	}
 	defer func() {
-		err = errors.Join(err, releaseTurnControlSession(context.WithoutCancel(ctx), controlSession))
+		out.NextOperationTurn = input.OperationTurn
+		out.ActiveElapsed = input.activeElapsed + time.Since(input.segmentStarted)
+		out.RepairCount = input.repairCount
 	}()
 	input, stepCapacity := normalizeIterationPolicy(input)
 	if input.ToolMode == "" {
@@ -293,12 +238,13 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	}
 	input.OperationTurn = max(input.OperationTurn, nextToolOperationTurn(input.Messages))
 	current := message.CloneMessages(input.Messages)
-	totalUsage := provider.Usage{}
-	externallyAccountedUsage := provider.Usage{}
-	input.externallyAccountedUsage = &externallyAccountedUsage
-	steps := make([]Step, 0, stepCapacity)
+	totalUsage := input.initialUsage
+	steps := cloneSteps(input.initialSteps)
+	if steps == nil {
+		steps = make([]Step, 0, stepCapacity)
+	}
 	lastModelCall := (*ModelCall)(nil)
-	toolCallsUsed := 0
+	toolCallsUsed := input.initialToolCallsUsed
 	// turnsRun counts the model turns that have actually run (their usage folded
 	// into totalUsage). It is set once a turn completes, before the per-turn Step
 	// is recorded, so the panic path below reports Iterations consistently with
@@ -306,22 +252,14 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 	// its Step exists (a guardrail/recorder panic or a sequential tool driver
 	// panic). Deriving Iterations from len(steps) there would under-report a turn
 	// whose usage and messages are already in the partial output.
-	turnsRun := 0
+	turnsRun := len(steps)
 	// Recover any panic raised by caller-supplied extension code the loop drives
 	// on this goroutine (guardrails, recorders, the sink when it emits tool-result
 	// frames, and sequential tool drivers) so a misbehaving extension degrades to a
 	// typed failure instead of crashing the worker. The accumulated trace is
-	// preserved on the returned LoopOutput. Several panic sources never reach this
-	// defer and are contained closer to their origin: hook handlers, in hook.Chain;
-	// parallel tool drivers, which run on bus-spawned goroutines this recover cannot
-	// observe and are contained by the tool bus; and the per-event callbacks
-	// (OnEvent, the hook chain, the sink on stream frames) and the provider stream,
-	// which panic inside collect — it recovers them itself and returns the partial
-	// turn as an ErrPanicRecovered error rather than unwinding here, so the streamed
-	// response survives. errors.Is(err, ErrPanicRecovered) holds for all of these.
-	defer func() {
-		out.ExternallyAccountedUsage = externallyAccountedUsage
-	}()
+	// preserved on the returned LoopOutput. Hook handlers and parallel tool
+	// drivers are contained closer to their origin. Per-event callbacks and the
+	// provider stream are recovered inside collect so partial output survives.
 	defer recoverRunMessagesPanic(
 		ctx,
 		input,
@@ -334,20 +272,13 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		&turnsRun,
 		&toolCallsUsed,
 	)
-	for iteration := 0; iterationAllowed(input, iteration); iteration++ {
+	for iteration := len(steps); iterationAllowed(input, iteration); iteration++ {
 		// A cancelled or expired context ends the loop promptly rather than
 		// issuing another model turn; the cause (context.Canceled or
 		// context.DeadlineExceeded) flows through loopErrorFailure, which maps a
 		// budget-driven deadline to FailureKindBudgetExhausted.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), ctxErr
-		}
-		var stopForControl bool
-		current, steps, stopForControl, controlErr = handleBeforeModelControl(
-			ctx, input, current, totalUsage, steps, iteration, toolCallsUsed,
-		)
-		if stopForControl {
-			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), controlErr
 		}
 		// Enforce the per-loop budget before every turn after the first.
 		// Reaching iteration N>0 means a prior turn chose to continue, so this
@@ -366,6 +297,9 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			}
 			current = prepared
 		}
+		if boundaryErr := e.observeBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed, ContinuationReady); boundaryErr != nil {
+			return loopErrorOutput(current, totalUsage, steps, iteration, toolCallsUsed), boundaryErr
+		}
 		assistant, usage, stopReason, identity, opened, turnErr := e.runTurn(ctx, current, input)
 		if turnErr != nil {
 			failure := handleTurnFailure(
@@ -373,11 +307,10 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 				assistant, usage, stopReason, identity, opened, turnErr,
 			)
 			current, totalUsage, steps, turnsRun = failure.current, failure.usage, failure.steps, failure.turnsRun
-			if failure.retry {
-				continue
-			}
 			return failure.output, failure.err
 		}
+		operationTurn := input.OperationTurn
+		input.OperationTurn++
 		totalUsage = totalUsage.Add(usage)
 		// The model turn ran and its usage is now counted, so a panic from here on
 		// (guardrails, recorders, sink, sequential tool drivers) must report this
@@ -397,19 +330,6 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 			StopReason:                    stopReason,
 		}
 		lastModelCall = modelCall
-		if input.MaxTokens > 0 && usage.TotalTokens == 0 {
-			current = append(current, assistant)
-			steps = append(steps, Step{
-				Index:      iteration,
-				ModelCall:  modelCall,
-				Decision:   StepDecisionFail,
-				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-			})
-			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-				return loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), recordErr
-			}
-			return budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, "max tokens")
-		}
 		if len(assistant.ToolCalls) == 0 {
 			var retry bool
 			current, steps, out, retry, err = e.finalizeNoToolStep(
@@ -423,8 +343,8 @@ func (e Engine) RunMessages(ctx context.Context, input LoopInput) (out LoopOutpu
 		}
 		var stop bool
 		out, stop, err = e.runToolStep(
-			ctx, &input, &current, assistant, modelCall, &totalUsage, &externallyAccountedUsage,
-			&steps, iteration, &toolCallsUsed,
+			ctx, &input, &current, assistant, modelCall, &totalUsage,
+			&steps, iteration, &toolCallsUsed, operationTurn,
 		)
 		if stop {
 			return out, err
@@ -445,7 +365,6 @@ type turnFailureResult struct {
 	usage    provider.Usage
 	steps    []Step
 	turnsRun int
-	retry    bool
 	output   LoopOutput
 	err      error
 }
@@ -464,33 +383,12 @@ func handleTurnFailure(
 	opened bool,
 	turnErr error,
 ) turnFailureResult {
-	var interrupt *StreamRuleInterruptError
-	if errors.As(turnErr, &interrupt) {
-		if interrupt.KeepPartial {
-			current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
-		} else {
-			totalUsage = totalUsage.Add(usage)
-			turnsRun = max(turnsRun, iteration+1)
-		}
-		if opened {
-			steps = append(steps, turnFailureStep(iteration, identity, usage, provider.StopReasonAborted, StepDecisionContinue, totalUsage, toolCallsUsed))
-			if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-				return turnFailureResult{
-					current: current, usage: totalUsage, steps: steps, turnsRun: turnsRun,
-					output: loopErrorOutput(current, totalUsage, steps, turnsRun, toolCallsUsed),
-					err:    errors.Join(turnErr, recordErr),
-				}
-			}
-		}
-		return turnFailureResult{current: current, usage: totalUsage, steps: steps, turnsRun: turnsRun, retry: true}
-	}
-
 	current, totalUsage, turnsRun = recordIncompleteTurn(current, assistant, totalUsage, usage, iteration, turnsRun)
 	if opened {
 		turnsRun = max(turnsRun, iteration+1)
 		steps = append(steps, turnFailureStep(iteration, identity, usage, stopReason, StepDecisionFail, totalUsage, toolCallsUsed))
-		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, steps); recordErr != nil {
-			turnErr = errors.Join(turnErr, recordErr)
+		if observeErr := observeFinalizedStep(ctx, input.StepObserver, steps); observeErr != nil {
+			turnErr = errors.Join(turnErr, observeErr)
 		}
 	}
 	return turnFailureResult{
@@ -529,34 +427,6 @@ func turnFailureStep(
 	}
 }
 
-func handleBeforeModelControl(
-	ctx context.Context,
-	input LoopInput,
-	current []message.Message,
-	totalUsage provider.Usage,
-	steps []Step,
-	iteration int,
-	toolCallsUsed int,
-) ([]message.Message, []Step, bool, error) {
-	controlBatch, err := drainTurnControl(ctx, input.Control, TurnBoundaryBeforeModel)
-	if err != nil {
-		return current, steps, true, err
-	}
-	current = append(current, controlMessages(controlBatch)...)
-	if !controlAborts(controlBatch) {
-		return current, steps, false, nil
-	}
-	steps = append(steps, Step{
-		Index:      iteration,
-		Decision:   StepDecisionFail,
-		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-	})
-	if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-		return current, steps, true, errors.Join(ErrTurnControlAbort, recordErr)
-	}
-	return current, steps, true, ErrTurnControlAbort
-}
-
 func recoverRunMessagesPanic(
 	ctx context.Context,
 	input LoopInput,
@@ -581,8 +451,8 @@ func recoverRunMessagesPanic(
 			Decision:   StepDecisionFail,
 			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
 		})
-		if recordErr := recordRecoveredStep(ctx, input.StepRecorder, *steps); recordErr != nil {
-			*runErr = errors.Join(*runErr, recordErr)
+		if observeErr := observeRecoveredStep(ctx, input.StepObserver, *steps); observeErr != nil {
+			*runErr = errors.Join(*runErr, observeErr)
 		}
 	}
 	*out = loopErrorOutput(*current, *totalUsage, *steps, *turnsRun, *toolCallsUsed)
@@ -596,187 +466,66 @@ func (e Engine) runToolStep(
 	assistant message.Message,
 	modelCall *ModelCall,
 	totalUsage *provider.Usage,
-	externallyAccountedUsage *provider.Usage,
 	steps *[]Step,
 	iteration int,
 	toolCallsUsed *int,
+	operationTurn int,
 ) (LoopOutput, bool, error) {
 	for index := range assistant.ToolCalls {
-		assistant.ToolCalls[index].OperationID = fmt.Sprintf("turn:%d:call:%d", input.OperationTurn, index)
+		assistant.ToolCalls[index].OperationID = fmt.Sprintf("turn:%d:call:%d", operationTurn, index)
 	}
-	input.OperationTurn++
 	*current = append(*current, assistant)
+	*steps = append(*steps, Step{
+		Index:      iteration,
+		ModelCall:  modelCall,
+		Decision:   StepDecisionContinue,
+		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
+	})
+	if boundaryErr := e.observeBoundary(ctx, *input, *current, *totalUsage, *steps, *toolCallsUsed, ContinuationModelComplete); boundaryErr != nil {
+		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, boundaryErr
+	}
 
-	// A completed tool-use turn is only a request for side effects. Refuse to
-	// dispatch it when cancellation landed after the provider's terminal event.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, ctxErr
 	}
 
-	handled, out, stop, controlErr := handleBeforeToolBatchControl(
-		ctx, *input, current, *totalUsage, steps, assistant, modelCall, iteration, *toolCallsUsed,
-	)
-	if handled {
-		return out, stop, controlErr
+	if input.MaxTokens > 0 && modelCall.TotalTokens == 0 {
+		(*steps)[len(*steps)-1].Decision = StepDecisionFail
+		if observeErr := observeFinalizedStep(ctx, input.StepObserver, *steps); observeErr != nil {
+			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, observeErr
+		}
+		out, err := budgetAbort(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed, "max tokens")
+		return out, true, err
 	}
 
-	// Reserve the whole batch before hooks or drivers run. This prevents one
-	// side-effecting batch from crossing a token or tool-call ceiling.
 	if dimension := preDispatchBudgetBlock(*input, *totalUsage, *toolCallsUsed, len(*steps), len(assistant.ToolCalls)); dimension != "" {
-		*steps = append(*steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			Decision:   StepDecisionFail,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
-		})
-		if recordErr := recordFinalizedStep(ctx, input.StepRecorder, *steps); recordErr != nil {
-			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, recordErr
+		(*steps)[len(*steps)-1].Decision = StepDecisionFail
+		if observeErr := observeFinalizedStep(ctx, input.StepObserver, *steps); observeErr != nil {
+			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, observeErr
 		}
 		out, err := budgetAbort(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed, dimension)
 		return out, true, err
 	}
 
-	// Hooks may rewrite tool names, so validate the prepared calls. Charge the
-	// registered batch before dispatch so panics and partial failures cannot
-	// under-report usage.
 	prepared, terminal, prepErr := e.prepareToolCalls(ctx, assistant.ToolCalls)
 	if prepErr != nil {
 		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, prepErr
 	}
 	*toolCallsUsed += len(assistant.ToolCalls)
-	var childUsage, childExternallyAccounted provider.Usage
-	var childUsageMu sync.Mutex
-	toolCtx := withParentUsageSink(ctx, func(usage, external provider.Usage) {
-		childUsageMu.Lock()
-		defer childUsageMu.Unlock()
-		childUsage = childUsage.Add(usage)
-		childExternallyAccounted = childExternallyAccounted.Add(external)
-	})
-	if input.MaxTokens > 0 {
-		remaining := input.MaxTokens - int64(totalUsage.TotalTokens)
-		if remaining < 0 {
-			remaining = 0
-		}
-		toolCtx = withParentTokenBudget(toolCtx, remaining)
-	}
-	toolCtx, stopControlWatch := controlledToolContext(toolCtx, input.Control)
-	results, dispatchErr := e.dispatchPreparedTools(toolCtx, prepared, input.ToolMode)
-	stopControlWatch()
-	*totalUsage = totalUsage.Add(childUsage)
-	*externallyAccountedUsage = externallyAccountedUsage.Add(childExternallyAccounted)
-
-	postToolControl, controlErr := drainTurnControl(ctx, input.Control, TurnBoundaryAfterTools)
-	if controlErr != nil {
-		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, controlErr
-	}
-	if len(postToolControl) > 0 && dispatchErr != nil {
-		notExecuted, allNotExecuted := tool.NotExecutedCallIDs(dispatchErr)
-		results = completeCancelledToolResults(prepared, results, notExecuted)
-		if allNotExecuted {
-			dispatchErr = nil
-		}
-	}
-
-	// Preserve every result that ran before reporting the dispatch error. A
-	// steer closes only slots the tool bus proves never started. Running or
-	// otherwise unknown outcomes remain errors for durable reconciliation.
+	dispatchCtx, childUsage := withAgentToolDispatchContext(ctx, input.MaxTokens, *totalUsage)
+	results, dispatchErr := e.dispatchPreparedTools(dispatchCtx, prepared, input.ToolMode, input.Sink)
+	*totalUsage = (*totalUsage).Add(childUsage.snapshot())
+	(*steps)[len(*steps)-1].BudgetUsed = BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed}
 	appendErr := appendToolResults(ctx, current, results, input.Sink)
 	if executionErr := errors.Join(dispatchErr, appendErr); executionErr != nil {
 		return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, executionErr
 	}
-	if input.ContextTransition != nil {
-		transitioned, transitionErr := input.ContextTransition.Apply(ctx, message.CloneMessages(*current), append([]tool.Result(nil), results...))
-		if transitionErr != nil {
-			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, transitionErr
-		}
-		*current = message.CloneMessages(transitioned)
-	}
-	if len(postToolControl) > 0 {
-		*current = append(*current, controlMessages(postToolControl)...)
-		terminal = false
-		if controlAborts(postToolControl) {
-			*steps = append(*steps, Step{
-				Index:      iteration,
-				ModelCall:  modelCall,
-				ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
-				Decision:   StepDecisionFail,
-				BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: *toolCallsUsed},
-			})
-			if err := recordTurnBoundary(ctx, *input, *current, *totalUsage, *steps, *toolCallsUsed); err != nil {
-				return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, errors.Join(ErrTurnControlAbort, err)
-			}
-			return loopErrorOutput(*current, *totalUsage, *steps, iteration+1, *toolCallsUsed), true, ErrTurnControlAbort
-		}
-	}
-	nextSteps, out, stop, err := finalizeToolStep(
-		ctx, *input, *current, *totalUsage, *steps, assistant, modelCall,
+	nextSteps, out, stop, err := e.finalizeToolStep(
+		ctx, *input, *current, *totalUsage, *steps, assistant,
 		results, terminal, iteration, *toolCallsUsed,
 	)
 	*steps = nextSteps
 	return out, stop, err
-}
-
-func handleBeforeToolBatchControl(
-	ctx context.Context,
-	input LoopInput,
-	current *[]message.Message,
-	totalUsage provider.Usage,
-	steps *[]Step,
-	assistant message.Message,
-	modelCall *ModelCall,
-	iteration, toolCallsUsed int,
-) (bool, LoopOutput, bool, error) {
-	results, controlBatch, err := prepareBeforeToolControl(
-		ctx, input.Control, assistant.ToolCalls, current, input.Sink,
-	)
-	if err != nil {
-		return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, err
-	}
-	if len(controlBatch) == 0 {
-		return false, LoopOutput{}, false, nil
-	}
-	*current = append(*current, controlMessages(controlBatch)...)
-	if controlAborts(controlBatch) {
-		*steps = append(*steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
-			Decision:   StepDecisionFail,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-		})
-		if recordErr := recordTurnBoundary(ctx, input, *current, totalUsage, *steps, toolCallsUsed); recordErr != nil {
-			return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, errors.Join(ErrTurnControlAbort, recordErr)
-		}
-		return true, loopErrorOutput(*current, totalUsage, *steps, iteration+1, toolCallsUsed), true, ErrTurnControlAbort
-	}
-	nextSteps, out, stop, err := finalizeToolStep(
-		ctx, input, *current, totalUsage, *steps, assistant, modelCall,
-		results, false, iteration, toolCallsUsed,
-	)
-	*steps = nextSteps
-	return true, out, stop, err
-}
-
-func prepareBeforeToolControl(
-	ctx context.Context,
-	control TurnControl,
-	calls []message.ToolCall,
-	current *[]message.Message,
-	sink stream.Sink,
-) ([]tool.Result, []ControlMessage, error) {
-	controlBatch, err := drainTurnControl(ctx, control, TurnBoundaryBeforeTools)
-	if err != nil || len(controlBatch) == 0 {
-		return nil, controlBatch, err
-	}
-	skipped := make([]tool.Call, len(calls))
-	for index, call := range calls {
-		skipped[index] = tool.Call{ID: call.ID, Name: call.Name, Arguments: call.Arguments}
-	}
-	results := cancelledToolResults(skipped)
-	if err := appendToolResults(ctx, current, results, sink); err != nil {
-		return nil, nil, err
-	}
-	return results, controlBatch, nil
 }
 
 func normalizeIterationPolicy(input LoopInput) (LoopInput, int) {
@@ -807,78 +556,45 @@ func (e Engine) finalizeNoToolStep(
 	iteration int,
 	toolCallsUsed int,
 ) ([]message.Message, []Step, LoopOutput, bool, error) {
-	finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(
-		ctx, input, current, assistant, iteration+1, totalUsage, stopReason,
-	)
-	if guardErr != nil {
-		return current, steps,
-			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-			false, guardErr
-	}
-	if len(retryMessages) > 0 {
-		steps = append(steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			Decision:   StepDecisionContinue,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-		})
-		current = appendRetryContext(current, assistant, retryMessages, retryPolicy)
-		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-			return current, steps,
-				loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-				false, recordErr
-		}
-		return current, steps, LoopOutput{}, true, nil
-	}
-	controlBatch, controlErr := drainTurnControl(ctx, input.Control, TurnBoundaryAfterAnswer)
-	if controlErr != nil {
-		return current, steps,
-			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-			false, controlErr
-	}
-	if controlAborts(controlBatch) {
-		steps = append(steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			Decision:   StepDecisionFail,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-		})
-		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-			return current, steps,
-				loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-				false, errors.Join(ErrTurnControlAbort, recordErr)
-		}
-		return current, steps,
-			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-			false, ErrTurnControlAbort
-	}
-	if messages := controlMessages(controlBatch); len(messages) > 0 {
-		current = appendFinalAssistant(current, finalOutput)
-		current = append(current, messages...)
-		steps = append(steps, Step{
-			Index:      iteration,
-			ModelCall:  modelCall,
-			Decision:   StepDecisionContinue,
-			BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-		})
-		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-			return current, steps,
-				loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-				false, recordErr
-		}
-		return current, steps, LoopOutput{}, true, nil
-	}
-	current = appendFinalAssistant(current, finalOutput)
+	base := current
+	current = appendFinalAssistant(current, assistant)
 	steps = append(steps, Step{
 		Index:      iteration,
 		ModelCall:  modelCall,
 		Decision:   StepDecisionFinish,
 		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
 	})
-	if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-		return current, steps,
-			loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed),
-			false, recordErr
+	if boundaryErr := e.observeBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed, ContinuationValidatingOutput); boundaryErr != nil {
+		return current, steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), false, boundaryErr
+	}
+	if input.MaxTokens > 0 && modelCall.TotalTokens == 0 {
+		steps[len(steps)-1].Decision = StepDecisionFail
+		if observeErr := observeFinalizedStep(ctx, input.StepObserver, steps); observeErr != nil {
+			return current, steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), false, observeErr
+		}
+		out, budgetErr := budgetAbort(current, totalUsage, steps, iteration+1, toolCallsUsed, "max tokens")
+		return current, steps, out, false, budgetErr
+	}
+
+	finalOutput, retryMessages, retryPolicy, guardErr := e.applyOutputGuardrails(
+		ctx, input, base, assistant, iteration+1, totalUsage, stopReason,
+	)
+	if guardErr != nil {
+		steps[len(steps)-1].Decision = StepDecisionFail
+		return current, steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), false, guardErr
+	}
+	if len(retryMessages) > 0 {
+		steps[len(steps)-1].Decision = StepDecisionContinue
+		current = appendRetryContext(base, assistant, retryMessages, retryPolicy)
+		if observeErr := observeFinalizedStep(ctx, input.StepObserver, steps); observeErr != nil {
+			return current, steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), false, observeErr
+		}
+		return current, steps, LoopOutput{}, true, nil
+	}
+
+	current = appendFinalAssistant(base, finalOutput)
+	if observeErr := observeFinalizedStep(ctx, input.StepObserver, steps); observeErr != nil {
+		return current, steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), false, observeErr
 	}
 	return current, steps, LoopOutput{
 		Messages:      current,
@@ -891,34 +607,46 @@ func (e Engine) finalizeNoToolStep(
 	}, false, nil
 }
 
-func finalizeToolStep(
+func (e Engine) finalizeToolStep(
 	ctx context.Context,
 	input LoopInput,
 	current []message.Message,
 	totalUsage provider.Usage,
 	steps []Step,
 	assistant message.Message,
-	modelCall *ModelCall,
 	results []tool.Result,
 	terminal bool,
 	iteration int,
 	toolCallsUsed int,
 ) ([]Step, LoopOutput, bool, error) {
-	decision := StepDecisionContinue
+	latest := &steps[len(steps)-1]
+	latest.ToolCalls = toolCallTraces(assistant.ToolCalls, results)
+	latest.BudgetUsed = BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed}
+	latest.Decision = StepDecisionContinue
 	if terminal {
-		decision = StepDecisionFinish
+		latest.Decision = StepDecisionFinish
 	}
-	steps = append(steps, Step{
-		Index:      iteration,
-		ModelCall:  modelCall,
-		ToolCalls:  toolCallTraces(assistant.ToolCalls, results),
-		Decision:   decision,
-		BudgetUsed: BudgetUsage{Tokens: int64(totalUsage.TotalTokens), ToolCalls: toolCallsUsed},
-	})
-	if terminal {
-		if recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed); recordErr != nil {
-			return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, recordErr
+
+	var policyOut LoopOutput
+	var policyErr error
+	stop := terminal
+	if !terminal {
+		policyOut, stop, policyErr = stepDecisionOverride(
+			input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed,
+		)
+		if policyErr != nil {
+			latest.Decision = StepDecisionFail
 		}
+	}
+	observeErr := observeFinalizedStep(ctx, input.StepObserver, steps)
+	boundaryErr := error(nil)
+	if observeErr == nil {
+		boundaryErr = e.observeBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed, ContinuationToolsComplete)
+	}
+	if combined := errors.Join(policyErr, observeErr, boundaryErr); combined != nil {
+		return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, combined
+	}
+	if terminal {
 		return steps, LoopOutput{
 			Messages:      current,
 			Usage:         totalUsage,
@@ -929,46 +657,31 @@ func finalizeToolStep(
 			ToolCallsUsed: toolCallsUsed,
 		}, true, nil
 	}
-
-	// Continue boundary: let StepPolicy mutate the latest decision before
-	// persisting that finalized decision exactly once.
-	policyOut, stop, policyErr := stepPolicyOverride(
-		input, current, totalUsage, steps, assistant.Thinking, iteration+1, toolCallsUsed,
-	)
-	recordErr := recordTurnBoundary(ctx, input, current, totalUsage, steps, toolCallsUsed)
-	if policyErr != nil && recordErr != nil {
-		return steps, policyOut, true, errors.Join(policyErr, recordErr)
-	}
-	if recordErr != nil {
-		return steps, loopErrorOutput(current, totalUsage, steps, iteration+1, toolCallsUsed), true, recordErr
-	}
 	if stop {
-		return steps, policyOut, true, policyErr
+		return steps, policyOut, true, nil
 	}
 	return steps, LoopOutput{}, false, nil
 }
 
-// recordFinalizedStep invokes recorder for the latest finalized step. The caller
-// appends the step before calling this helper so every failure returns the step
-// in the partial trace.
-func recordFinalizedStep(ctx context.Context, recorder StepRecorder, steps []Step) error {
-	if recorder == nil {
+// observeFinalizedStep invokes the observer for the latest finalized step.
+func observeFinalizedStep(ctx context.Context, observer StepObserver, steps []Step) error {
+	if observer == nil {
 		return nil
 	}
 	step := steps[len(steps)-1]
-	if err := recorder.RecordStep(ctx, step); err != nil {
-		return fmt.Errorf("agent: record step %d: %w", step.Index, err)
+	if err := observer.ObserveStep(ctx, step); err != nil {
+		return fmt.Errorf("agent: observe step %d: %w", step.Index, err)
 	}
 	return nil
 }
 
-func recordRecoveredStep(ctx context.Context, recorder StepRecorder, steps []Step) (err error) {
+func observeRecoveredStep(ctx context.Context, observer StepObserver, steps []Step) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: %v", ErrPanicRecovered, r)
 		}
 	}()
-	return recordFinalizedStep(ctx, recorder, steps)
+	return observeFinalizedStep(ctx, observer, steps)
 }
 
 func nextToolOperationTurn(messages []message.Message) int {
@@ -984,45 +697,39 @@ func nextToolOperationTurn(messages []message.Message) int {
 	return next
 }
 
-func recordTurnBoundary(
+func (e Engine) observeBoundary(
 	ctx context.Context,
 	input LoopInput,
 	messages []message.Message,
 	usage provider.Usage,
 	steps []Step,
 	toolCallsUsed int,
+	phase ContinuationPhase,
 ) error {
-	if err := recordFinalizedStep(ctx, input.StepRecorder, steps); err != nil {
-		return err
+	if e.Boundaries == nil {
+		return nil
 	}
-	session, _ := input.Control.(*turnControlSession)
-	if input.CheckpointRecorder != nil {
-		step := steps[len(steps)-1]
-		checkpoint := TurnCheckpoint{
-			Messages:                 message.CloneMessages(messages),
-			Usage:                    usage,
-			Step:                     step,
-			ToolCallsUsed:            toolCallsUsed,
-			NextOperationTurn:        input.OperationTurn,
-			ExternallyAccountedUsage: dereferenceUsage(input.externallyAccountedUsage),
-			AppliedControlIDs:        sessionPendingIDs(session),
-			ControlAborted:           session != nil && session.hasAbort(),
-		}
-		if err := input.CheckpointRecorder.RecordCheckpoint(ctx, checkpoint); err != nil {
-			return fmt.Errorf("agent: record checkpoint after step %d: %w", step.Index, err)
-		}
+	continuation := Continuation{
+		SchemaVersion:     ContinuationSchemaVersion,
+		Request:           cloneRequest(input.continuationRequest),
+		OutputPolicy:      input.continuationPolicy,
+		Messages:          message.CloneMessages(messages),
+		Usage:             usage,
+		Steps:             cloneSteps(steps),
+		ToolCallsUsed:     toolCallsUsed,
+		RepairCount:       input.repairCount,
+		ActiveElapsed:     input.activeElapsed + time.Since(input.segmentStarted),
+		NextOperationTurn: input.OperationTurn,
+		Phase:             phase,
 	}
-	if session != nil {
-		return session.acknowledgePending(ctx)
+	continuation.OutputPolicy.Schema = append(json.RawMessage(nil), continuation.OutputPolicy.Schema...)
+	if err := ValidateContinuation(continuation); err != nil {
+		return fmt.Errorf("agent: build %s continuation: %w", phase, err)
+	}
+	if err := e.Boundaries.ObserveBoundary(ctx, cloneContinuation(continuation)); err != nil {
+		return fmt.Errorf("agent: observe %s boundary: %w", phase, err)
 	}
 	return nil
-}
-
-func dereferenceUsage(usage *provider.Usage) provider.Usage {
-	if usage == nil {
-		return provider.Usage{}
-	}
-	return *usage
 }
 
 // loopTurnPreamble runs the per-iteration preamble for turns after the first: it
@@ -1045,26 +752,18 @@ func loopTurnPreamble(ctx context.Context, input LoopInput, current []message.Me
 	return compacted, LoopOutput{}, false, nil
 }
 
-// stepPolicyOverride consults input.StepPolicy at a continue boundary and reports
-// whether it stopped the loop. A nil policy, or a Continue/"" decision, returns
-// stop=false so the loop keeps iterating. A Finish/Handoff override stops the
-// loop cleanly (StopReasonComplete), recording the decision on the final step; a
-// Fail decision, or a Next error, stops it with ErrStepAborted. iterations is the
-// count of model turns that ran.
-func stepPolicyOverride(input LoopInput, current []message.Message, usage provider.Usage, steps []Step, thinking string, iterations, toolCallsUsed int) (out LoopOutput, stop bool, err error) {
-	if input.StepPolicy == nil {
+// stepDecisionOverride consults the StepDecider at a continue boundary.
+func stepDecisionOverride(input LoopInput, current []message.Message, usage provider.Usage, steps []Step, thinking string, iterations, toolCallsUsed int) (out LoopOutput, stop bool, err error) {
+	if input.StepDecider == nil {
 		return LoopOutput{}, false, nil
 	}
-	decision, policyErr := input.StepPolicy.Next(LoopSnapshot{Steps: steps})
-	if policyErr != nil {
-		// Both errors stay wrapped: ErrStepAborted so the engine classifies the
-		// failure, and policyErr so a caller's errors.Is/As still reaches the
-		// policy's own sentinel — mirroring how a Compact error keeps its cause.
+	decision, decideErr := input.StepDecider.Decide(LoopSnapshot{Steps: steps})
+	if decideErr != nil {
 		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
-			fmt.Errorf("%w: step policy: %w", ErrStepAborted, policyErr)
+			fmt.Errorf("%w: step decider: %w", ErrStepAborted, decideErr)
 	}
 	switch decision {
-	case StepDecisionFinish, StepDecisionHandoff:
+	case StepDecisionFinish:
 		steps[len(steps)-1].Decision = decision
 		return LoopOutput{
 			Messages:      current,
@@ -1078,7 +777,7 @@ func stepPolicyOverride(input LoopInput, current []message.Message, usage provid
 	case StepDecisionFail:
 		steps[len(steps)-1].Decision = StepDecisionFail
 		return loopErrorOutput(current, usage, steps, iterations, toolCallsUsed), true,
-			fmt.Errorf("%w: step policy returned fail", ErrStepAborted)
+			fmt.Errorf("%w: step decider returned fail", ErrStepAborted)
 	}
 	return LoopOutput{}, false, nil
 }
@@ -1383,7 +1082,7 @@ func (e Engine) applyOutputGuardrails(ctx context.Context, input LoopInput, curr
 }
 
 func (e Engine) recordOutputGuardrailDecision(ctx context.Context, input LoopInput, name string, action OutputGuardrailAction, reason string, iteration int, metadata map[string]string) {
-	if input.OutputRecorder == nil {
+	if input.OutputObserver == nil {
 		return
 	}
 	merged := cloneStringMap(input.Metadata)
@@ -1393,7 +1092,7 @@ func (e Engine) recordOutputGuardrailDecision(ctx context.Context, input LoopInp
 	for key, value := range metadata {
 		merged[key] = value
 	}
-	input.OutputRecorder.RecordOutputGuardrailDecision(ctx, OutputGuardrailDecision{
+	input.OutputObserver.ObserveOutputGuardrailDecision(ctx, OutputGuardrailDecision{
 		GuardrailName: name,
 		Action:        action,
 		Reason:        reason,
@@ -1414,7 +1113,52 @@ func cloneStringMap(values map[string]string) map[string]string {
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {
-	return maps.Clone(values)
+	if values == nil {
+		return nil
+	}
+	return cloneMutableValue(reflect.ValueOf(values)).Interface().(map[string]any)
+}
+
+func cloneMutableValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.New(value.Type()).Elem()
+		cloned.Set(cloneMutableValue(value.Elem()))
+		return cloned
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iterator := value.MapRange()
+		for iterator.Next() {
+			cloned.SetMapIndex(iterator.Key(), cloneMutableValue(iterator.Value()))
+		}
+		return cloned
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := range value.Len() {
+			cloned.Index(index).Set(cloneMutableValue(value.Index(index)))
+		}
+		return cloned
+	case reflect.Array:
+		cloned := reflect.New(value.Type()).Elem()
+		for index := range value.Len() {
+			cloned.Index(index).Set(cloneMutableValue(value.Index(index)))
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func cloneBoolPointer(value *bool) *bool {
@@ -1422,6 +1166,18 @@ func cloneBoolPointer(value *bool) *bool {
 		return nil
 	}
 	cloned := *value
+	return &cloned
+}
+
+func cloneResponseFormat(value *provider.ResponseFormat) *provider.ResponseFormat {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	if value.Schema != nil {
+		schema := cloneJSONSchema(*value.Schema)
+		cloned.Schema = &schema
+	}
 	return &cloned
 }
 
@@ -1434,18 +1190,18 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 	}
 	request := provider.Request{
 		Model:             input.Model,
+		OperationID:       fmt.Sprintf("turn:%d:model", input.OperationTurn),
 		Messages:          transformed,
 		Temperature:       input.Temperature,
 		TopP:              input.TopP,
 		MaxTokens:         input.ModelMaxTokens,
-		Metadata:          input.Metadata,
-		StopSequences:     input.StopSequences,
+		Metadata:          cloneStringMap(input.Metadata),
+		StopSequences:     slices.Clone(input.StopSequences),
 		ThinkingBudget:    input.ThinkingBudget,
-		ResponseFormat:    input.ResponseFormat,
+		ResponseFormat:    cloneResponseFormat(input.ResponseFormat),
 		PromptCacheKey:    input.PromptCacheKey,
 		ServiceTier:       input.ServiceTier,
 		ParallelToolCalls: cloneBoolPointer(input.ParallelToolCalls),
-		NativeToolHost:    input.NativeToolHost,
 		ContextUsage:      input.ContextUsage,
 		ExtraBody:         cloneAnyMap(input.ExtraBody),
 	}
@@ -1455,10 +1211,16 @@ func (e Engine) runTurn(ctx context.Context, current []message.Message, input Lo
 	if err := e.Hooks.BeforeModelCall(ctx, &request); err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
+	request.OperationID = fmt.Sprintf("turn:%d:model", input.OperationTurn)
 	if err := provider.ValidateExtraBody(request.ExtraBody); err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
-	providerStream, err := e.Provider.Stream(ctx, request)
+	var providerStream provider.Stream
+	if interceptor := provider.ChainStreamInterceptors(e.ModelInterceptor); interceptor != nil {
+		providerStream, err = interceptor.Stream(ctx, e.Provider, request)
+	} else {
+		providerStream, err = e.Provider.Stream(ctx, request)
+	}
 	if err != nil {
 		return message.Message{}, provider.Usage{}, provider.StopReasonError, provider.StreamIdentity{}, false, err
 	}
@@ -1494,6 +1256,7 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 	terminal := false
 	for _, call := range calls {
 		item := call
+		item.Arguments = append(json.RawMessage(nil), item.Arguments...)
 		operationID := item.OperationID
 		if err := e.Hooks.BeforeToolCall(ctx, &item); err != nil {
 			return nil, false, err
@@ -1511,38 +1274,39 @@ func (e Engine) prepareToolCalls(ctx context.Context, calls []message.ToolCall) 
 	return prepared, terminal, nil
 }
 
-// ResumeToolCalls executes tool calls restored from a durable checkpoint
-// through the same preparation, validation, and hook pipeline as a live turn.
-// The caller remains responsible for appending the returned results to history.
-func (e Engine) ResumeToolCalls(ctx context.Context, calls []message.ToolCall) ([]message.ToolResult, error) {
-	prepared, _, err := e.prepareToolCalls(ctx, calls)
-	if err != nil {
-		return nil, err
+// dispatchPreparedTools executes the hook-prepared calls on the bus, bridges
+// real-time tool updates to the loop sink, and runs AfterToolCall on each final
+// result. prepareToolCalls already validated every call as registered, so a
+// dispatch error comes from a driver that actually ran (or, for a sequential
+// driver, a panic that unwinds inline to the RunMessages recover) — which is why
+// the loop charges the batch before calling this.
+//
+// Every result ExecuteBatch returns ran to completion and side-effected, even
+// when the batch reports an error: a later sequential call failing still yields
+// the earlier successes, and a parallel call erroring or panicking still yields
+// the completed slots. Those results are post-processed and returned alongside
+// the batch error so the caller records them, sparing a resuming caller from
+// replaying side-effecting calls or leaving the matching assistant tool calls
+// dangling.
+//
+// If an AfterToolCall itself fails on one result (including a panic HookChain
+// converts to ErrHookPanic), the results blessed before it are returned with
+// that error and the failing result and any after it are dropped — so the
+// returned results are always a prefix of what AfterToolCall post-processed. An
+// AfterToolCall failure takes precedence over a batch error because it is the
+// earlier hook in the pipeline; the loop surfaces whichever non-nil error this
+// returns.
+func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode, sink Sink) ([]message.ToolResult, error) {
+	var updates tool.UpdateSink
+	if sink != nil {
+		updates = func(update tool.Update) error {
+			return sink.Emit(ctx, FrameFromToolUpdate(update))
+		}
 	}
-	return e.dispatchPreparedTools(ctx, prepared, e.ToolMode)
-}
-
-// dispatchPreparedTools executes the hook-prepared calls on the bus and runs
-// AfterToolCall on each result. prepareToolCalls already validated every call as
-// registered, so a dispatch error comes from a driver that actually ran (or, for a
-// sequential driver, a panic that unwinds inline to the RunMessages recover) —
-// which is why the loop charges the batch before calling this.
-//
-// Every result ExecuteBatch returns ran to completion and side-effected, even when
-// the batch reports an error: a later sequential call failing still yields the
-// earlier successes, and a parallel call erroring or panicking still yields the
-// completed slots. Those results are post-processed and returned alongside the
-// batch error so the caller records them, sparing a resuming caller from replaying
-// side-effecting calls or leaving the matching assistant tool calls dangling.
-//
-// If an AfterToolCall itself fails on one result (an error, or a panic hook.Chain
-// converts to ErrHandlerPanic), the results blessed before it are returned with
-// that error and the failing result and any after it are dropped — so the returned
-// results are always a prefix of what AfterToolCall post-processed. An AfterToolCall
-// failure takes precedence over a batch error because it is the earlier hook in the
-// pipeline; the loop surfaces whichever non-nil error this returns.
-func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call, mode tool.Mode) ([]message.ToolResult, error) {
-	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, nil)
+	results, batchErr := e.Tools.ExecuteBatch(ctx, prepared, mode, tool.ExecuteOptions{
+		Sink:        updates,
+		Interceptor: e.ToolInterceptor,
+	})
 	items := make([]message.ToolResult, 0, len(results))
 	for index, current := range results {
 		item := current
@@ -1575,21 +1339,21 @@ func (e Engine) dispatchPreparedTools(ctx context.Context, prepared []tool.Call,
 // caller's assignment of the return value. The prompt, the assistant tool call,
 // and every appended tool result thus survive on the partial LoopOutput rather
 // than being discarded.
-func appendToolResults(ctx context.Context, current *[]message.Message, results []message.ToolResult, sink stream.Sink) error {
+func appendToolResults(ctx context.Context, current *[]message.Message, results []message.ToolResult, sink Sink) error {
 	for _, result := range results {
 		*current = append(*current, message.NewToolResult(result))
 		if sink == nil {
 			continue
 		}
 		toolResult := result
-		if err := sink.Emit(ctx, stream.Frame{Kind: stream.FrameToolResult, ToolResult: &toolResult}); err != nil {
+		if err := sink.Emit(ctx, Frame{Kind: FrameToolResult, ToolResult: &toolResult}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink stream.Sink) (assistant message.Message, usage provider.Usage, stop provider.StopReason, err error) {
+func (e Engine) collect(ctx context.Context, providerStream provider.Stream, onEvent func(provider.Event) error, sink Sink) (assistant message.Message, usage provider.Usage, stop provider.StopReason, err error) {
 	defer func() { _ = providerStream.Close() }()
 	assistant = message.Message{Role: message.RoleAssistant, Kind: message.KindStandard}
 	events := make([]provider.Event, 0, 8)
@@ -1708,7 +1472,7 @@ func providerEventSize(event provider.Event) int {
 // and the sink (frames only), returning the first error. collect records the
 // event before calling this, so a callback failure here ends the turn with the
 // response streamed so far already preserved for the partial trace.
-func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent func(provider.Event) error, sink stream.Sink) error {
+func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent func(provider.Event) error, sink Sink) error {
 	if onEvent != nil {
 		if err := onEvent(event); err != nil {
 			return err
@@ -1718,7 +1482,7 @@ func (e Engine) fanOutEvent(ctx context.Context, event provider.Event, onEvent f
 		return err
 	}
 	if sink != nil {
-		if frame, ok := stream.FrameFromEvent(event); ok {
+		if frame, ok := FrameFromEvent(event); ok {
 			if err := sink.Emit(ctx, frame); err != nil {
 				return err
 			}

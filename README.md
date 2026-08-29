@@ -1,52 +1,27 @@
 # Venat
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Viking602/venat.svg)](https://pkg.go.dev/github.com/Viking602/venat)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Viking602/venat/agent.svg)](https://pkg.go.dev/github.com/Viking602/venat/agent)
 [![CI](https://github.com/Viking602/venat/actions/workflows/ci.yml/badge.svg)](https://github.com/Viking602/venat/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Viking602/venat?sort=semver)](https://github.com/Viking602/venat/releases)
 
-Venat is a Go library for multi-agent workloads that need crash recovery,
-human approvals, and idempotent side effects. Its `Runner` records typed `Run`,
-`Task`, `Event`, `Lease`, `Approval`, and `ActionAttempt` state through
-configurable stores. Applications embed the runner and provide the production
-storage implementation.
+Venat is a typed Go SDK for bounded Agent loops, application-defined multi-Agent orchestration, and optional crash-safe execution. Applications import the packages they need and retain ownership of identity, routing policy, storage schema, deployment, and operations.
 
-> **Status:** The latest published release is [v0.15.4](https://github.com/Viking602/venat/releases/tag/v0.15.4).
-> [v0.16.0](docs/release-notes/v0.16.0.md) is the prepared release candidate.
-> The public API may still change before v1.0.
+> **Status:** The latest published release is [v0.16.0](https://github.com/Viking602/venat/releases/tag/v0.16.0). Public APIs may change before v1.0.
 
-## Why Venat
+## Packages
 
-Agent workloads must preserve state across crashes, prevent duplicate side
-effects, and record decisions that cross process or human boundaries. Venat
-handles those concerns in four concrete ways:
+| Package | Responsibility |
+| --- | --- |
+| [`agent`](https://pkg.go.dev/github.com/Viking602/venat/agent) | One bounded model/tool loop, a synchronous AgentTool adapter, hooks, output validation, transient output, continuation, and resume |
+| [`message`](https://pkg.go.dev/github.com/Viking602/venat/message) | Provider-neutral messages, content, tool calls, and tool results |
+| [`provider`](https://pkg.go.dev/github.com/Viking602/venat/provider) | Streaming model driver contract, interceptors, conformance helpers, and provider adapters |
+| [`tool`](https://pkg.go.dev/github.com/Viking602/venat/tool) | Typed tool drivers, validation, execution modes, real-time updates, and interceptors |
+| [`skill`](https://pkg.go.dev/github.com/Viking602/venat/skill) | Reusable instruction resources and discovery |
+| [`orchestration`](https://pkg.go.dev/github.com/Viking602/venat/orchestration) | Pure scheduling protocol plus bounded mechanical dispatch execution |
+| [`durable`](https://pkg.go.dev/github.com/Viking602/venat/durable) | Optional execution persistence, leases, checkpoints, effect settlement, replay, and reconciliation |
+| [`durable/contract`](https://pkg.go.dev/github.com/Viking602/venat/durable/contract) | Conformance suite for application-supplied durable backends |
 
-- **Recovery:** commands are persisted, leased, audited, and resumable; guarded
-  side effects use an action-attempt ledger.
-- **Type safety:** CI rejects exported `[]any` results and loose `any` fields in
-  the public API.
-- **Storage ownership:** applications implement the storage contract; the
-  kernel ships no production backend or domain schema.
-- **Embedding:** Venat runs as a library in a normal Go program. It ships no
-  UI or hosted service.
-
-## At a glance
-
-- **Strong bounded agent loop** (`agent/`): one agent does one task well: step
-  trace, schema repair, tool safety, context management, typed failure, and
-  budget enforcement.
-  Reusable `skill/` instruction bundles support explicit and model-driven
-  activation there; they do not grant host tools or create a second runtime.
-- **Explicit multi-agent scheduler** (`multiagent/`): first-class
-  `AgentClass`, `Team`, `Scheduler`, `SchedulerFunc`, `Dispatch`, typed
-  `Handoff`, and `Blackboard`. Fixed pipelines use `SequentialScheduler`;
-  applications own more specialized scheduling policies.
-- **Durable runner** (root + `internal/`): runs, tasks, events, leases,
-  approvals, an outbox / action-attempt ledger for idempotent side effects, and
-  handoffs, all persisted and replayable.
-- **Durable triggers** (`transport/cron`, `transport/webhook`, and others): schedule and
-  event entry points, with per-trigger timezone support on the cron driver.
-- **Product packs** (`packs/`): vertical skeletons free to encode domain
-  vocabulary the kernel never touches.
+There is no privileged root façade. Composition remains visible in application code.
 
 ## Install
 
@@ -54,187 +29,156 @@ handles those concerns in four concrete ways:
 go get github.com/Viking602/venat@latest
 ```
 
-Requires Go 1.25+.
-Repository development and release gates pin Go 1.25.13.
+Venat requires Go 1.25 or newer.
 
-## Agent Skills
+## Direct Agent execution
 
-Venat supports the complete local Agent Skills lifecycle: trusted directory
-discovery, standards-compatible `SKILL.md` parsing, explicit activation,
-metadata-only catalog disclosure, model-driven activation, and bounded on-demand
-reads from `scripts/`, `references/`, and `assets/`.
+An `agent.Engine` receives a provider, an optional tool bus, and explicit loop configuration. `agent.Result.Failure` is terminal execution data; infrastructure setup and transport concerns remain at the caller boundary.
 
 ```go
-found, err := skill.Discover(skill.DiscoveryOptions{
-	ProjectDir:   projectRoot,
-	TrustProject: true,
+engine := agent.Engine{
+    Provider: providerDriver,
+    Tools:    tool.NewBus(toolDrivers...),
+    Model:    "your-model",
+    ToolMode: tool.ModeSequential,
+}
+
+result := engine.Run(ctx, agent.Request{
+    Prompt: "Summarize the repository",
+    Budget: &agent.Budget{MaxSteps: 8, MaxToolCalls: 12},
+}, agent.OutputPolicy{})
+if result.Failure != nil {
+    // Inspect the factual Agent failure and partial trace.
+}
+```
+
+Use `RunStream` with an `agent.Sink` for transient text, thinking, tool-call, tool-update, tool-result, done, and error frames. A tool function may accept `tool.UpdateSink` and emit typed progress or ordered content parts; the Bus supplies trusted call identity and per-call sequence. Sink delivery is synchronous and not durable output.
+
+## Delegating to a child Agent
+
+`agent.NewAgentTool` exposes an already configured child Engine as a
+non-terminal tool. The child keeps its own provider, model, tools, hooks,
+skills, loop policy, and context manager.
+
+```go
+child := agent.Engine{
+    Provider: childProvider,
+    Model:    childModel,
+}
+
+researcher, err := agent.NewAgentTool(child, agent.AgentToolConfig{
+    Definition: tool.Definition{
+        Name:             "researcher",
+        Description:      "Delegate a research task.",
+        ConcurrencyGroup: "subagents",
+        MaxConcurrency:   4,
+    },
 })
 if err != nil {
-	return err
+    return err
 }
-skills := skill.NewRegistry()
-for _, current := range found.Skills {
-	if err := skill.Register(skills, current); err != nil {
-		return err
-	}
-}
-engine, err := agent.Build(agent.Spec{
-	Model:           "gpt-5",
-	Skills:          []string{"always-on-review"},
-	AvailableSkills: []string{"pdf-processing"},
-}, agent.BuildDeps{Providers: providers, Skills: skills})
-```
 
-`Skills` are injected immediately. `AvailableSkills` disclose only names and
-descriptions until the model calls the framework-owned activation tool. Project
-skills are ignored unless `TrustProject` is true; additional discovery roots are
-explicit trust grants. Bundled files are listed without being loaded, and reads
-are limited to the captured manifest. Skills never grant host tools and scripts
-are never executed automatically: `allowed-tools` remains advisory while
-`Spec.Tools`, the tool bus, hooks, and policy remain authoritative.
-
-Run the complete local example with `go run ./_examples/skills`.
-
-## Quickstart
-
-Queue a run on the default in-memory runner and read the append-only event
-stream:
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/Viking602/venat"
-	"github.com/Viking602/venat/api"
-)
-
-func main() {
-	runner := venat.NewDevelopment()
-
-	run, err := runner.QueueRun(context.Background(), api.StartRunCommand{
-		Request: "compare options for a Go research assistant",
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	events, err := runner.RunEvents(context.Background(), run.ID)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(run.ID, len(events))
+parent := agent.Engine{
+    Provider: parentProvider,
+    Tools:    tool.NewBus(researcher),
+    Model:    parentModel,
 }
 ```
 
-Override defaults via `api.Config`:
+The default input is `{"task":"..."}`. Applications keep ownership of Agent
+registries, identity, routing, workflows, process isolation, background work,
+and independently durable child lifecycles.
+
+## Application-defined orchestration
+
+`orchestration.Scheduler` is a pure function over an immutable state snapshot. It returns stable dispatch IDs and opaque routes. `orchestration.Drive` executes each tick with bounded concurrency and folds successful outcomes deterministically.
 
 ```go
-runner := venat.NewDevelopment(api.Config{
-	PolicyEngine: policy.DenySideEffectsByDefault(),
+state, err := orchestration.Drive(ctx, scheduler, executor, orchestration.DriveOptions{
+    MaxTicks:       16,
+    MaxConcurrency: 4,
 })
 ```
 
-Continue with the [full quickstart](docs/quickstart.md). Multi-step scheduling
-uses `multiagent.Scheduler` implementations directly.
+Agent identity, teams, routing strategy, shared state, approvals, and deployment are application concerns. Persist `orchestration.State` in application storage when orchestration itself must survive a restart.
 
-## How it works
+## Optional durable execution
 
-Venat's documentation map is five layers. The linear picture is not a
-hard DAG; reverse-edge bans are the executable rule. `api/` imports no
-Venat package, `agent/` never imports `multiagent/`, `multiagent/` never
-imports the root Runner, `worker/`, or `internal/`, the root facade never
-imports `multiagent/`, and `worker/` / `packs/` / `coding/` keep their
-reverse-edge bans. The shared `stream/` package is intentionally
-available to `multiagent/`; it is a runtime-neutral collaboration
-primitive, not an upward dependency on Runner. See
-[architecture boundaries](docs/architecture-boundaries.md).
+`durable.Runtime` wraps the same `agent.Engine` loop. It persists immutable execution input, safe continuations, fenced leases, and provider/tool attempt outcomes through an injected `durable.Backend`.
 
-```
-┌─────────────────────────────────────────────┐
-│ Packs / Examples                            │
-│ research, customer-support, devops, aiops   │
-└─────────────────────────────────────────────┘
-                    ↓ host wiring
-┌─────────────────────────────────────────────┐
-│ Worker integration  (worker/)               │
-│ poll, lease, execute, team drive            │
-└─────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────┐
-│ Multi-Agent Layer  (multiagent/)            │
-│ AgentClass, AgentInstance, Team, Scheduler, │
-│ Dispatch, typed Handoff, Blackboard         │
-└─────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────┐
-│ Agent Loop Layer  (agent/)                  │
-│ Step, OutputPolicy, ToolSafety,             │
-│ ContextManager, AgentFailure, LoopPolicy    │
-└─────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────┐
-│ Durable Runner  (root + internal/)          │
-│ Run / Task / Event / Lease / Approval /     │
-│ Outbox / ActionAttempt / Handoff stores     │
-└─────────────────────────────────────────────┘
+```go
+runtime, err := durable.New(applicationBackend, durable.Options{
+    OwnerID: "worker-7",
+})
+if err != nil {
+    return err
+}
+
+result, err := runtime.Start(
+    ctx,
+    durable.ExecutionID("job-42"),
+    engine,
+    agent.Request{Prompt: "Perform the task"},
+    agent.OutputPolicy{},
+)
 ```
 
-The **durable runner** is what makes the upper layers safe to operate. The root
-`Runner` façade exposes typed commands for the full lifecycle: `QueueRun` /
-`RunEvents`, task leasing (`AcquireTaskExecution`), human approvals
-(`RequestApproval` / `DecideApproval` with resume tokens), idempotent side
-effects (`StartActionAttempt` / `CompleteActionAttempt`), trace spans, the
-blackboard, and the task-envelope mailbox. Storage sits behind a contract
-([ADR-012](docs/adr/ADR-012-storage-contract-position-d.md)); the default runner
-keeps everything in memory so you can
-start without provisioning anything, and you swap in your own backend for
-production by implementing the store interfaces.
+A provider or tool effect whose outcome cannot be proven becomes `unknown`. The runtime returns a typed `durable.ReconcileRequiredError`; the application records its real-world finding and explicitly chooses `succeed`, `fail`, or `retry` with `Runtime.Reconcile`, then calls `Resume`.
 
+Applications own backend schema and operations. Venat ships no production backend. Every backend must run `durable/contract.RunBackendContractTests`.
 
-## Examples
+Use `ResumeWithOptions` when an application controller must assert the current checkpoint sequence, phase, or pending operation before any Engine or effect work. `examples/durable` also demonstrates application-owned human approval through `Hook`, `Suspend`, a separate approval store, a tool wrapper, and targeted resume; no approval policy is built into the SDK.
 
-Examples live under `_examples/` (the leading underscore keeps them out of
-`go build ./...`). Run one with `go run ./_examples/<name>`.
+## Executable examples
 
-- [`incident_response`](_examples/incident_response/main.go): fan-out,
-  blackboard, review, approval, and action in one flow.
-- [`subagent`](_examples/subagent/main.go): agent-as-tool delegation across
-  models and providers.
-- [`evaluation`](_examples/evaluation/main.go): the evaluation harness.
+```bash
+go run ./examples/agent
+go run ./examples/subagent
+go run ./examples/orchestration
+go run ./examples/durable
+```
 
-Browse the [_examples directory](_examples/) for the complete set.
+The durable example keeps its illustrative backend inside the example directory; it is not a reusable storage adapter.
 
-## Documentation
+## Architecture
 
-- [Quickstart](docs/quickstart.md): install and run the first task.
-- [Public API](docs/public-api.md): exported contracts and stability.
-- [Documentation index](docs/index.md): runtime concepts, extensions,
-  compatibility, architecture, and the package map.
-- [Architecture boundaries](docs/architecture-boundaries.md): five layers
-  and import seams.
-- [Contributing](CONTRIBUTING.md): development workflow and verification gates.
+The dependency graph is intentionally one-way:
 
-## Scope & status
+```text
+message      skill
+   │           │
+   ├── provider│
+   └── tool    │
+        \      /
+          agent
+         /     \
+orchestration  durable
+```
 
-By design the kernel ships **no**:
+`agent` and `orchestration` never depend on `durable`. The optional durability layer depends inward on Agent contracts. Executable architecture gates validate production, internal-test, and external-test imports and fail when a required package scope disappears.
 
-- Built-in storage backend
-- Built-in memory backend
-- Domain vocabulary
-- UI / console
-- Hosted observability backends
-- Provider-specific deep integrations
+See:
 
-These belong in application code or optional plugins.
+- [Quickstart](docs/quickstart.md)
+- [Public API](docs/public-api.md)
+- [Durable execution](docs/durable-execution.md)
+- [Backend and extension development](docs/plugin-development.md)
+- [Architecture boundaries](docs/architecture-boundaries.md)
+- [Breaking migration](docs/migration.md)
+- [ADR-029](docs/adr/ADR-029-agent-sdk-and-optional-durable-runtime.md)
+- [ADR-030](docs/adr/ADR-030-stream-lifecycle-semantics.md)
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and
-[architecture boundaries](docs/architecture-boundaries.md) for coding
-standards and the architectural gates CI enforces (`sentrux`,
-`check-public-any.sh`, `check-business-words.sh`,
-`check-import-boundaries.sh`). The fast local gate is `make verify`; run
-`make ci-local` before substantial changes.
+```bash
+make verify
+make ci-local
+```
+
+`make verify` runs formatting, vet, dependency tidiness, lint, tests, and architecture checks. `make ci-local` adds static analysis, vulnerability scanning, and race tests.
+
+Contributions must preserve the direct package graph, avoid speculative public interfaces, and include behavior-level verification for changed contracts. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)

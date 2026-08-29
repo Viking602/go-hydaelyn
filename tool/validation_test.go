@@ -45,7 +45,7 @@ func TestBusRejectsInvalidArgumentsWithoutExecutingDriver(t *testing.T) {
 		"escaped duplicate": json.RawMessage(`{"query":"ok","\u0071uery":"again"}`),
 	} {
 		t.Run(name, func(t *testing.T) {
-			result, err := bus.Execute(context.Background(), Call{ID: name, Name: "lookup", Arguments: arguments}, nil)
+			result, err := bus.Execute(context.Background(), Call{ID: name, Name: "lookup", Arguments: arguments}, ExecuteOptions{})
 			if err != nil {
 				t.Fatalf("Execute() error = %v", err)
 			}
@@ -68,7 +68,7 @@ func TestBusExecutesSchemaValidArguments(t *testing.T) {
 			Required:   []string{"query"},
 		},
 	}}
-	result, err := NewBus(driver).Execute(context.Background(), Call{ID: "valid", Name: "lookup", Arguments: json.RawMessage(`{"query":"venat"}`)}, nil)
+	result, err := NewBus(driver).Execute(context.Background(), Call{ID: "valid", Name: "lookup", Arguments: json.RawMessage(`{"query":"venat"}`)}, ExecuteOptions{})
 	if err != nil || result.IsError || result.Content != "executed" || driver.calls.Load() != 1 {
 		t.Fatalf("valid execution = %#v, calls=%d, err=%v", result, driver.calls.Load(), err)
 	}
@@ -97,11 +97,7 @@ func TestBusFreezesDefinitionAndSchemaAtRegistration(t *testing.T) {
 		current[0].Concurrency != ConcurrencySequential {
 		t.Fatalf("registered definition mutated: %#v", current)
 	}
-	result, err := bus.Execute(
-		context.Background(),
-		Call{ID: "stable", Name: "lookup", Arguments: json.RawMessage(`{"query":"venat"}`)},
-		nil,
-	)
+	result, err := bus.Execute(context.Background(), Call{ID: "stable", Name: "lookup", Arguments: json.RawMessage(`{"query":"venat"}`)}, ExecuteOptions{})
 	if err != nil || result.IsError || driver.calls.Load() != 1 {
 		t.Fatalf("execution against frozen definition = %#v, calls=%d, err=%v", result, driver.calls.Load(), err)
 	}
@@ -112,7 +108,7 @@ func TestBusSurfacesInvalidHostSchemaBeforeExecution(t *testing.T) {
 		Name:        "broken",
 		InputSchema: Schema{Type: "not-a-json-schema-type"},
 	}}
-	_, err := NewBus(driver).Execute(context.Background(), Call{Name: "broken", Arguments: json.RawMessage(`{}`)}, nil)
+	_, err := NewBus(driver).Execute(context.Background(), Call{Name: "broken", Arguments: json.RawMessage(`{}`)}, ExecuteOptions{})
 	if !errors.Is(err, ErrInvalidToolSchema) || driver.calls.Load() != 0 {
 		t.Fatalf("invalid schema error = %v, calls=%d", err, driver.calls.Load())
 	}
@@ -130,7 +126,7 @@ func TestBusRejectsDuplicateToolNamesWithoutReplacingOriginal(t *testing.T) {
 	if err := dynamic.Register(second); !errors.Is(err, ErrDuplicateToolName) {
 		t.Fatalf("dynamic duplicate registration error = %v", err)
 	}
-	result, err := dynamic.Execute(context.Background(), Call{ID: "call", Name: "lookup", Arguments: json.RawMessage(`{}`)}, nil)
+	result, err := dynamic.Execute(context.Background(), Call{ID: "call", Name: "lookup", Arguments: json.RawMessage(`{}`)}, ExecuteOptions{})
 	if err != nil || result.IsError || first.calls.Load() != 1 || second.calls.Load() != 0 {
 		t.Fatalf("duplicate replacement result=%#v first=%d second=%d err=%v", result, first.calls.Load(), second.calls.Load(), err)
 	}

@@ -13,11 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Viking602/venat/agent"
 	"github.com/Viking602/venat/message"
 	"github.com/Viking602/venat/provider"
 	"github.com/Viking602/venat/provider/shared"
-	"github.com/Viking602/venat/tool"
 )
 
 func TestNewDefaultsToResponsesWireAndCurrentModels(t *testing.T) {
@@ -824,27 +822,57 @@ func TestDriverResponsesTwoTurnToolLoop(t *testing.T) {
 		Client:  server.Client(),
 		WireAPI: WireResponses,
 	})
-	engine := agent.Engine{
-		Provider: driver,
-		Tools:    tool.NewBus(responsesSmokeTool{}),
+	definition := message.ToolDefinition{
+		Name:        "lookup",
+		Description: "Look up a project",
+		InputSchema: message.JSONSchema{
+			Type:       "object",
+			Properties: map[string]message.JSONSchema{"query": {Type: "string"}},
+			Required:   []string{"query"},
+		},
 	}
-	result, err := engine.RunMessages(context.Background(), agent.LoopInput{
-		Model:         "gpt-5-codex",
-		Messages:      []message.Message{message.NewText(message.RoleUser, "look it up")},
-		MaxIterations: 2,
+	user := message.NewText(message.RoleUser, "look it up")
+	firstStream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5-codex",
+		Messages: []message.Message{user},
+		Tools:    []message.ToolDefinition{definition},
 	})
 	if err != nil {
-		t.Fatalf("RunMessages() error = %v", err)
+		t.Fatalf("first Stream() error = %v", err)
 	}
-	if result.StopReason != provider.StopReasonComplete {
-		t.Fatalf("StopReason = %q, want complete", result.StopReason)
+	firstResponse, err := provider.NormalizeEvents(collectEvents(t, firstStream))
+	if err != nil {
+		t.Fatalf("normalize first response: %v", err)
+	}
+	assistant := message.Message{
+		Role:          message.RoleAssistant,
+		Content:       firstResponse.Content,
+		Text:          firstResponse.Text,
+		ToolCalls:     firstResponse.ToolCalls,
+		ProviderState: firstResponse.ProviderState,
+		Response:      firstResponse.Response,
+	}
+	result := message.NewToolResult(message.ToolResult{ToolCallID: "call_1", Name: "lookup", Content: "found"})
+	secondStream, err := driver.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5-codex",
+		Messages: []message.Message{user, assistant, result},
+		Tools:    []message.ToolDefinition{definition},
+	})
+	if err != nil {
+		t.Fatalf("second Stream() error = %v", err)
+	}
+	secondResponse, err := provider.NormalizeEvents(collectEvents(t, secondStream))
+	if err != nil {
+		t.Fatalf("normalize second response: %v", err)
+	}
+	if secondResponse.StopReason != provider.StopReasonComplete {
+		t.Fatalf("StopReason = %q, want complete", secondResponse.StopReason)
 	}
 	if attempts.Load() != 2 {
 		t.Fatalf("requests = %d, want two model turns", attempts.Load())
 	}
-	last := result.Messages[len(result.Messages)-1]
-	if last.Text != "Done." || string(last.ProviderState) != secondOutput {
-		t.Fatalf("final assistant = %#v", last)
+	if secondResponse.Text != "Done." || string(secondResponse.ProviderState) != secondOutput {
+		t.Fatalf("final response = %#v", secondResponse)
 	}
 
 	mu.Lock()
@@ -879,30 +907,6 @@ func TestDriverResponsesTwoTurnToolLoop(t *testing.T) {
 	if toolOutput["type"] != "function_call_output" || toolOutput["call_id"] != "call_1" || toolOutput["output"] != "found" {
 		t.Fatalf("second-turn tool output = %#v", toolOutput)
 	}
-}
-
-type responsesSmokeTool struct{}
-
-func (responsesSmokeTool) Definition() tool.Definition {
-	return tool.Definition{
-		Name:        "lookup",
-		Description: "Look up a project",
-		InputSchema: tool.Schema{
-			Type: "object",
-			Properties: map[string]tool.Schema{
-				"query": {Type: "string"},
-			},
-			Required: []string{"query"},
-		},
-	}
-}
-
-func (responsesSmokeTool) Execute(_ context.Context, call tool.Call, _ tool.UpdateSink) (tool.Result, error) {
-	return tool.Result{
-		ToolCallID: call.ID,
-		Name:       call.Name,
-		Content:    "found",
-	}, nil
 }
 
 func newResponsesTestStream(sse string) *responsesStream {
