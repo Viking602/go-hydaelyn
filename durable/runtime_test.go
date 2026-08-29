@@ -344,6 +344,104 @@ func TestRuntime_ProviderOpenPanicBecomesUnknownAndReleasesLease(t *testing.T) {
 	}
 }
 
+type panicReceiveStream struct{}
+
+func (panicReceiveStream) Recv() (provider.Event, error) {
+	panic("provider stream receive exploded")
+}
+
+func (panicReceiveStream) Close() error { return nil }
+
+type panicDurableTool struct{}
+
+func (panicDurableTool) Definition() tool.Definition {
+	return tool.Definition{Name: "lookup"}
+}
+
+func (panicDurableTool) Execute(context.Context, tool.Call, tool.UpdateSink) (tool.Result, error) {
+	panic("tool execute exploded")
+}
+
+func TestRuntime_EffectPanicBecomesUnknownAndReleasesLease(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		executionID ExecutionID
+		engine      func() agent.Engine
+		wantKind    AttemptKind
+	}{
+		{
+			name:        "provider receive",
+			executionID: "provider-receive-panic",
+			engine: func() agent.Engine {
+				driver := &runtimeProvider{responses: []func(context.Context, provider.Request) (provider.Stream, error){
+					func(context.Context, provider.Request) (provider.Stream, error) {
+						return panicReceiveStream{}, nil
+					},
+				}}
+				return testEngine(driver)
+			},
+			wantKind: AttemptKindModel,
+		},
+		{
+			name:        "tool execute",
+			executionID: "tool-execute-panic",
+			engine: func() agent.Engine {
+				driver := &runtimeProvider{responses: []func(context.Context, provider.Request) (provider.Stream, error){
+					providerEvents(
+						provider.Event{
+							Kind: provider.EventToolCall,
+							ToolCall: &message.ToolCall{
+								ID:        "call-1",
+								Name:      "lookup",
+								Arguments: json.RawMessage(`{"query":"venat"}`),
+							},
+						},
+						provider.Event{Kind: provider.EventDone, StopReason: provider.StopReasonToolUse},
+					),
+				}}
+				return testEngine(driver, panicDurableTool{})
+			},
+			wantKind: AttemptKindTool,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := testbackend.New()
+			runtime := newTestRuntime(t, store, Options{
+				OwnerID:           string(test.executionID) + "-worker",
+				SettlementTimeout: 20 * time.Millisecond,
+			})
+			result, err := runtime.Start(
+				context.Background(),
+				test.executionID,
+				test.engine(),
+				testRequest("work"),
+				agent.OutputPolicy{},
+			)
+			var required *ReconcileRequiredError
+			if !errors.As(err, &required) || len(required.Attempts) != 1 {
+				t.Fatalf("Start() error = %v, want one ReconcileRequiredError", err)
+			}
+			if !errors.Is(err, agent.ErrPanicRecovered) {
+				t.Fatalf("Start() error = %v, want ErrPanicRecovered", err)
+			}
+			if result.Failure == nil || !errors.Is(result.Failure, agent.ErrPanicRecovered) {
+				t.Fatalf("Start() result failure = %v, want ErrPanicRecovered", result.Failure)
+			}
+			attempt := required.Attempts[0]
+			if attempt.Kind != test.wantKind || attempt.Status != AttemptStatusUnknown {
+				t.Fatalf("reconciliation attempt = %#v, want unknown %s attempt", attempt, test.wantKind)
+			}
+			execution, loadErr := store.LoadExecution(context.Background(), test.executionID)
+			if loadErr != nil {
+				t.Fatalf("LoadExecution() error = %v", loadErr)
+			}
+			if execution.Lease != nil {
+				t.Fatalf("execution lease = %#v, want released", execution.Lease)
+			}
+		})
+	}
+}
+
 func TestRuntime_PartialRetryStreamBecomesUnknownWithoutReopen(t *testing.T) {
 	store := testbackend.New()
 	runtime := newTestRuntime(t, store, Options{OwnerID: "partial-retry-worker"})

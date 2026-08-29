@@ -107,6 +107,16 @@ func openModelStream(ctx context.Context, next provider.Driver, request provider
 	return next.Stream(ctx, request)
 }
 
+func receiveModelEvent(next provider.Stream) (event provider.Event, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			event = provider.Event{}
+			err = runtimeOperationError("receive model stream", fmt.Errorf("%w: %v", agent.ErrPanicRecovered, recovered))
+		}
+	}()
+	return next.Recv()
+}
+
 type identifiedDurableModelStream struct {
 	provider.Stream
 	identity provider.StreamIdentity
@@ -134,9 +144,9 @@ func (stream *durableModelStream) Recv() (provider.Event, error) {
 		return provider.Event{}, io.ErrClosedPipe
 	}
 	if stream.settled {
-		return stream.next.Recv()
+		return receiveModelEvent(stream.next)
 	}
-	event, recvErr := stream.next.Recv()
+	event, recvErr := receiveModelEvent(stream.next)
 	if event.Kind != "" {
 		stream.events = append(stream.events, cloneProviderEvent(event))
 	}
@@ -222,6 +232,16 @@ func (stream *durableModelStream) finishEffect() {
 	stream.endOnce.Do(stream.active.endEffect)
 }
 
+func executeToolDriver(ctx context.Context, next tool.Driver, call tool.Call, sink tool.UpdateSink) (result tool.Result, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = tool.Result{}
+			err = runtimeOperationError("execute tool", fmt.Errorf("%w: %v", agent.ErrPanicRecovered, recovered))
+		}
+	}()
+	return next.Execute(ctx, call, sink)
+}
+
 type toolAttemptInterceptor struct {
 	active *activeExecution
 }
@@ -269,7 +289,7 @@ func (interceptor toolAttemptInterceptor) Execute(ctx context.Context, next tool
 		return tool.Result{}, attemptRuntimeError(interceptor.active.id, call.OperationID, started.Attempt.Number, ErrConflict)
 	}
 
-	result, executeErr := next.Execute(ctx, call, sink)
+	result, executeErr := executeToolDriver(ctx, next, call, sink)
 	failure := failureFromError(executeErr)
 	payload, encodeErr := encodeToolAttempt(result, failure)
 	if executeErr == nil && encodeErr == nil {
